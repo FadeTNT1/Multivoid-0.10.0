@@ -95,6 +95,10 @@ struct TaskFaultInfo {
     void*         faultingIP = nullptr;  // EXCEPTION_RECORD::ExceptionAddress
     void*         accessAddr = nullptr;  // ExceptionInformation[1] on an AV
     unsigned long code       = 0;        // 0xC0000005 == EXCEPTION_ACCESS_VIOLATION
+    // The first return addresses inside this module, walked from the faulting context: the mod
+    // function that called into the engine when the fault IP itself is the engine's.
+    void*         modFrames[4] = {};
+    int           modFrameCount = 0;
 };
 // The current thread's last-absorbed-fault stash (filled by the SEH filters).
 TaskFaultInfo& LastTaskFault();

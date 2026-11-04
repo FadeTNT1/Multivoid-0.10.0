@@ -18,6 +18,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <unordered_map>
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -303,9 +304,24 @@ void Pump() {
                         "skipped, pump continues",
                         f.faultingIP, D::FormatModuleRva(f.faultingIP));
             } else {
-                UE_LOGE("game_thread: posted task FAULT code=0x%08lX ip=%p [%s] access=%p; "
-                        "skipped, pump continues",
-                        f.code, f.faultingIP, D::FormatModuleRva(f.faultingIP), f.accessAddr);
+                // The task's callable type names its poster: an MSVC lambda's RTTI name carries the
+                // enclosing function, which the faulting IP (inside the engine) does not. A fault that
+                // repeats every frame is logged in full 8 times per site, then once per 1000, so one
+                // broken lane cannot flood the log and the console.
+                static std::unordered_map<void*, uint64_t> s_faultsBySite;  // game thread only
+                const uint64_t n = ++s_faultsBySite[f.faultingIP];
+                if (n <= 8) {
+                    UE_LOGE("game_thread: posted task FAULT code=0x%08lX ip=%p [%s] access=%p task=%s; "
+                            "skipped, pump continues",
+                            f.code, f.faultingIP, D::FormatModuleRva(f.faultingIP), f.accessAddr,
+                            task.target_type().name());
+                    for (int i = 0; i < f.modFrameCount; ++i)
+                        UE_LOGE("game_thread:   caller #%d %s", i, D::FormatModuleRva(f.modFrames[i]));
+                    if (n == 8) UE_LOGE("game_thread: this fault site repeats; now logged once per 1000");
+                } else if (n % 1000 == 0) {
+                    UE_LOGE("game_thread: posted task FAULT at [%s] x%llu so far",
+                            D::FormatModuleRva(f.faultingIP), static_cast<unsigned long long>(n));
+                }
             }
         }
         g_tasksRun.fetch_add(1, std::memory_order_relaxed);

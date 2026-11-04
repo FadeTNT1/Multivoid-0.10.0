@@ -94,6 +94,9 @@ bool Resolve(const std::wstring& ini, const wchar_t* iniKey, const char* envName
              const wchar_t* argKey, std::string& out) {
     bool set = IniValue(ini, iniKey, out);
     if (envName) set = EnvValue(envName, out) || set;
+    // The flag answers to its short key and to the ini key (-mvslot= and -mvsave_slot=), so a
+    // name copied out of server.ini is never silently ignored.
+    if (ArgValue(iniKey, out)) set = true;
     if (argKey) set = ArgValue(argKey, out) || set;
     return set;
 }

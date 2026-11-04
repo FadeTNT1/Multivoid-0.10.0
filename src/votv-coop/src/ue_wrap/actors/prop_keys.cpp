@@ -25,7 +25,6 @@ inline T ReadField(void* base, size_t off) {
     return *reinterpret_cast<T*>(reinterpret_cast<uint8_t*>(base) + off);
 }
 
-constexpr size_t kAactorSaveKeyOff = 0x0230;
 
 // The actor_save base that owns the key field GetActorSaveKeyString reads, resolved on demand
 // and cached; null means not resolvable yet, never no key.
@@ -72,7 +71,7 @@ R::FName GetInteractableKey(void* obj) {
     // The trash pile: a direct field.
     void* cls = R::ClassOf(obj);
     if (WalksToBase(cls, TrashBitsPileClass())) {
-        return ReadField<R::FName>(obj, kAactorSaveKeyOff);
+        return ReadField<R::FName>(obj, P::off::Aactor_save_Key);
     }
     // The chip pile and the clump: the blueprint function.
     if (WalksToBase(cls, GarbageClumpClass()) || WalksToBase(cls, ChipPileClass())) {
@@ -86,7 +85,7 @@ std::wstring GetActorSaveKeyString(void* obj) {
     void* base = ActorSaveCls();
     if (!base) return {};
     if (!WalksToBase(R::ClassOf(obj), base)) return {};   // NOT an actor_save: the offset is not its key
-    return R::ToString(ReadField<R::FName>(obj, kAactorSaveKeyOff));
+    return R::ToString(ReadField<R::FName>(obj, P::off::Aactor_save_Key));
 }
 
 std::wstring GetInteractableKeyString(void* obj) {
@@ -109,7 +108,7 @@ R::FName ReadKeyField(void* obj, KeyField where) {
     if (!obj) return R::FName{0, 0};
     switch (where) {
         case KeyField::Prop:      return ReadField<R::FName>(obj, P::off::Aprop_Key);
-        case KeyField::ActorSave: return ReadField<R::FName>(obj, kAactorSaveKeyOff);
+        case KeyField::ActorSave: return ReadField<R::FName>(obj, P::off::Aactor_save_Key);
         default:                  return R::FName{0, 0};
     }
 }

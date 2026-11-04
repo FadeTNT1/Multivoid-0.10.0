@@ -138,6 +138,26 @@ int TaskFaultFilter(EXCEPTION_POINTERS* ep) {
          ep->ExceptionRecord->NumberParameters >= 2)
             ? reinterpret_cast<void*>(ep->ExceptionRecord->ExceptionInformation[1])
             : nullptr;
+    // Walk the faulting stack (a copy of its context) and keep the first frames inside this
+    // module. Plain unwind calls on POD state, safe in a filter; bounded, and it stops at a frame
+    // with no unwind data.
+    t_lastTaskFault.modFrameCount = 0;
+    {
+        HMODULE self = nullptr;
+        ::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             reinterpret_cast<LPCWSTR>(&TaskFaultFilter), &self);
+        CONTEXT ctx = *ep->ContextRecord;
+        for (int depth = 0; depth < 48 && t_lastTaskFault.modFrameCount < 4 && ctx.Rip; ++depth) {
+            DWORD64 imageBase = 0;
+            PRUNTIME_FUNCTION rf = ::RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
+            if (!rf) break;
+            if (self && imageBase == reinterpret_cast<DWORD64>(self) && depth > 0)
+                t_lastTaskFault.modFrames[t_lastTaskFault.modFrameCount++] = reinterpret_cast<void*>(ctx.Rip);
+            void* handlerData = nullptr;
+            DWORD64 establisher = 0;
+            ::RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, rf, &ctx, &handlerData, &establisher, nullptr);
+        }
+    }
     return EXCEPTION_EXECUTE_HANDLER;
 }
 

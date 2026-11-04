@@ -39,6 +39,18 @@ inline constexpr const wchar_t* GameInstanceClass = L"mainGameInstance_C";
 // offsets are resolved at runtime through FindPropertyOffset (a BP-cooked class).
 inline constexpr const wchar_t* SaveSlotClass = L"saveSlot_C";
 
+// 0.10.0's starter loadout. A new save is born with an empty startupEquipment map; the game's own
+// create (lib_C::createSaveSlotTreeDirectory) copies defaultStartupEquipment into it, and the
+// player's inventory screen spawns those items into the equipment slots on the first world
+// (saveSlot_C::addStartupEquipment), then clears the map. reset_player does the same copy, plus a
+// reset of playerTransform to def (the caller keeps and restores it) and a clear of betterObjectsData.
+inline constexpr const wchar_t* SaveSlotStartupEquipment        = L"startupEquipment";
+inline constexpr const wchar_t* SaveSlotDefaultStartupEquipment = L"defaultStartupEquipment";
+inline constexpr const wchar_t* SaveSlotResetPlayerFn           = L"reset_player";
+inline constexpr const wchar_t* SaveSlotPlayerTransform         = L"playerTransform";
+inline constexpr const wchar_t* SaveSlotPlayerTransformDefault  = L"def";
+inline constexpr const wchar_t* SaveSlotBetterObjectsData       = L"betterObjectsData";
+
 // Actor spawning (the BlueprintCallable deferred-spawn pair the K2 SpawnActorFromClass node uses)
 // and transform get/set.
 inline constexpr const wchar_t* GameplayStaticsClass = L"GameplayStatics";

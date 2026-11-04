@@ -8,6 +8,7 @@
 #include "ue_wrap/engine/gvas_meta.h"     // worker-thread .sav metadata reads (no LoadGameFromSlot)
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/world/game_mode.h"
 
 #include <algorithm>
@@ -336,6 +337,55 @@ void ParseScanList(const std::vector<ScanItem>& items, const SlotCdoDefaults& de
     }
 }
 
+// A blank saveSlot_C from CreateSaveGameObject has an empty startupEquipment map. The game's own
+// create (lib_C::createSaveSlotTreeDirectory) assigns defaultStartupEquipment to it, and the
+// inventory screen spawns those items on the first world. The copy is the game's, not ours: a
+// TMap is a sparse array, a bit array and a hash, which a byte copy would alias. reset_player is
+// the one parameterless function that makes it. It also clears betterObjectsData, so it runs only
+// when that is already empty, and sets playerTransform to def, which on a blank save differs: the
+// transform is plain data (no heap), so it is kept before the call and written back after. The
+// result is the native create's: the map copied, everything else as CreateSaveGameObject left it.
+void SeedStartupEquipment(void* save) {
+    namespace N = profile::name;
+    void* cls = R::ClassOf(save);
+    const int32_t startOff = R::FindPropertyOffset(cls, N::SaveSlotStartupEquipment);
+    const int32_t defOff   = R::FindPropertyOffset(cls, N::SaveSlotDefaultStartupEquipment);
+    if (startOff < 0 || defOff < 0) {
+        UE_LOGI("save_browser: startup equipment -- this game has no %ls/%ls (pre-0.10.0); nothing to seed",
+                N::SaveSlotStartupEquipment, N::SaveSlotDefaultStartupEquipment);
+        return;
+    }
+    void* fn = R::FindFunction(cls, N::SaveSlotResetPlayerFn);
+    const int32_t xfOff  = R::FindPropertyOffset(cls, N::SaveSlotPlayerTransform);
+    const int32_t defXf  = R::FindPropertyOffset(cls, N::SaveSlotPlayerTransformDefault);
+    const int32_t objOff = R::FindPropertyOffset(cls, N::SaveSlotBetterObjectsData);
+    if (!fn || xfOff < 0 || defXf < 0 || objOff < 0) {
+        UE_LOGW("save_browser: startup equipment -- %ls or its fields unresolved (fn=%p xf=%d def=%d objs=%d); "
+                "the new save starts with no equipment", N::SaveSlotResetPlayerFn, fn, xfOff, defXf, objOff);
+        return;
+    }
+    auto* base = static_cast<uint8_t*>(save);
+    constexpr size_t kTransformBytes = 48;  // FTransform: FQuat, FVector + pad, FVector + pad (UE4.27)
+    const int32_t objects = ReadField<int32_t>(save, objOff + 8);  // TArray::Num
+    if (objects != 0) {
+        UE_LOGW("save_browser: startup equipment -- %ls would clear %d object(s) of this blank save; not "
+                "called, the new save starts with no equipment", N::SaveSlotResetPlayerFn, objects);
+        return;
+    }
+    uint8_t keptXf[kTransformBytes];
+    std::memcpy(keptXf, base + xfOff, kTransformBytes);
+    ParamFrame f(fn);
+    const bool called = Call(save, f);
+    std::memcpy(base + xfOff, keptXf, kTransformBytes);
+    if (!called) {
+        UE_LOGE("save_browser: startup equipment -- %ls call failed", N::SaveSlotResetPlayerFn);
+        return;
+    }
+    const int32_t seeded  = ReadField<int32_t>(save, startOff + 8);  // the map's element array Num
+    const int32_t wanted  = ReadField<int32_t>(save, defOff + 8);
+    UE_LOGI("save_browser: startup equipment -- seeded %d of %d default item(s)", seeded, wanted);
+}
+
 }  // namespace
 
 bool EnumerateSaves(std::vector<SaveInfo>& out) {
@@ -386,6 +436,10 @@ bool CreateNamedSave(const std::wstring& name, uint8_t mode, std::wstring& outSl
         save = f.Get<void*>(L"ReturnValue");
     }
     if (!save) { UE_LOGW("save_browser: CreateSaveGameObject returned null"); return false; }
+
+    // 0.10.0: seed the starter loadout as the game's own create does, or the player spawns with
+    // no flashlight, clothes or tools.
+    SeedStartupEquipment(save);
 
     // Stamp Version as the native create does (lib_C::gameVersion), because a blank CDO-default
     // object serializes an empty one and every save row then paints the red "unk!" badge. The

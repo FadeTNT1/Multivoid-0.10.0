@@ -285,6 +285,97 @@ void RunClassChecks(int& ok, int& fail, int& failPriority) {
     }
 }
 
+// Every hardcoded game-Blueprint offset in sdk_profile.h against the live class's reflection: a
+// recook moves a property and the constant then reads another field (0.10.0 moved prop.Key, and
+// reading junk as an FName faulted the prop index every frame). MOVED names the live offset to
+// transcribe; UNRESOLVED is a class not loaded yet or a property named differently.
+struct OffsetRow { const char* constant; const wchar_t* cls; const wchar_t* prop; size_t expected; };
+#define MV_OFF(cls, prop, constant) {#constant, cls, prop, P::off::constant}
+const OffsetRow kOffsets[] = {
+    MV_OFF(L"prop_C", L"physicsImpact", Aprop_physicsImpact),
+    MV_OFF(L"prop_C", L"StaticMesh", Aprop_StaticMesh),
+    MV_OFF(L"prop_C", L"Name", Aprop_Name),
+    MV_OFF(L"prop_C", L"propData", Aprop_propData),
+    MV_OFF(L"prop_C", L"Static", Aprop_Static),
+    MV_OFF(L"prop_C", L"removeWOrespawn", Aprop_removeWOrespawn),
+    MV_OFF(L"prop_C", L"frozen", Aprop_frozen),
+    MV_OFF(L"prop_C", L"sleep", Aprop_sleep),
+    MV_OFF(L"prop_C", L"Key", Aprop_Key),
+    MV_OFF(L"actor_save_C", L"Key", Aactor_save_Key),
+    MV_OFF(L"mainPlayer_C", L"PostProcess_overlays_OBSOLETE", AmainPlayer_PostProcess_overlays_OBSOLETE),
+    MV_OFF(L"mainPlayer_C", L"mesh_playerVisible", AmainPlayer_mesh_playerVisible),
+    MV_OFF(L"mainPlayer_C", L"mic", AmainPlayer_mic),
+    MV_OFF(L"mainPlayer_C", L"Camera", AmainPlayer_Camera),
+    MV_OFF(L"mainPlayer_C", L"PostProcess_pl", AmainPlayer_PostProcess_pl),
+    MV_OFF(L"mainPlayer_C", L"arms", AmainPlayer_arms),
+    MV_OFF(L"mainPlayer_C", L"playermodel", AmainPlayer_playermodel),
+    MV_OFF(L"mainPlayer_C", L"lag_fl", AmainPlayer_lag_fl),
+    MV_OFF(L"mainPlayer_C", L"light_R", AmainPlayer_light_R),
+    MV_OFF(L"mainPlayer_C", L"flashlight", AmainPlayer_flashlight),
+    MV_OFF(L"mainPlayer_C", L"flashlightMode", AmainPlayer_flashlightMode),
+    MV_OFF(L"mainPlayer_C", L"GameMode", AmainPlayer_GameMode),
+    MV_OFF(L"mainPlayer_C", L"hasFlashlight", AmainPlayer_hasFlashlight),
+    MV_OFF(L"mainPlayer_C", L"crankFlashlight", AmainPlayer_crankFlashlight),
+    MV_OFF(L"daynightCycle_C", L"eff_rain", AdaynightCycle_eff_rain),
+    MV_OFF(L"daynightCycle_C", L"rain", AdaynightCycle_rain),
+    MV_OFF(L"daynightCycle_C", L"isRaining", AdaynightCycle_isRaining),
+    MV_OFF(L"daynightCycle_C", L"thickFog", AdaynightCycle_thickFog),
+    MV_OFF(L"daynightCycle_C", L"fogEventObject", AdaynightCycle_fogEventObject),
+    MV_OFF(L"daynightCycle_C", L"isSnow", AdaynightCycle_isSnow),
+    MV_OFF(L"daynightCycle_C", L"enableSunlight", AdaynightCycle_enableSunlight),
+    MV_OFF(L"daynightCycle_C", L"rainStrength", AdaynightCycle_rainStrength),
+    MV_OFF(L"daynightCycle_C", L"rainLightningChance", AdaynightCycle_rainLightningChance),
+    MV_OFF(L"daynightCycle_C", L"rainDeactivateChance", AdaynightCycle_rainDeactivateChance),
+    MV_OFF(L"daynightCycle_C", L"finalFogDensity", AdaynightCycle_finalFogDensity),
+    MV_OFF(L"daynightCycle_C", L"rainWindSpeed", AdaynightCycle_rainWindSpeed),
+    MV_OFF(L"daynightCycle_C", L"fogProbability", AdaynightCycle_fogProbability),
+    MV_OFF(L"daynightCycle_C", L"permanentRain", AdaynightCycle_permanentRain),
+    MV_OFF(L"daynightCycle_C", L"permanentFog", AdaynightCycle_permanentFog),
+    MV_OFF(L"daynightCycle_C", L"enableMoonlight", AdaynightCycle_enableMoonlight),
+    MV_OFF(L"daynightCycle_C", L"enable_fog", AdaynightCycle_enable_fog),
+    MV_OFF(L"daynightCycle_C", L"enable_superfog", AdaynightCycle_enable_superfog),
+    MV_OFF(L"daynightCycle_C", L"enable_rain", AdaynightCycle_enable_rain),
+    MV_OFF(L"weatherFogController_C", L"Time", WeatherFogController_Time),
+    MV_OFF(L"weatherFogController_C", L"Alpha", WeatherFogController_Alpha),
+    MV_OFF(L"weatherFogController_C", L"Duration", WeatherFogController_Duration),
+    MV_OFF(L"weatherFogController_C", L"fogPhase", WeatherFogController_fogPhase),
+    MV_OFF(L"weatherFogController_C", L"Strength", WeatherFogController_Strength),
+    MV_OFF(L"directionalWind_C", L"windTarget", DirectionalWind_windTarget),
+    MV_OFF(L"directionalWind_C", L"windSpeed_rain", DirectionalWind_windSpeed_rain),
+    MV_OFF(L"directionalWind_C", L"windStrength_rain", DirectionalWind_windStrength_rain),
+    MV_OFF(L"directionalWind_C", L"windSpeed_background", DirectionalWind_windSpeed_background),
+    MV_OFF(L"directionalWind_C", L"windStrength_background", DirectionalWind_windStrength_background),
+};
+#undef MV_OFF
+
+void RunOffsetChecks(int& ok, int& fail, int& failPriority) {
+    UE_LOGI("sdk-check: --- GAME OFFSET audit ---");
+    g_report << "--- GAME OFFSET audit ---\n";
+    for (const auto& o : kOffsets) {
+        void* cls = FindLoadedClass(o.cls);
+        const int32_t live = cls ? R::FindPropertyOffset(cls, o.prop) : -1;
+        if (live >= 0 && static_cast<size_t>(live) == o.expected) { ++ok; continue; }
+        char buf[512];
+        if (live < 0) {
+            UE_LOGW("sdk-check[COSMETIC]: OFFSET %s UNRESOLVED (%ls.%ls; profile 0x%04zX)",
+                    o.constant, o.cls, o.prop, o.expected);
+            std::snprintf(buf, sizeof(buf), "  [COSMETIC] OFFSET %s UNRESOLVED (%s.%s; profile 0x%04zX)",
+                          o.constant, Narrow(o.cls).c_str(), Narrow(o.prop).c_str(), o.expected);
+            ++fail;
+            Failed(Severity::Cosmetic);
+        } else {
+            UE_LOGE("sdk-check[IMPORTANT]: OFFSET %s MOVED profile 0x%04zX live 0x%04X (%ls.%ls)",
+                    o.constant, o.expected, live, o.cls, o.prop);
+            std::snprintf(buf, sizeof(buf), "  [IMPORTANT] OFFSET %s MOVED profile 0x%04zX live 0x%04X (%s.%s)",
+                          o.constant, o.expected, live, Narrow(o.cls).c_str(), Narrow(o.prop).c_str());
+            ++fail;
+            ++failPriority;
+            Failed(Severity::Important);
+        }
+        ReportLine(buf);
+    }
+}
+
 void RunFunctionChecks(int& ok, int& fail, int& failPriority, int& skipped) {
     UE_LOGI("sdk-check: --- UFUNCTION resolution ---");
     g_report << "--- UFUNCTION resolution ---\n";
@@ -373,6 +464,7 @@ int Run() {
     RunFunctionChecks(ok, fail, failPriority, skipped);
     RunNpcAllowlistCheck(ok, fail, failPriority);
     RunAssetChecks(ok, fail, failPriority);
+    RunOffsetChecks(ok, fail, failPriority);
     const int total = ok + fail;
     if (failPriority == 0 && fail == 0) {
         UE_LOGI("sdk-check: === HEALTHY %d/%d resolved (no failures) ===", ok, total);
