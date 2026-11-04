@@ -68,6 +68,7 @@ messages, the late-join answer, the known limits with their evidence, and the co
 | [ui.md](ui.md) | The native screens, the F1 overlay, the HUD, and the game's notifications |
 | [send-path.md](send-path.md) | How fast each connection is paced, measured rather than configured; who may fill a send buffer, and where a held-back send waits |
 | [master-server.md](master-server.md) | The lobby list, the join brokering, the signaling relay and TURN, self-hosting |
+| [dedicated-server.md](dedicated-server.md) | The game run headless as a 24/7 host: the server switch, its config, the console, Wine and the Pterodactyl egg |
 | [voice-and-chat.md](voice-and-chat.md) | Host-authored chat and its history, proximity voice over the same connection |
 
 And the two maps:
