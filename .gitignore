@@ -279,3 +279,6 @@ docs/**
 !docs/versioning.md
 !docs/voice-and-chat.md
 reference/agency-agents/
+
+# friend-installer package output (installer/Build-Package.ps1)
+dist/
