@@ -385,3 +385,12 @@ if (MSVC)
 endif()
 
 
+
+# --- multivoid-loader: the dwmapi.dll proxy that starts main.dll without UE4SS --------------------------------
+# A self-contained target (no vcpkg, no GNS, nothing of the mod's sources; src/proxy_loader/CMakeLists.txt also
+# configures standalone). Its output, dwmapi.dll, lands beside main.dll in the build dir; the friend installer
+# (installer/Build-Package.ps1) packs both.
+option(VOTVCOOP_BUILD_PROXY_LOADER "Build the dwmapi.dll proxy loader beside main.dll" ON)
+if(WIN32 AND VOTVCOOP_BUILD_PROXY_LOADER)
+    add_subdirectory(src/proxy_loader)
+endif()
