@@ -1,0 +1,29 @@
+; server.ini -- a Multivoid dedicated server's settings. Copy to Mods\Multivoid\server.ini.
+; Read only when the game starts with -multivoid-server (or MULTIVOID_SERVER=1).
+; The environment (MULTIVOID_*) overrides this file, and -mv<key>=<value> overrides both.
+; docs/dedicated-server.md lists every key.
+
+[server]
+; UDP port for a direct server; leave out to keep net.port from multivoid.ini.
+port=47621
+name=Multivoid Server
+; Empty: an open server.
+password=
+; 2..4, the server's own parked player included.
+max_players=4
+; The save to host: <slot>.sav, else s_<slot>.sav, else a new story save named <slot>.
+save_slot=multivoid_server
+; 1: listed in the Multivoid server browser. 0: unlisted, join by address.
+list_public=1
+; direct: our own UDP listen on the port. brokered: through the master's relay, no port needed.
+reach=direct
+; The parked player's nickname.
+host_nick=Server
+; 0 turns the autosave timer off.
+autosave_minutes=10
+; t.MaxFPS once the world is up; 0 leaves the engine uncapped.
+max_fps=30
+; 1: every log line is also written to stdout.
+stdout=1
+; Seconds the host has to come up before the process gives up (exit code 3).
+ready_timeout_s=300

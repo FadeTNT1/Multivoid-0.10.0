@@ -267,6 +267,7 @@ docs/**
 !docs/events-and-weather.md
 !docs/join.md
 !docs/master-server.md
+!docs/dedicated-server.md
 !docs/npcs-and-kerfur.md
 !docs/piles.md
 !docs/players.md
