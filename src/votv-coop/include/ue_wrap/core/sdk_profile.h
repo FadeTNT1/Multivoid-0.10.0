@@ -19,7 +19,7 @@ namespace ue_wrap::profile {
 // The game build the signatures and offsets were derived against: a row of
 // ue_wrap/facts/game_builds.inc, by its name, which holds its identity and the text a player reads.
 // coop::version::kGameTarget names the same build (a static_assert in bootstrap/boot.cpp).
-inline constexpr const char* kTargetBuild = "0.9.0n";
+inline constexpr const char* kTargetBuild = "0.10.0";
 inline constexpr const char* kTargetEngineVersion = "UE4.27";  // exe FileVersion 4.27.2.0
 
 // The main pak, in <game>\VotV\Content\Paks: its footer names the build (ue_wrap/core/game_build.h).

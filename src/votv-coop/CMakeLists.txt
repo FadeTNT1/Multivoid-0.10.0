@@ -20,7 +20,7 @@ project(votv_coop LANGUAGES CXX C ASM_MASM)  # C for the MinHook sources (third_
 # between cooks, so the mod is incompatible across game versions. Update on
 # every game-recook adaptation. (The old project-VERSION mod semver was
 # retired 2026-07-19 -- Paper-Minecraft pair, user decision.)
-set(VOTVCOOP_GAME_TARGET "0.9.0n")
+set(VOTVCOOP_GAME_TARGET "0.10.0")
 
 # The BUILD NUMBER (the identity's other half) is kProtocolVersion -- parsed
 # out of protocol.h so the Paper-style pair lands in the generated
@@ -236,9 +236,16 @@ add_library(votv-coop SHARED ${VOTVCOOP_SOURCES})
 
 target_include_directories(votv-coop PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 # The fingerprint census compares the running game with the reference table of the game target
-# (docs/bytecode-fingerprint.md); a target with no generated table does not compile.
+# (docs/bytecode-fingerprint.md). Until the port tooling generates the target's own table, the
+# previous target's table is the reference: the census then names every function whose logic
+# changed across the retarget, which is the port's diff.
+set(VOTVCOOP_FINGERPRINT_REF "${VOTVCOOP_GAME_TARGET}")
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/ue_wrap/facts/fingerprints_${VOTVCOOP_FINGERPRINT_REF}.inc")
+    set(VOTVCOOP_FINGERPRINT_REF "0.9.0n")
+    message(WARNING "no fingerprint table for ${VOTVCOOP_GAME_TARGET}; the census compares against ${VOTVCOOP_FINGERPRINT_REF}")
+endif()
 target_compile_definitions(votv-coop PRIVATE
-    "VOTVCOOP_FINGERPRINT_TABLE=\"ue_wrap/facts/fingerprints_${VOTVCOOP_GAME_TARGET}.inc\"")
+    "VOTVCOOP_FINGERPRINT_TABLE=\"ue_wrap/facts/fingerprints_${VOTVCOOP_FINGERPRINT_REF}.inc\"")
 # The UE4SS mod-folder contract name (UE4SS_ARC WP-2 commit 3): the DLL ships
 # as Mods/Multivoid/dlls/main.dll. The versioned multivoid-<game>-<build>.dll
 # OUTPUT_NAME retired WITH its one consumer, the xinput proxy's scan -- the

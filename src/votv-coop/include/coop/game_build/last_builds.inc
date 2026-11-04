@@ -6,5 +6,6 @@
 //
 // The mod's own release history, so it is coop's and not the game-build rows' (principle 7). A retarget adds the
 // previous target's line (docs/versioning.md, the retarget's identity step); the version popup then tells a
-// player on that older game which Multivoid to use. Empty while 0.9.0n is the only target. Included by
+// player on that older game which Multivoid to use. Included by
 // coop/game_build only.
+LAST_BUILD("0.9.0n", 264)

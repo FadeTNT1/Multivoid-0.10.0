@@ -11,7 +11,7 @@
 |--|--|
 | **Install** | [**Multivoid on Thunderstore**](https://thunderstore.io/c/voices-of-the-void/p/Pelmentor/Multivoid/) — through r2modman or the Thunderstore Mod Manager, which set the loader up for you ([other routes](docs/install.md)) |
 | **Current build** | the newest `.zip` on the [Releases page](https://github.com/VOTV-MP/Multivoid/releases) (dev prereleases; the zip name and the in-game banner carry the identity) |
-| **Game target** | Voices of the Void Alpha **0.9.0n** |
+| **Game target** | Voices of the Void Alpha **0.10.0** |
 | **Status** | Alpha — dev prereleases published for testing; no stable release yet |
 | **Players** | up to **4** (host + 3) |
 | **Platform** | Windows · UE4.27 · LAN + Internet |
