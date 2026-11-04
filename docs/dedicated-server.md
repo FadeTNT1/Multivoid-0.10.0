@@ -198,11 +198,15 @@ The save lives in the Wine prefix's `%LOCALAPPDATA%\VotV\Saved\SaveGames`, i.e.
 `$WINEPREFIX/drive_c/users/<user>/AppData/Local/VotV/Saved/SaveGames`; the container keeps the
 prefix inside the persistent volume so the world survives a rebuild.
 
-**Xvfb fallback.** If the NULL RHI breaks something the game needs (a Blueprint that reads the
-viewport size, a render target the save thumbnails need), run with a real software RHI on a
-virtual display instead: drop `-nullrhi`, add `-RenderOffScreen -opengl4`/`-d3d11` with
-`LIBGL_ALWAYS_SOFTWARE=1`, under `xvfb-run -a -s "-screen 0 640x480x24"`. It costs CPU (llvmpipe)
-but needs no GPU. The entrypoint switches to it with `USE_XVFB=1`.
+**A display.** `-nullrhi` needs no GPU, but the engine still creates its window through
+`user32`, and Wine's X11 driver wants a display for that. The start script therefore runs a bare
+`Xvfb` by default (`USE_XVFB=1`): a display server only, nothing renders to it. `USE_XVFB=0` tries
+without one (Wine's null graphics driver); whether the game survives that is a live-test question.
+
+**Software-RHI fallback.** If the NULL RHI breaks something the game needs (a Blueprint that reads
+the viewport size, a render target the save path uses), run a real RHI on the virtual display
+instead: `RHI=software` drops `-nullrhi`, adds `-RenderOffScreen` and sets
+`LIBGL_ALWAYS_SOFTWARE=1`, so Wine's D3D11 runs on Mesa's llvmpipe. It costs CPU but needs no GPU.
 
 ### Pterodactyl
 
@@ -220,7 +224,9 @@ into the server's files through the panel's file manager or SFTP. The egg's vari
 | `SAVE_SLOT` | `multivoid_server` | |
 | `LIST_PUBLIC` | `1` | |
 | `AUTOSAVE_MINUTES` | `10` | |
-| `USE_XVFB` | `0` | the fallback above |
+| `REACH` | `direct` | `brokered` for a node without an open port |
+| `USE_XVFB` | `1` | the virtual display above |
+| `RHI` | `null` | `software` is the fallback above |
 
 Stop command `stop`; done-detection `Multivoid dedicated server ready`.
 
@@ -250,4 +256,4 @@ Needs a live run, in this order of risk:
 5. the parked pawn's sleep: if the game's night skip waits for every player to rest, the server's
    pawn never rests (`coop/player/sleep_sync`).
 
-Test steps are in the branch report and repeated in `server-docker/README.md`.
+Test steps are in [server-docker/README.md](../server-docker/README.md).

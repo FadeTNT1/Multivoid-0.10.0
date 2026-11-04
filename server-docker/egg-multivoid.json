@@ -1,0 +1,122 @@
+{
+    "_comment": "Multivoid dedicated server (Voices of the Void co-op) under Wine. The game is not included: upload your own. See server-docker/README.md.",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-11-04T00:00:00+00:00",
+    "name": "Multivoid (Voices of the Void co-op)",
+    "author": "multivoid@example.invalid",
+    "description": "A headless Voices of the Void host running the Multivoid co-op mod under Wine. The UDP port is the allocation's. Game files are not redistributable: the owner uploads their own game folder, with UE4SS and Multivoid installed, after the install step.",
+    "features": null,
+    "docker_images": {
+        "Multivoid (Wine, Debian)": "ghcr.io/votv-mp/multivoid-server:latest"
+    },
+    "file_denylist": [],
+    "startup": "/usr/local/bin/multivoid-start",
+    "config": {
+        "files": "{}",
+        "startup": "{\"done\": \"Multivoid dedicated server ready\"}",
+        "logs": "{}",
+        "stop": "stop"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# Multivoid egg install: the game is NOT redistributable, so nothing is downloaded.\n# This only lays out the folder the owner uploads their own game into.\nset -e\nmkdir -p /mnt/server/VotV\ncat > /mnt/server/UPLOAD_YOUR_GAME_HERE.txt <<'TXT'\nMultivoid dedicated server\n==========================\nVoices of the Void cannot be redistributed, so this server ships without it.\n\n1. On your own PC, install UE4SS and Multivoid into your game folder and check that\n   hosting from the Multiplayer menu works there.\n2. Upload that whole game folder into VotV/ here (File Manager or SFTP), so that\n   VotV/.../Binaries/Win64/VotV-Win64-Shipping.exe exists, with Mods/Multivoid/ beside UE4SS.\n3. Optional: copy an existing save (.sav) into\n   .wine/drive_c/users/container/AppData/Local/VotV/Saved/SaveGames/\n   and set SAVE_SLOT to its name without .sav. Otherwise a new story save is created.\n4. Start the server. The console says \"Multivoid dedicated server ready\" when friends can join.\nTXT\necho \"install: done -- upload your game folder into VotV/\"\n",
+            "container": "debian:bookworm-slim",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Server name",
+            "description": "The name shown in the Multivoid server browser.",
+            "env_variable": "SERVER_NAME",
+            "default_value": "Multivoid Server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:48",
+            "field_type": "text"
+        },
+        {
+            "name": "Password",
+            "description": "Empty for an open server. Friends type it when they join.",
+            "env_variable": "PASSWORD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:64",
+            "field_type": "text"
+        },
+        {
+            "name": "Max players",
+            "description": "2 to 4. The server's own parked player is one of them.",
+            "env_variable": "MAX_PLAYERS",
+            "default_value": "4",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer|between:2,4",
+            "field_type": "text"
+        },
+        {
+            "name": "Save slot",
+            "description": "The save to host (its file name without .sav). Missing: a new story save of that name is created.",
+            "env_variable": "SAVE_SLOT",
+            "default_value": "multivoid_server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|regex:/^[A-Za-z0-9_-]{1,48}$/",
+            "field_type": "text"
+        },
+        {
+            "name": "List publicly",
+            "description": "1 lists the server in the Multivoid browser; 0 keeps it unlisted (join by address).",
+            "env_variable": "LIST_PUBLIC",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|in:0,1",
+            "field_type": "text"
+        },
+        {
+            "name": "Reachability",
+            "description": "direct: friends connect to this node's port. brokered: through the Multivoid relay, for a node without an open port.",
+            "env_variable": "REACH",
+            "default_value": "direct",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|in:direct,brokered",
+            "field_type": "text"
+        },
+        {
+            "name": "Autosave minutes",
+            "description": "Minutes between autosaves; 0 turns the timer off.",
+            "env_variable": "AUTOSAVE_MINUTES",
+            "default_value": "10",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer|between:0,1440",
+            "field_type": "text"
+        },
+        {
+            "name": "Virtual display",
+            "description": "1 runs Wine on an Xvfb display (recommended); 0 runs with none.",
+            "env_variable": "USE_XVFB",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|in:0,1",
+            "field_type": "text"
+        },
+        {
+            "name": "Renderer",
+            "description": "null: no GPU at all (-nullrhi). software: Mesa on the virtual display, if null breaks the game.",
+            "env_variable": "RHI",
+            "default_value": "null",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|in:null,software",
+            "field_type": "text"
+        }
+    ]
+}
