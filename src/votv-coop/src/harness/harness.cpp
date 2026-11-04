@@ -5,6 +5,7 @@
 
 #include "harness/harness.h"
 #include "harness/browser_click_arm.h"
+#include "harness/dedicated_server.h"
 
 #include "harness/pump.h"
 #include "harness/session_runtime.h"
@@ -476,12 +477,15 @@ DWORD WINAPI TimelineThread(LPVOID param) {
         // comes up -- what this exists to measure happens during the load, and a load issued before
         // the loop would be watched by nothing. No clock: BootStorySaveBlocking re-issues its open
         // until one takes, which is the wait, and the content-warning screen does not block it.
-        if (cfg::ResolveFlag(coop::config_registry::rows::menu_autoload)) {
+        if (cfg::ResolveFlag(coop::config_registry::rows::menu_autoload) &&
+            !dedicated_server::SkipInteractiveSurfaces()) {
             UE_LOGW("harness: [dev] menu_autoload=1 -- loading the '%s' slot from the menu",
                     cfg::ResolveString(coop::config_registry::rows::save).c_str());
             if (HANDLE t = ::CreateThread(nullptr, 0, MenuAutoloadThread, nullptr, 0, nullptr))
                 ::CloseHandle(t);
         }
+        // A dedicated server queues its own host here, which the play loop below drains.
+        dedicated_server::Launch();
         session_runtime::RunPlayLoop(/*bootedIntoGameplay=*/false);
     } else {
         UE_LOGI("harness: scenario '%s' -- no automatic actions", scenario.c_str());
@@ -492,6 +496,9 @@ DWORD WINAPI TimelineThread(LPVOID param) {
 }  // namespace
 
 void Start() {
+    // The dedicated server's switch and settings, before any config row is read: the rows it sets ride
+    // their env twins, and the scenario is pinned to the menu launch (harness/dedicated_server.h).
+    dedicated_server::ApplyBootOverrides();
 
     // F12 takes a toast-free screenshot into coop-screenshots/; always on, for hands-on testing.
     screenshot::StartHotkeyWatcher();
@@ -563,12 +570,18 @@ void Start() {
     // selftest first, pure, then the catalogue built once from the ui.language row.
     l10n::RunSelftest(cfg::ResolveFlag(coop::config_registry::rows::l10n_selftest_red));
     l10n::Init(cfg::ResolveString(coop::config_registry::rows::ui_language).c_str());
-    if (!ui::imgui_overlay::Init()) {
-        UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
+    // A dedicated server has no renderer and nobody at it: no overlay, and the log's one sink is its
+    // stdout mirror rather than the in-game console.
+    if (dedicated_server::SkipInteractiveSurfaces()) {
+        UE_LOGI("harness: dedicated server -- the overlay and the in-game console are not installed");
+    } else {
+        if (!ui::imgui_overlay::Init()) {
+            UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
+        }
+        // The in-game console's logger sink, registered now so it captures the mod log from here on;
+        // it auto-shows during a client join.
+        ui::console::Init();
     }
-    // The in-game console's logger sink, registered now so it captures the mod log from here on;
-    // it auto-shows during a client join.
-    ui::console::Init();
 
     // The MULTIPLAYER entry point: the native button injected above NEW GAME in VOTV's main menu,
     // which opens the server browser. ui_menu_C resolves lazily with a bounded retry. On by
