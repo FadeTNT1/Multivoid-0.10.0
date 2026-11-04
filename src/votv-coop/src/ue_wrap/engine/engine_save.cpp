@@ -10,6 +10,7 @@
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/engine/world_identity.h"
 #include "ue_wrap/world/game_mode.h"
@@ -345,6 +346,27 @@ int DeriveModeFromSlot(const wchar_t* slot) {
 // at preLoad, the warning screen or the menu it re-issues the open each call, since a single
 // open fired during preLoad is silently dropped. It does not re-open once the gameplay world is
 // loading, which would restart the load.
+// mainGameInstance_C's apply-the-save flag (loadObjectsFromSlot on 0.10.0, loadObjects before),
+// resolved by reflection: the profile's 0.9.0n constant (0x229) is, on 0.10.0, inside a TArray, and setting it turned the array's Data
+// pointer into 0x100, which the engine's exit purge then freed (the crash on quitting after a
+// hosted or joined game). Refused, never guessed, when the property does not resolve.
+void SetLoadObjects(void* gi) {
+    static int32_t s_off = -2;
+    if (s_off == -2) {
+        void* cls = R::ClassOf(gi);
+        s_off = R::FindPropertyOffset(cls, profile::name::GameInstanceLoadObjects);
+        if (s_off < 0) s_off = R::FindPropertyOffset(cls, profile::name::GameInstanceLoadObjectsLegacy);
+        if (s_off >= 0 && static_cast<size_t>(s_off) != P::off::mainGameInstance_loadObjects)
+            UE_LOGW("engine: mainGameInstance_C apply-save flag at 0x%X, the profile says 0x%zX",
+                    s_off, P::off::mainGameInstance_loadObjects);
+    }
+    if (s_off < 0) {
+        UE_LOGE("engine: mainGameInstance_C apply-save flag unresolved -- not set; the save may not apply");
+        return;
+    }
+    *(reinterpret_cast<uint8_t*>(gi) + s_off) = 1;
+}
+
 bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
     if (!slot || !*slot) return false;
 
@@ -408,7 +430,7 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
     }
     PutSaveRulesInForce(gi, g_storySave, "LoadStorySave");
     PutSaveStartDayInForce(gi, g_storySave, "LoadStorySave");
-    *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(gi) + P::off::mainGameInstance_loadObjects) = 1;
+    SetLoadObjects(gi);
 
     // The game mode from the slot prefix before the travel, retried each poll until the widget is
     // loaded.
@@ -519,7 +541,7 @@ bool StartFreshGame(int gameMode) {
     PutSaveStartDayInForce(gi, g_storySave, "StartFreshGame");
     // A blank save has empty object and trigger arrays, so restoring it yields the level defaults
     // through the same load path as a real save.
-    *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(gi) + P::off::mainGameInstance_loadObjects) = 1;
+    SetLoadObjects(gi);
     // The mode outright: the pseudo-slot has no file and so no name for a prefix to be read from,
     // and every mode has to be reachable here, not the two a story-or-sandbox flag could spell.
     int mode = gameMode;

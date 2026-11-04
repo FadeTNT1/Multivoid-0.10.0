@@ -33,6 +33,10 @@ inline constexpr float kKPPSpawnZ =   6420.f;
 inline constexpr const wchar_t* KismetSystemLibraryClass = L"KismetSystemLibrary";
 inline constexpr const wchar_t* ExecuteConsoleCommandFn = L"ExecuteConsoleCommand";
 inline constexpr const wchar_t* GameInstanceClass = L"mainGameInstance_C";
+// The "apply the save on BeginPlay" flag the save menu's Launch sets: loadObjectsFromSlot on 0.10.0,
+// loadObjects before it.
+inline constexpr const wchar_t* GameInstanceLoadObjects       = L"loadObjectsFromSlot";
+inline constexpr const wchar_t* GameInstanceLoadObjectsLegacy = L"loadObjects";
 
 // The live UsaveSlot_C instance holds the player's current runtime vitals (food, sleep, health,
 // coffeePower), which the BP mutates in place and SaveGameToSlot serialises whole; its field

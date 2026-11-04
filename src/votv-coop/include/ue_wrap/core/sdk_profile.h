@@ -188,7 +188,7 @@ inline constexpr size_t FUObjectArray_MasterSerialNumber = 0xB0;      // int32 c
 inline constexpr size_t TArray_Data = 0x00;  // TArray<T*> = {T** Data; int32 Num; int32 Max}
 inline constexpr size_t TArray_Num = 0x08;
 inline constexpr size_t TArray_Max = 0x0C;
-inline constexpr size_t mainGameInstance_loadObjects = 0x0229;  // bool: apply the save on BeginPlay (vs fresh)
+inline constexpr size_t mainGameInstance_loadObjects = 0x0239;  // bool: apply the save on BeginPlay (vs fresh); loadObjectsFromSlot on 0.10.0 (0x229 as loadObjects on 0.9.0n). Written only through the live reflection offset (engine_save.cpp)
 // The mod's own UMG widget tree (built through SpawnObject):
 inline constexpr size_t UUserWidget_WidgetTree = 0x01D8;       // UWidgetTree*
 inline constexpr size_t UWidgetTree_RootWidget = 0x0028;       // UWidget*

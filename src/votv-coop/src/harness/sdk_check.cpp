@@ -292,6 +292,8 @@ void RunClassChecks(int& ok, int& fail, int& failPriority) {
 struct OffsetRow { const char* constant; const wchar_t* cls; const wchar_t* prop; size_t expected; };
 #define MV_OFF(cls, prop, constant) {#constant, cls, prop, P::off::constant}
 const OffsetRow kOffsets[] = {
+    MV_OFF(L"mainGameInstance_C", L"loadObjectsFromSlot", mainGameInstance_loadObjects),
+    MV_OFF(L"mainGamemode_C", L"mainPlayer", mainGamemode_mainPlayer),
     MV_OFF(L"prop_C", L"physicsImpact", Aprop_physicsImpact),
     MV_OFF(L"prop_C", L"StaticMesh", Aprop_StaticMesh),
     MV_OFF(L"prop_C", L"Name", Aprop_Name),
