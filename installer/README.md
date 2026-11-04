@@ -3,7 +3,10 @@
 Installs the Multivoid co-op mod into **Voices of the Void 0.10.0**. No UE4SS, no mod manager, no downloads: one
 small loader file (`dwmapi.dll`) goes next to the game's exe and starts the mod by itself.
 
-## Install
+Friend-facing step-by-step guides: **[INSTALL-WINDOWS.md](INSTALL-WINDOWS.md)** and
+**[INSTALL-LINUX.md](INSTALL-LINUX.md)** (Proton / Wine, via `install-multivoid.sh`).
+
+## Install (Windows)
 
 1. Unzip the whole `Multivoid-Installer-0.10.0` folder somewhere (the Desktop is fine). Keep `payload\` next to the
    installer: it holds the files that get installed.
@@ -19,7 +22,38 @@ If Windows says the zip's files are blocked ("downloaded from the internet"), ri
 tick **Unblock**, and unzip again. The `.bat` already runs the script with the execution policy bypassed, so
 nothing needs to be changed in PowerShell.
 
-## The menu
+## Install (Linux, Proton / Wine)
+
+```
+chmod +x install-multivoid.sh && ./install-multivoid.sh
+```
+
+Same payload, same manifest, same menu (1 Install, 2 Uninstall, 3 Repair) and same 0.10.0 check as the Windows
+installer. Needs only bash and coreutils (`find`, `grep`, `sed`, `od`, `sha256sum`). It looks for the game in
+`~/Games`, `~/Downloads`, `~/Desktop`, Steam libraries (also Flatpak Steam), Lutris and Heroic folders.
+**After installing, Wine must be told to load the native `dwmapi.dll`**: Steam launch option
+`WINEDLLOVERRIDES="dwmapi=n,b" %command%` (the installer prints it, plus the Lutris / Heroic / Bottles equivalents).
+It does not edit Steam's binary `shortcuts.vdf`. Unattended:
+
+```
+./install-multivoid.sh --action install   --game-path "$HOME/Games/VotV" --yes
+./install-multivoid.sh --action uninstall --game-path "$HOME/Games/VotV" --yes --remove-logs
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--action install\|uninstall\|repair` | Skip the menu. |
+| `--game-path <path>` | The game folder, `WindowsNoEditor`, `VotV/Binaries/Win64`, or the exe. |
+| `--yes` | Never ask a question; every question takes its safe default. |
+| `--skip-version-check` | Go on although the exe is not the 0.10.0 build. |
+| `--ue4ss ask\|keep\|replace` | What to do about an existing UE4SS (unattended `ask` means `keep`). |
+| `--remove-logs` / `--remove-user-data` | Uninstall only: also delete logs and reports / settings, saves and identity key. |
+| `--payload-dir <path>` | Use a payload folder somewhere else. |
+
+It refuses to run while `VotV-Win64-Shipping.exe` is running (`pgrep`). Not covered yet: a run on a real Proton prefix
+(tested only against a fake game tree).
+
+## The menu (both installers)
 
 | Choice | What it does |
 | --- | --- |
@@ -78,7 +112,7 @@ identity key, and **`loader.log`**, which records how the loader started the mod
   whether it stood aside for UE4SS, whether `main.dll` loaded, and whether the mod started or refused.
   Then try **3) Repair**.
 - Linux / Steam Proton: set the launch option `WINEDLLOVERRIDES="dwmapi=n,b" %command%` so Wine uses the
-  `dwmapi.dll` beside the game instead of its built-in one.
+  `dwmapi.dll` beside the game instead of its built-in one (see INSTALL-LINUX.md).
 - The mod's own log is `multivoid.log` beside the game exe; the F1 menu has a bug-report button.
 - Still stuck: the Discord linked from the main README.
 

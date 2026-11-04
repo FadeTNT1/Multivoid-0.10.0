@@ -7,7 +7,8 @@
     from assets\paks (when present), and lays them out as the installer expects:
 
         Multivoid-Installer-<version>\
-            Install-Multivoid.bat / Install-Multivoid.ps1 / README.md / LICENSE / THIRD-PARTY-NOTICES.md / VERSION.txt
+            Install-Multivoid.bat / Install-Multivoid.ps1 / install-multivoid.sh (Linux, LF endings)
+            README.md / INSTALL-WINDOWS.md / INSTALL-LINUX.md / LICENSE / THIRD-PARTY-NOTICES.md / VERSION.txt
             payload\mod\dlls\main.dll [+ main.dll.sig]   payload\mod\enabled.txt
             payload\loader\dwmapi.dll
             payload\pak\*                                (optional)
@@ -66,9 +67,14 @@ New-Item -ItemType Directory -Path (Join-Path $stage 'payload\mod\dlls') -Force 
 New-Item -ItemType Directory -Path (Join-Path $stage 'payload\loader') -Force | Out-Null
 
 # --- the installer itself ---------------------------------------------------------------------------------------
-foreach ($f in 'Install-Multivoid.ps1', 'Install-Multivoid.bat', 'README.md') {
+foreach ($f in 'Install-Multivoid.ps1', 'Install-Multivoid.bat', 'README.md', 'INSTALL-WINDOWS.md', 'INSTALL-LINUX.md') {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $f) -Destination $stage
 }
+# The Linux installer is copied as raw bytes with CR stripped: a CRLF shebang ("bash\r") would not run on Linux.
+$shBytes = [System.IO.File]::ReadAllBytes((Join-Path $PSScriptRoot 'install-multivoid.sh'))
+$shLf = New-Object System.Collections.Generic.List[byte] ($shBytes.Length)
+foreach ($b in $shBytes) { if ($b -ne 13) { $shLf.Add($b) } }
+[System.IO.File]::WriteAllBytes((Join-Path $stage 'install-multivoid.sh'), $shLf.ToArray())
 foreach ($legal in 'LICENSE', 'THIRD-PARTY-NOTICES.md') {
     $p = Join-Path $repoRoot $legal
     if (Test-Path -LiteralPath $p) { Copy-Item -LiteralPath $p -Destination $stage }
@@ -119,7 +125,8 @@ if (Test-Path -LiteralPath (Join-Path $stage 'payload\pak')) {
 
 # --- verify what was staged -------------------------------------------------------------------------------------
 foreach ($need in 'payload\mod\dlls\main.dll', 'payload\mod\enabled.txt', 'payload\loader\dwmapi.dll',
-                  'Install-Multivoid.ps1', 'Install-Multivoid.bat', 'README.md') {
+                  'Install-Multivoid.ps1', 'Install-Multivoid.bat', 'install-multivoid.sh', 'README.md',
+                  'INSTALL-WINDOWS.md', 'INSTALL-LINUX.md') {
     if (-not (Test-Path -LiteralPath (Join-Path $stage $need) -PathType Leaf)) { throw "staged tree is missing $need" }
 }
 $mainSha = Get-Sha256 (Join-Path $stage 'payload\mod\dlls\main.dll')
@@ -152,7 +159,11 @@ try {
     try {
         foreach ($f in @(Get-ChildItem -LiteralPath $stageFull -Recurse -File)) {
             $entry = $name + '/' + (($f.FullName.Substring($stageFull.Length).TrimStart('\')) -replace '\\', '/')
-            [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f.FullName, $entry, [System.IO.Compression.CompressionLevel]::Optimal)
+            $e = [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f.FullName, $entry, [System.IO.Compression.CompressionLevel]::Optimal)
+            if ($f.Extension -eq '.sh') {
+                # Best effort: record mode 0755 so `unzip` on Linux keeps the executable bit (README says chmod +x anyway).
+                try { $e.ExternalAttributes = [System.BitConverter]::ToInt32([System.BitConverter]::GetBytes([uint32]0x81ED0000), 0) } catch { }
+            }
         }
     } finally { $archive.Dispose() }
 } finally { $fs.Dispose() }
@@ -161,7 +172,8 @@ try {
 $read = [System.IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $names = @($read.Entries | ForEach-Object { $_.FullName })
-    foreach ($need in "$name/Install-Multivoid.ps1", "$name/Install-Multivoid.bat", "$name/payload/mod/dlls/main.dll",
+    foreach ($need in "$name/Install-Multivoid.ps1", "$name/Install-Multivoid.bat", "$name/install-multivoid.sh",
+                      "$name/INSTALL-WINDOWS.md", "$name/INSTALL-LINUX.md", "$name/payload/mod/dlls/main.dll",
                       "$name/payload/mod/enabled.txt", "$name/payload/loader/dwmapi.dll") {
         if ($names -notcontains $need) { throw "the written zip is missing $need" }
     }
