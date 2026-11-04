@@ -103,7 +103,12 @@ function Read-YesNo([string]$Question, [bool]$Default) {
 # Small helpers
 # ---------------------------------------------------------------------------------------------------------------
 function Get-Sha256([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    # .NET directly, not Get-FileHash: a Windows PowerShell 5.1 started from PowerShell 7 inherits 7's
+    # PSModulePath and cannot load its Utility module, so the cmdlet is missing there.
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $fs = [System.IO.File]::OpenRead($Path)
+    try { $bytes = $sha.ComputeHash($fs) } finally { $fs.Dispose(); $sha.Dispose() }
+    return ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
 }
 
 function Get-PeTimestamp([string]$Exe) {

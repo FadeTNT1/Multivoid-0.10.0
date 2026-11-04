@@ -282,3 +282,6 @@ reference/agency-agents/
 
 # friend-installer package output (installer/Build-Package.ps1)
 dist/
+
+# The friend installer launcher is source, not a build artifact.
+!installer/Install-Multivoid.bat
