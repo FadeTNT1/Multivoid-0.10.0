@@ -92,7 +92,9 @@ const NoReplayRow kNoReplayRows[] = {
     { "graystank", "world-actor lane (eventer EX-catch: ufoDropper_tank_C / ufoDropper_pig_C)" },
     { "arirBuster", "creature spawn (no lane yet)" },
     { "eggvasion", "npc and world-actor lanes (eventer and egger EX-catch)" },
-    { "boarwar", "creature spawn (no lane yet)" },
+    // boarwar mints boarInvasion_C: its grayboar_C props ride the prop lane and its two ariral shooters the npc
+    // lane (its source row); its four end-of-war firetank_C and the level UFO shader it lights stay the host's.
+    { "boarwar", "prop lane (grayboar_C) and npc lane (boarInvasion_C EX-catch: npc_ariral_shooter_C)" },
     { "soltoClean", "world-actor spawn (no lane yet: soltomiaCleaning_C plays gameplay on a mirror)" },
     { "salt", "save-actor spawn (no lane)" }, { "rozitalHole", "save-actor spawn (no lane)" },
     { "dreambase", "save-actor spawn (no lane)" },

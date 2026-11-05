@@ -279,6 +279,12 @@ inline constexpr const wchar_t* UfoDropperCarClass  = L"ufoDropper_car_C";
 // power grid's to refuse (coop/world/power_grid), so a mirror is the saucer alone.
 inline constexpr const wchar_t* UfoDropperTankClass = L"ufoDropper_tank_C";
 inline constexpr const wchar_t* UfoDropperPigClass  = L"ufoDropper_pig_C";
+// boarwar's controller (runEvent('boarwar') mints it above the treehouse): its ubergraph throws grayboar_C
+// props (the prop lane carries them), mints two npc_ariral_shooter_C 60 s and 120 s in, and four firetank_C
+// once the boars are spent, all under EX_CallMath, so its creatures cross only through its source row in
+// npc_world_enum. The firetanks stay out of that row: a firetank_C mirror's BeginPlay arms five AI timers
+// (update, senseupdate, fire, speak, makehealthnoise) that no row refuses yet.
+inline constexpr const wchar_t* BoarInvasionClass = L"boarInvasion_C";
 // The arirFollower event's spawner: runTrigger mints npc_arirFollower_C at its own transform
 // (EX_CallMath), so the npc lane sees it only through a source row.
 inline constexpr const wchar_t* TriggerSpawnFollowingArirClass = L"trigger_spawnFollowingArir_C";

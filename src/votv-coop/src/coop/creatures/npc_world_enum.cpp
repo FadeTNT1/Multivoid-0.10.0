@@ -172,6 +172,8 @@ constexpr const wchar_t* kUfoKnobOutputs[] = {P::name::UfoKnobClass, nullptr};
 constexpr const wchar_t* kUfoUkOutputs[] = {P::name::UfoUkClass, P::name::UfoUkEnemyClass, nullptr};
 constexpr const wchar_t* kSuperFogOutputs[] = {P::name::HoelUfoClass, nullptr};
 constexpr const wchar_t* kArirFollowerOutputs[] = {P::name::NpcClass_ArirFollower, nullptr};
+// boarwar's shooters only: its grayboar_C props ride the prop lane, and its firetank_C has no parked mirror.
+constexpr const wchar_t* kBoarInvasionOutputs[] = {P::name::NpcClass_AriralShooter, nullptr};
 constexpr ExSpawnSource kExSpawnSources[] = {
     {L"trigger_wispSwarm_C",     nullptr},          // the wisps event swarm
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
@@ -194,6 +196,8 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {P::name::SuperFogClass, kSuperFogOutputs},
     // The arirFollower event: the spawner's runTrigger mints the follower; an npc-lane mirror.
     {P::name::TriggerSpawnFollowingArirClass, kArirFollowerOutputs},
+    // boarwar: the controller the eventer mints throws its boars and, a minute in, mints two ariral shooters.
+    {P::name::BoarInvasionClass, kBoarInvasionOutputs},
 };
 
 // Whether `cls`'s own name is one of `names` (null-terminated). One render, then plain compares.
@@ -289,7 +293,7 @@ void InstallExSpawnCatch() {
                 "jellyfishPath_C -> jellyfish_C, trigger_eventer_C -> ventCrawler_C + superEgger_C, "
                 "trigger_eventer_C -> kocker_C + morningUfo_C + rozitBorg_C + ufoDropper_body_C + ufoDropper_car_C + "
                 "ufoDropper_tank_C + ufoDropper_pig_C, "
-                "trigger_spawnFollowingArir_C -> npc_arirFollower_C, "
+                "trigger_spawnFollowingArir_C -> npc_arirFollower_C, boarInvasion_C -> npc_ariral_shooter_C, "
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
                 "mainGamemode_C -> geomOcta_C + eg_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
