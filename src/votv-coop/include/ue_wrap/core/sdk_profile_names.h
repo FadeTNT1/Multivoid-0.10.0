@@ -528,6 +528,24 @@ inline constexpr const wchar_t* PlaySoundAtLocationFn    = L"PlaySoundAtLocation
 // rather than borrowing the game's `att_*` assets; its field offsets are `off::att`.
 inline constexpr const wchar_t* SoundAttenuationClass = L"SoundAttenuation";
 
+// 0.10.0 per-material audio. lib_C::physSound is OBSOLETE (its body only raises the in-game hint
+// "obsolete function: phys" and its `Data` out-param is gone). The replacement is
+// lib_C::getPhysicalAsAudio(PhysicalMaterial, __WorldContext) -> out AudioPhysMat
+// (a physMat_SoundsAndParticles_C), out IsAudioPhysical; a material that is not an audio material
+// resolves to the physsnd_fallback asset, as native does. The native pickup reads `sound_soft` off
+// that object and impacts read `sound_impact`. prop_C's physicsImpact component carries the
+// material to look up: physmat_override when valid, else physmat (comp_physicsImpact_C).
+inline constexpr const wchar_t* PhysAudioLibClass            = L"lib_C";
+inline constexpr const wchar_t* GetPhysicalAsAudioFn         = L"getPhysicalAsAudio";
+inline constexpr const wchar_t* GetPhysicalAsAudioMatParam   = L"PhysicalMaterial";
+inline constexpr const wchar_t* GetPhysicalAsAudioWorldParam = L"__WorldContext";
+inline constexpr const wchar_t* GetPhysicalAsAudioOutParam   = L"AudioPhysMat";
+inline constexpr const wchar_t* PhysAudioSoftProp            = L"sound_soft";    // physMat_SoundsAndParticles_C: grab / pickup cue
+inline constexpr const wchar_t* PhysAudioImpactProp          = L"sound_impact";  // physMat_SoundsAndParticles_C: impact / land cue
+inline constexpr const wchar_t* PropPhysicsImpactProp        = L"physicsImpact";      // prop_C -> comp_physicsImpact_C
+inline constexpr const wchar_t* PhysImpactMatOverrideProp    = L"physmat_override";   // comp_physicsImpact_C UPhysicalMaterial*, wins when valid
+inline constexpr const wchar_t* PhysImpactMatProp            = L"physmat";            // comp_physicsImpact_C UPhysicalMaterial*
+
 // mainPlayer_C drives every ragdoll cause through `ragdollMode(bool ragdoll, bool passOut, bool
 // death)` (mainPlayer.hpp:484) and recovers through `forceGetUp()` (line 641). On an unpossessed puppet
 // ragdollMode(true,true,false) flips isRagdoll and spawns the ragdoll actor, and forceGetUp clears the AnimBP
