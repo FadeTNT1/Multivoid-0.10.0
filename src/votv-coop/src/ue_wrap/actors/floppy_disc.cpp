@@ -40,8 +40,12 @@ bool EnsureResolved() {
     if (!cls) return false;  // loads on demand; the backoff above bounds the retry
     g_offData       = R::FindPropertyOffset(cls, L"Data");
     g_offReadWrites = R::FindPropertyOffset(cls, L"readWrites");
-    if (g_offData < 0)       { UE_LOGW("floppy_disc: data offset -- fallback 0x368");       g_offData = 0x368; }
-    if (g_offReadWrites < 0) { UE_LOGW("floppy_disc: readWrites offset -- fallback 0x37C"); g_offReadWrites = 0x37C; }
+    // No numeric fallback: Data and readWrites are written, and a stale offset lands in another field.
+    if (g_offData < 0 || g_offReadWrites < 0) {
+        UE_LOGW("floppy_disc: data/readWrites offset not found -- disc access refused (retry in 1s)");
+        g_offData = g_offReadWrites = -1;
+        return false;
+    }
     g_cls = cls;
     g_resolved = true;
     UE_LOGI("floppy_disc: resolved (data=0x%X readWrites=0x%X)", g_offData, g_offReadWrites);

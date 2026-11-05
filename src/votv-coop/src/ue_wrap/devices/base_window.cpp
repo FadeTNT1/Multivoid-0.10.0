@@ -1,9 +1,9 @@
 // ue_wrap/devices/base_window.cpp -- see ue_wrap/devices/base_window.h. Engine access for VOTV's
 // base observation window (AbaseWindow_C).
 //
-// Offsets are resolved from the live class via reflection (FindPropertyOffset) with
-// the documented Alpha 0.9.0-n CXX-dump values as a logged fallback, matching the
-// door wrapper (version-tagging rule -- offsets stay correct across game recooks).
+// Offsets are resolved from the live class via reflection (FindPropertyOffset), so they stay
+// correct across game recooks. `clean` is WRITTEN, so it has no numeric fallback: if it does not
+// resolve, the wrapper refuses to read or write it (a stale offset would land in another field).
 
 #include "ue_wrap/devices/base_window.h"
 
@@ -25,12 +25,11 @@ namespace R = reflection;
 std::atomic<bool> g_resolved{false};
 
 void*   g_winCls     = nullptr;  // baseWindow_C UClass
-int32_t g_cleanOff   = -1;       // AbaseWindow_C::clean  (Alpha 0.9.0-n: 0x0260)
+int32_t g_cleanOff   = -1;       // AbaseWindow_C::clean (reflected only; no fallback)
 int32_t g_keyOff     = -1;       // Aactor_save_C::Key    (Alpha 0.9.0-n: 0x0230)
 void*   g_setCleanFn = nullptr;  // AbaseWindow_C::setClean() -- SetCustomPrimitiveDataFloat(0, clean)
 
-// Documented Alpha 0.9.0-n fallbacks (CXXHeaderDump/baseWindow.hpp + actor_save.hpp).
-constexpr int32_t kCleanOffFallback = 0x0260;
+// Documented Alpha 0.9.0-n fallback for the READ-only Key (CXXHeaderDump/actor_save.hpp).
 constexpr int32_t kKeyOffFallback   = 0x0230;
 
 }  // namespace
@@ -44,8 +43,12 @@ bool EnsureResolved() {
     // `clean` is declared on AbaseWindow_C itself.
     int32_t cleanOff = R::FindPropertyOffset(winCls, L"clean");
     if (cleanOff < 0) {
-        UE_LOGW("base_window: reflected clean offset not found -- using fallback 0x%04X", kCleanOffFallback);
-        cleanOff = kCleanOffFallback;
+        // No numeric fallback: clean is written, and the 0.9.0n offset is another field now.
+        // Left unresolved so the caller retries; nothing reads or writes it meanwhile.
+        static std::atomic<bool> s_said{false};
+        if (!s_said.exchange(true))
+            UE_LOGW("base_window: reflected clean offset not found -- window clean sync refused");
+        return false;
     }
     // `Key` is declared on the Aactor_save_C parent, which the property lookup climbs to.
     int32_t keyOff = R::FindPropertyOffset(winCls, L"Key");
