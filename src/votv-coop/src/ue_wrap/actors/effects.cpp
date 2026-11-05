@@ -7,6 +7,7 @@
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/engine/data_table.h"
 #include "ue_wrap/world/world_singleton.h"
 
@@ -136,11 +137,14 @@ const SaveSlot& SaveSlotFor(void* slot) {
     if (void* const cls = R::ClassOf(slot); cls != g_slot.cls) {
         g_slot = SaveSlot{};
         g_slot.cls = cls;
-        g_slot.objectsData = R::FindPropertyOffset(cls, L"objectsData");
+        // 0.10.0 keeps the world rows in betterObjectsData; objectsData before.
+        g_slot.objectsData = R::FindPropertyOffset(cls, profile::name::SaveSlotBetterObjectsData);
+        if (g_slot.objectsData < 0)
+            g_slot.objectsData = R::FindPropertyOffset(cls, profile::name::SaveSlotObjectsDataLegacy);
         g_slot.gamemode = R::FindPropertyOffset(cls, L"gamemode");
         g_slot.resetFn = R::FindFunction(cls, L"reset_player_effects");
         const std::wstring label = R::ToString(R::NameOf(cls));
-        if (g_slot.objectsData < 0) UE_LOGE("effects: %ls.objectsData did not resolve", label.c_str());
+        if (g_slot.objectsData < 0) UE_LOGE("effects: %ls has neither betterObjectsData nor objectsData", label.c_str());
         if (g_slot.gamemode < 0) UE_LOGE("effects: %ls.gamemode did not resolve", label.c_str());
         if (!g_slot.resetFn) UE_LOGE("effects: %ls.reset_player_effects did not resolve", label.c_str());
     }

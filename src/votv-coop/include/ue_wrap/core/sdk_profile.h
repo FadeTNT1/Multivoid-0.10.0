@@ -347,6 +347,14 @@ inline constexpr size_t FFieldClass_Name = 0x00;          // FName
 inline constexpr size_t FProperty_TypeObject = 0x78;      // the property's type object (see above)
 inline constexpr size_t FField_Next = 0x20;               // FField*
 inline constexpr size_t FField_NamePrivate = 0x28;        // FName
+// FSoftObjectPtr (TPersistentObjectPtr<FSoftObjectPath> in the UE4.27 engine source): a
+// FWeakObjectPtr {ObjectIndex, ObjectSerialNumber}, TagAtLastTest, then the path's AssetPathName FName
+// and SubPathString FString. Engine-stable: a recook never moves it. The save-row reader
+// (ue_wrap/actors/save_rows.h) reads a TSoftClassPtr member through it, after checking its size.
+inline constexpr size_t FSoftObjectPtr_WeakIndex     = 0x00;  // int32
+inline constexpr size_t FSoftObjectPtr_WeakSerial    = 0x04;  // int32
+inline constexpr size_t FSoftObjectPtr_AssetPathName = 0x10;  // FName
+inline constexpr size_t FSoftObjectPtr_Size          = 0x28;
 // ArrayDim first, then ElementSize (RE-UE4SS MemberVariableLayout_4_27_Template.ini [FProperty]). The two
 // were once named the other way round; every reader multiplied them, so it never showed, until
 // script_fingerprint read ElementSize alone and every parameter measured 1 byte.
@@ -590,13 +598,9 @@ inline constexpr size_t DirectionalWind_windTarget             = 0x0238;  // UBi
 // a receiver runs the same toggle (ue_wrap/world/red_sky), and set() runs only inside the event.
 inline constexpr size_t AmainGamemode_redSky                = 0x0888;  // AredSkyEvent_C*
 
-// AmainGamemode_C::saveSlot: the live world-save container saveObjects() / saveTriggers()
-// repopulate and SaveGameToSlot serialises; save_capture reads it (mainGamemode.hpp).
-inline constexpr size_t AmainGamemode_saveSlot              = 0x04B0;  // UsaveSlot_C*
-
-// UsaveSlot_C::objectsData: the TArray<Fstruct_save> of every world object (saveSlot.hpp);
-// save_capture's safety probe reads its Num (@ +0x8).
-inline constexpr size_t UsaveSlot_objectsData              = 0x0300;  // TArray<Fstruct_save>
+// The gamemode's save object and its world arrays are NOT offsets here: 0.10.0 renamed the member
+// (saveSlot -> save_slot) and moved the gather to betterObjectsData, so both are resolved by name
+// (world_singleton::GamemodeSaveSlotOffset and the profile's content names).
 
 // AmainGamemode_C::daynightCycle is the world singleton's daynightCycle_C, so no gamemode offset
 // is needed.

@@ -4,6 +4,7 @@
 
 #include "coop/config/config.h"
 #include "ue_wrap/core/call.h"
+#include "ue_wrap/world/world_singleton.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/cached_obj_ref.h"
@@ -345,7 +346,7 @@ void Tick(bool connected, bool isHost) {
     //                           what an order carries / that the TSubclassOf `object` reads).
     //   DECREMENT             = a cart removal, the queue's only drain.
     // droneOrder is dumped throttled below purely as a runtime cross-check.
-    const int32_t offSave = Off(gmCls, L"saveSlot");
+    const int32_t offSave = ue_wrap::world_singleton::GamemodeSaveSlotOffsetOnClass(gmCls);
     void* save = offSave >= 0 ? ReadAt<void*>(gm, offSave) : nullptr;
     if (save && R::IsLive(save)) {
         void* sCls = R::ClassOf(save);

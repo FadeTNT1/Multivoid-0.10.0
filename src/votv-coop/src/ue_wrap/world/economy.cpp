@@ -25,7 +25,7 @@ int32_t g_offPoints = -1;
 void* ResolveSaveSlotAndPoints(int32_t* outOff) {
     void* gm = world_singleton::Gamemode();
     if (!gm) return nullptr;
-    if (g_offSave < 0) g_offSave = R::FindPropertyOffset(R::ClassOf(gm), L"saveSlot");
+    if (g_offSave < 0) g_offSave = world_singleton::GamemodeSaveSlotOffset(gm);
     if (g_offSave < 0) return nullptr;
     void* save = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(gm) + g_offSave);
     if (!save || !R::IsLive(save)) return nullptr;
@@ -40,7 +40,7 @@ void* ResolveSaveSlotAndPoints(int32_t* outOff) {
 void* SaveSlotPtr() {  // the shared gamemode->saveSlot resolve, ptr only
     void* gm = world_singleton::Gamemode();
     if (!gm) return nullptr;
-    if (g_offSave < 0) g_offSave = R::FindPropertyOffset(R::ClassOf(gm), L"saveSlot");
+    if (g_offSave < 0) g_offSave = world_singleton::GamemodeSaveSlotOffset(gm);
     if (g_offSave < 0) return nullptr;
     void* save = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(gm) + g_offSave);
     return (save && R::IsLive(save)) ? save : nullptr;

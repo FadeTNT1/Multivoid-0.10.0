@@ -52,7 +52,7 @@ void ResolvePass() {
     if (!g_textLib) g_textLib = FT::Resolved();
     if (!g_gamemodeCls) g_gamemodeCls = R::FindClass(L"mainGamemode_C");
     if (!g_gamemodeCls) return;
-    if (g_offSaveSlot < 0) g_offSaveSlot = R::FindPropertyOffset(g_gamemodeCls, L"saveSlot");
+    if (g_offSaveSlot < 0) g_offSaveSlot = world_singleton::GamemodeSaveSlotOffsetOnClass(g_gamemodeCls);
     if (g_offLaptop < 0) g_offLaptop = R::FindPropertyOffset(g_gamemodeCls, L"laptop");
     if (!g_addEmailFn) g_addEmailFn = R::FindFunction(g_gamemodeCls, L"addEmail");
     if (!g_saveSlotCls) g_saveSlotCls = R::FindClass(L"saveSlot_C");
