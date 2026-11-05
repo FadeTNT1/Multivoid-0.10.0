@@ -41,6 +41,10 @@ const char* const kReplayRows[] = {
     // the same on every peer) and destroy themselves. Each peer's copy moves its own player on its own wake;
     // the host's save carries the host's copy to a joiner, whose load then does the same:
     "bedEvent", "treehouseSleep",
+    // The oil special mints seven oilStainSpawn_C at fixed points; each traces down once its spot is unseen and
+    // leaves one grime_oil_C decal there, the same spot on every peer, so a peer's own copy is the host's stain
+    // (grime keys by position, so a wipe crosses on the grime lane):
+    "oil",
     // Graffiti decal specials (a grime decal spawn; no lane):
     "arirGraff_0", "arirGraff_1", "arirGraff_2", "arirGraff_3",
     "arirGraff_4", "arirGraff_5", "arirGraff_6",
@@ -75,9 +79,10 @@ const NoReplayRow kNoReplayRows[] = {
     { "arirEgg", "prop lane (armed prop)" },
     { "console", "device lanes" }, { "lightswitch", "device lanes" },
     { "keypadGuess", "device lanes" },
-    // atvExplode sets car.trap on the host's own ATV; the ATV lane carries that flag to every copy in the stamp's
-    // bit 4, so the event itself stays host-only (a client's car need not be the host's). `zapped` has no lane:
-    { "atvExplode", "car.trap rides the ATV lane's stamp (zapped has no lane)" },
+    // atvExplode only sets car.trap on the host's gamemode ATV (runSpecialEvent @312); the ATV lane carries that
+    // flag to every copy in the stamp's bit 4, so the event itself stays host-only (a client's car need not be the
+    // host's), and the trap's blast is the host's (the ATV health drill's `trap` arm):
+    { "atvExplode", "ATV lane (car.trap in the stamp's bit 4)" },
     // Host-local by design:
     { "agrav", "physics divergence (by-design host-local)" },
     // Creature and save-actor spawns, host-only until mirrored. The crawler, the egger's eggs, the
@@ -92,27 +97,48 @@ const NoReplayRow kNoReplayRows[] = {
     // graystank mints a ufoDropper_tank_C (the eventer's `combat` set) or a ufoDropper_pig_C: the dropper is a
     // world-actor mirror whose kerfur kill, drop and generator break a client refuses.
     { "graystank", "world-actor lane (eventer EX-catch: ufoDropper_tank_C / ufoDropper_pig_C)" },
-    { "arirBuster", "creature spawn (no lane yet)" },
+    // arirBuster mints arirBusterSpawner_C, which destroys itself in its BeginPlay; its crates, blinker lamp and
+    // notebook are props the prop lane carries:
+    { "arirBuster", "prop lane (arirBusterSpawner_C's crates, lamp and notebook)" },
     { "eggvasion", "npc and world-actor lanes (eventer and egger EX-catch)" },
     // boarwar mints boarInvasion_C: its grayboar_C props ride the prop lane and its two ariral shooters the npc
     // lane (its source row); its four end-of-war firetank_C and the level UFO shader it lights stay the host's.
     { "boarwar", "prop lane (grayboar_C) and npc lane (boarInvasion_C EX-catch: npc_ariral_shooter_C)" },
+    // soltoClean's soltomiaCleaning_C is hidden until a player's overlap, which then teleports the ATV, closes
+    // and jams three doors and later throws a sponge prop: a mirror would run all of it on the client, so it
+    // needs a presentation relay (its overlap and montage) before it can cross:
     { "soltoClean", "world-actor spawn (no lane yet: soltomiaCleaning_C plays gameplay on a mirror)" },
-    { "salt", "save-actor spawn (no lane)" }, { "rozitalHole", "save-actor spawn (no lane)" },
-    { "dreambase", "save-actor spawn (no lane)" },
+    { "salt", "save-actor spawn (no lane)" },
+    // rozitalHole's event_bottomHoleController_C (a save actor) waits for an overlap at the far hole, then mints
+    // holeBottom_C, holeDevice_C and a kavotiaPatrolController_C (igetis_C, kavotia_C) beside prop swaps the
+    // prop lane would carry; none of the three has a lane:
+    { "rozitalHole", "save-actor spawn (no lane: holeBottom_C, holeDevice_C, kavotiaPatrolController_C)" },
+    // dreamer_dreambase_C is not loaded in the capture the 0.10.0 pass read; unread:
+    { "dreambase", "save-actor spawn (no lane; dreamer_dreambase_C unread)" },
     { "fallbody_0", "world-actor lane (eventer EX-catch: ufoDropper_body_C; drop and kerfur kill refused)" },
     { "fallbody_1", "world-actor lane (eventer EX-catch: ufoDropper_body_C; drop and kerfur kill refused)" },
     { "fallcar_0", "world-actor lane (eventer EX-catch: ufoDropper_car_C; drop and kerfur kill refused)" },
-    // The prank layer (host-local RNG; thrown-prop outputs ride the prop lane):
+    // The prank layer (host-local RNG; thrown-prop outputs ride the prop lane). These spawn their props at once:
     { "food", "prank special (prop lane)" }, { "drive", "prank special (prop lane)" },
-    { "atvFuel", "prank special (prop lane)" }, { "atvFix", "prank special (prop lane)" },
     { "poisonFood", "prank special (prop lane)" }, { "expDrive", "prank special (prop lane)" },
-    { "cookiebox", "prank special (prop lane)" }, { "trashPiles", "prank special (prop lane)" },
-    { "vaccine", "prank special (prop lane)" }, { "oil", "prank special (prop lane)" },
-    { "begos", "prank special (prop lane)" }, { "gascans", "prank special (prop lane)" },
-    { "bombBox", "prank special (prop lane)" },
-    { "rockThrow", "prank spawner (no lane)" }, { "hillRoller", "prank spawner (no lane)" },
-    { "alienJump", "prank spawner (no lane)" }, { "trashBase", "prank spawner (no lane)" },
+    { "cookiebox", "prank special (prop lane)" }, { "bombBox", "prank special (prop lane)" },
+    { "begos", "prank special (prop lane: begoExplosion_C's spikeballs)" },
+    // These arm a box whose overlap spawns the props (any pawn's, a puppet's included, on the host):
+    { "trashPiles", "prank special (prop lane, overlap-armed: event_trashPiles_C)" },
+    { "vaccine", "prank special (prop lane, overlap-armed: event_vaccine_C)" },
+    { "gascans", "prank special (prop lane, overlap-armed: event_funnyGascans_C)" },
+    { "hillRoller", "prank spawner (prop lane, overlap-armed: hillRollerSpawner_C)" },
+    // alienJump's alien shows on its overlap and throws props and nails at the host's camera; its body and its
+    // sound are the host's:
+    { "alienJump", "prank spawner (prop lane, overlap-armed: alienJump_C aims at the host's camera)" },
+    // rockThrow's three rockThrower_C throw prop_rock_C only while getPlayerPawn(0), the host's own player,
+    // stands in their box; a client in it is not aimed at:
+    { "rockThrow", "prank spawner (prop lane: rockThrower_C aims at the host's player only)" },
+    // event_arirFuelsATV_C refuels or repairs an ATV parked in its box once unseen; fuel and health ride the ATV
+    // condition lane, the ariral visitor it mints is the host's:
+    { "atvFuel", "ATV condition lane (event_arirFuelsATV_C fuel)" },
+    { "atvFix", "ATV condition lane (event_arirFuelsATV_C health)" },
+    { "trashBase", "prank spawner (no lane)" },
 };
 
 // The interaction rows: the row's entire effect is the prank special, host-local RNG.
