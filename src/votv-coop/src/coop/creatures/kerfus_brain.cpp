@@ -26,7 +26,9 @@ namespace sg = ue_wrap::script_gate;
 
 // The brain's bodies (p_kerfus.cpp, bp_cfg): the tick (energy drain and charge, the wheel's
 // torque, the stuck jump), the two timer events that re-path and unstick it, the movement functions,
-// the server job, the laptop's jump, the haunting, and the cord events, whose one effect is `charging`.
+// the server job, the laptop's jump, the haunting, and the cord events. On 0.10.0 those are
+// cordPlugged_obj / cordUnplugged_obj(cord, socket), the corded-prop event pair: each calls
+// prop_corded_C's own (which sets cordPowered) and then sets `charging`, both the brain's inputs.
 // The water events set only the body's damping, and upd() only its looks and sounds, so both stay.
 UE_FACT_FN(kRowReceiveTick, "kerfus_brain", L"p_kerfus_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowCheckJump, "kerfus_brain", L"p_kerfus_C", L"checkJump", Declared);
@@ -38,8 +40,8 @@ UE_FACT_FN(kRowJump, "kerfus_brain", L"p_kerfus_C", L"jump", Declared);
 UE_FACT_FN(kRowRCjump, "kerfus_brain", L"p_kerfus_C", L"RCjump", Declared);
 UE_FACT_FN(kRowPossess, "kerfus_brain", L"p_kerfus_C", L"possess", Declared);
 UE_FACT_FN(kRowPossessTimer, "kerfus_brain", L"p_kerfus_C", L"possessTimer", Declared);
-UE_FACT_FN(kRowCordPlugged, "kerfus_brain", L"p_kerfus_C", L"cordPlugged", Declared);
-UE_FACT_FN(kRowCordUnplugged, "kerfus_brain", L"p_kerfus_C", L"cordUnplugged", Declared);
+UE_FACT_FN(kRowCordPlugged, "kerfus_brain", L"p_kerfus_C", L"cordPlugged_obj", Declared);
+UE_FACT_FN(kRowCordUnplugged, "kerfus_brain", L"p_kerfus_C", L"cordUnplugged_obj", Declared);
 const ue_wrap::facts::Function* const kBrain[] = {
     &kRowReceiveTick, &kRowCheckJump, &kRowUpdatePath, &kRowMovePawnTo, &kRowFindBrokenServer, &kRowTask,
     &kRowJump, &kRowRCjump, &kRowPossess, &kRowPossessTimer, &kRowCordPlugged, &kRowCordUnplugged,
