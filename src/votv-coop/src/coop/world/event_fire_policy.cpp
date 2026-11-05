@@ -35,7 +35,7 @@ struct NoReplayRow { const char* name; const char* lane; };
 const NoReplayRow kNoReplayRows[] = {
     // Outputs already ride a lane (a replay is a double delivery):
     { "starRain", "event_cue lane (cue 0)" },
-    { "arirFollower", "npc lane" },
+    { "arirFollower", "npc lane (trigger_spawnFollowingArir_C EX-catch)" },
     // The swarm's wisps ride the npc lane (the source-gated catch in npc_world_enum); a replay
     // would arm the client's own swarm trigger and double-spawn client-local creatures on top of
     // the mirrors:
@@ -76,10 +76,10 @@ const NoReplayRow kNoReplayRows[] = {
     // grays and the tentacle balls are mirrored; the eventer's other outputs are not (its catch
     // enrols only what a client's copy is kept inert for, npc_world_enum), so they stay host-only:
     { "ventCrawler", "npc lane (allowlisted; eventer EX-catch)" },
-    { "ventKnocker", "world-actor spawn (no lane yet: the eventer's catch leaves kocker_C out)" },
+    { "ventKnocker", "world-actor lane (eventer EX-catch: kocker_C)" },
     { "tentacleBalls", "npc lane (follower EX-catch)" },
-    { "morningGay", "world-actor spawn (no lane yet: the eventer's catch leaves morningUfo_C out)" },
-    { "borgRozital", "world-actor spawn (no lane yet: the eventer's catch leaves rozitBorg_C out)" },
+    { "morningGay", "world-actor lane (eventer EX-catch: morningUfo_C)" },
+    { "borgRozital", "world-actor lane (eventer EX-catch: rozitBorg_C, its tick kept on the mirror)" },
     { "graysforest", "npc lane (controller EX-catch)" },
     { "graystank", "creature spawn (no lane yet)" }, { "arirBuster", "creature spawn (no lane yet)" },
     { "eggvasion", "npc and world-actor lanes (eventer and egger EX-catch)" },
@@ -87,9 +87,9 @@ const NoReplayRow kNoReplayRows[] = {
     { "soltoClean", "world-actor spawn (no lane yet: soltomiaCleaning_C plays gameplay on a mirror)" },
     { "salt", "save-actor spawn (no lane)" }, { "rozitalHole", "save-actor spawn (no lane)" },
     { "dreambase", "save-actor spawn (no lane)" },
-    { "fallbody_0", "dropper spawn (no lane yet: the eventer's catch leaves the droppers out)" },
-    { "fallbody_1", "dropper spawn (no lane yet: the eventer's catch leaves the droppers out)" },
-    { "fallcar_0", "dropper spawn (no lane yet: the eventer's catch leaves the droppers out)" },
+    { "fallbody_0", "world-actor lane (eventer EX-catch: ufoDropper_body_C; drop and kerfur kill refused)" },
+    { "fallbody_1", "world-actor lane (eventer EX-catch: ufoDropper_body_C; drop and kerfur kill refused)" },
+    { "fallcar_0", "world-actor lane (eventer EX-catch: ufoDropper_car_C; drop and kerfur kill refused)" },
     // The prank layer (host-local RNG; thrown-prop outputs ride the prop lane):
     { "food", "prank special (prop lane)" }, { "drive", "prank special (prop lane)" },
     { "atvFuel", "prank special (prop lane)" }, { "atvFix", "prank special (prop lane)" },

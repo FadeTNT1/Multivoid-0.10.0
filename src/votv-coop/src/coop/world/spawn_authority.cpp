@@ -94,6 +94,10 @@ UE_FACT_FN(kRowAttackHoelUfo, "spawn_authority", L"HoelUfo_C", L"attack", Declar
 UE_FACT_FN(kRowAttackBeamHoelUfo, "spawn_authority", L"HoelUfo_C", L"attackBeam", Declared);
 UE_FACT_FN(kRowChangeSpeedHoelUfo, "spawn_authority", L"HoelUfo_C", L"changeSpeed", Declared);
 UE_FACT_FN(kRowChangeSpringDirHoelUfo, "spawn_authority", L"HoelUfo_C", L"changeSpringDir", Declared);
+// The fallbody / fallcar droppers (ufoDropper_C, the parent of ufoDropper_body_C and ufoDropper_car_C):
+// the 10 s kerfur-kill timer its BeginPlay arms, and the timeline's drop event that mints the prop.
+UE_FACT_FN(kRowKillKerfurUfoDropper, "spawn_authority", L"ufoDropper_C", L"killKerfur", Declared);
+UE_FACT_FN(kRowDropUfoDropper, "spawn_authority", L"ufoDropper_C", L"Timeline_0__Drop__EventFunc", Declared);
 
 // One row: the facts row a client must not run, and the tag its refusal log carries.
 struct Row {
@@ -236,6 +240,12 @@ constexpr Row kRows[] = {
     {&kRowAttackBeamHoelUfo,              "hoelUfo.attackBeam"},
     {&kRowChangeSpeedHoelUfo,             "hoelUfo.changeSpeed"},
     {&kRowChangeSpringDirHoelUfo,         "hoelUfo.changeSpringDir"},
+    // The eventer's droppers on a client are world-actor mirrors (the eventer's source row). A player's
+    // overlap still shows the mirror and plays its timeline, the saucer's descent on its own component,
+    // but the drop event's prop is the host's (it crosses as a prop), and the kerfur kill (a random
+    // kerfur dropped to its prop every 10 s) is the host's. The tick's light blink is presentation.
+    {&kRowKillKerfurUfoDropper,           "ufoDropper.killKerfur"},
+    {&kRowDropUfoDropper,                 "ufoDropper.drop"},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x53410000;   // 'SA', then the row

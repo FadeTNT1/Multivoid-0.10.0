@@ -165,7 +165,14 @@ actors that destroy themselves at an event's end. A spawner that runs inside a B
 pyramid's, the jellyfish path's) is caught at the native function seam and gated by the spawning
 class. A mirror stops whatever its class simulates with (the coin's sphere, the jellyfish's
 capsule), so the pose drive alone moves it `[V]`. A heading
-that lives outside the actor's rotation streams as an auxiliary yaw.
+that lives outside the actor's rotation streams as an auxiliary yaw. The eventer's own spawns cross
+the same way, through its row of the source-gated catch: the vent crawler and the egger, the
+knocker in the vent, the morning UFO, the Rozital mothership and the falling body and car
+droppers, and the arirFollower event's follower crosses on the character lane through its spawner's
+row `[RD]`. The mothership flies a part of itself across the sky from its own tick, so its mirror
+keeps that tick, which changes nothing shared; a dropper's mirror still shows its saucer's descent
+on a player's walk-in, but its dropped prop and its kerfur kill are the host's and refused on a
+client (`coop/world/spawn_authority`) `[RD]`.
 
 The walking pyramid rides those rails for its spawn, pose and despawn, the creature lane for
 its four wisps, and the event lane for its identity; its own lane owns the one axis nothing
@@ -292,6 +299,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | Rain falls inside the base for a player standing indoors, the host included: the game's own effect, the same in single player. The rain emitter follows the player's camera and spawns its drops around it, below the roof's rain-collision mesh, which stops only drops falling onto it from above | `[V]` `coop/world/weather_rain` never moves the emitter or the camera; `[RD]` the decompiled day-night cycle's emitter move |
 | Trigger-volume fires (a bed event, a scare a player walks into) run per peer, as the single-player design intends | `[V]` by design, not a gap |
 | A client sees no church herbs and cannot pick them (the herbs are spawned inside the church's graph and no lane carries them yet); the striking client gets no camera turn or slow motion of its own | `[RD]` `coop/world/church_sync`; needs a plant lane and a per-striker cue |
+| The eventer's world actors (the knocker, the morning UFO, the mothership, the droppers) and the arirFollower event's follower have not been seen crossing in a play session yet. A joiner's mothership mirror restarts its flight from the beginning (its progress is not on the wire), and a morning UFO or a dropper shows on a peer only once a player, or a puppet, walks into it there | `[RD]` `coop/creatures/npc_world_enum`, `coop/world/world_actor_mirror` |
 | The UK ships' shots, a crashed ship's wreck and crater, and the calvine saucer's fall are not mirrored: the host's run only | `[RD]` `coop/world/spawn_authority` refuses them on a client; the wreck's and crater's base classes are unverified |
 | Only the pyramid and the alarm have had the one-event-at-a-time pass; every other event rides the generic lanes on the per-row replay policy | `[V]` `coop/world/event_fire_sync`, the replay allowlist |
 

@@ -22,6 +22,7 @@
 #include "ue_wrap/engine/engine_physics.h"  // StopActorSimulating
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/types.h"
 
 #include <chrono>
@@ -239,6 +240,17 @@ void OnWorldActorSpawn(const coop::net::WorldActorSpawnPayload& payload) {
     // overwritten each frame by the pose drive's location and rotation writes (the MTA
     // dead-reckoning model).
     E::SetActorTickEnabled(spawned, false);
+    // A class whose presentation is its own tick on a component (the Rozital mothership flies its
+    // ships component, the root stays put) keeps its tick: that tick writes no shared state, and the
+    // host's destroy still retires the mirror.
+    for (const wchar_t* tickDriven : ue_wrap::profile::name::kWorldActorTickDrivenClasses) {
+        if (_wcsicmp(classW.c_str(), tickDriven) == 0) {
+            E::SetActorTickEnabled(spawned, true);
+            UE_LOGI("world-actor[client OnSpawn]: eid=%u '%ls' -- actor tick kept (its presentation is "
+                    "its own tick)", payload.elementId, classW.c_str());
+            break;
+        }
+    }
     // A pose-driven mirror must not also simulate: the two fight and the mirror drifts off the
     // host's transform. The coin simulates with its sphere and the jellyfish with its capsule, each its
     // root; whatever component a mirrored class simulates with is stopped, found from its members.

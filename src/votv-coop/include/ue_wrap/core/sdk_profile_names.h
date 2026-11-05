@@ -261,6 +261,28 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
 inline constexpr size_t kWorldActorAllowlistSize =
     sizeof(kWorldActorAllowlist) / sizeof(kWorldActorAllowlist[0]);
 
+// The eventer's world-actor outputs (trigger_eventer_C::runEvent, each minted under EX_CallMath, so
+// they cross only through the eventer's source row in npc_world_enum): ventKnocker's knocker (knocks
+// on an overlap, then destroys itself), morningGay's UFO (shown and flown on a player's overlap; its
+// tick moves its root), borgRozital's mothership (its tick flies the `ships` component across the sky
+// over 480 s), and the fallbody / fallcar droppers (ufoDropper_C children: a player's overlap plays a
+// timeline that drops a prop, and a 10 s timer kills a random kerfur, both refused on a client).
+inline constexpr const wchar_t* KockerClass         = L"kocker_C";
+inline constexpr const wchar_t* MorningUfoClass     = L"morningUfo_C";
+inline constexpr const wchar_t* RozitBorgClass      = L"rozitBorg_C";
+inline constexpr const wchar_t* UfoDropperBodyClass = L"ufoDropper_body_C";
+inline constexpr const wchar_t* UfoDropperCarClass  = L"ufoDropper_car_C";
+// The arirFollower event's spawner: runTrigger mints npc_arirFollower_C at its own transform
+// (EX_CallMath), so the npc lane sees it only through a source row.
+inline constexpr const wchar_t* TriggerSpawnFollowingArirClass = L"trigger_spawnFollowingArir_C";
+
+// World-actor mirrors whose whole presentation is their own deterministic tick on a component, not
+// the root the pose drive moves: the client mirror keeps its actor tick (world_actor_mirror). Every
+// entry's tick must write no shared state.
+inline constexpr const wchar_t* kWorldActorTickDrivenClasses[] = {
+    RozitBorgClass,  // the tick lerps `ships` by its alpha, shakes the local camera, destroys itself at alpha 1
+};
+
 // The transient physics props the host's ambient spawners materialise through
 // BeginDeferredActorSpawnFromClass whose own Init is BP-internal (EX_LocalVirtualFunction, past
 // the ProcessEvent detour). The spawn call is observable, so coop/host_spawn_watcher catches it at
