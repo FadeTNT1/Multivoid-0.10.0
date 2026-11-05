@@ -43,6 +43,17 @@ void OnTick();
 void ArmPendingSaveTimeTwin(coop::element::ElementId eid, const ue_wrap::FVector& savePos, uint8_t chipType,
                             bool wantClump = false);
 
+// The host's full row for a save-time twin the spawn bind could not bind yet (a native not loaded,
+// or an ambiguous cluster). Retained beside the pending twin, latest wins, so the twin's terminal
+// pass has the host's word to recover from rather than forgetting the entity: an unbound eid that
+// gives up first adopts the nearest unbound native of its own form and type within 5 cm of the key
+// (the near-miss the 1 cm gate refused, or one of an identical co-located cluster), and failing
+// that the row is replayed through the spawn receiver, which materialises the host's pile at the
+// row's pose. A late bind converges the native to the row. Forgotten when the eid is destroyed
+// (ForgetPendingRow), when the twin is cancelled, and at teardown. Game thread only.
+void RetainPendingRow(coop::element::ElementId eid, const coop::net::PropSpawnPayload& row, int senderSlot);
+void ForgetPendingRow(coop::element::ElementId eid);
+
 // Armed from a host position correction: the host authoritatively moved E off `oldPos`, so
 // that save position is vacated, and the sweep retires whatever save-loaded native lingers
 // there on the host's word (no client-side position guess and no majority cap; the guess is

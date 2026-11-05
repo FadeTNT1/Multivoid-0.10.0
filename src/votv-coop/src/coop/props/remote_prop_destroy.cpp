@@ -227,6 +227,8 @@ DestroyApply OnDestroyImpl_(const coop::net::PropDestroyPayload& payload, void* 
     // no-op for unknown eids.
     // The eid ends here, so messages held for a bind that was still to come have nothing to reach.
     coop::element::bind_wait::GiveUp(payload.elementId, "the prop was destroyed before its bind");
+    // A row retained for a pending pile twin must never replay a pile the host has since destroyed.
+    coop::element::quiescence_drain::ForgetPendingRow(payload.elementId);
     UnregisterPropMirror(payload.elementId);
     if (!actor) {
         if (keyW.empty() &&

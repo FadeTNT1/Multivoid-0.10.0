@@ -241,10 +241,15 @@ host's pile lands from it; a `PropDestroy` for the id drops it `[?]`.
 The client's own piles do not all exist when the snapshot arrives -- its save load is still
 draining -- so an expression that finds no actor at its save-time position is HELD rather than
 answered: the id is recorded and the quiescence sweep binds the actor when it appears. The hold is
-bounded. An id whose actor never appears is given up after the sweep's retry budget and that pile
-is absent on that client until a later join expresses it again, unless a convert is held for it:
-that one replays and lands the host's pile. Nothing is invented at the stale save position, because
-the host may have moved or removed the pile since.
+bounded. The host's full row (class, pose, scale, chip type) is retained beside the hold, so the
+hold's end is a recovery, not a forgetting. A late bind converges the actor to the row. An id still
+unbound at the retry budget adopts the nearest unbound actor of its own form and chip type within
+5 cm of its save-time position (a near miss the 1 cm gate refused, or one of an identical
+co-located cluster, which bound nothing at the burst); failing that the row replays through the
+spawn receiver and the host's pile materialises at the row's pose, never at the stale save
+position. A held convert is newer than the row and replays instead; a `PropDestroy` for the id
+forgets the row. An id the client already has bound when a row names it again (a reconnect, a
+second bracket) is claimed for the sweep and converged to the row's pose.
 
 ## Known limits
 

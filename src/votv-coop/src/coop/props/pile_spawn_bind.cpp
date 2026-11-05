@@ -227,6 +227,9 @@ void* BindOwnSavePile(const coop::net::PropSpawnPayload& payload,
         if (isSaveTimeKey && payload.elementId != 0) {
             coop::element::quiescence_drain::ArmPendingSaveTimeTwin(payload.elementId, matchPos, payload.chipType,
                                                                     wantClump);
+            // The host's row rides with the twin, so the terminal pass recovers the entity from it
+            // (a near native adopted, or the row replayed) instead of forgetting it.
+            coop::element::quiescence_drain::RetainPendingRow(payload.elementId, payload, senderSlot);
             // Messages for the eid wait for the sweep's bind only while it owns no actor: the same twin is
             // also armed for a bound eid (a dup retire), which has nothing to wait for.
             coop::element::Element* row = coop::element::Registry::Get().Get(payload.elementId);

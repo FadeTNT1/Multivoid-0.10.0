@@ -11,6 +11,7 @@
 #include "coop/element/registry.h"             // Registry
 #include "coop/props/prop_element_tracker.h"   // IsBoundMirrorNative, InPurgeEpisode
 #include "coop/props/remote_prop.h"            // TryApplyDestroy, KeyToWString, IsActorUnderAnyDrive
+#include "coop/props/remote_prop_spawn.h"      // OnSpawn: a retained row replays at its twin's pass cap
 #include "coop/props/prop_drive_stream.h"      // IsParked: a prop the host's driven stream owns
 #include "coop/props/prop_stick_sync.h"        // ConvergeStuck, a wall-attach copy's stuck state
 #include "coop/props/prop_wire_parity.h"       // ConvergeFrozenSleep, a keyed prop's corrected state
@@ -53,6 +54,17 @@ struct PendingTwin {
     bool    wantClump  = false;    // the form of the native this key names (a host-vacate twin takes either)
 };
 std::unordered_map<uint32_t, PendingTwin> g_pendingSaveTimeTwin;
+// The host's row for a pending twin the spawn bind armed (RetainPendingRow): the terminal pass
+// recovers the entity from it instead of forgetting it.
+struct RetainedRow {
+    coop::net::PropSpawnPayload row;
+    int senderSlot = 0;
+};
+std::unordered_map<uint32_t, RetainedRow> g_retainedRows;
+// The terminal pass's near-adopt radius: an unbound native of the row's form and type this close to
+// the save-time key is the entity's own copy, a near-miss the 1 cm gate refused or one of an
+// identical co-located cluster (the [PILE-CENSUS] le5 band). (5 cm) squared.
+constexpr float kGiveUpAdoptR2Cm = 25.f;
 // A host-vacate twin matches the stale native by position alone: whatever chipPile lingers at
 // the vacated spot is the stale copy, whatever its type.
 constexpr uint8_t kAnyChipType = 0xFF;
@@ -205,7 +217,60 @@ int SweepReconcileSaveTimeTwins() {
     // could claim it.
     std::vector<bool> consumedFlags(natives.size(), false);
     std::vector<uint32_t> resolvedEids;  // erase from the pending map (retired OR dropped-after-N)
-    int confirmedRetired = 0, held = 0, lateBound = 0;
+    int confirmedRetired = 0, held = 0, lateBound = 0, giveUpAdopted = 0;
+    // Rows replayed after the walk of the pending map: the spawn receiver's bind and materialise
+    // touch the queues this loop iterates.
+    std::vector<RetainedRow> replayRows;
+    // The terminal answer for a twin at its pass cap. An eid that is still UNBOUND is recovered on
+    // the host's word before it is forgotten: the nearest unbound native of the row's own form and
+    // type within 5 cm of the key is adopted (the near-miss the 1 cm gate refused, or one of an
+    // identical co-located cluster, which are interchangeable), and failing that the retained row
+    // replays. A held convert keeps its own replay (NoteGaveUp), since it is newer than the row; a
+    // host-vacate twin's eid was materialised from its row already.
+    auto terminal = [&](uint32_t eid, const PendingTwin& p, void* bound) {
+        const auto rowIt = g_retainedRows.find(eid);
+        if (bound || p.hostVacate ||
+            bind_wait::Holds(eid, static_cast<uint16_t>(coop::net::ReliableKind::PropConvert))) {
+            NoteGaveUp(eid, p, bound);
+            return;
+        }
+        int best = -1;
+        float bestD2 = kGiveUpAdoptR2Cm;
+        for (int i = 0; i < static_cast<int>(natives.size()); ++i) {
+            if (consumedFlags[i]) continue;
+            const LiveNative& nv = natives[i];
+            if (nv.isClump != p.wantClump) continue;
+            if (p.chipType != kAnyChipType && nv.chipType != p.chipType) continue;
+            const float dx = nv.x - p.x, dy = nv.y - p.y, dz = nv.z - p.z;
+            const float d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > bestD2) continue;
+            if (!R::IsLiveByIndex(nv.actor, nv.idx)) continue;
+            best = i;
+            bestD2 = d2;
+        }
+        if (best >= 0) {
+            consumedFlags[best] = true;
+            coop::pile_spawn_bind::AdoptOwnNative(natives[best].actor, eid, /*senderSlot=*/0,
+                                                  "give-up, nearest native within 5cm of the key");
+            if (rowIt != g_retainedRows.end()) coop::pile_spawn_bind::ConvergeToRow(natives[best].actor, rowIt->second.row);
+            ++giveUpAdopted;
+            UE_LOGI("[PILE-1C] eid=%u at its pass cap ADOPTED the nearest unbound native (d=%.2fcm) at the "
+                    "save-time key (%.1f,%.1f,%.1f) instead of giving up%s", eid, std::sqrt(bestD2), p.x, p.y,
+                    p.z, rowIt != g_retainedRows.end() ? "; converged to the host's row" : "");
+            return;
+        }
+        if (rowIt != g_retainedRows.end()) {
+            const coop::net::PropSpawnPayload& r = rowIt->second.row;
+            UE_LOGW("[PILE-1C] eid=%u at its pass cap with NO native at its save-time key (%.1f,%.1f,%.1f) -- "
+                    "REPLAYING the host's retained row: the pile materialises at the row's pose (%.1f,%.1f,%.1f)",
+                    eid, p.x, p.y, p.z, r.locX, r.locY, r.locZ);
+            replayRows.push_back(rowIt->second);
+            coop::dev::pile_defer_drill::NoteGivenUp(eid);   // [dev] the twin did give up; the row recovers it
+            bind_wait::GiveUpReplayHeld(eid, "no native appeared at the save-time key; the retained row replays");
+            return;
+        }
+        NoteGaveUp(eid, p, bound);
+    };
     for (auto& [eid, p] : g_pendingSaveTimeTwin) {
         const ue_wrap::FVector key{p.x, p.y, p.z};
         int idx = coop::save_time_retire_util::FindExactMatch(
@@ -238,7 +303,7 @@ int SweepReconcileSaveTimeTwins() {
         // its retire needs nor the unbound state a bind needs, so the pass holds the eid, bounded
         // like any hold. A host-vacate twin retires on the binding alone, read or not.
         if (!boundRead && !p.hostVacate) {
-            if (++p.unresolvedPasses >= kMaxTwinPasses) { resolvedEids.push_back(eid); NoteGaveUp(eid, p, bound); }
+            if (++p.unresolvedPasses >= kMaxTwinPasses) { resolvedEids.push_back(eid); terminal(eid, p, bound); }
             ++held;
             continue;
         }
@@ -277,12 +342,16 @@ int SweepReconcileSaveTimeTwins() {
                 consumedFlags[idx] = true;
                 coop::pile_spawn_bind::AdoptOwnNative(natives[idx].actor, eid, /*senderSlot=*/0,
                                                       p.hostVacate ? "load tail, host-vacate key" : "load tail");
+                // The host's retained row is the pose it expressed: the late native converges to it
+                // now (a no-op when save-aligned), and a later correction still snaps over it.
+                if (const auto rowIt = g_retainedRows.find(eid); rowIt != g_retainedRows.end() && !p.hostVacate)
+                    coop::pile_spawn_bind::ConvergeToRow(natives[idx].actor, rowIt->second.row);
                 resolvedEids.push_back(eid);
                 ++lateBound;
             } else {
                 // Hold, the candidate not consumed: it is likely the element's own re-create, which
                 // step 2 of this pass claims. Bounded.
-                if (++p.unresolvedPasses >= kMaxTwinPasses) { resolvedEids.push_back(eid); NoteGaveUp(eid, p, bound); }
+                if (++p.unresolvedPasses >= kMaxTwinPasses) { resolvedEids.push_back(eid); terminal(eid, p, bound); }
                 ++held;
             }
         } else {
@@ -313,16 +382,38 @@ int SweepReconcileSaveTimeTwins() {
             }
             if (++p.unresolvedPasses >= kMaxTwinPasses) {
                 resolvedEids.push_back(eid);  // no native@old ever materialized here -> stop retrying (FPS-pin guard)
-                NoteGaveUp(eid, p, bound);
+                terminal(eid, p, bound);
             }
         }
     }
 
-    for (uint32_t e : resolvedEids) g_pendingSaveTimeTwin.erase(e);
+    for (uint32_t e : resolvedEids) {
+        g_pendingSaveTimeTwin.erase(e);
+        g_retainedRows.erase(e);
+    }
+    // The replays, outside the walk. The row is the host's word as it expressed it; the save-time
+    // stamp is cleared, since the twin it named is the one that never appeared, so the receiver
+    // binds a native exactly at the row's pose if one is there and materialises the pile otherwise.
+    // An eid that bound or died in the meantime is skipped.
+    int replayed = 0;
+    if (!replayRows.empty()) {
+        void* localPlayer = coop::players::Registry::Get().Local();
+        for (RetainedRow& rr : replayRows) {
+            const uint32_t eid = rr.row.elementId;
+            if (coop::element::Element* el = coop::element::Registry::Get().Get(eid)) {
+                if (void* a = el->GetActor(); a && R::IsLiveByIndex(a, el->GetInternalIdx())) continue;
+            }
+            rr.row.hasMatchPos = coop::net::match_form::kNone;
+            rr.row.matchX = rr.row.matchY = rr.row.matchZ = 0.f;
+            coop::remote_prop::OnSpawn(rr.row, rr.senderSlot, localPlayer);
+            ++replayed;
+        }
+    }
     UE_LOGI("[PILE-1C] sweep-reconcile -- %zu pending twin(s): %d confirmed-moved retired (per-eid, no cap), "
             "%d bound LATE (the load tail's native adopted by an eid that owned none), "
-            "%d HELD (unconfirmed -- kept bounded for a later confirmed pass), %zu still pending",
-            pendingN, confirmedRetired, lateBound, held, g_pendingSaveTimeTwin.size());
+            "%d HELD (unconfirmed -- kept bounded for a later confirmed pass), %d adopted at the pass cap, "
+            "%d retained row(s) replayed, %zu still pending",
+            pendingN, confirmedRetired, lateBound, held, giveUpAdopted, replayed, g_pendingSaveTimeTwin.size());
     return confirmedRetired;
 }
 
@@ -512,11 +603,21 @@ void EnsurePosCorrection(coop::element::ElementId eid, const ue_wrap::FVector& l
             static_cast<unsigned>(eid), loc.X, loc.Y, loc.Z);
 }
 
+void RetainPendingRow(coop::element::ElementId eid, const coop::net::PropSpawnPayload& row, int senderSlot) {
+    if (eid == 0) return;
+    g_retainedRows[static_cast<uint32_t>(eid)] = RetainedRow{row, senderSlot};
+}
+
+void ForgetPendingRow(coop::element::ElementId eid) {
+    g_retainedRows.erase(static_cast<uint32_t>(eid));
+}
+
 void CancelPendingSaveTimeTwin(coop::element::ElementId eid) {
     // The re-bind just bound the native at the twin's key to the element itself, so the stale-copy
     // premise is dead (exactly one native there, and it is the element; the co-located case never
     // re-binds). Without the cancel the twin would burn kMaxTwinPasses of walk and log, since the
     // native it would retire is now bound and excluded from the candidates.
+    g_retainedRows.erase(static_cast<uint32_t>(eid));
     if (g_pendingSaveTimeTwin.erase(static_cast<uint32_t>(eid)) > 0)
         UE_LOGI("[PILE-1C] twin eid=%u CANCELLED -- the identity re-bind claimed the native at the twin key as "
                 "E's own re-create (no stale copy exists)", static_cast<unsigned>(eid));
@@ -638,6 +739,7 @@ void Reset() {
     // in steady state, and the per-bracket index in pile_spawn_bind resets separately. An item
     // unresolved at teardown is a target that never loaded this session.
     g_pendingSaveTimeTwin.clear();
+    g_retainedRows.clear();
     g_ghostSweepArmed = false;  // the pending ghost adjudication goes too
     if (!g_pendingPosCorrection.empty())
         UE_LOGI("[PILE-B3] session teardown dropping %zu undrained pos-correction(s) -- target never bound this "
