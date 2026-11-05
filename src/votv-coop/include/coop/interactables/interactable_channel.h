@@ -198,8 +198,21 @@ public:
         std::wstring key = StringFromWireKey(p.key);
         if (key.empty()) { UE_LOGW("%s: OnReliable empty key -- dropping", a_.name); return; }
         const bool want = (p.action != 0);
-        void* actor = a_.EnsureResolved() ? ResolveFast(key) : nullptr;
+        const bool resolved = a_.EnsureResolved();
+        void* actor = resolved ? ResolveFast(key) : nullptr;
         if (actor) { ApplyResolved(actor, key, want, senderSlot); return; }
+        // Each reason a state cannot land is said once, loud: a lane that is silent here reads as a lane that works.
+        if (!resolved && !saidUnresolved_) {
+            saidUnresolved_ = true;
+            UE_LOGW("%s: a state arrived for '%ls' but this peer's family is not resolved (class not found) -- "
+                    "deferred until it is", a_.name, key.c_str());
+        } else if (resolved && !saidDeferred_) {
+            saidDeferred_ = true;
+            UE_LOGW("%s: a state arrived for key '%ls' that this peer's index does not hold (index %s, %zu key(s)) -- "
+                    "deferred; if it never lands the peers name the device differently (compare the keysHash of the "
+                    "'index rebuilt' lines, and run with interactable_log for the per-device identity probe)",
+                    a_.name, key.c_str(), IndexCurrent() ? "current" : "of a dead world", byKey_.size());
+        }
         // Not streamed in yet: deferred, retried on the throttled tick.
         pending_[key] = Pending{ want, std::chrono::steady_clock::now() + kPendingTTL, passes_ };
         if (ProbeLog())
@@ -221,10 +234,24 @@ public:
         const std::wstring key = KeyForActor(actor);
         if (key.empty()) {
             ++unindexedEdges_;
+            if (!saidUnindexed_) {
+                saidUnindexed_ = true;
+                UE_LOGW("%s: a watched verb ran on '%ls' (class '%ls') but the index does not hold it, so the edge is "
+                        "not sent (index %s, %zu key(s); the actor has no identity, or the hub has not passed it yet)",
+                        a_.name, R::ToString(R::NameOf(actor)).c_str(), R::ClassNameOf(actor).c_str(),
+                        IndexCurrent() ? "current" : "of a dead world", byKey_.size());
+            }
             return;
         }
         bool cur = false;
-        if (!a_.ReadState(actor, cur)) return;
+        if (!a_.ReadState(actor, cur)) {
+            if (!saidRead_) {
+                saidRead_ = true;
+                UE_LOGW("%s: a watched verb ran on '%ls' but its state could not be read -- the edge is not sent",
+                        a_.name, key.c_str());
+            }
+            return;
+        }
         SendEdge(key, cur, s);
     }
 
@@ -415,7 +442,15 @@ public:
         if (nm.rfind(L"Default__", 0) == 0) return;  // skip CDO
         if (!R::IsLive(obj)) return;
         std::wstring key = KeyOf(obj);
-        if (key.empty()) return;
+        if (key.empty()) {
+            if (!saidNoKey_) {
+                saidNoKey_ = true;
+                UE_LOGW("%s: an instance of class '%ls' named '%ls' has no identity (no Key, not loaded from the level) "
+                        "-- it is left out of the index, so it cannot sync (first of this lane)", a_.name,
+                        R::ClassNameOf(obj).c_str(), nm.c_str());
+            }
+            return;
+        }
         scanFound_.emplace_back(std::move(key), Ref{ obj, R::InternalIndexOf(obj) });
     }
 
@@ -446,6 +481,11 @@ public:
         if (liveCount == lastCount_) { if (stablePasses_ < 1000000) ++stablePasses_; }
         else                         { stablePasses_ = 0; lastCount_ = liveCount; }
         scanFound_.clear();
+        if (liveCount == 0 && stablePasses_ >= kSettlePassesForExpiry && !saidEmptyIndex_) {
+            saidEmptyIndex_ = true;
+            UE_LOGW("%s: the index settled with 0 instances although the family resolved -- no device of this lane in "
+                    "this world, or none passes the class check or has an identity", a_.name);
+        }
         // Logged only when the count or the hash changes. The hash is the cross-peer key-stability
         // signal (compare host and client), and it is also what says whether this census differs
         // from the one already reported -- which the per-instance dump below reads too.
@@ -550,6 +590,11 @@ private:
         bool now = want;
         a_.ReadState(actor, now);
         { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[key] = now; }
+        if (!ok && !saidApplyFailed_) {
+            saidApplyFailed_ = true;
+            UE_LOGW("%s: the apply of %s to key='%ls' failed (the device's verb did not run)", a_.name,
+                    want ? "ON" : "OFF", key.c_str());
+        }
         if (now == want)
             UE_LOGI("%s: applied %s key='%ls' ok=%d (from slot %u)",
                     a_.name, want ? "ON" : "OFF", key.c_str(), ok ? 1 : 0, fromSlot);
@@ -602,6 +647,8 @@ private:
     std::unordered_map<std::wstring, Ref> byKey_;
     std::unordered_map<void*, std::wstring> keyByActor_;   // byKey_ the other way round, rebuilt with it
     uint64_t passes_ = 0;                                  // hub passes completed (GT-only)
+    bool saidUnresolved_ = false, saidDeferred_ = false, saidUnindexed_ = false, saidRead_ = false,
+         saidApplyFailed_ = false, saidNoKey_ = false, saidEmptyIndex_ = false;  // one WARN per reason (GT-only)
     uint64_t unindexedEdges_ = 0;                          // edges on a device the index did not hold (GT-only)
     std::vector<std::pair<std::wstring, Ref>> scanFound_;  // hub-pass scratch (GT-only)
     uint32_t indexGen_ = 0;   // world gen of the last completed hub pass (GT-write, GT-read)

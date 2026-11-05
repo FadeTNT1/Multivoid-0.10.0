@@ -7,6 +7,7 @@
 #include "coop/session/net_pump.h"  // IsInAnnouncedWorld: a client's own world load stays local
 
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/actors/swinger.h"
 #include "ue_wrap/devices/appliance.h"
@@ -17,7 +18,11 @@
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <cwchar>
+#include <cwctype>
+#include <string>
 
 namespace coop::toggle_verbs {
 namespace {
@@ -47,6 +52,7 @@ struct Row {
     const char* what;
     bool (*IsInstance)(void* obj);
     void (*Edge)(void* actor);
+    bool lockerLane = false;  // a locker's row: a refusal of it is said once, for the locker sync is under test
 };
 const Row kRows[] = {
     { &kRowUse, 0x4C535755 /*'LSWU'*/, "a light switch's use", &ue_wrap::lightswitch::IsLightSwitch,
@@ -58,7 +64,12 @@ const Row kRows[] = {
     { &kRowVisual, 0x41505653 /*'APVS'*/, "a server box's visual", &ue_wrap::appliance::IsAppliance,
       &coop::interactable_sync::OnApplianceVerb },
     { &kRowOpen, 0x44424F50 /*'DBOP'*/, "a locker's open", &ue_wrap::door_box::IsLocker,
-      &coop::interactable_sync::OnDoorBoxVerb },
+      &coop::interactable_sync::OnDoorBoxVerb, true },
+    // The player's interaction on 0.10.0 reaches a locker through its actionOptionIndex as well (the pak's locker_C
+    // declares it beside `open`): watched too, and the lane's per-key dedup (lastKnown_) makes an edge `open` already
+    // sent a no-op, so a path that moves `opened` without calling `open` is not lost.
+    { &kRowActionOptionIndex, 0x44424C41 /*'DBLA'*/, "a locker's action", &ue_wrap::door_box::IsLocker,
+      &coop::interactable_sync::OnDoorBoxVerb, true },
     { &kRowActionOptionIndex, 0x44424149 /*'DBAI'*/, "a drone console's action", &ue_wrap::door_box::IsDroneConsole,
       &coop::interactable_sync::OnDoorBoxVerb },
     { &kRowOpen, 0x53574F50 /*'SWOP'*/, "a lid's open", &ue_wrap::swinger::IsSwinger,
@@ -86,6 +97,16 @@ enum class Reg : uint8_t { Pending, Registered, Refused };
 Reg  g_reg[kRowCount] = {};
 bool g_settled = false;
 uint64_t g_edges[kRowCount] = {};
+uint64_t g_calls[kRowCount] = {};       // the row's body ran on any object, whatever its class
+uint8_t  g_saidNotInstance[kRowCount] = {};
+uint8_t  g_saidWorldGate[kRowCount] = {};
+bool     g_saidFirstEdge[kRowCount] = {};
+
+bool NameHasLocker(void* obj) {
+    std::wstring n = ue_wrap::reflection::ClassNameOf(obj);
+    for (auto& c : n) c = static_cast<wchar_t>(std::towlower(c));
+    return n.rfind(L"locker_", 0) == 0;  // locker_C and its subclasses, not lockerguy_C
+}
 
 const Row* RowOf(int tag, int* index) {
     for (int i = 0; i < kRowCount; ++i)
@@ -99,10 +120,37 @@ void OnVerbPost(const sg::Call& call) {
     if (!s || !s->connected() || !call.object) return;
     int i = -1;
     const Row* row = RowOf(call.tag, &i);
-    if (!row || !row->IsInstance(call.object)) return;
+    if (!row) return;
+    ++g_calls[i];
+    if (!row->IsInstance(call.object)) {
+        // A locker-named class the lane does not recognise is the family never resolving, or the class not a
+        // descendant of the one it resolved: the lane would stay silent for good, so it is said, once a row.
+        if (row->lockerLane && g_saidNotInstance[i] < 1 && NameHasLocker(call.object)) {
+            ++g_saidNotInstance[i];
+            UE_LOGW("[TOGGLE-VERB] %s ran on '%ls' (class '%ls') but door_box does not recognise it as a locker "
+                    "(locker_C %s) -- no edge is sent", row->what,
+                    ue_wrap::reflection::ToString(ue_wrap::reflection::NameOf(call.object)).c_str(),
+                    ue_wrap::reflection::ClassNameOf(call.object).c_str(),
+                    ue_wrap::door_box::LockerClassResolved() ? "resolved, so the class is no descendant" : "NOT resolved");
+        }
+        return;
+    }
     // A client's load of a world is the host's save; its devices' own calls there are not its player's.
-    if (s->role() != coop::net::Role::Host && !coop::net_pump::IsInAnnouncedWorld(call.object)) return;
+    if (s->role() != coop::net::Role::Host && !coop::net_pump::IsInAnnouncedWorld(call.object)) {
+        if (row->lockerLane && g_saidWorldGate[i] < 3) {
+            ++g_saidWorldGate[i];
+            UE_LOGW("[TOGGLE-VERB] %s ran on a locker on this client but its world is not the announced one yet -- "
+                    "the edge is dropped (said up to 3 times a row; expected only during the client's own world load)",
+                    row->what);
+        }
+        return;
+    }
     ++g_edges[i];
+    if (row->lockerLane && !g_saidFirstEdge[i]) {
+        g_saidFirstEdge[i] = true;
+        UE_LOGI("[TOGGLE-VERB] first edge of %s on '%ls' -- handed to the locker lane", row->what,
+                ue_wrap::reflection::ToString(ue_wrap::reflection::NameOf(call.object)).c_str());
+    }
     row->Edge(call.object);
 }
 
@@ -122,6 +170,16 @@ void Install(coop::net::Session* session) {
     }
 }
 
+namespace {
+// Which rows' watches are not live, by name: a locker row among them is the sync's own gate failing.
+void SayNotLive() {
+    for (int i = 0; i < kRowCount; ++i)
+        if (!(g_reg[i] == Reg::Registered && sg::NameWatchLive(*kRows[i].verb, kRows[i].tag)))
+            UE_LOGE("[TOGGLE-VERB] gate not live: %s ('%ls', %s)", kRows[i].what, kRows[i].verb->Name(),
+                    g_reg[i] == Reg::Refused ? "refused" : g_reg[i] == Reg::Pending ? "never registered" : "unresolved or dead");
+}
+}  // namespace
+
 void Tick() {
     sg::ResolvePendingNames();
     if (g_settled) return;
@@ -137,6 +195,15 @@ void Tick() {
         g_settled = true;
         UE_LOGE("[TOGGLE-VERB] %d of %d toggle verb gates are dead (refused, or resolved into a full table)",
                 kRowCount - live, kRowCount);
+        SayNotLive();
+    } else {
+        static const auto s_start = std::chrono::steady_clock::now();
+        static bool s_saidSlow = false;
+        if (!s_saidSlow && std::chrono::steady_clock::now() - s_start > std::chrono::seconds(60)) {
+            s_saidSlow = true;
+            UE_LOGW("[TOGGLE-VERB] %d of %d toggle verb gates still not live 60 s in", kRowCount - live, kRowCount);
+            SayNotLive();
+        }
     }
 }
 
@@ -145,7 +212,12 @@ void OnDisconnect() {
         if (g_edges[i])
             UE_LOGI("[TOGGLE-VERB] session end -- %s ran on a device of its row %llu time(s), the "
                     "lane's own applies among them", kRows[i].what, static_cast<unsigned long long>(g_edges[i]));
+        else if (kRows[i].lockerLane)
+            UE_LOGI("[TOGGLE-VERB] session end -- %s: body ran %llu time(s) on any object, 0 on a locker the lane took",
+                    kRows[i].what, static_cast<unsigned long long>(g_calls[i]));
         g_edges[i] = 0;
+        g_calls[i] = 0;
+        g_saidFirstEdge[i] = false;
     }
 }
 

@@ -6,7 +6,7 @@
 // writer past the load: a light switch's use() (`a`; its group is coop/interactables/lightgroup_verbs);
 // a garage's runTrigger (Open, unless mid-swing); an appliance's actionOptionIndex (a faucet's, sink's,
 // shower's, oven's and tape unit's bool) and a server box's visual(bool) (a kerfur Omega's); a
-// locker's open(bool) (its toggle, a murder kerfur's openDoors) and the drone console's
+// locker's open(bool) and actionOptionIndex (its toggle, a murder kerfur's openDoors) and the drone console's
 // actionOptionIndex (its `opened`); a lid's open(bool) and close() (a prop_swinger's `opened`: its own
 // setup as it spawns, its grab, damage, padlock and resting swing, and a cremator's door); an oven's
 // fix() (its `fixed`, one way: the repair widget's last step). A security camera is the host's, not

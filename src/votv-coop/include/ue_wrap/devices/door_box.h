@@ -30,6 +30,10 @@ bool EnsureResolved();
 // time it moves. Game thread.
 uint64_t ResolvedFamilyCount();
 
+// Whether locker_C has resolved (its `opened` read): a locker's verb callback tells a family that never
+// resolved from a class it does not recognise. Game thread.
+bool LockerClassResolved();
+
 // True iff `obj` is a locker_C/droneConsole_C descendant.
 bool IsDoorBox(void* obj);
 

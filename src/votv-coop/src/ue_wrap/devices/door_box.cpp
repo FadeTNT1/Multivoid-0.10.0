@@ -157,6 +157,16 @@ void ResolveTimelineVerbs() {
 }  // namespace
 
 bool EnsureResolved() {
+    // A locker class that never appears is told once, so a renamed class tells itself: the clock starts at the
+    // first ask (the lane's first tick), and a main-menu session reads as the same silence.
+    static const auto s_start = std::chrono::steady_clock::now();
+    static bool s_saidMissing = false;
+    if (!s_saidMissing && !g_locker.resolved &&
+        std::chrono::steady_clock::now() - s_start > std::chrono::seconds(90) && !ClassFor(g_locker)) {
+        s_saidMissing = true;
+        UE_LOGW("door_box: class 'locker_C' not found in the object index 90 s after the lane started -- the lockers "
+                "cannot sync (renamed class on this build, or no world has loaded; ignore in the main menu)");
+    }
     // Both families are tried until each has its class: whichever streams in second resolves its
     // own verb on its own edge, which a latch shared with the first would have denied it forever.
     // A class held costs one pointer test, and one not loaded one object-index lookup, which costs
@@ -168,6 +178,8 @@ bool EnsureResolved() {
 }
 
 uint64_t ResolvedFamilyCount() { return (g_locker.resolved ? 1u : 0u) + (g_console.resolved ? 1u : 0u); }
+
+bool LockerClassResolved() { return g_locker.resolved; }
 
 bool IsDoorBox(void* obj) { return DescOf(obj) != nullptr; }
 bool IsLocker(void* obj) { return obj && g_locker.resolved && DescOf(obj) == &g_locker; }
@@ -214,8 +226,19 @@ bool ApplyOpened(void* actor, bool want) {
         // Timeline, sets door collision.
         ParamFrame f(verb);
         if (!f.valid()) return false;
-        f.Set<bool>(L"opened", want);
-        if (!Call(actor, f)) return false;
+        static bool s_saidParam = false, s_saidCall = false;
+        if (!f.Set<bool>(L"opened", want) && !s_saidParam) {
+            s_saidParam = true;
+            UE_LOGW("door_box: locker open() has no parameter named 'opened' on this build -- the apply calls it "
+                    "with the default, so a peer's state will not land");
+        }
+        if (!Call(actor, f)) {
+            if (!s_saidCall) {
+                s_saidCall = true;
+                UE_LOGW("door_box: the locker's open(%d) call failed on '%ls'", want ? 1 : 0, GetNameKey(actor).c_str());
+            }
+            return false;
+        }
     } else if (triggerWired) {
         *reinterpret_cast<bool*>(reinterpret_cast<char*>(actor) + d->offOpened) = want;
         ForceSnap(actor, *d, want);
@@ -223,6 +246,12 @@ bool ApplyOpened(void* actor, bool want) {
                 "triggerOnOpen left to the opening peer", want ? 1 : 0);
         return true;  // snapped synchronously -- no verify entry needed
     } else {
+        static bool s_saidNoVerb = false;
+        if (isLocker && !s_saidNoVerb) {
+            s_saidNoVerb = true;
+            UE_LOGW("door_box: the locker has no open() verb on this build -- its apply falls to the console path "
+                    "(write opened, drive the timeline), which skips the sound and the collision");
+        }
         // Console (no public verb) -- the garage write+refresh precedent:
         // opened := want, refresh the button/blinklight collision, drive the
         // swing natively via the Timeline component.
