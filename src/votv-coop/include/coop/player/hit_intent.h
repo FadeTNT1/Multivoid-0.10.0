@@ -5,9 +5,8 @@
 // call when this machine's own player is the damager -- a parked creature (coop/creatures/hit_target_creature), a prop
 // this client does not author (coop/props/hit_target_prop). The client sends HitIntent -- the target's element id, the
 // damage, the impact and the struck point. A creature's call is cancelled: its health and death stay the host's. A
-// prop's call runs and the intent carries a swing sequence: the host elects the sender the prop's syncer, as for a throw.
-//
-// The host queues a client's intents (cap 8, a pace of 4 then 2 a second), captures the sender's eye and newest
+// prop's call runs and the intent carries a swing sequence: the host elects the sender the prop's syncer, as for a throw;
+// a world container's is cancelled like a creature's and the host runs it (coop/props/crate_break). The host queues a client's intents (cap 8, a pace of 4 then 2 a second), captures the sender's eye and newest
 // aim from its puppet at arrival, and serves one head a tick through coop/player/hit_judge: the held item, the sender
 // alive, the reach, the facing, the sight and the point on the target. A creature's pass runs its own addDamage with
 // a null damager; a refused swing at a prop makes the host stream the prop's own pose back. A refusal is counted,
@@ -42,6 +41,7 @@ struct Swing {
     ue_wrap::FVector impact{};
     float            damage = 0.f;
     uint16_t         seq = 0;   // a prop target's claim sets it: the swing then runs, and the intent carries it
+    bool             hostApplies = false;   // a world container's claim: the call is cancelled and the host runs it
 };
 
 // CLIENT, for a target's claim: read the swing of an addDamage call whose damager is this machine's own player,

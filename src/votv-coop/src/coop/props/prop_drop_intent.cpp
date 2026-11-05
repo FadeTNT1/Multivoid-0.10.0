@@ -22,6 +22,7 @@
 #include "coop/props/prop_key_index.h"  // a key on the wire to a live actor
 #include "coop/props/container_writer_watch.h"   // TakeObjInFlight -- mark a container-extraction birth
 #include "coop/props/container_birth.h"           // a thrown container's birth slice
+#include "coop/props/crate_break.h"               // InsideMirrorSpill -- a container's spill here is a second set
 #include "coop/session/world_load_episode.h"  // InEpisode (quiet during the join loadObjects churn)
 #include "ue_wrap/core/call.h"                   // ParamFrame + Call (setKey on the host re-spawn)
 #include "ue_wrap/core/cached_obj_ref.h"          // dev::LastClientPlaceSpawn
@@ -185,6 +186,12 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     if (!actor || !R::IsLive(actor)) return;
     if (coop::prop_echo_suppress::IsMirrorSpawn(actor)) return;  // a host-authored mirror we adopt, not a place
     if (!ue_wrap::prop::IsDescendantOfProp(actor)) return;          // keyed Aprop_C lineage only
+    // Born while a container's destroy or break runs here: the spill of a copy whose break is the host's, which spills
+    // its own set as births. Dissolved, never sent.
+    if (coop::props::crate_break::InsideMirrorSpill()) {
+        coop::props::crate_break::DissolveSpill(actor);
+        return;
+    }
     if (PT::GetPropElementIdForActor(actor) != coop::element::kInvalidId) return;  // already tracked = not a fresh place
     // The hand-axis exclusion, the enqueue half (a fast path only, not load-bearing here: at
     // finish-spawn return the hold update has not yet written the holding actor, so the freshly

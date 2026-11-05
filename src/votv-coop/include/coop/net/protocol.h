@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 268;
+inline constexpr uint16_t kProtocolVersion = 269;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1077,7 +1077,9 @@ enum class ReliableKind : uint8_t {
     // sender's held item, its reach, its sight, the point on the target) and runs the verb on its real entity. A prop:
     // the swing runs on the client's copy, which the shove moves, and the intent carries the swing's sequence; the host
     // judges the same way and elects the sender the prop's syncer (PropSyncAnswer, kind Throw, echoing the sequence),
-    // or streams the prop's own pose back when it refuses. The verb is generic (0 addDamage, 1 exploded, 2 ignite) and
+    // or streams the prop's own pose back when it refuses. A world container: the client cancels the call and the host
+    // runs the container's own addDamage on its copy after the judge (coop::props::crate_break), so its break and spill
+    // are the host's; seq is 0. The verb is generic (0 addDamage, 1 exploded, 2 ignite) and
     // the host judges 0 only. Never relayed; a creature's death arrives as its destroy. Late join: none -- a request
     // is an act. Trust: the id must name a live host element that is a hit target (a creature of a parked family, or a
     // prop), the damage is clamped to the held item's, and intents run from a bounded queue at a bounded rate.
@@ -1223,6 +1225,22 @@ enum class ReliableKind : uint8_t {
     // change the host's 1 Hz poll sees and to a joiner at its world-ready edge; a client writes the fields and
     // runs the church's own presentation refreshes. ChurchStatePayload. Never relayed; not pre-world.
     ChurchState = 210,
+
+    // CLIENT->HOST: a world container's mirror here took a physics impact from a prop this client throws or syncs (a
+    // thrown rock), or the container itself, thrown by this client, struck something; the client cancelled the
+    // impact's damage on its copy, since a container's damage, break and spill are the host's
+    // (coop::props::crate_break). The host judges the sender syncs the causer (or the container), the point lies on
+    // the container, the causer's copy is near it, the damage and speed are bounded and the id is new, then runs the
+    // container's own impactDamage on its copy. Never relayed; not pre-world. Late join: none -- a request is an act.
+    // PropContactIntentPayload.
+    PropContactIntent = 211,
+
+    // HOST->ALL: the host ran a hit, a damage or a break on a world container's copy; every client plays the
+    // material's own impact, damaged or destroyed cue at the point (coop::props::prop_impact_fx), since the cues play
+    // inside the component's body, which a client never runs on a container. Sent before the body runs, so a break's
+    // cue precedes its PropDestroy on the same lane. Rate-capped on the host. Never relayed; a client's copy is refused
+    // at the host's receive edge. Late join: none -- a one-shot cue. PropImpactFxPayload.
+    PropImpactFx = 212,
 };
 
 #pragma pack(push, 1)
@@ -3997,6 +4015,40 @@ struct HitIntentPayload {
 static_assert(sizeof(HitIntentPayload) == 36, "HitIntentPayload must be 36 bytes");
 static_assert(sizeof(HitIntentPayload) <= 256 - 20 - 8,
               "HitIntentPayload must fit in one reliable datagram");
+
+// A client's contact on a world container (PropContactIntent): the container's element id, the causer's (0 when the
+// container itself, thrown by the sender, struck something), the sender's own id for the contact, the damage the
+// client's impact computed, the causer's speed at the contact, the contact point and the impact, in world centimetres.
+// The host judges all of it.
+struct PropContactIntentPayload {
+    uint32_t targetEid;    // 4  -- the container's Element id
+    uint32_t causerEid;    // 4  -- the thrown prop's Element id; 0 = the container is the thrower's own
+    uint16_t contactId;    // 2  -- the sender's running id, never 0; a repeat is refused
+    uint16_t pad;          // 2  -- zeroed
+    float    damage;       // 4  -- impactDamage's damage parameter as the client's impact computed it
+    float    speed;        // 4  -- the causer's (or the container's) linear speed, cm/s
+    float    hitLoc[3];    // 12 -- the contact point
+    float    impact[3];    // 12 -- impactDamage's impact parameter
+};
+static_assert(sizeof(PropContactIntentPayload) == 44, "PropContactIntentPayload must be 44 bytes");
+static_assert(sizeof(PropContactIntentPayload) <= 256 - 20 - 8,
+              "PropContactIntentPayload must fit in one reliable datagram");
+
+// A cue the host's container played (PropImpactFx): the container's element id, which cue of its physics material
+// (kPropImpactFx*), and where. A receiver resolves the cue from its own copy's material.
+inline constexpr uint8_t kPropImpactFxImpact    = 0;   // sound_impact: struck, no damage taken
+inline constexpr uint8_t kPropImpactFxDamaged   = 1;   // sound_damaged: damage taken, still standing
+inline constexpr uint8_t kPropImpactFxDestroyed = 2;   // sound_destroyed: the break
+inline constexpr uint8_t kPropImpactFxCount     = 3;
+
+struct PropImpactFxPayload {
+    uint32_t targetEid;    // 4  -- the container's Element id
+    uint8_t  kind;         // 1  -- kPropImpactFx*
+    uint8_t  pad[3];       // 3  -- zeroed
+    float    loc[3];       // 12 -- where the cue plays
+};
+static_assert(sizeof(PropImpactFxPayload) == 20, "PropImpactFxPayload must be 20 bytes");
+static_assert(sizeof(PropImpactFxPayload) <= 256 - 20 - 8, "PropImpactFxPayload must fit in one reliable datagram");
 
 // A lightning strike (LightningStrike): the strike's world location; the receiver spawns the
 // strike actor there, and it destroys itself.

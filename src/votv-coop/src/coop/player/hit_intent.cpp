@@ -13,6 +13,7 @@
 #include "coop/player/puppet_drive.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
+#include "coop/props/crate_break.h"
 #include "coop/props/hit_target_prop.h"
 
 #include "ue_wrap/core/log.h"
@@ -123,10 +124,16 @@ sg::Verdict OnAddDamagePre(const sg::Call& c) {
 
     if (!s->SendReliableToSlot(0, coop::net::ReliableKind::HitIntent, &p, sizeof(p))) {
         UE_LOGW("creature_hit_intent: the hit on target %u was not sent", p.targetEid);
-        if (byProp) coop::hit_target_prop::NoteUnsent(c.object);   // the minted record ends, so the next swing mints again
+        // The minted record ends, so the next swing mints again; a container's claim minted none.
+        if (byProp && !swing.hostApplies) coop::hit_target_prop::NoteUnsent(c.object);
         return sg::Verdict::Cancel;
     }
     if (!byProp) return sg::Verdict::Cancel;
+    // A container's damage is the host's: the copy here neither breaks nor spills, and the host's cue comes back.
+    if (swing.hostApplies) {
+        coop::hit_target_prop::NoteSent(eid, swing.damage, swing.seq);
+        return sg::Verdict::Cancel;
+    }
     // A swing at a prop runs on the copy, as a throw does: the host's election of the swinger decides whose it is.
     coop::hit_target_prop::NoteSent(eid, swing.damage, swing.seq);
     return sg::Verdict::Run;
@@ -199,14 +206,23 @@ bool Serve(coop::net::Session& s, int slot, const Queued& q) {
     const FVector hitLoc{p.hitLoc[0], p.hitLoc[1], p.hitLoc[2]};
     float damage = 0.f;
     const char* why = nullptr;
+    // A world container's swing was cancelled on the swinger's copy, which nothing shoved: the host runs its damage.
+    const bool hostDamaged = !isCreature && coop::props::crate_break::IsHostDamaged(target);
     if (!coop::hit_judge::JudgeHit(slot, q.eye, q.aim, hitLoc, target, p.damage, damage, why)) {
-        if (!isCreature) coop::hit_target_prop::OnRefused(p.targetEid);   // the copy the swinger shoved is converged
+        // The copy the swinger shoved is converged.
+        if (!isCreature && !hostDamaged) coop::hit_target_prop::OnRefused(p.targetEid);
         const bool notFacing = std::strcmp(why, "not facing") == 0;
         return Refuse(slot, why, notFacing ? coop::hit_judge::FacingCosine(q.aim, q.eye, hitLoc) : std::nanf(""));
     }
 
     coop::net::HitIntentPayload judged = p;
     judged.damage = damage;
+    if (hostDamaged) {
+        const char* applyWhy = nullptr;
+        if (!coop::props::crate_break::HostApplySwing(p.targetEid, static_cast<uint8_t>(slot), judged, applyWhy))
+            return Refuse(slot, applyWhy);
+        return true;
+    }
     if (!isCreature) {
         const char* applyWhy = nullptr;
         if (!coop::hit_target_prop::HostApply(p.targetEid, static_cast<uint8_t>(slot), judged, applyWhy)) {

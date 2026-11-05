@@ -6,9 +6,11 @@
 #include "coop/config/config_registry.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/props/crate_break.h"
 #include "coop/props/prop_syncer.h"
 #include "coop/props/prop_throw.h"
 
+#include "ue_wrap/actors/container_inventory.h"
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/log.h"
@@ -95,24 +97,28 @@ const CompOffsets& OffsetsOf(void* comp) {
     return o;
 }
 
-// Whether this call would bring the component's health to zero or below, by the component's own arithmetic: an impact
-// is gated on damage / resistance > 1 and takes that quotient from the health; a fire takes the damage itself. A
-// resistance of 0 is lethal, as the division makes it. False when the figures cannot be read.
-bool Lethal(Row row, const sg::Call& c) {
+// What this call would do to the component's health, by the component's own arithmetic: an impact is gated on
+// damage / resistance > 1 and takes that quotient from the health; a fire takes the damage itself. A resistance of 0
+// is lethal, as the division makes it. Unknown when the figures cannot be read.
+ImpactOutcome OutcomeOf(Row row, const sg::Call& c) {
     const CompOffsets& o = OffsetsOf(c.object);
-    if (o.health < 0 || o.damageData < 0 || o.resistance < 0) return false;
+    if (o.health < 0 || o.damageData < 0 || o.resistance < 0) return ImpactOutcome::Unknown;
     float damage = 0.f;
     const uint8_t* d = ParamBytes(c, g_damageOff[row].Of(c.function));
-    if (!d) return false;
+    if (!d) return ImpactOutcome::Unknown;
     std::memcpy(&damage, d, sizeof(damage));
     const uint8_t* base = static_cast<const uint8_t*>(c.object);
     float health = 0.f, resistance = 0.f;
     std::memcpy(&health, base + o.health, sizeof(health));
     std::memcpy(&resistance, base + o.damageData + o.resistance, sizeof(resistance));
-    if (row == kFire) return health - damage <= 0.f;
-    const float taken = damage / resistance;
-    return taken > 1.f && health - taken <= 0.f;
+    const float taken = row == kFire ? damage : damage / resistance;
+    if (row == kImpact && !(taken > 1.f)) return ImpactOutcome::NoDamage;
+    if (health - taken <= 0.f) return ImpactOutcome::Lethal;
+    return taken > 0.f ? ImpactOutcome::Damaged : ImpactOutcome::NoDamage;
 }
+
+// Whether this call would bring the component's health to zero or below. False when the figures cannot be read.
+bool Lethal(Row row, const sg::Call& c) { return OutcomeOf(row, c) == ImpactOutcome::Lethal; }
 
 // This client authors the prop only by a sequence its swing or throw minted and the host has not granted yet.
 bool AuthoredByPendingSeqOnly(void* prop) {
@@ -161,6 +167,13 @@ sg::Verdict Judge(Row row, const sg::Call& c) {
     if (!s || !s->connected() || s->role() != coop::net::Role::Client) return sg::Verdict::Run;
     void* owner = R::OuterOf(c.object);
     if (!owner || !ue_wrap::prop::IsDescendantOfProp(owner)) return sg::Verdict::Run;
+    // A container's break spills its contents, which only the host's copy may do: its damage is the host's whoever
+    // authors its motion, and an impact goes there as an intent.
+    if (ue_wrap::container_inventory::IsContainer(owner)) {
+        if (row == kImpact) coop::props::crate_break::OnClientImpact(c, owner);
+        ++g_cancelled[row];
+        return sg::Verdict::Cancel;
+    }
     if (!Strict() && AuthoredHere(owner)) {
         // A non-lethal call runs; a lethal one waits for the grant, since a break before it would delete the host's
         // prop even when the host refuses the election.
@@ -193,6 +206,8 @@ Reg  g_reg[kRows] = {Reg::Pending, Reg::Pending};
 bool g_settled[kRows] = {};
 
 }  // namespace
+
+ImpactOutcome ImpactOutcomeOf(const sg::Call& c) { return OutcomeOf(kImpact, c); }
 
 bool AuthoredHere(void* prop) {
     void* me = coop::players::Registry::Get().Local();

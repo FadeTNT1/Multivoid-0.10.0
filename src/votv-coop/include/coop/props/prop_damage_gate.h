@@ -10,6 +10,7 @@
 // (coop/props/prop_syncer, a pending claim included): its own copy is then the truth and its damage stands, except a
 // lethal call while only a throw's or a swing's sequence is pending, which waits for the grant (below). A caller's
 // identity is never read: a physics impact carries the struck prop as its actor, and a drill's call nests under our code.
+// A world container's damage is never authored here: coop/props/crate_break says why and where its impact goes.
 
 // The watches fail open: a dead one leaves that verb running on every copy, said in one ERROR line. Other owners (the
 // ATV, the player, the car, the own-graph breakers) are outside it. The damaged and destroyed sounds and particles the
@@ -17,15 +18,27 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace coop::net {
 class Session;
 }  // namespace coop::net
+
+namespace ue_wrap::script_gate {
+struct Call;
+}  // namespace ue_wrap::script_gate
 
 namespace coop::props::prop_damage_gate {
 
 // True when this machine authors the prop's motion: it holds the prop in a hand grab, it threw it, or its prop-syncer
 // episode names it. Read by the hit intent's prop target too. Game thread.
 bool AuthoredHere(void* prop);
+
+// What a comp_physicsImpact_C::impactDamage call `c` will do to its component, by the component's own arithmetic (an
+// impact counts only when damage / damageData.damageResistance exceeds 1, and takes that quotient from its health).
+// Unknown when the figures cannot be read. Read before the body runs; any role. Game thread.
+enum class ImpactOutcome : uint8_t { Unknown, NoDamage, Damaged, Lethal };
+ImpactOutcome ImpactOutcomeOf(const ue_wrap::script_gate::Call& c);
 
 // A swing or a throw authors its prop from the moment its sequence is minted, before the host has granted the
 // election. Until then a lethal call on the prop is cancelled, since a break before the grant would delete the host's

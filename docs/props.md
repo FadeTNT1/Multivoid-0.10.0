@@ -272,8 +272,32 @@ same drive does, until the container changes. A client's own copy of the call on
 comes from the container's own overlap graph. A joiner needs no replay: the put is one host step, so a joiner seeded
 before it receives the prop's destroy and the container's publication, and one seeded after receives the container with
 the record `[?]`. The open and closed state is a keyed-device channel like a
-door's ([devices.md](devices.md)). The full break-and-spill behaviour, and the single-slot verbs, are reverse-engineered
-and designed and not built.
+door's ([devices.md](devices.md)). The single-slot verbs are reverse-engineered and designed and not built.
+
+A container's damage, break and spill are the host's (`coop/props/crate_break`). A supply crate
+(`prop_container_sbox_C`, the `wbox` row: health 200, resistance 1) takes damage through its physics component's
+`impactDamage`, which plays the material's cues and, at zero health, breaks it; the break spills its loot as fresh
+props. A spill on a client's copy would be a second set the host never sees, so a client runs no damage on any
+`prop_container_C`, whoever holds or threw it. A held swing's `addDamage` on a container mirror is cancelled and sent
+as the ordinary `HitIntent` with no sequence; the host judges it (`coop/player/hit_judge`) and runs the container's own
+`addDamage` on its copy, the swinger's puppet as the damager. An impact on a container mirror is cancelled at the damage
+gate; when the hitting actor is a prop this client throws or syncs (a thrown rock), or the container is the one this
+client threw, it goes to the host as a `PropContactIntent` with the damage the client's impact computed. The host judges
+that the sender is the elected syncer of the causer (or of the container; a causer elected late is waited for 1.5 s),
+the point lies within 200 cm of the container and the host's copy of the causer within 1000 cm of it, the damage is at
+most 500 and the speed within the throw's flight bound, and the id is new; then it runs the component's own
+`impactDamage` on its copy. Any other impact on a client's mirror is the host's own copy's to take. The host's break
+then spills on the host, and its births and its death reach every peer on the ordinary lanes. A client's copy that the
+host's destroy removes spills nothing: a prop born there while the container's `ReceiveDestroyed`, `broken` or
+`broken_fire` body runs is dissolved, never sent `[?]`.
+
+The cues `impactDamage` plays (the material's `sound_impact`, `sound_damaged`, `sound_destroyed`; the crate's
+`physSnd_wood_crate`) run on the host's copy alone, so the host watches the body before it runs and sends
+`PropImpactFx` to every client (`coop/props/prop_impact_fx`): `damaged` or `destroyed` when the component's own
+arithmetic says the call damages or breaks it, `impact` when a client's swing or contact the host runs strikes without
+damage. Sent before the body, a break's cue precedes its destroy on the same lane. Each receiver plays its own copy's
+cue of that kind, falling back to the milder one a material lacks; the swinger hears the host's too, since its own call
+was cancelled. At most one cue per container in 80 ms, one break cue per container, twenty a second in all `[?]`.
 
 ### A record that changes in place
 
@@ -410,6 +434,7 @@ is built; concrete and food are designed and not built.
 | a prop a hook drags, and one still sliding after the hook lets go | the host | a per-tick stream while it moves; the end edge hands the velocity back |
 | a prop's key | the game, once; the host's copy wins on a mirror | never rewritten on the owner |
 | container contents | the host | slices of its object array; an extraction is an intent |
+| a container's damage, break and spill | the host | a client's swing and contact are intents the host runs; the cues go to every client |
 | a stuck prop, and its unstick | the peer that sticks or frees it; every peer runs the component's own verb | one reliable message |
 | a self-changing prop's progression | the host | park, corrector or anchor, per prop |
 | notebook editor occupancy | the host arbitrates | a claim keyed by the owning prop |
@@ -430,6 +455,8 @@ is built; concrete and food are designed and not built.
 | `PropStickState` | the peer that sticks or frees it, to all | frozen or static, the commit pose and the hold the stick ended; or an unstick, with the pose and velocity |
 | `PropSnapPos` | the host to one joiner | a position correction for a save-authoritative prop moved in the join window, with a keyed prop's frozen and sleep; it carries the host's drive context for the prop (claim generation and open), the client drops one older than a drive END still on its copy, and a prop a hand held after its correction went out gets a follow-up after the release `[?]` |
 | `ContainerState`, `ContainerContents` | the presser; the host | open or closed; one slice of the host's object array |
+| `PropContactIntent` | a client to the host | a contact on a world container by a prop the client throws, or by the container it threw: the ids, the damage, the speed, the point, the impact |
+| `PropImpactFx` | the host to all | a world container's impact, damaged or destroyed cue, with the point |
 | `InventoryPickup` | each peer, relayed | the pocket blip, so others hear a pickup |
 
 ## Late join
@@ -448,7 +475,8 @@ world is ready, since the release and the end edge that close them are not sent 
 not ready either: a prop held at the join resolves on the first pose after it, and at the ready edge
 the host re-sends every driven prop's pose, the resting ones included, which the delta gate would
 otherwise never send. An end edge that reaches a joiner before the prop it names is kept until the
-prop resolves.
+prop resolves. A container's damage needs no seed: its health is the host's alone, a broken container reaches a joiner
+as its absence and its spill as the host's props, and a cue is a one-shot with no replay.
 
 ## Known limits
 
@@ -466,6 +494,7 @@ prop resolves.
 | A prop the driven-prop channel set coasting can come to rest a few centimetres from the host's copy: the host ends a coasting stream half a second after the prop stops moving, before its body sleeps, and the end edge sets the client's copy to the host's pose and hands it back its physics, so each copy settles on its own. The broom drill measured 0 to 6.4 cm, and 12.1 cm for a prop whose support another prop knocked away on the host | `[V]` `coop/props/prop_drive_host` (`kRestMs`), `coop/props/prop_drive_stream` (the end edge restores simulation per `coop/props/prop_wire_parity`); the broom drill's push and dispense phases |
 | A prop a client's own body or physics moves, with no verb, moves on that client only: the motion scan (`coop/props/prop_motion_scan`) reads the host's props, so a host-side settle or knock reaches every copy, but a client's shove or a client-only settle has no feeder until the prop is grabbed. A knocked prop on the host is found on the scan's next read of it, up to about a second in the near set and a few seconds in the far one, so its first centimetres of motion are not streamed | `[RD]` `coop/props/prop_motion_scan` reads only the host's own Prop elements; `coop/props/prop_syncer` has no body-push feeder |
 | A prop parked under the host's drive cannot be grabbed on a client while the drag lasts: the park turns the body kinematic and the game's grab needs a simulating one. It is grabbable again after the end edge | `[V]` `coop/props/prop_drive_stream` parks by switching the mesh's simulation off (`ue_wrap/engine/engine_physics`); `coop/props/prop_wire_parity` records why a kinematic mirror is ungrabbable |
+| A container's break is read, not measured: that `prop_C.addDamage` on a container reaches its component's `impactDamage` with the puppet as damager, that the actor a client's impact names is the thrown prop, which of the container's bodies spills, and that the material's break cues are named `sound_damaged` and `sound_destroyed` are taken from the pak's name maps. A container a client throws breaks only when it strikes something the contact intent names; fire never breaks a container a client holds | `[RD]` the pak's name maps of `comp_physicsImpact`, `prop_container` and `physSnd_wood_crate`; `[?]` until a two-peer run reads the `[CRATE]` lines |
 | A pose can arrive milliseconds before the spawn that names its prop; that is a race, not a defect, and a ledger tells the two apart instead of warning per packet | `[V]` `coop/props/unresolved_pose_ledger` |
 
 ## Code map
@@ -479,6 +508,7 @@ prop resolves.
 | the stick | `coop/props/prop_stick_sync` |
 | a prop under a hook's drive or a broom's push | `coop/props/prop_drive_host` (the host's set and stream), `coop/props/prop_drive_stream` (the receiver), `coop/items/hook_prop_claim` (the hook lane feeding it), `coop/items/hook_constraint` (the tie itself, host-only), `coop/items/broom_push` (the broom's push feeding it) |
 | containers | `coop/props/container_contents_sync`, `coop/items/save_record_wire`, `coop/interactables/interactable_sync` |
+| a container's damage, break and cues | `coop/props/crate_break`, `coop/props/prop_impact_fx`, `coop/props/prop_damage_gate`, `coop/props/hit_target_prop`, `ue_wrap/actors/physics_impact` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |
 | the pocket blip | `coop/items/inventory_pickup_sync` |

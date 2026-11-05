@@ -52,6 +52,11 @@ void PlayLandSound(void* propActor);
 // = any live actor in the world (typically the local player).
 void PlayInventoryBlipAt(void* worldCtx, const ue_wrap::FVector& loc);
 
+// A cue of a prop's own physics material (its impact, damaged or destroyed sound, which the component plays inside
+// impactDamage on the host's copy alone), at `loc` (vol 1.0 / pitch 1.0 / att_default). Receiver side of
+// ReliableKind::PropImpactFx (coop/props/prop_impact_fx). `worldCtx` = any live actor in the world.
+void PlayMaterialCueAt(void* worldCtx, void* cue, const ue_wrap::FVector& loc);
+
 // The game's own save-denied/failed click (button_keypad_deny -- the desk play-screen deny
 // @23927 and the keypad deny, vol 0.5 / pitch 1.0), played at the LOCAL player whose action was
 // denied, which today is the device-occupancy busy deny. `playerActor` = the denied local

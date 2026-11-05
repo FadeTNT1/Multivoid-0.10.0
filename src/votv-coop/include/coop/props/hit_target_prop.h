@@ -7,7 +7,8 @@
 // (coop/props/prop_syncer_host); the sender's simulation and its break then stand, and the host takes the prop back at
 // rest. A lethal break before the grant waits for it (prop_damage_gate). A refused swing makes the host drive its own
 // copy as a host row, so the swinger's shoved copy parks to it. A swing at a mirror not yet bound to a host element is
-// cancelled, lost, and said once. Game thread.
+// cancelled, lost, and said once. A world container is the exception (coop/props/crate_break): its swing is cancelled
+// here and the host runs it, since its break spills contents only the host's copy may spill. Game thread.
 
 #pragma once
 

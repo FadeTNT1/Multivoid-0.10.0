@@ -134,6 +134,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::CoffeeActionIntent:
     case ReliableKind::RemoverRequest:
     case ReliableKind::HitIntent:
+    case ReliableKind::PropContactIntent:
     case ReliableKind::ProjectileFired:
     case ReliableKind::ExplosionRequest:
     case ReliableKind::AtvExplodeRequest:
@@ -164,6 +165,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::CreatureEventActive:
     case ReliableKind::LightningStrike:
     case ReliableKind::ChurchState:
+    case ReliableKind::PropImpactFx:
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:

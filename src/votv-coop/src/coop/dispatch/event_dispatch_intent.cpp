@@ -30,7 +30,9 @@
 #include "coop/interactables/desk_verb_intent.h"  // a press on the main desk's save family, and its answers
 #include "coop/element/element.h"  // kInvalidId
 #include "coop/interactables/coffee_intent.h"
+#include "coop/props/crate_break.h"  // CLIENT->HOST a contact on a world container, judged and run by the host
 #include "coop/props/pack_trash_intent.h"  // CLIENT->HOST bagging of a pile or clump
+#include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
 #include "coop/props/prop_act_host.h"  // CLIENT->HOST a take or use of a shared prop, and its commit
 #include "coop/props/prop_act_request.h"  // HOST->CLIENT its answer
 #include "coop/props/prop_drop_intent.h"  // CLIENT->HOST client-placed keyed prop
@@ -401,6 +403,62 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::hit_intent::OnIntent(static_cast<int>(msg.senderPeerSlot), p);
+        break;
+    }
+    case net::ReliableKind::PropContactIntent: {
+        // CLIENT->HOST: a prop this client throws struck a world container's mirror, or the container it threw struck
+        // something. The host judges the contact and runs the container's own impactDamage (coop::props::crate_break);
+        // the format lives here. Never relayed.
+        if (session.role() != net::Role::Host) {
+            UE_LOGW("event_feed: PropContactIntent received on a client -- dropping");
+            break;
+        }
+        if (msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: PropContactIntent from invalid senderPeerSlot=%d -- dropping", msg.senderPeerSlot);
+            break;
+        }
+        if (msg.payloadLen < sizeof(net::PropContactIntentPayload)) {
+            UE_LOGW("event_feed: PropContactIntent payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::PropContactIntentPayload));
+            break;
+        }
+        net::PropContactIntentPayload p{};
+        std::memcpy(&p, msg.payload, sizeof(p));
+        // The trust boundary: a named container, a causer that is none or an id, an id the sender minted, and every
+        // float a finite value within the world's range, the damage and the speed not negative.
+        constexpr float kMaxComponent = 1e7f;
+        const auto bounded = [](float v) { return std::isfinite(v) && std::fabs(v) <= kMaxComponent; };
+        bool floatsOk = bounded(p.damage) && p.damage >= 0.f && bounded(p.speed) && p.speed >= 0.f;
+        for (int i = 0; i < 3; ++i) floatsOk = floatsOk && bounded(p.hitLoc[i]) && bounded(p.impact[i]);
+        if (!floatsOk || p.targetEid == 0 || p.targetEid == coop::element::kInvalidId ||
+            p.causerEid == coop::element::kInvalidId || p.causerEid == p.targetEid || p.contactId == 0) {
+            UE_LOGW("event_feed: PropContactIntent eid=%u causer=%u out of range -- dropping", p.targetEid,
+                    p.causerEid);
+            break;
+        }
+        coop::props::crate_break::OnContactIntent(static_cast<int>(msg.senderPeerSlot), p);
+        break;
+    }
+    case net::ReliableKind::PropImpactFx: {
+        // HOST->CLIENT: the host's container played a hit, damage or break cue; this peer plays its copy's
+        // (coop::props::prop_impact_fx). Host-authored only: the receive edge refuses a client's copy.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0 ||
+            msg.payloadLen < sizeof(net::PropImpactFxPayload)) {
+            UE_LOGW("event_feed: PropImpactFx dropped (role, sender slot %d or length %zu)", msg.senderPeerSlot,
+                    static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        net::PropImpactFxPayload p{};
+        std::memcpy(&p, msg.payload, sizeof(p));
+        bool locOk = true;
+        for (int i = 0; i < 3; ++i) locOk = locOk && std::isfinite(p.loc[i]) && std::fabs(p.loc[i]) <= 1e7f;
+        if (p.kind >= net::kPropImpactFxCount || !locOk || p.targetEid == 0 ||
+            p.targetEid == coop::element::kInvalidId) {
+            UE_LOGW("event_feed: PropImpactFx kind=%u eid=%u out of range -- dropping", static_cast<unsigned>(p.kind),
+                    p.targetEid);
+            break;
+        }
+        coop::props::prop_impact_fx::OnFx(p);
         break;
     }
     case net::ReliableKind::ProjectileFired: {

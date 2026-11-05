@@ -9,6 +9,7 @@
 #include "coop/net/protocol.h"
 #include "coop/player/hit_intent.h"
 #include "coop/props/active_drive.h"
+#include "coop/props/crate_break.h"
 #include "coop/props/prop_damage_gate.h"
 #include "coop/props/prop_drive_host.h"
 #include "coop/props/prop_syncer_host.h"
@@ -58,6 +59,21 @@ uint32_t ClientClaim(const sg::Call& c, coop::hit_intent::Swing& swing) {
     if (!c.object || !ue_wrap::prop::IsDescendantOfProp(c.object)) return EL::kInvalidId;
 
     if (!coop::hit_intent::ReadLocalSwing(c, swing)) return EL::kInvalidId;
+    // A world container's damage is the host's whoever authors its motion: no sequence, the call is cancelled and the
+    // host runs it (coop/props/crate_break).
+    if (coop::props::crate_break::IsHostDamaged(c.object)) {
+        const EL::ElementId held = EL::Registry::Get().EidForActor(c.object);
+        if (held == EL::kInvalidId) {
+            if (!g_unboundSaid) {
+                g_unboundSaid = true;
+                UE_LOGI("hit_target_prop: a swing at a prop not yet bound to the host's is lost");
+            }
+            return coop::hit_intent::kClaimedUnsent;
+        }
+        swing.seq = 0;
+        swing.hostApplies = true;
+        return static_cast<uint32_t>(held);
+    }
     if (coop::props::prop_damage_gate::AuthoredHere(c.object)) return EL::kInvalidId;
 
     // The element the actor is bound to, O(1): a host element is the claim, a client's own row is refused by the host's
