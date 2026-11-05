@@ -405,7 +405,7 @@ int SweepReconcileSaveTimeTwins() {
             }
             rr.row.hasMatchPos = coop::net::match_form::kNone;
             rr.row.matchX = rr.row.matchY = rr.row.matchZ = 0.f;
-            coop::remote_prop::OnSpawn(rr.row, rr.senderSlot, localPlayer);
+            coop::remote_prop_spawn::OnSpawn(rr.row, rr.senderSlot, localPlayer);
             ++replayed;
         }
     }
