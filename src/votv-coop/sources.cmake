@@ -243,6 +243,7 @@ set(VOTVCOOP_SOURCES
     src/coop/props/trash_clump_pose_stream.cpp
     src/coop/props/trash_sweep.cpp
     src/coop/props/prop_drive_host.cpp
+    src/coop/props/prop_motion_scan.cpp
     src/coop/props/prop_drive_stream.cpp
     src/coop/props/prop_syncer_host.cpp
     src/coop/props/prop_syncer_client.cpp

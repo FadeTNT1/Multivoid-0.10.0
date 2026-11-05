@@ -12,7 +12,7 @@
 // (prop_syncer_host grants it); the host then publishes the client's admitted pose as it would its own.
 //
 // Game thread; the table is the host's, Pump runs on both roles. Verb-fed and never scanned: the set holds only
-// what a caller claimed or a client was granted.
+// what a caller claimed or a client was granted; motion no verb owns comes in as prop_motion_scan's coasts.
 
 #pragma once
 
@@ -32,6 +32,9 @@ void Claim(void* actor, const char* reason);
 
 // How many props coast with no verb's claim. Game thread.
 size_t CoastingCount();
+
+// True while `actor` has a live row here: claimed, coasting or a client's. Game thread.
+bool IsDriven(void* actor);
 
 // The drive context of `actor` (eid `eid`) for a message that reads its pose now: the claim
 // generation last opened for the eid (0 if none this session) and whether that drive is open.
