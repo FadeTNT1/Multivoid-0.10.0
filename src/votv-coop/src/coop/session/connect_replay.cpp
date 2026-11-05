@@ -62,6 +62,7 @@
 #include "coop/player/players_registry.h"
 #include "coop/props/prop_snapshot.h"
 #include "coop/world/alarm_sync.h"  // base radar alarm shared-world toggle
+#include "coop/world/church_sync.h"  // the Stolas church's state
 #include "coop/interactables/serverbox_sync.h"  // host-authoritative signal-server sim state
 #include "coop/interactables/server_upgrade_sync.h"  // the servers' physical upgrades
 #include "coop/creatures/roach_sync.h"  // host-authoritative roach-infestation mirror
@@ -168,6 +169,7 @@ void ConnectReplayForSlot(int slot) {
     // The alarm lane's late-join answer: the current alarm state, unconditionally, so a mid-alarm
     // joiner starts its klaxon on arrival.
     coop::alarm_sync::QueueConnectBroadcastForSlot(slot);
+    coop::church_sync::QueueConnectBroadcastForSlot(slot);  // the church's four save fields, unconditionally
     coop::serverbox_sync::QueueConnectBroadcastForSlot(slot);  // current server state to the joiner
     coop::server_upgrade_sync::QueueConnectBroadcastForSlot(slot);  // every box's upgrade level
     coop::floppy_slot_sync::QueueConnectBroadcastForSlot(slot);  // every device slot, the laptop's file quad behind the laptop's: the joiner's world came from a save frozen before the first insert

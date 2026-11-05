@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 265;
+inline constexpr uint16_t kProtocolVersion = 266;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1218,6 +1218,11 @@ enum class ReliableKind : uint8_t {
     // coop::props::container_act_wire's commit. Never relayed; not pre-world; the same lane as the request, so an act's
     // end cannot overtake its start.
     ContainerActCommit = 209,
+
+    // HOST->ALL: the Stolas church's shared state (outsideChurch_C: broken, angry, striked, harvests), on each
+    // change the host's 1 Hz poll sees and to a joiner at its world-ready edge; a client writes the fields and
+    // runs the church's own presentation refreshes. ChurchStatePayload. Never relayed; not pre-world.
+    ChurchState = 210,
 };
 
 #pragma pack(push, 1)
@@ -2226,6 +2231,14 @@ struct AlarmStatePayload {
     uint8_t pad[3];   // 3 -- zeroed
 };
 static_assert(sizeof(AlarmStatePayload) == 4, "AlarmStatePayload must be 4 bytes");
+
+// The Stolas church (ChurchState), host to all: the four save fields getData writes, whole.
+struct ChurchStatePayload {
+    uint8_t flags;     // 1 -- bit 0 broken, bit 1 angry, bit 2 striked; the rest zero
+    uint8_t harvests;  // 1 -- outsideChurch_C.harvests, clamped to 0..255 (8 angers it)
+    uint8_t pad[2];    // 2 -- zeroed
+};
+static_assert(sizeof(ChurchStatePayload) == 4, "ChurchStatePayload must be 4 bytes");
 
 // The signal-server simulation (ServerState), host to all: the aggregates and, by the servers' save-stable
 // array index (up to 64; a larger farm logs and caps), each box's broken and damaged bits and the repair

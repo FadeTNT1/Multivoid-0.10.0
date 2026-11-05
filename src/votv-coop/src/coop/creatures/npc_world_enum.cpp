@@ -161,6 +161,8 @@ constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
 // so its source is narrowed to the two outputs of the night roll (mainGamemode_C::CustomEvent_5, an Octa or a
 // night egg), whose client roll the spawn authority refuses.
 constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", nullptr};
+constexpr const wchar_t* kUfoKnobOutputs[] = {P::name::UfoKnobClass, nullptr};
+constexpr const wchar_t* kUfoUkOutputs[] = {P::name::UfoUkClass, P::name::UfoUkEnemyClass, nullptr};
 constexpr ExSpawnSource kExSpawnSources[] = {
     {L"trigger_wispSwarm_C",     nullptr},          // the wisps event swarm
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
@@ -173,6 +175,11 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {L"grayEventController_C",   nullptr},          // graysforest: spawn() mints the grayTest_C pack
     {L"superEgger_C",            nullptr},          // eggvasion: spwn() mints the eg_C children
     {L"tentacleBallsFollower_C", nullptr},          // tentacleBalls: runTrigger() mints the pack
+    // The 0.10.0 UFO encounters: each controller mints its flock in its own ubergraph, and the
+    // flock ships are world-actor-lane outputs; the client's controllers are refused in spawn_authority.
+    {P::name::UfoKnobControllerClass, kUfoKnobOutputs},  // the knob flock (startEvent)
+    {P::name::UfoUkControllerClass, kUfoUkOutputs},    // the UK flock (beginEvent, ufoClass)
+    {P::name::UfoUkControllerEnemyClass, kUfoUkOutputs},  // the enemy UK flock (the same beginEvent body)
 };
 
 // Whether `cls`'s own name is one of `names` (null-terminated). One render, then plain compares.
@@ -268,7 +275,8 @@ void InstallExSpawnCatch() {
                 "jellyfishPath_C -> jellyfish_C, trigger_eventer_C -> ventCrawler_C + superEgger_C, "
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
                 "mainGamemode_C -> geomOcta_C + eg_C, "
-                "tentacleBallsFollower_C -> tentacleBall_C; EX_CallMath spawns now enroll)");
+                "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
+                "ufo_UK_enemy_C; EX_CallMath spawns now enroll)");
     } else {
         UE_LOGW("npc-sync[ex-spawn]: InstallPostHook FAILED -- EX_CallMath creature spawns will "
                 "NOT mirror this session (event-swarm wisps host-only)");

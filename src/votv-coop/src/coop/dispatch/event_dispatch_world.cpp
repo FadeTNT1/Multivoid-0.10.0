@@ -10,6 +10,7 @@
 #include "coop/comms/chat_sync.h"
 #include "coop/commands/command_sync.h"
 #include "coop/world/alarm_sync.h"
+#include "coop/world/church_sync.h"
 #include "coop/interactables/serverbox_sync.h"  // the host-authoritative signal-server state
 #include "coop/interactables/server_upgrade_sync.h"  // the servers' physical upgrades
 #include "coop/creatures/roach_sync.h"           // the host-authoritative roach snapshot
@@ -142,6 +143,24 @@ bool HandleWorldEvent(const net::Session::ReliableMessage& msg) {
         net::AlarmStatePayload ap{};
         std::memcpy(&ap, msg.payload, sizeof(ap));
         coop::alarm_sync::OnReliable(ap, msg.senderPeerSlot);
+        break;
+    }
+    case net::ReliableKind::ChurchState: {
+        // The Stolas church's state, host to clients only (a client's copy is refused at the host's
+        // receive edge, client_authorship.h); the module writes the church's fields and refreshes it.
+        if (msg.payloadLen < sizeof(net::ChurchStatePayload)) {
+            UE_LOGW("event_feed: ChurchState payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::ChurchStatePayload));
+            break;
+        }
+        net::ChurchStatePayload cp{};
+        std::memcpy(&cp, msg.payload, sizeof(cp));
+        if ((cp.flags & ~0x07u) != 0) {
+            UE_LOGW("event_feed: ChurchState flags=0x%02X carry unknown bits -- dropping",
+                    static_cast<unsigned>(cp.flags));
+            break;
+        }
+        coop::church_sync::OnReliable(cp);
         break;
     }
     case net::ReliableKind::ServerState: {

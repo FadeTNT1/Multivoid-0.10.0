@@ -36,59 +36,59 @@ std::atomic<coop::net::Session*> g_session{nullptr};
 // is spelled as the live header dump spells it; names compare without case.
 UE_FACT_FN(kRowSpawnMushroomMaster, "spawn_authority", L"mushroomMaster_C", L"Spawn", Declared);
 UE_FACT_FN(kRowSpawnMushroomSpawner, "spawn_authority", L"mushroomSpawner_C", L"Spawn", Declared);
-UE_FACT_FN(kRowReceiveTickTickerYellowWispSpawner, "spawn_authority", L"ticker_yellowWispSpawner_C",
-           L"ReceiveTick", Declared);
-UE_FACT_FN(kRowReceiveTickTickerWispSpawner, "spawn_authority", L"ticker_wispSpawner_C", L"ReceiveTick",
-           Declared);
+UE_FACT_FN(kRowReceiveTickTickerYellowWispSpawner, "spawn_authority", L"ticker_yellowWispSpawner_C", L"ReceiveTick", Declared);
+UE_FACT_FN(kRowReceiveTickTickerWispSpawner, "spawn_authority", L"ticker_wispSpawner_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveTickTickerEgSpawner, "spawn_authority", L"ticker_egSpawner_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowSpawnJellyfishPath, "spawn_authority", L"jellyfishPath_C", L"spawn", Declared);
 UE_FACT_FN(kRowSummonRoachCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"summonRoach", Declared);
-UE_FACT_FN(kRowAddRoachTimerCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"addRoachTimer",
-           Declared);
-UE_FACT_FN(kRowSpawnNestTimerCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"spawnNestTimer",
-           Declared);
+UE_FACT_FN(kRowAddRoachTimerCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"addRoachTimer", Declared);
+UE_FACT_FN(kRowSpawnNestTimerCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"spawnNestTimer", Declared);
 UE_FACT_FN(kRowCustomEventCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"CustomEvent", Declared);
-UE_FACT_FN(kRowReceiveTickTickerInsomniacSpawner, "spawn_authority", L"ticker_insomniacSpawner_C",
-           L"ReceiveTick", Declared);
-UE_FACT_FN(kRowReceiveTickTickerFossilhoundSpawner, "spawn_authority", L"ticker_fossilhoundSpawner_C",
-           L"ReceiveTick", Declared);
+UE_FACT_FN(kRowReceiveTickTickerInsomniacSpawner, "spawn_authority", L"ticker_insomniacSpawner_C", L"ReceiveTick", Declared);
+UE_FACT_FN(kRowReceiveTickTickerFossilhoundSpawner, "spawn_authority", L"ticker_fossilhoundSpawner_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveTickCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"ReceiveTick", Declared);
-UE_FACT_FN(kRowReceiveTickTickerRoachSummoner, "spawn_authority", L"ticker_roachSummoner_C", L"ReceiveTick",
-           Declared);
+UE_FACT_FN(kRowReceiveTickTickerRoachSummoner, "spawn_authority", L"ticker_roachSummoner_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveBeginPlayVentCrawler, "spawn_authority", L"ventCrawler_C", L"ReceiveBeginPlay", Declared);
-UE_FACT_FN(kRowBoxBeginOverlapVentCrawler, "spawn_authority", L"ventCrawler_C",
-           L"BndEvt__ventCrawler_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature",
-           Declared);
+UE_FACT_FN(kRowBoxBeginOverlapVentCrawler, "spawn_authority", L"ventCrawler_C", L"BndEvt__ventCrawler_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
 UE_FACT_FN(kRowReceiveBeginPlayGrayTest, "spawn_authority", L"grayTest_C", L"ReceiveBeginPlay", Declared);
-UE_FACT_FN(kRowSphereBeginOverlapGrayTest, "spawn_authority", L"grayTest_C",
-           L"BndEvt__grayTest_Sphere_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature",
-           Declared);
+UE_FACT_FN(kRowSphereBeginOverlapGrayTest, "spawn_authority", L"grayTest_C", L"BndEvt__grayTest_Sphere_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
 UE_FACT_FN(kRowDeacCamsGrayTest, "spawn_authority", L"grayTest_C", L"deacCams", Declared);
 UE_FACT_FN(kRowDisableCamsGrayTest, "spawn_authority", L"grayTest_C", L"disableCams", Declared);
 UE_FACT_FN(kRowReceiveBeginPlayEg, "spawn_authority", L"eg_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowReceiveTickEg, "spawn_authority", L"eg_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowOnLandedEg, "spawn_authority", L"eg_C", L"OnLanded", Declared);
 UE_FACT_FN(kRowRetrieveEg, "spawn_authority", L"eg_C", L"retrieve", Declared);
-UE_FACT_FN(kRowReceiveBeginPlayTentacleBall, "spawn_authority", L"tentacleBall_C", L"ReceiveBeginPlay",
-           Declared);
+UE_FACT_FN(kRowReceiveBeginPlayTentacleBall, "spawn_authority", L"tentacleBall_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowReceiveTickTentacleBall, "spawn_authority", L"tentacleBall_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowMoveTentacleBall, "spawn_authority", L"tentacleBall_C", L"move", Declared);
-UE_FACT_FN(kRowSphereHitTentacleBall, "spawn_authority", L"tentacleBall_C",
-           L"BndEvt__tentacleBall_Sphere_K2Node_ComponentBoundEvent_0_ComponentHitSignature__DelegateSignature",
-           Declared);
+UE_FACT_FN(kRowSphereHitTentacleBall, "spawn_authority", L"tentacleBall_C", L"BndEvt__tentacleBall_Sphere_K2Node_ComponentBoundEvent_0_ComponentHitSignature__DelegateSignature", Declared);
 UE_FACT_FN(kRowBeginGrayEventController, "spawn_authority", L"grayEventController_C", L"begin", Declared);
 UE_FACT_FN(kRowTurnedonGrayEventController, "spawn_authority", L"grayEventController_C", L"turnedon", Declared);
 UE_FACT_FN(kRowSpawnGrayEventController, "spawn_authority", L"grayEventController_C", L"spawn", Declared);
-UE_FACT_FN(kRowTriggerboxOverlapGrayEventController, "spawn_authority", L"grayEventController_C",
-           L"BndEvt__grayEventController_triggerbox_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature",
-           Declared);
-UE_FACT_FN(kRowRunTriggerTentacleBallsFollower, "spawn_authority", L"tentacleBallsFollower_C", L"runTrigger",
-           Declared);
-UE_FACT_FN(kRowReceiveTickTentacleBallsFollower, "spawn_authority", L"tentacleBallsFollower_C", L"ReceiveTick",
-           Declared);
+UE_FACT_FN(kRowTriggerboxOverlapGrayEventController, "spawn_authority", L"grayEventController_C", L"BndEvt__grayEventController_triggerbox_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
+UE_FACT_FN(kRowRunTriggerTentacleBallsFollower, "spawn_authority", L"tentacleBallsFollower_C", L"runTrigger", Declared);
+UE_FACT_FN(kRowReceiveTickTentacleBallsFollower, "spawn_authority", L"tentacleBallsFollower_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveBeginPlaySuperEgger, "spawn_authority", L"superEgger_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowSpwnSuperEgger, "spawn_authority", L"superEgger_C", L"spwn", Declared);
 UE_FACT_FN(kRowCustomEvent5Gamemode, "spawn_authority", L"mainGamemode_C", L"CustomEvent_5", Declared);
+// The 0.10.0 UFO encounters (untitled_1): the bodies the controllers' and the ships' ubergraphs own.
+UE_FACT_FN(kRowStartEventKnobController, "spawn_authority", L"ufo_knob_controller_C", L"startEvent", Declared);
+UE_FACT_FN(kRowStopEventKnobController, "spawn_authority", L"ufo_knob_controller_C", L"stopEvent", Declared);
+UE_FACT_FN(kRowReceiveTickKnobController, "spawn_authority", L"ufo_knob_controller_C", L"ReceiveTick", Declared);
+UE_FACT_FN(kRowBeginEventUkController, "spawn_authority", L"ufo_UK_controller_C", L"beginEvent", Declared);
+UE_FACT_FN(kRowStopEventUkController, "spawn_authority", L"ufo_UK_controller_C", L"stopEvent", Declared);
+UE_FACT_FN(kRowReceiveTickUkController, "spawn_authority", L"ufo_UK_controller_C", L"ReceiveTick", Declared);
+UE_FACT_FN(kRowSetEnemiesUkController, "spawn_authority", L"ufo_UK_controller_C", L"setEnemies", Declared);
+UE_FACT_FN(kRowBeginEventCalvine, "spawn_authority", L"ufo_calvine_C", L"beginEvent", Declared);
+UE_FACT_FN(kRowAttemptFallCalvine, "spawn_authority", L"ufo_calvine_C", L"attemptFall", Declared);
+UE_FACT_FN(kRowStartFallingCalvine, "spawn_authority", L"ufo_calvine_C", L"startFalling", Declared);
+UE_FACT_FN(kRowGetupCalvine, "spawn_authority", L"ufo_calvine_C", L"getup", Declared);
+UE_FACT_FN(kRowChangeSpeedKnob, "spawn_authority", L"ufo_knob_C", L"changeSpeed", Declared);
+UE_FACT_FN(kRowTryToShootUk, "spawn_authority", L"ufo_UK_C", L"tryToShoot", Declared);
+UE_FACT_FN(kRowShootLazerUk, "spawn_authority", L"ufo_UK_C", L"shootLazer", Declared);
+UE_FACT_FN(kRowChangeSpeedUk, "spawn_authority", L"ufo_UK_C", L"changeSpeed", Declared);
+UE_FACT_FN(kRowSetEnemyTargetUk, "spawn_authority", L"ufo_UK_C", L"setEnemyTarget", Declared);
+UE_FACT_FN(kRowExplodeUk, "spawn_authority", L"ufo_UK_C", L"explode", Declared);
 
 // One row: the facts row a client must not run, and the tag its refusal log carries.
 struct Row {
@@ -190,6 +190,39 @@ constexpr Row kRows[] = {
     // 120-300 s timer), so a client's timer simply ends here. The host rolls and the source-gated catch mirrors the
     // Octa and the egg; the level-placed egg roller is already a row above.
     {&kRowCustomEvent5Gamemode,           "gamemode.CustomEvent_5"},
+
+    // The 0.10.0 UFO encounters. The knob controller starts its flock 0.2 s after its BeginPlay and
+    // re-rolls it from its tick; the UK controller starts 5 s after BeginPlay when beginSpawn is set,
+    // re-arms itself after a war's stopEvent and picks enemies on a 2 s timer; the enemy controller is
+    // a subclass and runs these same bodies. Every flock ship is minted inside these bodies
+    // (BeginDeferred under EX_CallMath), so they are refused on a client, and the host's ships reach it
+    // through the source-gated catch onto the world-actor lane (npc_world_enum). stopEvent destroys the
+    // client's own (empty) flock array only, so refusing it costs nothing and keeps a stray war re-arm
+    // (its Delay -> beginEvent) from ever starting.
+    {&kRowStartEventKnobController,       "ufoKnobController.startEvent"},
+    {&kRowStopEventKnobController,        "ufoKnobController.stopEvent"},
+    {&kRowReceiveTickKnobController,      "ufoKnobController.ReceiveTick"},
+    {&kRowBeginEventUkController,         "ufoUkController.beginEvent"},
+    {&kRowStopEventUkController,          "ufoUkController.stopEvent"},
+    {&kRowReceiveTickUkController,        "ufoUkController.ReceiveTick"},
+    {&kRowSetEnemiesUkController,         "ufoUkController.setEnemies"},
+    // ufo_calvine_C (level-placed on both sides): beginEvent arms the 0.1 s fall-attempt timer, whose
+    // attemptFall rolls startFalling (the physics drop, an explosion_c, a barrel roll); getup is the
+    // cheat menu's lift. The host's own event runs; a client's copy keeps its spline flight only.
+    {&kRowBeginEventCalvine,              "ufoCalvine.beginEvent"},
+    {&kRowAttemptFallCalvine,             "ufoCalvine.attemptFall"},
+    {&kRowStartFallingCalvine,            "ufoCalvine.startFalling"},
+    {&kRowGetupCalvine,                   "ufoCalvine.getup"},
+    // The ships' own timers on a client: every client instance is a world-actor mirror (its actor tick
+    // is off and its body does not simulate), but BeginPlay still arms the knob's and the UK ship's
+    // changeSpeed timers and the UK ship's tryToShoot and enemy timers. shootLazer mints the laser
+    // (laserClass) and explode starts the crash; both are the host's, so a mirror runs neither.
+    {&kRowChangeSpeedKnob,                "ufoKnob.changeSpeed"},
+    {&kRowTryToShootUk,                   "ufoUk.tryToShoot"},
+    {&kRowShootLazerUk,                   "ufoUk.shootLazer"},
+    {&kRowChangeSpeedUk,                  "ufoUk.changeSpeed"},
+    {&kRowSetEnemyTargetUk,               "ufoUk.setEnemyTarget"},
+    {&kRowExplodeUk,                      "ufoUk.explode"},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x53410000;   // 'SA', then the row
