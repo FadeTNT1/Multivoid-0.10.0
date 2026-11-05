@@ -305,6 +305,11 @@ size_t CoastingCount() {
     return n;
 }
 
+bool IsDriven(void* actor) {
+    UE_ASSERT_GAME_THREAD("prop_drive_host::IsDriven");
+    return actor && Find(actor) != nullptr;
+}
+
 DriveContext ContextOf(void* actor, uint32_t eid) {
     UE_ASSERT_GAME_THREAD("prop_drive_host::ContextOf");
     DriveContext c;
