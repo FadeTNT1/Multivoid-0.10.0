@@ -19,7 +19,9 @@ namespace ue_wrap::engine {
 bool ReturnToMainMenu();
 
 // Load a save slot through the game's own entry (LoadGameFromSlot, setSaveSlotObject with
-// loadObjects=true, then untitled_1; the save selects the mode). `forceGameMode` >= 0 writes that
+// loadObjects=true, the game instance's currentLevel named as the game's launch names it, then
+// untitled_1; the save selects the mode). True once the level's loadObjects has restored the save
+// (ue_wrap/engine/save_restore_watch), not merely once a pawn stands in the level. `forceGameMode` >= 0 writes that
 // enum_gamemode ordinal instead of deriving it from the slot-name prefix, which the coop slot
 // `zcoop_<pid>` lacks. A slot file in the 0.10.0 compressed format (a host's stale fallback
 // streams its world's main.sav as it is) loads through LoadGameCompressed instead. The save is
@@ -30,8 +32,11 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode = -1);
 // A 0.10.0 world folder's entry ("main" or "autosave"), loaded as the game's save menu loads one:
 // the save, the metadata and the persistent object through LoadGameCompressed, all three
 // registered with setSaveSlotObject so the game's own saves write back into SaveGames/<folder>,
-// the metadata's rules and mode put in force, then untitled_1. Polled like LoadStorySave; Failed is
-// final (an entry that does not load, or one saved inside an area level). Game thread.
+// the metadata's rules and mode put in force, baseLevel and currentLevel set as the save menu's
+// launch sets them (without currentLevel the level's loadObjects restores nothing), then
+// untitled_1. InGameplay once the save's restore ran there. Polled like LoadStorySave; Failed is
+// final (an entry that does not load, one saved inside an area level, or one whose starter map is
+// not untitled_1). Game thread.
 enum class LoadResult { Pending, InGameplay, Failed };
 LoadResult LoadWorld(const std::wstring& folder, const std::wstring& entry);
 

@@ -40,6 +40,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_1
     src/ue_wrap/core/script_loop.cpp
     src/ue_wrap/engine/engine.cpp
     src/ue_wrap/engine/engine_save.cpp
+    src/ue_wrap/engine/save_restore_watch.cpp
     src/ue_wrap/engine/data_table.cpp
     src/ue_wrap/actors/inventory_component.cpp
     src/ue_wrap/actors/container_box.cpp

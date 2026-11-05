@@ -11,6 +11,7 @@
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/engine/save_to_slot_hook.h"
+#include "ue_wrap/engine/world_folder.h"
 #include "ue_wrap/engine/world_identity.h"
 #include "ue_wrap/world/world_singleton.h"
 
@@ -120,8 +121,51 @@ SG::Verdict OnSavePre(const SG::Call& c) {
     return SG::Verdict::Cancel;
 }
 
+// When the running saveToSlot began (FILETIME ticks), so its post can tell a file it rewrote from
+// one it left alone. 0 outside a call. saveToSlot does not nest.
+uint64_t g_saveToSlotStart = 0;
+
+uint64_t NowFileTime() {
+    FILETIME ft{};
+    ::GetSystemTimeAsFileTime(&ft);
+    return (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+}
+
+SG::Verdict OnSaveToSlotPre(const SG::Call& c) {
+    const SG::Verdict v = OnSavePre(c);
+    g_saveToSlotStart = v == SG::Verdict::Run ? NowFileTime() : 0;
+    return v;
+}
+
+// The body returning is not the file being written: saveToSlot's own return value is never assigned
+// by its body, and SaveGameCompressed's result is only printed. The entry file it names is read
+// instead: rewritten since the call began, and not empty.
 void OnSaveToSlotPost(const SG::Call& c) {
-    if (g_written && !MustNotSave()) g_written(c.object);
+    const uint64_t started = g_saveToSlotStart;
+    g_saveToSlotStart = 0;
+    if (MustNotSave()) return;
+    const std::wstring file = ue_wrap::world_folder::SaveObjectFile(c.object);
+    WIN32_FILE_ATTRIBUTE_DATA fa{};
+    if (file.empty() || !::GetFileAttributesExW(file.c_str(), GetFileExInfoStandard, &fa)) {
+        UE_LOGE("save_block: saveToSlot on %p returned but its file '%ls' %s -- not counted as a world save",
+                c.object, file.empty() ? L"<unresolved>" : file.c_str(), file.empty() ? "is not named" : "does not exist");
+        return;
+    }
+    const uint64_t written = (static_cast<uint64_t>(fa.ftLastWriteTime.dwHighDateTime) << 32) |
+                             fa.ftLastWriteTime.dwLowDateTime;
+    const uint64_t bytes = (static_cast<uint64_t>(fa.nFileSizeHigh) << 32) | fa.nFileSizeLow;
+    // Two seconds of slack for the file system's timestamp resolution.
+    constexpr uint64_t kSlack = 2ull * 10000000ull;
+    if (bytes == 0 || (started && written + kSlack < started)) {
+        UE_LOGE("save_block: saveToSlot on %p returned but '%ls' was not rewritten (%llu bytes, last written "
+                "%llu ms before the call) -- not counted as a world save", c.object, file.c_str(),
+                static_cast<unsigned long long>(bytes),
+                static_cast<unsigned long long>(started > written ? (started - written) / 10000ull : 0ull));
+        return;
+    }
+    UE_LOGI("save_block: world save written -- '%ls' (%llu bytes)", file.c_str(),
+            static_cast<unsigned long long>(bytes));
+    if (g_written) g_written(c.object);
 }
 
 // The gate on the engine's SaveGameToSlot (ue_wrap/engine/save_to_slot_hook): a flat-slot write of
@@ -136,7 +180,7 @@ bool WorldSaveGate(void* /*saveObject*/, const wchar_t* slotName) {
 
 bool WatchAll() {
     bool ok = SG::WatchName(kRowGamemodeSave, kTagGamemodeSave, &OnSavePre, nullptr);
-    ok = SG::WatchName(kRowSlotSaveToSlot, kTagSaveToSlot, &OnSavePre, &OnSaveToSlotPost) && ok;
+    ok = SG::WatchName(kRowSlotSaveToSlot, kTagSaveToSlot, &OnSaveToSlotPre, &OnSaveToSlotPost) && ok;
     for (const ue_wrap::facts::Function* row : {&kRowSlotSave, &kRowSlotSaveManual, &kRowSlotSavePlayerOnly,
                                                 &kRowSlotSaveSelf, &kRowMetaSave, &kRowMetaSaveSelf,
                                                 &kRowPersistSaveSelf})

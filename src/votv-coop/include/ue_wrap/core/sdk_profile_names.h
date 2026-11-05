@@ -327,6 +327,25 @@ inline constexpr const wchar_t* SaveMetadataRulesProp    = L"Rules";
 inline constexpr const wchar_t* SaveMetadataGameModeProp = L"gamemode_type";
 inline constexpr const wchar_t* SaveMetadataSavedTimeProp = L"savedtime";
 inline constexpr const wchar_t* SaveMetadataAreaProp     = L"area";
+// The level a world starts in (FName; None on a world made before 0.10.0 named one, which the
+// game's launch reads as untitled_1) and the level its last save was in.
+inline constexpr const wchar_t* SaveMetadataStarterMapProp   = L"starterMap";
+inline constexpr const wchar_t* SaveMetadataCurrentLevelProp = L"currentLevel";
+// The game instance's level state, both FNames. lib_C::loadLevel(level, option) writes
+// currentLevel = level on its way into a gameplay level (None on its way to the menu), and
+// mainGamemode_C::loadObjects skips the whole restore of a save -- player transform, every saved
+// object, the player's own data, the triggers -- while it is None ("Cannot load objects: current
+// level none"). The save menu's launch sets baseLevel = the metadata's starterMap first.
+inline constexpr const wchar_t* GameInstanceCurrentLevelProp = L"currentLevel";
+inline constexpr const wchar_t* GameInstanceBaseLevelProp    = L"baseLevel";
+// The save's restore on a level's BeginPlay (mainGamemode_C::loadObjects) and the player's own
+// part of it (mainPlayer_C::betterLoadData: pawn data, inventory, equipment).
+inline constexpr const wchar_t* MainGamemodeLoadObjectsFn = L"loadObjects";
+inline constexpr const wchar_t* MainPlayerBetterLoadDataFn = L"betterLoadData";
+// saveSlot_C's own folder (stamped at creation, absolute) and entry name; saveToSlot writes
+// <savepath>/<slotName>.sav through SaveGameCompressed.
+inline constexpr const wchar_t* SaveSlotSavePathProp = L"savepath";
+inline constexpr const wchar_t* SaveSlotSlotNameProp = L"slotName";
 inline constexpr const wchar_t* SaveSelfFn               = L"saveSelf";  // saveSlot_C, save_metadata_C, save_persistent_C
 // The world-save verbs a client must never run (coop/save/save_block). mainGamemode_C::save(asBackup,
 // bypassEvent, asAutosave) is the pause menu's and the quicksave key's entry; saveSlot_C::save(asBackup,
