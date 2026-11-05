@@ -35,6 +35,12 @@ const char* const kReplayRows[] = {
     // after ITS machine's camera has seen it, so each peer gets its own sighting. It spawns nothing; the
     // sixteen emails its fade-out mails are the host's (a client's own finish is refused in spawn_authority).
     "arirShip",
+    // Wake-up relocations, per player by design: bedEvent's trigger_bedEvent_C mints a bedEvent_C, and the
+    // treehouseSleep special an event_arirTreehouseSleep_C, both save actors that wait for their machine's
+    // gamemode `wokenUp` and then teleport getMainPlayer (bedEvent first sets the bed to its own transform,
+    // the same on every peer) and destroy themselves. Each peer's copy moves its own player on its own wake;
+    // the host's save carries the host's copy to a joiner, whose load then does the same:
+    "bedEvent", "treehouseSleep",
     // Graffiti decal specials (a grime decal spawn; no lane):
     "arirGraff_0", "arirGraff_1", "arirGraff_2", "arirGraff_3",
     "arirGraff_4", "arirGraff_5", "arirGraff_6",
@@ -63,9 +69,6 @@ const NoReplayRow kNoReplayRows[] = {
     // and the sounds ride SkyState (its black-hole state and tp count), a client's own tp refused:
     { "earthTp", "sky_sync (SkyState black hole + tp cue; emails ride the host append feed)" },
     { "vehtp", "atv lane" },
-    // bedEvent runs trigger_bedEvent -> bedEvent_C, which moves the bed and teleports
-    // getMainPlayer on wake; the sleep lane only gates client dreams, it does not carry this:
-    { "bedEvent", "bedEvent_C bed/player transform + wake teleport (no lane)" },
     { "picnic", "prop lane" }, { "destroyPicnic", "prop lane" },
     { "enasus", "prop lane" }, { "enacros", "prop lane" },
     { "cookier", "prop lane (armed prop)" }, { "paperGray", "prop lane (armed prop)" },
@@ -77,7 +80,6 @@ const NoReplayRow kNoReplayRows[] = {
     { "atvExplode", "car.trap rides the ATV lane's stamp (zapped has no lane)" },
     // Host-local by design:
     { "agrav", "physics divergence (by-design host-local)" },
-    { "treehouseSleep", "per-player teleport" },
     // Creature and save-actor spawns, host-only until mirrored. The crawler, the egger's eggs, the
     // grays and the tentacle balls are mirrored; the eventer's other outputs are not (its catch
     // enrols only what a client's copy is kept inert for, npc_world_enum), so they stay host-only:
