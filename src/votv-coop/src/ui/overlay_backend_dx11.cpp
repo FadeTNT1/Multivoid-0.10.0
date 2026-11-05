@@ -26,6 +26,7 @@ namespace {
 ID3D11Device*           g_device  = nullptr;
 ID3D11DeviceContext*    g_context = nullptr;
 ID3D11RenderTargetView* g_rtv     = nullptr;
+IDXGISwapChain*         g_boundSc = nullptr;  // identity only; the viewport owns it
 
 void CreateRTV(IDXGISwapChain* sc) {
     if (g_rtv || !g_device) return;
@@ -33,6 +34,10 @@ void CreateRTV(IDXGISwapChain* sc) {
     if (SUCCEEDED(sc->GetBuffer(0, IID_PPV_ARGS(&back))) && back) {
         const HRESULT hr = g_device->CreateRenderTargetView(back, nullptr, &g_rtv);
         if (FAILED(hr)) UE_LOGE("imgui_overlay: CreateRenderTargetView failed (hr=0x%08lX) -- menu won't draw", hr);
+        if (g_rtv) {
+            g_boundSc = sc;
+            UE_LOGI("imgui_overlay: dx11 render target rebuilt (swapchain=%p)", static_cast<void*>(sc));
+        }
         back->Release();
     } else {
         UE_LOGW("imgui_overlay: swapchain GetBuffer(0) failed -- no RTV this resize");
@@ -102,17 +107,35 @@ void NewFrame() { ImGui_ImplDX11_NewFrame(); }
 void InvalidateDeviceObjects() { ImGui_ImplDX11_InvalidateDeviceObjects(); }
 
 void EnsureTarget(const FrameTarget& t) {
+    if (g_rtv && t.dxgi != g_boundSc) {
+        UE_LOGI("imgui_overlay: dx11 swapchain changed (%p -> %p) -- releasing the old render target",
+                static_cast<void*>(g_boundSc), static_cast<void*>(t.dxgi));
+        ReleaseRTV();
+    }
     if (!g_rtv) CreateRTV(t.dxgi);  // recreate after a resize
 }
 
 void RenderDrawData(const FrameTarget&) {
     if (g_rtv) {
+        // ImGui restores shaders and blend state, but not render targets. Restore ours too so
+        // the context cannot retain our backbuffer view across the engine's ResizeBuffers.
+        ID3D11RenderTargetView* targets[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+        ID3D11DepthStencilView* depth = nullptr;
+        g_context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, targets, &depth);
         g_context->OMSetRenderTargets(1, &g_rtv, nullptr);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        g_context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, targets, depth);
+        for (auto* target : targets)
+            if (target) target->Release();
+        if (depth) depth->Release();
     }
 }
 
-void OnResizeRelease() { ReleaseRTV(); }
+void OnResizeRelease() {
+    if (!g_rtv) return;
+    ReleaseRTV();
+    UE_LOGI("imgui_overlay: dx11 render target released before resize");
+}
 
 void OnResizeRecreate(const FrameTarget& t) { CreateRTV(t.dxgi); }
 

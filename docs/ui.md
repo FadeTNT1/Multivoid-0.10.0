@@ -124,6 +124,14 @@ captures input, suppresses the game's cursor recentring and hands the pointer ba
 (`ui/input_focus`, `ui/overlay_cursor`); a keystroke typed into a text field never also fires a
 game bind.
 
+`[RD]` The DX11 draw restores the engine's render targets and depth target after compositing,
+so the immediate context does not retain the overlay's backbuffer view. Resize brackets release
+the overlay's targets before the engine resizes and rebuild them afterwards; a replaced DX11
+swapchain also invalidates its old target. DX12 treats a swapchain replaced inside the resize
+bracket like one discovered at present: it re-confirms the presenting queue before drawing again.
+The Win32 backend follows the message router's replacement window without rebuilding the ImGui
+context or renderer, and clears held input from the old window. Each recovery step logs its result.
+
 F1 opens the menu: a category tree whose developer categories are hidden unless the developer
 switch is on (`ui/dev_menu`). For every player it holds Cosmetics (skins on a live mannequin,
 the nameplate preference, the nickname colour, the font and size), Network (the live statistics
@@ -232,6 +240,7 @@ scoreboard fills as roster rows arrive; nameplates appear with each puppet's fir
 | The native screens' frames do not yet reproduce the game's bevelled, nested border material; the flat border was measured wrong | `[V]` [votv-ui-style.md](votv-ui-style.md), the frame section |
 | The game's own toasts a client self-generates from diverged world state are not suppressed or mirrored; only the server state behind one family is driven | `[V]` `coop/interactables/serverbox_sync` is the one family |
 | The old ImGui browser is kept as a fallback, a deliberate exception to retiring replaced code | `[V]` `ui/server_browser_surface` |
+| Resolution and fullscreen recovery needs an in-game check with two peers: change resolution and toggle fullscreen repeatedly, then check shared interactions, chat, F1, movement and mouse input; full graphics-device replacement is not reinitialized | `[?]` `ui/overlay_backend_dx11`, `ui/overlay_backend_dx12`, `ui/imgui_overlay`; the resize-release/rebuild, queue re-confirmation and Win32 rebind logs identify the paths exercised |
 | The quick-slot bar's rebuild has been confirmed on a load issued through the game's own load call, not on a click of the menu's Load button; a second load in one process cannot close that, since the texture array survives the world | `[V]` `harness/world_boot`, the same call the button ends at |
 
 ## Code map

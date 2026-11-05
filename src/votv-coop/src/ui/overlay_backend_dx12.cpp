@@ -435,8 +435,8 @@ void EnsureTarget(const FrameTarget& t) {
     ProcessPendingReleases();  // RenderDrawData may not run for many frames
     if (g_disabled) return;
     if (sc != g_boundSc) {
-        // A swapchain recreation never passes through our ResizeBuffers hook. The new chain may be
-        // presented by a different queue, and submitting our list on the wrong queue is a
+        // A swapchain recreation can arrive through the resize bracket or the next present. The
+        // new chain may use a different queue, and submitting our list on the wrong queue is a
         // cross-queue race on the backbuffer, so: stop drawing, re-arm the capture seeded with the
         // queue we know, and draw again only once it is re-confirmed.
         UE_LOGI("imgui_overlay: dx12: swapchain changed (%p -> %p) -- rebuilding targets and "
@@ -564,15 +564,22 @@ void OnResizeRelease() {
     if (!g_live) return;
     WaitGpuIdle("resize-release");  // the GPU may still read the buffers we are about to drop
     ReleaseSwapchainDerived();
+    UE_LOGI("imgui_overlay: dx12 render targets released before resize");
 }
 
 void OnResizeRecreate(const FrameTarget& t) {
     IDXGISwapChain* sc = t.dxgi;
     if (!g_live || g_disabled) return;
+    // Preserve the swapchain-change edge until EnsureTarget re-arms the presenting-queue capture.
+    if (sc != g_boundSc) {
+        EnsureTarget(t);
+        return;
+    }
     const UINT oldCount = g_bufferCount;
     const DXGI_FORMAT oldFormat = g_rtvFormat;
     if (!CreateSwapchainDerived(sc)) return;
     ReinitBackendIfDescChanged(oldCount, oldFormat);
+    UE_LOGI("imgui_overlay: dx12 render targets rebuilt after resize");
 }
 
 void* CreateTextureFromImageFile(const wchar_t* path, int* outW, int* outH) {

@@ -241,7 +241,7 @@ void EngineResizeBracket(const char* which, size_t scOff, overlay_backend::Rhi r
         overlay_backend::OnResizeRecreate({rhi, nullptr, sc, nullptr});
         // Resizes are rare, so one line each is not spam, and it is the one line that says the
         // bracket ran, with or without RivaTuner in the process.
-        UE_LOGI("imgui_overlay: %s%s -- render target rebuilt on %s", which, sizeNote,
+        UE_LOGI("imgui_overlay: %s%s -- resize bracket completed on %s", which, sizeNote,
                 overlay_backend::Kind() ? overlay_backend::Kind() : "?");
         ue_wrap::log::Flush();
     }

@@ -45,6 +45,7 @@
 #include "coop/dev/input_focus_probe.h"
 #include "coop/dev/worldless_frames.h"
 #include "coop/input/input_owner.h"
+#include "coop/input/game_window_proc.h"
 #include "ue_wrap/core/hook.h"
 #include "ue_wrap/core/log.h"
 
@@ -190,6 +191,26 @@ bool BringUp(const overlay_backend::FrameTarget& t) {
 // taking down the render thread.
 void RenderFrameGuarded(const overlay_backend::FrameTarget& t) {
     __try {
+        // The message router follows recreated windows; ImGui's platform backend must follow too.
+        HWND hwnd = static_cast<HWND>(coop::input::game_window_proc::Hwnd());
+        ImGuiIO& io = ImGui::GetIO();
+        if (hwnd && (hwnd != g_hwnd || !io.BackendPlatformUserData)) {
+            if (io.BackendPlatformUserData) ImGui_ImplWin32_Shutdown();
+            io.ClearEventsQueue();
+            io.ClearInputKeys();
+            io.ClearInputMouse();
+            if (!ImGui_ImplWin32_Init(hwnd)) {
+                static HWND sFailed = nullptr;
+                if (sFailed != hwnd) {
+                    sFailed = hwnd;
+                    UE_LOGE("imgui_overlay: Win32 rebind failed (hwnd=%p) -- retrying next frame", hwnd);
+                }
+                return;
+            }
+            UE_LOGI("imgui_overlay: Win32 backend rebound to recreated window (%p -> %p)", g_hwnd, hwnd);
+            g_hwnd = hwnd;
+        }
+        if (!::IsWindow(g_hwnd)) return;
         ui::style::MaybeRescale(g_hwnd);
         ui::voice_panel::CommitAbandonedDrag();
         overlay_backend::NewFrame();
