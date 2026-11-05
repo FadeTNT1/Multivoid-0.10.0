@@ -415,7 +415,20 @@ bool RunRevive(coop::net::Session& session, void* pawn) {
     //    there is no prior value to inherit; the game's own regen resumes from here.
     float maxHp = 100.f;
     if (!V::Read(V::Field::MaxHealth, &maxHp) || maxHp <= 0.f) maxHp = 100.f;
+    // A build whose pawn lacks the health property (a rename in a future game version) cannot be
+    // written or read back. That is a gap in this mod, not a failed revive: the leg is dropped, said
+    // once, and the rest of the conjunction (stood up, dead cleared, at the KPP) still has to hold.
     const bool vitalsOk = V::Write(V::Field::Health, maxHp);
+    const bool hpLegSkipped = !vitalsOk && V::RowUnavailable(V::Field::Health);
+    if (hpLegSkipped) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGW("death_revive: the health row does not resolve on this build -- the health write and its "
+                    "readback are skipped from the revive conjunction (the player is revived without a "
+                    "health restore)");
+        }
+    }
 
     // 3. Stand up. forceWakeup is the unconditional one: movement mode, capsule collision, camera
     //    and mesh re-attach, physics off, input on, isRagdoll false (which re-opens the pause gate)
@@ -453,18 +466,19 @@ bool RunRevive(coop::net::Session& session, void* pawn) {
     const bool haveBurnTime = V::Read(V::Field::BurningTime, &burnTime);
     float burning = 1.f;  // a Bool row reads 0 or 1; logged, not a term: the game does not show the flag
     const bool haveBurning = V::Read(V::Field::Burning, &burning);
-    const bool ok = vitalsOk && haveBurnTime && burnTime <= 0.f &&
+    const bool ok = (vitalsOk || hpLegSkipped) && haveBurnTime && burnTime <= 0.f &&
                     wokeUp && teleReported &&
-                    deadCleared && haveState && !isRagdoll && !deadNow && haveHp && hp > 0.f &&
+                    deadCleared && haveState && !isRagdoll && !deadNow &&
+                    (hpLegSkipped || (haveHp && hp > 0.f)) &&
                     atKpp;
 
-    UE_LOGI("death_revive: REVIVE %s after a run-ending authored by %ls -- vitals=%d wake=%d "
+    UE_LOGI("death_revive: REVIVE %s after a run-ending authored by %ls -- vitals=%d%s wake=%d "
             "tele=%d deadClr=%d fireClr=%d burn=%.1f burning=%d "
             "| screen (retried, NOT a gate): black=%d dmgRed=%.2f bloodLoss=%.0f actor(s) @%.1fs "
             "| readback: ragdoll=%d dead=%d hp=%.1f distKPP=%.0f cm (tol %.0f)",
             ok ? "OK" : "FAILED",
             g_pendingAuthorClass.empty() ? L"(unrecorded)" : g_pendingAuthorClass.c_str(),
-            vitalsOk ? 1 : 0, wokeUp ? 1 : 0,
+            vitalsOk ? 1 : 0, hpLegSkipped ? "(health leg skipped: row unavailable)" : "", wokeUp ? 1 : 0,
             teleReported ? 1 : 0, deadCleared ? 1 : 0, fireCleared ? 1 : 0,
             haveBurnTime ? burnTime : -1.f, haveBurning ? static_cast<int>(burning) : -1,
             blackCleared ? 1 : 0, redBefore, bloodActors, bloodTimeBefore,
