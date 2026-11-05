@@ -87,9 +87,9 @@ void HostLobby(const std::string& name, const std::string& world, bool locked, i
 // create; `mode` is the gamemode ordinal (story is 0) for a new save.
 struct SaveChoice {
     bool        newGame = false;
-    std::string slot;       // existing slot to load          (newGame=false)
-    std::string newName;    // base name for the new save      (newGame=true)
-    uint8_t     mode = 0;   // enum_gamemode for the new save  (newGame=true)
+    std::string slot;       // existing world to load, its key: "<folder>" or "<folder>/autosave" (newGame=false)
+    std::string newName;    // name for the new world folder   (newGame=true)
+    uint8_t     mode = 0;   // enum_gamemode for the new world (newGame=true)
     // Who authored `newName`, which decides whether a taken name may be silently disambiguated: a
     // name a person typed is a request for that exact name, and the create primitive refuses to
     // rename it; a name this mod derived (the native lane has no name field) carries no such

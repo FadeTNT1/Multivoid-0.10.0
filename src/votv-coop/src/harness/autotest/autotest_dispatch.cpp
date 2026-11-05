@@ -101,9 +101,9 @@ void SpawnEnvGatedTests(coop::net::Role role) {
     SpawnIf("VOTVCOOP_RUN_WEATHER_TEST", "weather test", &WeatherTestThread, role);
     // The save-block test, client only: drives saveToSlot so the save hook's block is observable.
     SpawnIf("VOTVCOOP_RUN_SAVEBLOCK_TEST", "save-block test", &SaveBlockTestThread, role);
-    // The save-button test, client only: drives the escape press so the pause menu's disabled
-    // Save button is observable.
-    SpawnIf("VOTVCOOP_RUN_SAVEBTN_TEST", "save-button test", &SaveBtnDisableTestThread, role);
+    // The save-request test, client only: drives the quicksave key so the refusal and its chat line
+    // are observable.
+    SpawnIf("VOTVCOOP_RUN_SAVEMSG_TEST", "save-request test", &SaveMessageTestThread, role);
     // The prop-reap test, both peers: forces a synthetic dead local prop Element and verifies the
     // reaper evicts it.
     SpawnIf("VOTVCOOP_RUN_PROPREAP_TEST", "prop-reap test", &PropReapTestThread, role);

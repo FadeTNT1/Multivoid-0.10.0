@@ -266,6 +266,7 @@ docs/**
 !docs/deployables.md
 !docs/events-and-weather.md
 !docs/join.md
+!docs/saving.md
 !docs/master-server.md
 !docs/dedicated-server.md
 !docs/npcs-and-kerfur.md

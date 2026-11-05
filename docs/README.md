@@ -55,6 +55,7 @@ messages, the late-join answer, the known limits with their evidence, and the co
 | | |
 |---|---|
 | [join.md](join.md) | Joining a game: admission, the save transfer, the connect replay, the join window, and the late-join rule every lane answers |
+| [saving.md](saving.md) | Saving: the 0.10.0 world folders, listing, creating and loading a world, and why only the host saves |
 | [players.md](players.md) | The remote player: the puppet, the pose stream, names, skins, damage, death, sleep, inventory, moderation |
 | [props.md](props.md) | Props: identity, the birth and death seams, holding and throwing, containers, the props that change on their own |
 | [deployables.md](deployables.md) | The tools that leave an actor behind: the grappling hook and rope, the owner's stream, the anchor handoff, the tie that lives on the host |

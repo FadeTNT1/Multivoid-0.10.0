@@ -188,36 +188,40 @@ const RuleField* NthOfKind(const std::vector<RuleField>& rules, Kind kind, int n
     return nullptr;
 }
 
-int ApplySavedToProcess(void* gameInstance, void* save) {
-    if (!gameInstance || !save || !R::IsLive(save)) return -1;
-    void* giClass = R::ClassOf(gameInstance);
-    void* saveClass = R::ClassOf(save);
-    if (!giClass || !saveClass) return -1;
-    const int32_t dstOff = R::FindPropertyOffset(giClass, L"gameRules");
-    const int32_t srcOff = R::FindPropertyOffset(saveClass, L"localGameRules");
-    void* dstStruct = R::PropertyInnerStruct(giClass, L"gameRules");
-    void* srcStruct = R::PropertyInnerStruct(saveClass, L"localGameRules");
+int CopyRules(void* dstObj, const wchar_t* dstProp, void* srcObj, const wchar_t* srcProp) {
+    if (!dstObj || !srcObj || !R::IsLive(dstObj) || !R::IsLive(srcObj)) return -1;
+    void* dstClass = R::ClassOf(dstObj);
+    void* srcClass = R::ClassOf(srcObj);
+    if (!dstClass || !srcClass) return -1;
+    const int32_t dstOff = R::FindPropertyOffset(dstClass, dstProp);
+    const int32_t srcOff = R::FindPropertyOffset(srcClass, srcProp);
+    void* dstStruct = R::PropertyInnerStruct(dstClass, dstProp);
+    void* srcStruct = R::PropertyInnerStruct(srcClass, srcProp);
     const int32_t size = R::StructSize(dstStruct);
     // One struct type on both sides, or the bytes do not mean the same thing.
     if (dstOff < 0 || srcOff < 0 || !dstStruct || dstStruct != srcStruct || size <= 0) return -1;
 
-    uint8_t* dst = reinterpret_cast<uint8_t*>(gameInstance) + dstOff;
-    const uint8_t* src = reinterpret_cast<const uint8_t*>(save) + srcOff;
+    uint8_t* dst = reinterpret_cast<uint8_t*>(dstObj) + dstOff;
+    const uint8_t* src = reinterpret_cast<const uint8_t*>(srcObj) + srcOff;
     // The boot loop re-asserts this on every poll: equal bytes are the common case and cost nothing.
     if (std::memcmp(dst, src, static_cast<size_t>(size)) == 0) return 0;
 
-    std::vector<RuleField> before, saved;
-    ReadRulesAt(gameInstance, L"gameRules", before, /*withNames=*/false);
-    ReadRulesAt(save, L"localGameRules", saved, /*withNames=*/false);
+    std::vector<RuleField> before, after;
+    ReadRulesAt(dstObj, dstProp, before, /*withNames=*/false);
+    ReadRulesAt(srcObj, srcProp, after, /*withNames=*/false);
     int changed = 0;
-    for (size_t i = 0; i < before.size() && i < saved.size(); ++i) {
+    for (size_t i = 0; i < before.size() && i < after.size(); ++i) {
         const RuleField& a = before[i];
-        const RuleField& b = saved[i];
+        const RuleField& b = after[i];
         if (a.bval != b.bval || a.ival != b.ival || a.fval != b.fval) ++changed;
     }
     // The members are bools, bytes and one float: a plain value copy is the whole assignment.
     std::memcpy(dst, src, static_cast<size_t>(size));
     return changed;
+}
+
+int ApplySavedToProcess(void* gameInstance, void* save) {
+    return CopyRules(gameInstance, L"gameRules", save, L"localGameRules");
 }
 
 WriteResult WriteSavedRule(void* save, const std::string& key, const std::string& value) {

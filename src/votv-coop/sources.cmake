@@ -48,7 +48,6 @@ set(VOTVCOOP_SOURCES
     src/coop/world/balance_sync.cpp
     src/coop/world/daily_task_sync.cpp
     src/coop/save/save_block.cpp
-    src/coop/save/save_button_disable.cpp
     src/ui/multiplayer_menu.cpp
     src/coop/player/nameplate.cpp
     src/coop/player/nick_color.cpp
@@ -493,6 +492,7 @@ set(VOTVCOOP_SOURCES
     src/ui/native_screen.cpp
     src/ui/native_text_field.cpp
     src/ui/host_window_native.cpp
+    src/ui/host_create_world.cpp
     src/ui/host_session_choices.cpp
     src/ui/host_session_settings.cpp
     src/ui/browser_input_screens.cpp

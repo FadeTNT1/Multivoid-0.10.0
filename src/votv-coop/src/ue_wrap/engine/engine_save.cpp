@@ -12,13 +12,17 @@
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/engine/world_folder.h"
 #include "ue_wrap/engine/world_identity.h"
+#include "ue_wrap/engine/world_meta.h"
 #include "ue_wrap/world/game_mode.h"
 #include "ue_wrap/world/game_rules.h"
 #include "ue_wrap/world/world_singleton.h"
 
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,7 +48,12 @@ void* g_setSaveSlotFn = nullptr;
 // GameInstance and the world was rebuilt from freed memory.
 void* g_storySave = nullptr;          // cached USaveGame* (one disk load per campaign)
 int32_t g_storySaveIdx = -1;          // its GUObjectArray index (IsLiveByIndex guard)
-std::wstring g_storySaveSlot;         // campaign identity axis 1: the target slot
+std::wstring g_storySaveSlot;         // campaign identity axis 1: the target slot or world key
+// A world folder's other two objects, registered with the save (LoadWorld); null for a flat slot.
+void* g_storyMeta = nullptr;
+int32_t g_storyMetaIdx = -1;
+void* g_storyPersist = nullptr;
+int32_t g_storyPersistIdx = -1;
 // The second axis: the non-gameplay world the campaign polls in. Every return to the menu
 // creates a new menu world, so a changed polling world means a world round-trip happened since
 // the cache was built, whether or not any poll saw the gameplay in between.
@@ -158,12 +167,51 @@ void ValidateCachedSaveForCampaign(const wchar_t* slot, void* curWorld) {
         g_campaignWorld = curWorld;
         g_campaignWorldIdx = R::InternalIndexOf(curWorld);
     }
-    if (g_storySave && !R::IsLiveByIndex(g_storySave, g_storySaveIdx)) {
-        UE_LOGW("engine: save cache -- cached save %p ('%ls') was GC-purged mid-campaign; "
-                "reloading from disk", g_storySave, g_storySaveSlot.c_str());
+    const bool metaDead = g_storyMeta && !R::IsLiveByIndex(g_storyMeta, g_storyMetaIdx);
+    const bool persistDead = g_storyPersist && !R::IsLiveByIndex(g_storyPersist, g_storyPersistIdx);
+    if (g_storySave && (!R::IsLiveByIndex(g_storySave, g_storySaveIdx) || metaDead || persistDead)) {
+        UE_LOGW("engine: save cache -- cached save %p ('%ls') or a companion object was GC-purged "
+                "mid-campaign; reloading from disk", g_storySave, g_storySaveSlot.c_str());
         g_storySave = nullptr;
         g_storySaveIdx = -1;
+        g_storyMeta = nullptr;
+        g_storyMetaIdx = -1;
+        g_storyPersist = nullptr;
+        g_storyPersistIdx = -1;
     }
+}
+
+// mainGameInstance_C::setSaveSlotObject with all five of its arguments, as the game's save menu
+// calls it: the save, the entry's slot name, the world folder, the metadata and the persistent
+// object. A flat slot has no folder and no companions; the function stores whatever it is given.
+void RegisterSave(void* gi, void* save, const std::wstring& slotName, const std::wstring& folder,
+                  void* metadata, void* persistent, const char* who) {
+    if (!g_setSaveSlotFn) {
+        if (void* gicls = R::ClassOf(gi)) g_setSaveSlotFn = R::FindFunction(gicls, P::name::SetSaveSlotObjectFn);
+    }
+    if (!g_setSaveSlotFn) {
+        UE_LOGW("engine: %s -- setSaveSlotObject unresolved", who);
+        return;
+    }
+    std::wstring sb = slotName, fb = folder;
+    R::FString sfs{sb.data(), static_cast<int32_t>(sb.size()) + 1, static_cast<int32_t>(sb.size()) + 1};
+    R::FString ffs{fb.data(), static_cast<int32_t>(fb.size()) + 1, static_cast<int32_t>(fb.size()) + 1};
+    ParamFrame f(g_setSaveSlotFn);
+    f.Set<void*>(L"save_gameInst", save);
+    f.SetRaw(L"SlotName", &sfs, sizeof(sfs));
+    f.SetRaw(L"folderSlotName", &ffs, sizeof(ffs));
+    f.Set<void*>(L"metadataObject", metadata);
+    f.Set<void*>(L"save_persistent", persistent);
+    Call(gi, f);
+}
+
+// True when the slot's file on disk is the 0.10.0 compressed format rather than GVAS: the stale
+// fallback of a host streams its world's main.sav as it is.
+bool SlotFileIsCompressed(const std::wstring& path) {
+    std::ifstream f(std::filesystem::path(path), std::ios::binary);
+    uint8_t head[4] = {};
+    if (!f.read(reinterpret_cast<char*>(head), 4)) return false;
+    return ue_wrap::world_meta::IsCompressed(head, 4);
 }
 // The boot poll's two "where are we?" reads, one owner for LoadStorySave and StartFreshGame.
 // Adopted from archhn0madd's Multifoid fork; see docs/credits.md.
@@ -394,19 +442,20 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
         UE_LOGW("engine: LoadStorySave -- not up yet (cdo=%p fn=%p gi=%p); retry", g_storyGsCdo, g_loadGameFn, gi);
         return false;
     }
-    if (!g_setSaveSlotFn) {
-        if (void* gicls = R::ClassOf(gi)) g_setSaveSlotFn = R::FindFunction(gicls, P::name::SetSaveSlotObjectFn);
-    }
-
     // The slot loaded from disk once.
     if (!g_storySave) {
-        std::wstring b(slot);
-        R::FString fs = makeFStr(b);
-        ParamFrame f(g_loadGameFn);
-        f.SetRaw(L"SlotName", &fs, sizeof(fs));
-        f.Set<int32_t>(L"UserIndex", 0);
-        if (!Call(g_storyGsCdo, f)) { UE_LOGE("engine: LoadStorySave -- LoadGameFromSlot call failed"); return false; }
-        g_storySave = f.Get<void*>(L"ReturnValue");
+        const std::wstring dir = ue_wrap::world_folder::SaveGamesDir();
+        if (!dir.empty() && SlotFileIsCompressed(dir + slot + P::name::WorldSaveExt)) {
+            g_storySave = ue_wrap::world_folder::LoadCompressed(slot, dir, P::name::WorldSaveExt);
+        } else {
+            std::wstring b(slot);
+            R::FString fs = makeFStr(b);
+            ParamFrame f(g_loadGameFn);
+            f.SetRaw(L"SlotName", &fs, sizeof(fs));
+            f.Set<int32_t>(L"UserIndex", 0);
+            if (!Call(g_storyGsCdo, f)) { UE_LOGE("engine: LoadStorySave -- LoadGameFromSlot call failed"); return false; }
+            g_storySave = f.Get<void*>(L"ReturnValue");
+        }
         if (!g_storySave) { UE_LOGW("engine: LoadStorySave -- slot '%ls' missing/empty", slot); return false; }
         g_storySaveIdx = R::InternalIndexOf(g_storySave);  // IsLiveByIndex guard for reuse
         g_storySaveSlot = slot;                            // campaign identity
@@ -418,16 +467,7 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
 
     // Registered on the persistent GameInstance and flagged for the game to apply on BeginPlay;
     // re-asserted each retry (no disk) so it is fresh at the travel.
-    if (g_setSaveSlotFn) {
-        std::wstring b(slot);
-        R::FString fs = makeFStr(b);
-        ParamFrame f(g_setSaveSlotFn);
-        f.Set<void*>(L"save_gameInst", g_storySave);
-        f.SetRaw(L"SlotName", &fs, sizeof(fs));
-        Call(gi, f);
-    } else {
-        UE_LOGW("engine: LoadStorySave -- setSaveSlotObject unresolved");
-    }
+    RegisterSave(gi, g_storySave, slot, std::wstring(), nullptr, nullptr, "LoadStorySave");
     PutSaveRulesInForce(gi, g_storySave, "LoadStorySave");
     PutSaveStartDayInForce(gi, g_storySave, "LoadStorySave");
     SetLoadObjects(gi);
@@ -444,6 +484,70 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
     return false;  // not in gameplay yet -> caller keeps retrying
 }
 
+// A 0.10.0 world, loaded the way the game's save menu loads one (ui_saveSlots apply, then
+// trylaunch): the entry's save, its metadata and the world's persistent object through
+// LoadGameCompressed, all three registered with setSaveSlotObject so the game's own save writes
+// back into this folder, the metadata's rules and mode put in force, the save's day handed over,
+// and the gameplay level opened. Polled like LoadStorySave.
+LoadResult LoadWorld(const std::wstring& folder, const std::wstring& entry) {
+    const BootWorldView w = SurveyBootWorld("LoadWorld");
+    if (w.inGameplay) return LoadResult::InGameplay;
+    if (w.gameplayLoading) return LoadResult::Pending;
+
+    const std::wstring key = ue_wrap::world_folder::MakeKey(folder, entry);
+    ValidateCachedSaveForCampaign(key.c_str(), w.curWorld);
+    void* gi = world_singleton::GameInstance();
+    if (!gi) {
+        UE_LOGW("engine: LoadWorld -- no game instance yet; retry");
+        return LoadResult::Pending;
+    }
+    if (!g_storySave) {
+        ue_wrap::world_folder::Entry e;
+        if (!ue_wrap::world_folder::LoadEntry(folder, entry, e)) {
+            UE_LOGE("engine: LoadWorld -- world '%ls' entry '%ls' did not load (save=%p metadata=%p "
+                    "persistent=%p)", folder.c_str(), entry.c_str(), e.save, e.metadata, e.persistent);
+            return LoadResult::Failed;
+        }
+        const std::wstring area = ue_wrap::world_folder::MetadataArea(e.metadata);
+        if (!area.empty()) {
+            UE_LOGE("engine: LoadWorld -- entry '%ls' of '%ls' was saved inside the area '%ls', which a "
+                    "hosted world cannot start in", entry.c_str(), folder.c_str(), area.c_str());
+            return LoadResult::Failed;
+        }
+        g_storySave = e.save;
+        g_storySaveIdx = R::InternalIndexOf(e.save);
+        g_storyMeta = e.metadata;
+        g_storyMetaIdx = R::InternalIndexOf(e.metadata);
+        g_storyPersist = e.persistent;
+        g_storyPersistIdx = R::InternalIndexOf(e.persistent);
+        g_storySaveSlot = key;
+        FireSaveObjectReadyHook(g_storySave);
+    }
+
+    RegisterSave(gi, g_storySave, entry, folder, g_storyMeta, g_storyPersist, "LoadWorld");
+    {
+        static void* sLastMeta = nullptr;
+        const int changed = ue_wrap::world_folder::ApplyMetadataRules(gi, g_storyMeta, g_storySave);
+        if (changed < 0)
+            UE_LOGW("engine: LoadWorld -- the world's rules could not be put in force (struct unresolved)");
+        else if (changed > 0 || g_storyMeta != sLastMeta)
+            UE_LOGI("engine: LoadWorld -- the world's rules are in force (%d rule(s) changed)", changed);
+        sLastMeta = g_storyMeta;
+    }
+    PutSaveStartDayInForce(gi, g_storySave, "LoadWorld");
+    SetLoadObjects(gi);
+    const int mode = ue_wrap::world_folder::MetadataGameMode(g_storyMeta);
+    ApplyGameModeFromSlot(gi, key.c_str(),
+                          ue_wrap::game_mode::IsValid(mode) ? mode : ue_wrap::game_mode::kStory);
+
+    std::wstring openCmd = L"open ";
+    openCmd += P::name::GameplayLevel;
+    UE_LOGI("engine: LoadWorld -- at preLoad/menu; (re)issuing '%ls' (world '%ls' registered)",
+            openCmd.c_str(), key.c_str());
+    ExecuteConsoleCommand(openCmd.c_str());
+    return LoadResult::Pending;
+}
+
 // Content invalidation: the next poll reloads the slot from disk even mid-campaign, for a slot
 // file that changed under the same name (a rejoin re-downloads the host's world into the same
 // slot). Staleness across campaigns is handled by the campaign identity.
@@ -453,6 +557,10 @@ void ResetCachedSave() {
     g_storySave = nullptr;
     g_storySaveIdx = -1;
     g_storySaveSlot.clear();
+    g_storyMeta = nullptr;
+    g_storyMetaIdx = -1;
+    g_storyPersist = nullptr;
+    g_storyPersistIdx = -1;
     g_campaignWorld = nullptr;
     g_campaignWorldIdx = -1;
     g_gameModeApplied = false;
@@ -471,14 +579,6 @@ void SetSaveObjectReadyHook(SaveObjectReadyHook hook) {
 // snapshot mirrors its whole world onto it with nothing to reconcile away. Polled like
 // LoadStorySave. Game thread.
 bool StartFreshGame(int gameMode) {
-    auto makeFStr = [](std::wstring& b) {
-        R::FString fs{};
-        fs.Data = b.data();
-        fs.Num = static_cast<int32_t>(b.size()) + 1;
-        fs.Max = fs.Num;
-        return fs;
-    };
-
     // The boot survey, shared with LoadStorySave.
     const BootWorldView w = SurveyBootWorld("StartFreshGame");
     if (w.inGameplay) return true;
@@ -500,10 +600,6 @@ bool StartFreshGame(int gameMode) {
         UE_LOGW("engine: StartFreshGame -- CreateSaveGameObject=%p saveSlot_C=%p not resolved; retry", createFn, saveCls);
         return false;
     }
-    if (!g_setSaveSlotFn) {
-        if (void* gicls = R::ClassOf(gi)) g_setSaveSlotFn = R::FindFunction(gicls, P::name::SetSaveSlotObjectFn);
-    }
-
     // The blank save created once per campaign, cached like the loaded one.
     if (!g_storySave) {
         ParamFrame f(createFn);
@@ -527,16 +623,7 @@ bool StartFreshGame(int gameMode) {
 
     // The blank save registered under the pseudo-slot name.
     const wchar_t* freshSlot = kFreshSlotName;
-    if (g_setSaveSlotFn) {
-        std::wstring b(freshSlot);
-        R::FString fs = makeFStr(b);
-        ParamFrame f(g_setSaveSlotFn);
-        f.Set<void*>(L"save_gameInst", g_storySave);
-        f.SetRaw(L"SlotName", &fs, sizeof(fs));
-        Call(gi, f);
-    } else {
-        UE_LOGW("engine: StartFreshGame -- setSaveSlotObject unresolved");
-    }
+    RegisterSave(gi, g_storySave, freshSlot, std::wstring(), nullptr, nullptr, "StartFreshGame");
     PutSaveRulesInForce(gi, g_storySave, "StartFreshGame");
     PutSaveStartDayInForce(gi, g_storySave, "StartFreshGame");
     // A blank save has empty object and trigger arrays, so restoring it yields the level defaults

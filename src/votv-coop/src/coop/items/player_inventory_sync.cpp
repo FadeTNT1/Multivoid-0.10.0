@@ -21,7 +21,8 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/sdk_profile_names.h"  // the start point
 #include "ue_wrap/engine/save_capture.h"  // the moment the world is gathered into the save object
-#include "ue_wrap/engine/save_to_slot_hook.h"  // the moment the host's world is saved
+#include "coop/save/save_block.h"  // the moment the host's world is saved
+#include "coop/save/save_transfer.h"  // the hosted world's key
 
 #include <array>
 #include <atomic>
@@ -309,15 +310,15 @@ void OnWorldGather() {
     coop::player_profile_store::MarkWorldGathered();
 }
 
-// Host: the engine reported a world save written (ue_wrap/engine/save_to_slot_hook; the thread
-// that saved, which is the game thread). Only THE world counts: the live save object, under a slot
-// name of the game's own. The save-slot menu writes regenerated and copied save objects, and the
-// join capture writes the live one to a zcoop_ scratch slot; neither is a moment the host's world
-// on disk changed.
-void OnWorldSaveWritten(void* saveObject, const wchar_t* slotName) {
+// Host: saveSlot_C::saveToSlot wrote a world entry (coop/save/save_block, on the game thread). Only
+// THE world counts: the live save object. The save-slot menu writes regenerated and copied save
+// objects of its own; the join capture writes through SaveGameToSlot and never reaches this. The
+// profiles are cut beside the hosted world's key (coop/save/save_transfer).
+void OnWorldSaveWritten(void* saveObject) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running() || s->role() != coop::net::Role::Host) return;
-    if (std::wcsncmp(slotName, L"zcoop_", 6) == 0) return;
+    const std::wstring& world = coop::save_transfer::HostSlot();
+    const wchar_t* slotName = world.c_str();
     if (void* live = ue_wrap::inventory::ResolveSaveSlot(); saveObject != live) {
         // The save-slot menu writes save objects of its own; a mismatch that is NOT that would be a
         // stale gamemode behind the resolver, and a cut skipped for it must be visible.
@@ -348,7 +349,7 @@ void OnWorldSaveWritten(void* saveObject, const wchar_t* slotName) {
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
-    ue_wrap::save_to_slot_hook::SetWritten(&OnWorldSaveWritten);
+    coop::save_block::SetWritten(&OnWorldSaveWritten);
     ue_wrap::save_capture::SetWorldGatherHook(&OnWorldGather);
     // Arm the engine's pre-materialise apply point (a no-op until a client join has a pending
     // blob). Re-arming across stop and start is harmless.

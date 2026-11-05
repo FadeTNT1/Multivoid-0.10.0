@@ -77,10 +77,10 @@ needs a live test per lane. It is the first follow-up (see *Stubbed*).
 
 ### Auto-loading and auto-hosting
 
-`save_slot` names the slot. The driver resolves it in this order: `<slot>.sav` in the game's
-`SaveGames` folder; else `s_<slot>.sav` (the story prefix the game puts on a named save); else a
-**new story save named `<slot>`** is created through the same primitive the picker's New Game uses,
-and its real slot name (`s_<slot>`) is logged, so the next boot finds it by the second rule.
+`save_slot` names the world. The driver hosts the world folder `SaveGames/<slot>/` when it holds
+a `main.meta` (the game's 0.10.0 world layout, [ui.md](ui.md)); else a **new story world named
+`<slot>`** is created through the game's own `createSaveSlotTreeDirectory`, the primitive the
+picker's New game uses, so the next boot finds that folder.
 
 Then `HostWithSave` is queued with:
 
@@ -126,8 +126,8 @@ nothing on this page runs and a player's launch is byte-for-byte the same as bef
 ### Autosave
 
 Every `autosave_minutes`, while the host session runs, the driver posts the game's own full save
-(`saveSlot_C::saveToSlot`, non-forced, the same body the game's pause-menu save and autosave run)
-to the game thread. The mod's save hooks ride that call: the player profiles are cut to disk with
+(`saveSlot_C::save`, the gather and the write the game's pause-menu save and autosave run) to
+the game thread; it writes into the hosted world's folder. The mod's save hooks ride that call: the player profiles are cut to disk with
 the world (`coop/player/player_profile_store`), and the pre-session backup already ran at the
 host start (`coop/save/save_guard`). A non-forced save during a running event writes the world of
 the last gather (see `ue_wrap/engine/save_capture.h`), which is what the game itself does; the

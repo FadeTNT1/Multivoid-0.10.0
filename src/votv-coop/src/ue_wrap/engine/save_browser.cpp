@@ -3,19 +3,20 @@
 #include "ue_wrap/engine/save_browser.h"
 
 #include "ue_wrap/core/call.h"
-#include "ue_wrap/engine/engine.h"        // GetSavePrefix / DeriveModeFromSlot
 #include "ue_wrap/core/game_thread.h"
-#include "ue_wrap/engine/gvas_meta.h"     // worker-thread .sav metadata reads (no LoadGameFromSlot)
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile_names.h"
+#include "ue_wrap/engine/engine.h"        // GetSavePrefix / DeriveModeFromSlot (legacy rows)
+#include "ue_wrap/engine/gvas_meta.h"     // legacy flat slots
+#include "ue_wrap/engine/world_folder.h"
+#include "ue_wrap/engine/world_meta.h"
 #include "ue_wrap/world/game_mode.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <cwctype>
 #include <filesystem>
 #include <map>
@@ -30,109 +31,37 @@ namespace {
 
 namespace R = reflection;
 namespace GT = game_thread;
+namespace N = profile::name;
+namespace fs = std::filesystem;
 
 std::wstring FStrToW(const R::FString& s) {
-    // FString::Num counts the null terminator.
     if (s.Data && s.Num > 1) return std::wstring(s.Data, s.Data + (s.Num - 1));
     return std::wstring();
 }
 
-// Build an FString that ALIASES `buf` (no copy) to pass into a UFunction. `buf` must
-// outlive the call. UE reads it (const FString&) and does not take ownership.
 R::FString MakeFStr(std::wstring& buf) {
     R::FString fs{};
     fs.Data = buf.data();
-    fs.Num  = static_cast<int32_t>(buf.size()) + 1;  // counts the null
+    fs.Num  = static_cast<int32_t>(buf.size()) + 1;
     fs.Max  = fs.Num;
     return fs;
 }
 
-// ---- GameplayStatics save UFunctions (CreateSaveGameObject / SaveGameToSlot /
-//      DoesSaveGameExist), resolved once on the CDO. -----------------------------
-void* g_gsCdo        = nullptr;
-void* g_createFn     = nullptr;
-void* g_saveToSlotFn = nullptr;
-void* g_doesExistFn  = nullptr;
-
-bool ResolveGs() {
-    if (!g_gsCdo) g_gsCdo = R::FindClassDefaultObject(L"GameplayStatics");
-    if (g_gsCdo) {
-        void* c = R::ClassOf(g_gsCdo);
-        if (c && !g_createFn)     g_createFn     = R::FindFunction(c, L"CreateSaveGameObject");
-        if (c && !g_saveToSlotFn) g_saveToSlotFn = R::FindFunction(c, L"SaveGameToSlot");
-        if (c && !g_doesExistFn)  g_doesExistFn  = R::FindFunction(c, L"DoesSaveGameExist");
-    }
-    return g_gsCdo && g_createFn && g_saveToSlotFn && g_doesExistFn;
-}
-
-// ---- saveSlot_C metadata offsets (reflection-resolved, recook-safe; cached). -----
-struct SlotOffsets {
-    int32_t savedtime = -1, points = -1, health = -1, maxHealth = -1, version = -1, lastDate = -1;
-    bool tried = false;
-};
-SlotOffsets g_off;
-
-void ResolveSlotOffsets() {
-    if (g_off.tried) return;
-    void* cls = R::FindClass(L"saveSlot_C");
-    if (!cls) return;  // not loaded yet -- retry next call (tried stays false)
-    // The row's DAY is savedtime.Z + 1 (uicomp_saveSlot::upd). `savedtime` is an FIntVector
-    // {h, m, day}; the float `Day` property is the raw elapsed-time accumulator and is not it.
-    g_off.savedtime = R::FindPropertyOffset(cls, L"savedtime");
-    g_off.points    = R::FindPropertyOffset(cls, L"Points");
-    g_off.health    = R::FindPropertyOffset(cls, L"health");
-    g_off.maxHealth = R::FindPropertyOffset(cls, L"maxHealth");
-    g_off.version   = R::FindPropertyOffset(cls, L"Version");
-    g_off.lastDate  = R::FindPropertyOffset(cls, L"lastDate");
-    // Latch only once every field resolved, so a recook that renames one does not stick the rest
-    // at -1 and read 0 forever; until then each call retries.
-    const bool all = g_off.savedtime >= 0 && g_off.points >= 0 && g_off.health >= 0 &&
-                     g_off.maxHealth >= 0 && g_off.version >= 0 && g_off.lastDate >= 0;
-    if (all) {
-        g_off.tried = true;
-        UE_LOGI("save_browser: saveSlot_C offsets savedtime=%d Points=%d health=%d maxHealth=%d Version=%d lastDate=%d",
-                g_off.savedtime, g_off.points, g_off.health, g_off.maxHealth, g_off.version, g_off.lastDate);
-    } else {
-        UE_LOGW("save_browser: saveSlot_C offsets incomplete savedtime=%d Points=%d health=%d maxHealth=%d "
-                "Version=%d lastDate=%d -- will retry", g_off.savedtime, g_off.points, g_off.health,
-                g_off.maxHealth, g_off.version, g_off.lastDate);
-    }
-}
-
-template <class T>
-T ReadField(void* obj, int32_t off, T fallback = T{}) {
-    if (!obj || off < 0) return fallback;
-    return *reinterpret_cast<T*>(reinterpret_cast<uint8_t*>(obj) + off);
-}
-
-// ---- the scan pipeline ------------------------------------------------------------
-// The game's own loadSlots deserializes every .sav on the game thread; this scan reads the
-// few scalars a row needs instead, in two stages. STAGE A (game thread) resolves the
-// SaveGames dir, lists *.sav, drops subsaves through the game's own classifier and reads the
-// saveSlot_C CDO defaults. STAGE B (worker) tag-walks each file for its metadata, caches by
-// mtime and sorts newest-first. Slot names are never filtered by hand: the mode prefixes come
-// from the game's getSavePrefix.
-
 // lib_C::gameVersion(prefix, suffix) with both empty: the project version, the string the game's
 // slot menu stamps on a new save and compares a loaded one against. The body is pure and never
-// reads __WorldContext, so the CDO is a valid target and `context` only fills the pin. The out
-// FString is minted engine-side and handed to the caller, who owns it. Game thread.
-bool CallGameVersion(void* context, R::FString& out) {
+// reads __WorldContext, so the CDO is a valid target. Game thread.
+bool CallGameVersion(R::FString& out) {
     out = R::FString{};
     void* libCdo = R::FindClassDefaultObject(L"lib_C");
     void* libCls = libCdo ? R::ClassOf(libCdo) : nullptr;
-    // The CXX dump renders GameVersion, the asset dump gameVersion. FindFunction compares
-    // insensitively, so one lookup answers whichever spelling this process interned first.
     void* verFn = libCls ? R::FindFunction(libCls, L"GameVersion") : nullptr;
     if (!verFn) return false;
     ParamFrame f(verFn);
-    f.Set<void*>(L"__WorldContext", context ? context : libCdo);
+    f.Set<void*>(L"__WorldContext", libCdo);
     if (!Call(libCdo, f)) return false;
     return f.GetRaw(L"Version", &out, static_cast<int32_t>(sizeof(out))) && out.Data;
 }
 
-// The running game's version, resolved once per process on the game thread and kept for readers
-// on any thread (GameVersion).
 std::mutex   g_versionMu;
 std::wstring g_gameVersion;
 
@@ -142,8 +71,8 @@ std::wstring ResolveGameVersion() {
         if (!g_gameVersion.empty()) return g_gameVersion;
     }
     R::FString ver{};
-    if (!CallGameVersion(nullptr, ver)) {
-        UE_LOGW("save_browser: lib_C.gameVersion unresolved -- no save is flagged as a version conflict");
+    if (!CallGameVersion(ver)) {
+        UE_LOGW("save_browser: lib_C.gameVersion unresolved -- no world is flagged as a version conflict");
         return {};
     }
     const std::wstring out = FStrToW(ver);
@@ -154,107 +83,79 @@ std::wstring ResolveGameVersion() {
     return out;
 }
 
-struct ScanItem {
-    SaveInfo     base;   // slot/mode/modeLabel/displayName pre-filled (stage A)
-    std::wstring path;   // full path to the .sav
-};
-
-// saveSlot_C CDO defaults for properties the delta serializer omitted.
-struct SlotCdoDefaults {
-    bool    valid = false;
-    int32_t savedTimeZ = 0;
-    int32_t points = 0;
-    float   health = 0.f;
-    float   maxHealth = 0.f;
-    std::wstring version;
-    std::wstring gameVersion;  // the running game's, for each row's conflict flag; empty = unresolved
-};
-
-// Resolve <ProjectSavedDir>/SaveGames/ once through the native UFunction, which honors
-// -saveddirsuffix; never rebuild it from the environment. The returned FString's engine-side
-// buffer is read once and pinned.
-std::wstring ResolveSaveGamesDir() {
-    static std::wstring s_dir;
-    if (!s_dir.empty()) return s_dir;
-    void* ksl = R::FindClassDefaultObject(L"KismetSystemLibrary");
-    void* fn  = ksl ? R::FindFunction(R::ClassOf(ksl), L"GetProjectSavedDirectory") : nullptr;
-    if (!fn) { UE_LOGW("save_browser: GetProjectSavedDirectory unresolved"); return {}; }
-    ParamFrame f(fn);
-    if (!Call(ksl, f)) return {};
-    R::FString ret{};
-    f.GetRaw(L"ReturnValue", &ret, static_cast<int32_t>(sizeof(ret)));
-    std::wstring dir = FStrToW(ret);
-    if (dir.empty()) return {};
-    if (dir.back() != L'/' && dir.back() != L'\\') dir += L'/';
-    dir += L"SaveGames/";
-    s_dir = dir;
-    UE_LOGI("save_browser: SaveGames dir = '%ls'", s_dir.c_str());
-    return s_dir;
-}
-
-// VOTV's own subsave classifier (lib_C CDO; pure string logic). False on resolve
-// failure = list rather than hide. The out mainSaveName FString is engine-minted
-// into the frame and abandoned (pin doctrine; bytes per call, scans are on-demand).
+// VOTV's own subsave classifier (lib_C CDO; pure string logic). False on a resolve failure, so a
+// slot is listed rather than hidden.
 bool IsSubsaveName(const std::wstring& slot) {
-    static void* s_lib = nullptr;
-    static void* s_fn  = nullptr;
-    if (!s_lib) s_lib = R::FindClassDefaultObject(L"lib_C");
-    if (s_lib && !s_fn) s_fn = R::FindFunction(R::ClassOf(s_lib), L"processSaveNameIntoSubsave");
-    if (!s_lib || !s_fn) return false;
+    void* lib = R::FindClassDefaultObject(L"lib_C");
+    void* fn = lib ? R::FindFunction(R::ClassOf(lib), L"processSaveNameIntoSubsave") : nullptr;
+    if (!fn) return false;
     std::wstring buf = slot;
     R::FString fs = MakeFStr(buf);
-    ParamFrame f(s_fn);
+    ParamFrame f(fn);
     f.SetRaw(L"saveSlotName", &fs, static_cast<int32_t>(sizeof(fs)));
-    f.Set<void*>(L"__WorldContext", s_lib);
-    if (!Call(s_lib, f)) return false;
+    f.Set<void*>(L"__WorldContext", lib);
+    if (!Call(lib, f)) return false;
     return f.Get<bool>(L"isSubsave");
 }
 
-// STAGE A. Game thread. False = save system not resolvable yet (retry later).
-bool BuildScanList(std::vector<ScanItem>& items, SlotCdoDefaults& def) {
-    items.clear();
-    const std::wstring dir = ResolveSaveGamesDir();
-    if (dir.empty()) return false;
+// What one scan item is: a world folder (both entries are read from it) or a legacy flat slot.
+struct ScanItem {
+    bool         legacy = false;
+    std::wstring name;   // the folder, or the slot
+    std::wstring path;   // the folder's path with a trailing slash, or the .sav's
+    int          legacyMode = -1;
+    std::wstring legacyDisplay;
+};
 
-    ResolveSlotOffsets();
-    void* cdo = R::FindClassDefaultObject(L"saveSlot_C");
-    if (!cdo || g_off.savedtime < 0) {
-        UE_LOGW("save_browser: saveSlot_C CDO/offsets unresolved -- cannot scan yet");
-        return false;
-    }
-    def.valid      = true;
-    def.savedTimeZ = ReadField<int32_t>(cdo, g_off.savedtime + 8);
-    def.points     = ReadField<int32_t>(cdo, g_off.points);
-    def.health     = ReadField<float>(cdo, g_off.health);
-    def.maxHealth  = ReadField<float>(cdo, g_off.maxHealth);
-    def.version    = FStrToW(ReadField<R::FString>(cdo, g_off.version));
+// The game's defaults the files omit (a tagged stream leaves out a value equal to its class default).
+struct Defaults {
+    int          metaMode = 0;        // save_metadata_C.gamemode_type
+    std::wstring gameVersion;         // the running game's; empty = unresolved
+};
+
+int ByteDefault(const wchar_t* cls, const wchar_t* prop) {
+    void* cdo = R::FindClassDefaultObject(cls);
+    const int32_t off = cdo ? R::FindPropertyOffset(R::ClassOf(cdo), prop) : -1;
+    return off >= 0 ? *(reinterpret_cast<const uint8_t*>(cdo) + off) : 0;
+}
+
+// The game-thread half. False = the save system is not resolvable yet.
+bool BuildScanList(std::vector<ScanItem>& items, Defaults& def) {
+    items.clear();
+    const std::wstring dir = world_folder::SaveGamesDir();
+    if (dir.empty()) return false;
+    def.metaMode = ByteDefault(N::SaveMetadataClass, N::SaveMetadataGameModeProp);
     def.gameVersion = ResolveGameVersion();
 
     std::error_code ec;
-    for (std::filesystem::directory_iterator it{std::filesystem::path(dir), ec}, end;
-         !ec && it != end; it.increment(ec)) {
-        if (!it->is_regular_file(ec)) continue;
+    for (fs::directory_iterator it{fs::path(dir), ec}, end; !ec && it != end; it.increment(ec)) {
+        std::error_code e2;
+        if (it->is_directory(e2)) {
+            // A world is a folder the game made: it holds main.meta.
+            if (!fs::is_regular_file(it->path() / (std::wstring(N::WorldEntryMain) + N::WorldMetaExt), e2))
+                continue;
+            ScanItem item;
+            item.name = it->path().filename().wstring();
+            item.path = it->path().wstring() + L"/";
+            items.push_back(std::move(item));
+            continue;
+        }
+        if (!it->is_regular_file(e2)) continue;
         std::wstring ext = it->path().extension().wstring();
         for (wchar_t& c : ext) c = static_cast<wchar_t>(::towlower(c));
         if (ext != L".sav") continue;
         const std::wstring slot = it->path().stem().wstring();
-        if (slot.empty()) continue;
-        if (IsSubsaveName(slot)) continue;  // native parity: subsaves never top-level
-
+        if (slot.empty() || IsSubsaveName(slot)) continue;
         ScanItem item;
+        item.legacy = true;
+        item.name = slot;
         item.path = it->path().wstring();
-        item.base.slot = slot;
-        item.base.mode = engine::DeriveModeFromSlot(slot.c_str());
-        const wchar_t* label = ue_wrap::game_mode::Name(item.base.mode);
-        item.base.modeLabel = label ? label : L"";
-        std::wstring prefix;  // displayName = slot minus the mode prefix (cosmetic)
-        if (item.base.mode >= 0 &&
-            engine::GetSavePrefix(static_cast<uint8_t>(item.base.mode), prefix) &&
-            !prefix.empty() && slot.rfind(prefix, 0) == 0) {
-            item.base.displayName = slot.substr(prefix.size());
-        } else {
-            item.base.displayName = slot;
-        }
+        item.legacyMode = engine::DeriveModeFromSlot(slot.c_str());
+        std::wstring prefix;
+        item.legacyDisplay = slot;
+        if (item.legacyMode >= 0 && engine::GetSavePrefix(static_cast<uint8_t>(item.legacyMode), prefix) &&
+            !prefix.empty() && slot.rfind(prefix, 0) == 0)
+            item.legacyDisplay = slot.substr(prefix.size());
         items.push_back(std::move(item));
     }
     if (ec) {
@@ -264,264 +165,161 @@ bool BuildScanList(std::vector<ScanItem>& items, SlotCdoDefaults& def) {
     return true;
 }
 
-// ---- async cache (render thread reads; stage B fills) ---------------------------
-std::mutex g_mu;
-std::vector<SaveInfo> g_cache;
-uint64_t g_rev = 0;
-std::string g_status = "No save scan yet";
-std::atomic<bool> g_scanning{false};
-
-// mtime-keyed per-slot metadata cache: an unchanged file's row is reused without
-// re-opening it, so re-opening the picker is ~free. Guarded by g_metaMu (stage B
-// runs on a worker; the synchronous EnumerateSaves path runs on the game thread).
-struct CachedMeta {
+// The cache, by file, so an unchanged file is not re-read on every open.
+struct CachedRow {
     int64_t  mtime = 0;
     uint64_t size = 0;
+    bool     ok = false;
     SaveInfo info;
 };
 std::mutex g_metaMu;
-std::map<std::wstring, CachedMeta> g_metaCache;
+std::map<std::wstring, CachedRow> g_metaCache;
 
-// STAGE B. Any thread (pure file I/O). Fills `out` sorted newest-first.
-void ParseScanList(const std::vector<ScanItem>& items, const SlotCdoDefaults& def,
-                   std::vector<SaveInfo>& out) {
+bool Stat(const fs::path& p, int64_t& mtime, uint64_t& size) {
+    std::error_code ec;
+    size = fs::file_size(p, ec);
+    if (ec) return false;
+    mtime = fs::last_write_time(p, ec).time_since_epoch().count();
+    return !ec;
+}
+
+void FillCommon(SaveInfo& info, const Defaults& def) {
+    const wchar_t* label = info.mode >= 0 ? game_mode::Name(info.mode) : nullptr;
+    info.modeLabel = label ? label : L"";
+    // The game's compare is FString ==, which ignores case. An unresolved game version flags nothing.
+    info.versionConflict = !def.gameVersion.empty() &&
+                           ::_wcsicmp(info.version.c_str(), def.gameVersion.c_str()) != 0;
+}
+
+// One world entry's row from its .meta, or false when the entry has never been saved (a fresh
+// world's autosave is a blank placeholder, and the game lists no row for it either).
+bool ReadEntry(const ScanItem& it, const wchar_t* entry, const Defaults& def, SaveInfo& out, int64_t& mtime) {
+    const fs::path meta = fs::path(it.path) / (std::wstring(entry) + N::WorldMetaExt);
+    uint64_t size = 0;
+    if (!Stat(meta, mtime, size)) return false;
+    const std::wstring key = meta.wstring();
+    {
+        std::lock_guard<std::mutex> lk(g_metaMu);
+        auto c = g_metaCache.find(key);
+        if (c != g_metaCache.end() && c->second.mtime == mtime && c->second.size == size) {
+            out = c->second.info;
+            return c->second.ok;
+        }
+    }
+    world_meta::WorldMeta m;
+    const bool isMain = std::wstring(entry) == N::WorldEntryMain;
+    bool ok = world_meta::ReadWorldMeta(key, m) && m.isMetadataClass && (isMain || m.hasLastSaved);
+    SaveInfo info;
+    if (ok) {
+        info.folder = it.name;
+        info.entry = entry;
+        info.world = world_folder::MakeKey(it.name, entry);
+        info.displayName = isMain ? it.name : it.name + L" (autosave)";
+        info.inArea = !m.area.empty();
+        info.mode = m.hasGameMode ? m.gameMode : def.metaMode;
+        info.day = (m.hasSavedTimeZ ? m.savedTimeZ : 0) + 1;
+        info.version = m.version;
+        info.lastPlayedTicks = m.hasLastSaved ? m.lastSavedTicks : 0;
+        FillCommon(info, def);
+    } else if (isMain) {
+        UE_LOGW("save_browser: world '%ls' has a main.meta this build cannot read -- not listed", it.name.c_str());
+    }
+    std::lock_guard<std::mutex> lk(g_metaMu);
+    g_metaCache[key] = {mtime, size, ok, info};
+    out = info;
+    return ok;
+}
+
+bool ReadLegacy(const ScanItem& it, const Defaults& def, SaveInfo& out, int64_t& mtime) {
+    uint64_t size = 0;
+    if (!Stat(it.path, mtime, size)) return false;
+    {
+        std::lock_guard<std::mutex> lk(g_metaMu);
+        auto c = g_metaCache.find(it.path);
+        if (c != g_metaCache.end() && c->second.mtime == mtime && c->second.size == size) {
+            out = c->second.info;
+            return c->second.ok;
+        }
+    }
+    gvas_meta::GvasSlotMeta m;
+    const bool ok = gvas_meta::ReadSlotMeta(it.path, m) && m.isSaveSlotClass;
+    SaveInfo info;
+    if (ok) {
+        info.legacy = true;
+        info.world = it.name;
+        info.displayName = it.legacyDisplay;
+        info.mode = it.legacyMode;
+        info.day = (m.hasSavedTimeZ ? m.savedTimeZ : 0) + 1;
+        info.version = m.hasVersion ? m.version : std::wstring();
+        info.lastPlayedTicks = m.hasLastSavedDate ? m.lastSavedDateTicks : 0;
+        FillCommon(info, def);
+    }
+    std::lock_guard<std::mutex> lk(g_metaMu);
+    g_metaCache[it.path] = {mtime, size, ok, info};
+    out = info;
+    return ok;
+}
+
+// The worker half: pure file I/O. Worlds first, newest-first; legacy slots after them, also
+// newest-first, since they are shown only to say where the player's old saves went.
+void ParseScanList(const std::vector<ScanItem>& items, const Defaults& def, std::vector<SaveInfo>& out) {
     struct Row { int64_t mtime; SaveInfo info; };
     std::vector<Row> rows;
-    rows.reserve(items.size());
+    rows.reserve(items.size() * 2);
     for (const ScanItem& it : items) {
-        std::error_code ec;
-        const std::filesystem::path p{it.path};
-        const uint64_t sz = std::filesystem::file_size(p, ec);
-        if (ec) continue;
-        const int64_t mt = std::filesystem::last_write_time(p, ec).time_since_epoch().count();
-        if (ec) continue;
-        {
-            std::lock_guard<std::mutex> lk(g_metaMu);
-            auto c = g_metaCache.find(it.base.slot);
-            if (c != g_metaCache.end() && c->second.mtime == mt && c->second.size == sz) {
-                rows.push_back({mt, c->second.info});
-                continue;
-            }
+        SaveInfo info;
+        int64_t mtime = 0;
+        if (it.legacy) {
+            if (ReadLegacy(it, def, info, mtime)) rows.push_back({mtime, std::move(info)});
+            continue;
         }
-        gvas_meta::GvasSlotMeta m;
-        if (!gvas_meta::ReadSlotMeta(it.path, m) || !m.isSaveSlotClass)
-            continue;  // unreadable / not a saveSlot_C (data.sav): native-parity skip
-        SaveInfo info = it.base;
-        // Display formula parity (uicomp_saveSlot::upd): day = savedtime.Z + 1.
-        info.day       = (m.hasSavedTimeZ ? m.savedTimeZ : def.savedTimeZ) + 1;
-        info.points    = m.hasPoints ? m.points : def.points;
-        info.health    = m.hasHealth ? m.health : def.health;
-        info.maxHealth = m.hasMaxHealth ? m.maxHealth : def.maxHealth;
-        info.version   = m.hasVersion ? m.version : def.version;
-        // The game's compare is FString ==, which ignores case. An unresolved game version flags nothing.
-        info.versionConflict = !def.gameVersion.empty() &&
-                               ::_wcsicmp(info.version.c_str(), def.gameVersion.c_str()) != 0;
-        info.lastPlayedTicks = m.hasLastSavedDate ? m.lastSavedDateTicks : 0;
-        {
-            std::lock_guard<std::mutex> lk(g_metaMu);
-            g_metaCache[it.base.slot] = {mt, sz, info};
-        }
-        rows.push_back({mt, std::move(info)});
+        if (ReadEntry(it, N::WorldEntryMain, def, info, mtime)) rows.push_back({mtime, std::move(info)});
+        if (ReadEntry(it, N::WorldEntryAutosave, def, info, mtime)) rows.push_back({mtime, std::move(info)});
     }
-    // Newest-first by file mtime rather than loadSlots' MaxOfDateTimeArray over the saved dates:
-    // the same write stamps both, and lastSavedDate is delta-omitted on a fresh slot.
-    std::stable_sort(rows.begin(), rows.end(),
-                     [](const Row& a, const Row& b) { return a.mtime > b.mtime; });
+    std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+        if (a.info.legacy != b.info.legacy) return !a.info.legacy;
+        return a.mtime > b.mtime;
+    });
     out.clear();
     out.reserve(rows.size());
     for (Row& r : rows) {
-        UE_LOGI("save_browser:   '%ls' mode=%d(%ls) day=%d pts=%d hp=%.0f/%.0f ver='%ls'",
-                r.info.slot.c_str(), r.info.mode, r.info.modeLabel.c_str(), r.info.day,
-                r.info.points, r.info.health, r.info.maxHealth, r.info.version.c_str());
+        UE_LOGI("save_browser:   '%ls'%s mode=%d(%ls) day=%d ver='%ls'%s", r.info.world.c_str(),
+                r.info.legacy ? " [legacy]" : "", r.info.mode, r.info.modeLabel.c_str(), r.info.day,
+                r.info.version.c_str(), r.info.inArea ? " [in an area]" : "");
         out.push_back(std::move(r.info));
     }
 }
 
-// A blank saveSlot_C from CreateSaveGameObject has an empty startupEquipment map. The game's own
-// create (lib_C::createSaveSlotTreeDirectory) assigns defaultStartupEquipment to it, and the
-// inventory screen spawns those items on the first world. The copy is the game's, not ours: a
-// TMap is a sparse array, a bit array and a hash, which a byte copy would alias. reset_player is
-// the one parameterless function that makes it. It also clears betterObjectsData, so it runs only
-// when that is already empty, and sets playerTransform to def, which on a blank save differs: the
-// transform is plain data (no heap), so it is kept before the call and written back after. The
-// result is the native create's: the map copied, everything else as CreateSaveGameObject left it.
-void SeedStartupEquipment(void* save) {
-    namespace N = profile::name;
-    void* cls = R::ClassOf(save);
-    const int32_t startOff = R::FindPropertyOffset(cls, N::SaveSlotStartupEquipment);
-    const int32_t defOff   = R::FindPropertyOffset(cls, N::SaveSlotDefaultStartupEquipment);
-    if (startOff < 0 || defOff < 0) {
-        UE_LOGI("save_browser: startup equipment -- this game has no %ls/%ls (pre-0.10.0); nothing to seed",
-                N::SaveSlotStartupEquipment, N::SaveSlotDefaultStartupEquipment);
-        return;
-    }
-    void* fn = R::FindFunction(cls, N::SaveSlotResetPlayerFn);
-    const int32_t xfOff  = R::FindPropertyOffset(cls, N::SaveSlotPlayerTransform);
-    const int32_t defXf  = R::FindPropertyOffset(cls, N::SaveSlotPlayerTransformDefault);
-    const int32_t objOff = R::FindPropertyOffset(cls, N::SaveSlotBetterObjectsData);
-    if (!fn || xfOff < 0 || defXf < 0 || objOff < 0) {
-        UE_LOGW("save_browser: startup equipment -- %ls or its fields unresolved (fn=%p xf=%d def=%d objs=%d); "
-                "the new save starts with no equipment", N::SaveSlotResetPlayerFn, fn, xfOff, defXf, objOff);
-        return;
-    }
-    auto* base = static_cast<uint8_t*>(save);
-    constexpr size_t kTransformBytes = 48;  // FTransform: FQuat, FVector + pad, FVector + pad (UE4.27)
-    const int32_t objects = ReadField<int32_t>(save, objOff + 8);  // TArray::Num
-    if (objects != 0) {
-        UE_LOGW("save_browser: startup equipment -- %ls would clear %d object(s) of this blank save; not "
-                "called, the new save starts with no equipment", N::SaveSlotResetPlayerFn, objects);
-        return;
-    }
-    uint8_t keptXf[kTransformBytes];
-    std::memcpy(keptXf, base + xfOff, kTransformBytes);
-    ParamFrame f(fn);
-    const bool called = Call(save, f);
-    std::memcpy(base + xfOff, keptXf, kTransformBytes);
-    if (!called) {
-        UE_LOGE("save_browser: startup equipment -- %ls call failed", N::SaveSlotResetPlayerFn);
-        return;
-    }
-    const int32_t seeded  = ReadField<int32_t>(save, startOff + 8);  // the map's element array Num
-    const int32_t wanted  = ReadField<int32_t>(save, defOff + 8);
-    UE_LOGI("save_browser: startup equipment -- seeded %d of %d default item(s)", seeded, wanted);
-}
+std::mutex g_mu;
+std::vector<SaveInfo> g_cache;
+uint64_t g_rev = 0;
+std::string g_status = "No world scan yet";
+std::atomic<bool> g_scanning{false};
 
 }  // namespace
 
 bool EnumerateSaves(std::vector<SaveInfo>& out) {
     out.clear();
     std::vector<ScanItem> items;
-    SlotCdoDefaults def;
+    Defaults def;
     if (!BuildScanList(items, def)) return false;
-    ParseScanList(items, def, out);  // synchronous convenience path (dev probe)
+    ParseScanList(items, def, out);
     return true;
-}
-
-bool SlotExists(const std::wstring& slot) {
-    if (slot.empty() || !ResolveGs() || !g_doesExistFn) return false;
-    std::wstring buf = slot;
-    R::FString fs = MakeFStr(buf);
-    ParamFrame f(g_doesExistFn);
-    f.SetRaw(L"SlotName", &fs, sizeof(fs));
-    f.Set<int32_t>(L"UserIndex", 0);
-    if (!Call(g_gsCdo, f)) return false;
-    return f.Get<bool>(L"ReturnValue");
-}
-
-bool CreateNamedSave(const std::wstring& name, uint8_t mode, std::wstring& outSlot) {
-    outSlot.clear();
-    if (name.empty()) { UE_LOGW("save_browser: CreateNamedSave -- empty name"); return false; }
-    if (!ResolveGs()) { UE_LOGW("save_browser: CreateNamedSave -- GameplayStatics not resolved"); return false; }
-
-    std::wstring prefix;
-    if (!engine::GetSavePrefix(mode, prefix)) {
-        UE_LOGW("save_browser: CreateNamedSave -- getSavePrefix(%u) unresolved (widget not loaded?)",
-                static_cast<unsigned>(mode));
-        return false;
-    }
-    const std::wstring slot = prefix + name;
-    if (SlotExists(slot)) {
-        UE_LOGW("save_browser: CreateNamedSave -- slot '%ls' already exists (name taken)", slot.c_str());
-        return false;
-    }
-
-    // CreateSaveGameObject(saveSlot_C) -> a blank UsaveSlot_C (the New-Game baseline).
-    void* saveCls = R::FindClass(L"saveSlot_C");
-    if (!saveCls) { UE_LOGW("save_browser: CreateNamedSave -- saveSlot_C class missing"); return false; }
-    void* save = nullptr;
-    {
-        ParamFrame f(g_createFn);
-        f.Set<void*>(L"SaveGameClass", saveCls);
-        if (!Call(g_gsCdo, f)) { UE_LOGE("save_browser: CreateSaveGameObject call failed"); return false; }
-        save = f.Get<void*>(L"ReturnValue");
-    }
-    if (!save) { UE_LOGW("save_browser: CreateSaveGameObject returned null"); return false; }
-
-    // 0.10.0: seed the starter loadout as the game's own create does, or the player spawns with
-    // no flashlight, clothes or tools.
-    SeedStartupEquipment(save);
-
-    // Stamp Version as the native create does (lib_C::gameVersion), because a blank CDO-default
-    // object serializes an empty one and every save row then paints the red "unk!" badge. The
-    // out FString's buffer is minted engine-side in the call and its header moves into the fresh
-    // object's field, so ownership transfers with no copy. A resolve failure still creates the
-    // slot; only the badge is wrong.
-    ResolveSlotOffsets();
-    R::FString ver{};
-    if (g_off.version < 0 || !CallGameVersion(save, ver)) {
-        UE_LOGW("save_browser: CreateNamedSave -- Version stamp unavailable (VersionOff=%d); creating unversioned",
-                g_off.version);
-    } else {
-        std::memcpy(reinterpret_cast<uint8_t*>(save) + g_off.version, &ver, sizeof(ver));
-        UE_LOGI("save_browser: CreateNamedSave -- stamped Version '%ls'", FStrToW(ver).c_str());
-    }
-
-    // SaveGameToSlot(save, "<prefix><name>", 0) -> writes <slot>.sav NOW (persist at create).
-    std::wstring buf = slot;
-    R::FString fs = MakeFStr(buf);
-    bool ok = false;
-    {
-        ParamFrame f(g_saveToSlotFn);
-        f.Set<void*>(L"SaveGameObject", save);
-        f.SetRaw(L"SlotName", &fs, sizeof(fs));
-        f.Set<int32_t>(L"UserIndex", 0);
-        if (!Call(g_gsCdo, f)) { UE_LOGE("save_browser: SaveGameToSlot call failed"); return false; }
-        ok = f.Get<bool>(L"ReturnValue");
-    }
-    if (!ok) { UE_LOGW("save_browser: SaveGameToSlot('%ls') returned false", slot.c_str()); return false; }
-
-    outSlot = slot;
-    UE_LOGI("save_browser: CreateNamedSave -- created + persisted '%ls' (mode=%u)",
-            slot.c_str(), static_cast<unsigned>(mode));
-    return true;
-}
-
-bool CreateNamedSaveUnique(const std::wstring& baseName, uint8_t mode, std::wstring& outSlot) {
-    outSlot.clear();
-    if (baseName.empty()) {
-        UE_LOGW("save_browser: CreateNamedSaveUnique -- empty base name");
-        return false;
-    }
-    std::wstring prefix;
-    if (!ResolveGs() || !engine::GetSavePrefix(mode, prefix)) {
-        UE_LOGW("save_browser: CreateNamedSaveUnique -- save system unresolved (mode=%u)",
-                static_cast<unsigned>(mode));
-        return false;
-    }
-
-    // Numbered from two, the way a save list numbers a repeat: the first world keeps the bare
-    // name. The cap refuses rather than wrapping, since reusing a slot at the end of the range
-    // would overwrite a world somebody played.
-    for (int n = 1; n <= 99; ++n) {
-        std::wstring name = baseName;
-        if (n > 1) name += L" " + std::to_wstring(n);
-        if (SlotExists(prefix + name)) continue;
-        return CreateNamedSave(name, mode, outSlot);
-    }
-    UE_LOGW("save_browser: CreateNamedSaveUnique -- '%ls' and 98 numbered variants all exist",
-            baseName.c_str());
-    return false;
 }
 
 void RefreshAsync() {
     if (g_scanning.exchange(true)) return;  // a scan is already in flight
     {
         std::lock_guard<std::mutex> lk(g_mu);
-        g_status = "Scanning saves...";
+        g_status = "Scanning worlds...";
     }
     GT::Post([] {
-        // STAGE A here on the game thread, STAGE B on a detached worker, so no disk I/O runs under
-        // the game tick. The worker touches only the statics above and a scan can be in flight only
-        // while the picker is open.
         auto items = std::make_shared<std::vector<ScanItem>>();
-        auto def   = std::make_shared<SlotCdoDefaults>();
-        const bool ok = BuildScanList(*items, *def);
-        if (!ok) {
+        auto def = std::make_shared<Defaults>();
+        if (!BuildScanList(*items, *def)) {
             std::lock_guard<std::mutex> lk(g_mu);
             g_status = "Save system not ready (try again)";
             ++g_rev;
-            // Clear the coalescing flag inside the lock, after rev/cache/status are coherent, so a
-            // render-thread RefreshAsync that sees g_scanning==false also sees the finished scan.
             g_scanning.store(false, std::memory_order_release);
             return;
         }
@@ -530,9 +328,10 @@ void RefreshAsync() {
             ParseScanList(*items, *def, v);
             std::lock_guard<std::mutex> lk(g_mu);
             g_cache.swap(v);
+            size_t worlds = 0;
+            for (const SaveInfo& s : g_cache) worlds += s.legacy ? 0 : 1;
             char buf[64];
-            std::snprintf(buf, sizeof(buf), "%zu save%s", g_cache.size(),
-                          g_cache.size() == 1 ? "" : "s");
+            std::snprintf(buf, sizeof(buf), "%zu world%s", worlds, worlds == 1 ? "" : "s");
             g_status = buf;
             ++g_rev;
             g_scanning.store(false, std::memory_order_release);  // inside the lock

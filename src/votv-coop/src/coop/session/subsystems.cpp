@@ -139,7 +139,6 @@
 #include "coop/items/broom_push.h"
 #include "coop/props/trash_pile_sync.h"
 #include "coop/save/save_block.h"
-#include "coop/save/save_button_disable.h"
 #include "coop/props/grab_observer.h"
 #include "coop/player/item_activate.h"
 #include "coop/player/player_damage.h"
@@ -337,11 +336,10 @@ void Install(coop::net::Session& session) {
     // world-up, but the apply-blob receiver and the pre-materialise save hook must be live before
     // the join's world loads. Its tick and per-slot hooks below stay.
     coop::balance_sync::SetSession(&session);  // shared host-authoritative balance
-    // The client world-save block: registers its gate and arms the one save detour, in every
-    // role (the gate reads the role when a save fires; a host's save passes and is reported).
+    // Only the host saves: the world-save verbs gated in every role (the gate reads the role when
+    // a save fires; a host's save passes and is reported, a client's is refused and, when asked
+    // for, answered in its chat).
     coop::save_block::Install(&session);
-    // Grey out the client pause menu's Save button; a no-op on the host.
-    coop::save_button_disable::Install(&session);
     // The shutdown install and the window title are called from the boot timeline directly, not
     // here: they must work before the local player is possessed, since a player may close the
     // window on the splash.
@@ -688,7 +686,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::prop_stick_sync::Tick(); }  // broadcast recorded stick commits NOW -- must precede local_streams' release edge (net_pump runs TickGameplay first)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:pause_guard"}; coop::pause_guard::Tick(isConnected); }  // coop no-pause invariant -- un-pause the world while connected (ESC menu stays usable; a paused peer froze its pose stream)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:run_end"}; coop::player::run_end_travel::Tick(); }  // the run-ending seam's session-scoped work: publish the seam's readiness (the verdict itself runs in the VM's body loop)
-    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:save_cycle_off"}; coop::save_block::Tick(&session); }  // client native save-cycle OFF -- hold gamemode.disableSave=true (saveSlot_C::save gates gather+write on it); the SaveGameToSlot disk hook stays as the belt
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:save_cycle_off"}; coop::save_block::Tick(&session); }  // client native save-cycle OFF -- hold gamemode.disableSave=true under the verb gates
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:sleep"}; coop::sleep_sync::Tick(); }  // the local rest-state poll + its send + the client's dream hold
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:sleep_rest"}; coop::sleep_rest::Tick(); }  // a client's rest: the sleep watch until live, then the effects' factor and food and coffee while it lasts
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:wisp_attack"}; coop::wisp_attack_sync::Tick(); }  // host detect wisp-grabs-client -> neutralize + relay (host-only, no-op on client)

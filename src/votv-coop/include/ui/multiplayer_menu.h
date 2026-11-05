@@ -11,8 +11,8 @@
 // Click detection is a POLL, not a delegate bind: a POST observer on ui_menu_C's
 // own per-frame Tick watches a global VK_LBUTTON edge and asks whether the button
 // is hovered on the RELEASE edge. That Tick is the one reliable game-thread tick
-// while the menu is up, since net_pump does not run pre-gameplay; it mirrors
-// save_button_disable, the isPause main-versus-pause discriminator included.
+// while the menu is up, since net_pump does not run pre-gameplay. The isPause flag tells the main
+// menu from the pause menu, which share ui_menu_C.
 //
 #pragma once
 

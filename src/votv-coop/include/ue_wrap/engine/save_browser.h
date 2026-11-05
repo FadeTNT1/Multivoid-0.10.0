@@ -1,18 +1,13 @@
-// ue_wrap/engine/save_browser.h -- VOTV save enumeration + creation. Engine-wrapper layer
-// (principle 7): NO coop, network or gameplay state lives here. The UFunction-driven
-// parts -- create, exists, and the scan's stage A -- are GAME THREAD ONLY.
+// ue_wrap/engine/save_browser.h -- the worlds a host can pick, listed off disk. Engine-wrapper layer
+// (principle 7): NO coop, network or gameplay state lives here.
 //
-// EnumerateSaves lists <SavedDir>/SaveGames/*.sav -- directory from the native
-// GetProjectSavedDirectory, subsaves excluded through lib_C::processSaveNameIntoSubsave
-// -- and reads each row's metadata DIRECTLY from the file's GVAS tag stream
-// (ue_wrap/gvas_meta), taking saveSlot_C CDO defaults for delta-omitted properties.
-// Driving loadSlots instead means N calls to LoadGameFromSlot, a full 15-20 MB
-// deserialize per save on the game thread, which froze the picker for seconds once
-// real saves accumulated. Non-saveSlot_C slots and subsaves are excluded; b_* is the
-// SANDBOX prefix and is never filtered.
-//
-// CreateNamedSave mirrors VOTV's create primitive: CreateSaveGameObject(saveSlot_C)
-// + SaveGameToSlot(obj, "<prefix><name>", 0), a persisted-at-creation blank save.
+// A 0.10.0 world is a folder under SaveGames (ue_wrap/engine/world_folder): each folder with a
+// main.meta is one row, and its autosave a second row once the game has written one. A row's
+// numbers come from the entry's .meta (ue_wrap/engine/world_meta), read on a worker and cached by
+// modification time, so listing never deserialises a world on the game thread. A pre-0.10.0 flat
+// slot (SaveGames/<slot>.sav, GVAS) is listed as legacy: the game converts those in its own Load
+// menu, and a world loaded from one would save to the wrong place, so a legacy row is not hostable.
+// Which flat slots are the game's sub-saves is decided by the game's own classifier.
 
 #pragma once
 
@@ -22,74 +17,39 @@
 
 namespace ue_wrap::save_browser {
 
-// One existing save, with the metadata a picker row needs (read off UsaveSlot_C).
 struct SaveInfo {
-    std::wstring slot;         // slot name (== the <slot>.sav filename minus extension)
-    std::wstring displayName;  // slot minus the mode prefix (for the list)
-    int          mode = -1;    // enum_gamemode ordinal (story=0, ...); -1 = unknown
-    std::wstring modeLabel;    // "Story" / "Sandbox" / "Infinite" / ... (display)
-    int          day = 0;      // UsaveSlot_C::Day
-    int          points = 0;   // UsaveSlot_C::Points
-    float        health = 0.f; // UsaveSlot_C::health
-    float        maxHealth = 0.f;  // UsaveSlot_C::maxHealth
-    std::wstring version;      // UsaveSlot_C::Version
-    bool         versionConflict = false;  // Version differs from the running game's (GameVersion):
-                                           // the case the game's own slot menu warns about
-    int64_t      lastPlayedTicks = 0;  // UsaveSlot_C::lastDate (FDateTime ticks, 100ns)
+    std::wstring world;        // the key (world_folder::MakeKey), or the slot name of a legacy row
+    std::wstring folder;       // the world folder; empty for a legacy row
+    std::wstring entry;        // "main" or "autosave"; empty for a legacy row
+    bool         legacy = false;   // a pre-0.10.0 flat slot: shown, not hostable
+    bool         inArea = false;   // the entry was saved inside an area level: shown, not hostable
+    std::wstring displayName;  // the folder (with " (autosave)"), or the slot minus its mode prefix
+    int          mode = -1;    // enum_gamemode ordinal; -1 = unknown
+    std::wstring modeLabel;    // "Story" / "Sandbox" / ... (display)
+    int          day = 0;      // savedtime.Z + 1, as the game's row prints it
+    std::wstring version;      // the game version the entry was last saved by
+    bool         versionConflict = false;  // differs from the running game's (GameVersion)
+    int64_t      lastPlayedTicks = 0;      // FDateTime ticks (100 ns)
+
+    bool Hostable() const { return !legacy && !inArea; }
 };
 
-// Enumerate all existing top-level saves with metadata (synchronous convenience
-// path -- the picker uses RefreshAsync instead). `out` is replaced, sorted
-// newest-first. Returns false if the save system can't be resolved yet (saveSlot_C
-// not loaded / dir unresolved) -- `out` is then left empty. Game thread.
+// Enumerate synchronously (a dev probe; the picker uses RefreshAsync). Sorted newest-first. False
+// when the save system cannot be resolved yet. Game thread.
 bool EnumerateSaves(std::vector<SaveInfo>& out);
 
-// Create a brand-new, NAMED, mode-correct, PERSISTED save and return its full slot
-// name ("<prefix><name>") in `outSlot`. `mode` is an enum_gamemode ordinal (story=0).
-// Returns false on name collision (slot already exists) or if the save system isn't
-// resolvable. Game thread only. The caller enters gameplay via the SAME path as any
-// existing save: engine::LoadStorySave(outSlot).
-bool CreateNamedSave(const std::wstring& name, uint8_t mode, std::wstring& outSlot);
-
-// The same creation, from a BASE name the caller does not need to have checked: probes
-// "<base>", "<base> 2", "<base> 3" ... and creates the first one free.
-//
-// WHY IT EXISTS. `CreateNamedSave` refusing a taken name is correct -- a caller naming
-// an exact slot deserves the truth rather than a silent rename. But the native hosting
-// lane has no name field, so its base name is a CONSTANT, and a constant can be created
-// exactly once: the second New Game a player ever hosted died on "already exists",
-// aborted the boot and dropped them back on the server browser with no world made.
-//
-// Uniqueness is resolved HERE, against LIVE slots at the moment of creation, rather
-// than by a picker filtering its save list: an enumeration a menu is holding can be
-// minutes old, and a name that was free when it was CHOSEN is exactly the failure this
-// closes. Game thread.
-bool CreateNamedSaveUnique(const std::wstring& baseName, uint8_t mode, std::wstring& outSlot);
-
-// True iff a save slot already exists on disk (UGameplayStatics::DoesSaveGameExist).
-// Game thread only. Used by the picker to validate a typed New-Game name live.
-bool SlotExists(const std::wstring& slot);
-
-// --- async cache for the render-thread picker (mirrors lobby_client) -------------
-
-// Kick a scan: stage A (dir/classify/CDO defaults) on the game thread, stage B
-// (per-file GVAS metadata reads, mtime-cached) on a worker thread; the result is
-// cached for CopySaves. Non-blocking, safe from the render thread. Coalesces (no
-// overlapping scans). Call on picker-open / explicit refresh / after
-// CreateNamedSave -- not from the per-frame ImGui draw (the coalesce prevents
-// OVERLAP, not a re-post-every-frame churn).
+// Kick a scan: the directory listing and the game's defaults on the game thread, the .meta reads
+// on a worker. Non-blocking, coalesced, safe from the render thread.
 void RefreshAsync();
 
-// Copy the cached save list (render thread). Returns a revision counter that bumps
-// on each COMPLETED scan, so the UI can detect "new data landed".
+// Copy the cached list. Returns a revision counter that bumps on each completed scan.
 uint64_t CopySaves(std::vector<SaveInfo>& out);
 
-// The running game's version as its own slot menu compares it against a save's Version:
-// lib_C::gameVersion with an empty prefix and suffix, which is the project version ("0.9.0").
-// Resolved on the game thread by a scan; empty until one has. Any thread.
+// The running game's version as its own slot menu compares it (lib_C::gameVersion). Resolved by a
+// scan on the game thread; empty until one has. Any thread.
 std::wstring GameVersion();
 
-// One-line status for the picker footer ("Scanning..." / "N save(s)" / an error).
+// One-line status for the picker footer ("Scanning..." / "N worlds" / an error).
 std::string Status();
 
 }  // namespace ue_wrap::save_browser

@@ -87,15 +87,16 @@ std::string W2A(const std::wstring& w) {
 // does ("Conflict version!", the two versions, launch anyways or return).
 void DoHostExisting(const sb::SaveInfo& info);
 void AskOrHostExisting(const sb::SaveInfo& info) {
-    if (info.versionConflict) { g_conflictSlot = info.slot; return; }
+    if (!info.Hostable()) return;  // a legacy slot or an area entry: shown, not hosted
+    if (info.versionConflict) { g_conflictSlot = info.world; return; }
     DoHostExisting(info);
 }
 
 void DoHostExisting(const sb::SaveInfo& info) {
     sm::SaveChoice c;
     c.newGame = false;
-    c.slot = W2A(info.slot);
-    const std::string label = W2A(info.displayName.empty() ? info.slot : info.displayName);
+    c.slot = W2A(info.world);
+    const std::string label = W2A(info.displayName.empty() ? info.world : info.displayName);
     // Raise the host-boot cover only if the host action is ACCEPTED -- it hides the menu
     // so the user can't wander into the browser and connect to their own lobby while the
     // world loads, and gives "Starting your server -- loading <world>" feedback.
@@ -177,7 +178,7 @@ void Render() {
     bool open = true;
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
     if (ImGui::Begin("Host Game  -  choose a world###coop_save_picker", &open, flags)) {
-        ImGui::TextUnformatted("Pick a save to host, or start a New Game:");
+        ImGui::TextUnformatted("Pick a world to host, or start a new one:");
         ImGui::SameLine();
         if (ImGui::SmallButton("Refresh")) sb::RefreshAsync();
         ImGui::SameLine();
@@ -189,12 +190,11 @@ void Render() {
         const ImGuiTableFlags tflags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                        ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable |
                                        ImGuiTableFlags_PadOuterX;
-        if (ImGui::BeginTable("##savelist", 5, tflags, ImVec2(0.0f, -footer))) {
+        if (ImGui::BeginTable("##savelist", 4, tflags, ImVec2(0.0f, -footer))) {
             ImGui::TableSetupScrollFreeze(0, 1);
             ImGui::TableSetupColumn("Name",    ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("Mode",    ImGuiTableColumnFlags_WidthFixed, S(80.0f));
             ImGui::TableSetupColumn("Day",     ImGuiTableColumnFlags_WidthFixed, S(50.0f));
-            ImGui::TableSetupColumn("Health",  ImGuiTableColumnFlags_WidthFixed, S(64.0f));
             ImGui::TableSetupColumn("Version", ImGuiTableColumnFlags_WidthFixed, S(70.0f));
             ImGui::TableHeadersRow();
 
@@ -204,7 +204,10 @@ void Render() {
                 ImGui::PushID(i);
 
                 ImGui::TableSetColumnIndex(0);
-                const std::string disp = W2A(s.displayName.empty() ? s.slot : s.displayName);
+                std::string disp = W2A(s.displayName.empty() ? s.world : s.displayName);
+                if (s.legacy) disp += "  (old save: convert it in the game's Load menu)";
+                else if (s.inArea) disp += "  (saved in an area)";
+                if (!s.Hostable()) ImGui::BeginDisabled();
                 if (ImGui::Selectable(disp.c_str(), g_selected == i,
                                       ImGuiSelectableFlags_SpanAllColumns |
                                       ImGuiSelectableFlags_AllowDoubleClick)) {
@@ -213,11 +216,11 @@ void Render() {
                 }
                 ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(W2A(s.modeLabel).c_str());
                 ImGui::TableSetColumnIndex(2); ImGui::Text("%d", s.day);
-                ImGui::TableSetColumnIndex(3); ImGui::Text("%.0f/%.0f", s.health, s.maxHealth);
-                ImGui::TableSetColumnIndex(4);
+                ImGui::TableSetColumnIndex(3);
                 if (s.versionConflict) ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "%s",
                                                           s.version.empty() ? "unk!" : W2A(s.version).c_str());
                 else                   ImGui::TextDisabled("%s", W2A(s.version).c_str());
+                if (!s.Hostable()) ImGui::EndDisabled();
 
                 ImGui::PopID();
             }
@@ -232,7 +235,7 @@ void Render() {
         // Enter in the name field = the primary action: a text field with one obvious
         // action submits on Enter.
         const bool nameEnter = ImGui::InputTextWithHint(
-            "##newname", "save name", g_newName, sizeof(g_newName),
+            "##newname", "world name", g_newName, sizeof(g_newName),
             ImGuiInputTextFlags_EnterReturnsTrue);
         ImGui::SameLine();
         const bool canNew = g_newName[0] != '\0';
@@ -272,9 +275,10 @@ void Render() {
 
         // Footer: Host the selected save / Cancel + the lobby params.
         ImGui::Separator();
-        const bool hasSel = g_selected >= 0 && g_selected < static_cast<int>(g_saves.size());
+        const bool hasSel = g_selected >= 0 && g_selected < static_cast<int>(g_saves.size()) &&
+                            g_saves[g_selected].Hostable();
         if (!hasSel) ImGui::BeginDisabled();
-        if (ImGui::Button("Host selected save", ImVec2(S(170.0f), 0.0f)) && hasSel)
+        if (ImGui::Button("Host selected world", ImVec2(S(170.0f), 0.0f)) && hasSel)
             AskOrHostExisting(g_saves[g_selected]);
         if (!hasSel) ImGui::EndDisabled();
         ImGui::SameLine();
@@ -286,7 +290,7 @@ void Render() {
         // The version warning, over the picker.
         if (!g_conflictSlot.empty()) {
             const sb::SaveInfo* held = nullptr;
-            for (const sb::SaveInfo& s : g_saves) if (s.slot == g_conflictSlot) held = &s;
+            for (const sb::SaveInfo& s : g_saves) if (s.world == g_conflictSlot) held = &s;
             if (!held) g_conflictSlot.clear();  // the save went away under the warning
             else {
                 ImGui::OpenPopup("Conflict version!###coop_save_conflict");

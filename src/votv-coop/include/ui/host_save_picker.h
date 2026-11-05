@@ -1,10 +1,10 @@
 // ui/host_save_picker.h -- the Host-Game save picker (ImGui modal over the menu).
 //
-// Native functions, ImGui on top: lists existing saves via ue_wrap::save_browser
-// (which drives VOTV's own loadSlots) and offers a New Game (save_browser::CreateNamedSave
-// = VOTV's CreateSaveGameObject + SaveGameToSlot). On confirm it calls
-// coop::session_manager::HostWithSave -> the harness LOADS the chosen world (or creates
-// the new save) THEN starts the host session.
+// Native functions, ImGui on top: lists the worlds via ue_wrap::save_browser (each 0.10.0
+// world folder's .meta, read off disk) and offers a new world (ue_wrap::world_folder::Create,
+// the game's own createSaveSlotTreeDirectory). On confirm it calls
+// coop::session_manager::HostWithSave -> the harness LOADS the chosen world (or creates the
+// new one) THEN starts the host session.
 //
 // Opened from the server browser's "Host Game" button (which passes the lobby host
 // params). Interactive surface (cursor + input), like the server browser.

@@ -65,6 +65,7 @@
 #include "coop/props/prop_snapshot.h"
 #include "coop/props/trash_morph_gate.h"
 #include "coop/save/save_guard.h"
+#include "coop/save/save_block.h"
 #include "coop/save/save_transfer.h"
 #include "coop/session/join_beacon.h"
 #include "coop/session/join_progress.h"
@@ -341,6 +342,9 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the trash morph gate's three verbs: a joiner's pile loads with the save, and the watch is
     // by class and name, so no pile runs a morph unjudged. Idempotent across Stop/Start.
     coop::trash_morph_gate::Install(&g_session);
+    // Only the host saves, from before the world: a joiner's world load ends in the game's own
+    // post-load save, and its save object carries the host's folder path. Idempotent.
+    coop::save_block::Install(&g_session);
     if (netCfg.role == coop::net::Role::Host) {
         // Snapshot the canonical save before coop injects state (host only; clients are
         // save-blocked); synchronous, so it completes before Start.

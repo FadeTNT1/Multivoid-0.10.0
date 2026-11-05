@@ -9,6 +9,7 @@
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
 #include "coop/session/session_manager.h"
+#include "ui/host_create_world.h"      // the game's own create pane, for Create world
 #include "ui/host_session_settings.h"   // step two, what Next opens
 #include "ui/input_focus.h"
 #include "ui/native_screen.h"
@@ -97,6 +98,7 @@ void* g_status   = nullptr;
 std::string g_lastStatus;
 void* g_backBtn  = nullptr;
 void* g_hostBtn  = nullptr;
+void* g_createBtn = nullptr;   // Create world: the game's create pane, then step two
 // Sized from the table, never spelled again: as a literal beside a literal-sized table, every
 // loop was a separate place to forget when the table shrank, and an over-run loop reads a null
 // and silently draws nothing.
@@ -109,7 +111,7 @@ int32_t g_priorIndex = -1;
 bool    g_shown      = false;
 int     g_buildAttempts = 0;
 
-// The chosen world by slot name; empty is New game, the default, since a fresh world is the only
+// The chosen world by its key (save_browser::SaveInfo::world); empty is New game, the default, since a fresh world is the only
 // choice that always exists. Not an index: the list is sorted newest-first by last played and
 // re-scanned on every Show, so an index chosen before a host, a quit and a reopen names a
 // different world, and a wrong slot is a wrong save. The browser keys on lobbyId for the same
@@ -165,7 +167,7 @@ std::string Narrow(const std::wstring& w) {
 int SlotIndex() {
     if (g_selectedSlot.empty()) return -1;
     for (size_t i = 0; i < g_saves.size(); ++i)
-        if (g_saves[i].slot == g_selectedSlot) return static_cast<int>(i);
+        if (g_saves[i].world == g_selectedSlot) return static_cast<int>(i);
     return -1;
 }
 
@@ -314,13 +316,16 @@ bool BuildScreen(void* switcher) {
         // Sentence case: VOTV uppercases no button label anywhere.
         g_backBtn = NS::BuildButton(footRow, backDonor, L"Back", NS::kBtnFontPx);
         g_status  = NS::AddText(footRow, L"", 16, kText, NS::kJustCenter, 1.f);
+        // The game's own create pane, with its rules editor; the world it makes goes on to step two.
+        g_createBtn = NS::BuildButton(footRow, backDonor, L"Create world", NS::kBtnFontPx);
         // "Next", not "Host": this window no longer hosts, and a label promising the last step
         // while a second one follows is a lie the player notices at once.
         g_hostBtn = NS::BuildButton(footRow, backDonor, L"Next", NS::kBtnFontPx);
-        if (!g_backBtn || !g_hostBtn) return false;
+        if (!g_backBtn || !g_hostBtn || !g_createBtn) return false;
         // The status text carries all the fill weight, so it takes the slack and pushes the two
         // buttons to the ends.
         NS::SetHSlot(NS::SlotOf(g_backBtn), 0.f, NS::kLeft,  NS::kCenter);
+        NS::SetHSlot(NS::SlotOf(g_createBtn), 0.f, NS::kRight, NS::kCenter);
         NS::SetHSlot(NS::SlotOf(g_hostBtn), 0.f, NS::kRight, NS::kCenter);
         if (void* s = NS::AddVFill(col, footRow, 0.f, NS::kFill, NS::kBottom))
             NS::SetSlotPadding(s, P::off::UVerticalBoxSlot_Padding, 0.f, kPadPx, 0.f, 0.f);
@@ -369,8 +374,12 @@ void SyncSaves() {
         E::SetWidgetVisibility(g_saveRows[i].box, live ? 0 : 1);   // Visible / Collapsed
         if (!live) continue;
         const sb::SaveInfo& s = g_saves[static_cast<size_t>(i)];
-        SetText(g_saveRows[i].a, s.displayName.empty() ? s.slot : s.displayName, kText);
-        SetText(g_saveRows[i].b, s.modeLabel, kDim);
+        SetText(g_saveRows[i].a, s.displayName.empty() ? s.world : s.displayName, kText);
+        // A row that cannot be hosted says why in the mode column: an old flat save is converted in
+        // the game's own Load menu, and an entry saved inside an area cannot start a hosted world.
+        if (s.legacy)       SetText(g_saveRows[i].b, L"old save, convert in Load", kDim);
+        else if (s.inArea)  SetText(g_saveRows[i].b, L"saved in an area", kDim);
+        else                SetText(g_saveRows[i].b, s.modeLabel, kDim);
         // A save of another game version says so in its row, before the player commits to it.
         const std::wstring day = L"day " + std::to_wstring(s.day);
         if (s.versionConflict) SetText(g_saveRows[i].c, day + L"   " + (s.version.empty() ? L"unk!" : s.version), kBad);
@@ -410,6 +419,24 @@ void UpdateHover() {
     if (g_hoverRow != prevRow || g_hoverConn != prevConn) RepaintAll();
 }
 
+// The session's name, derived rather than typed: the browser lists servers by name and "<nick>'s
+// game" tells another player who is hosting.
+std::string SessionName() {
+    return sm::Nickname().empty() ? "Multivoid game" : sm::Nickname() + "'s game";
+}
+
+// A world Create world just made: straight to step two, as Next on it would go. It is on disk but
+// not yet in the list (the rescan is in flight), and a fresh world has no version to warn about.
+void NextWithCreated(const std::wstring& folder) {
+    g_selectedSlot = folder;
+    DropConflictWarning();
+    sm::SaveChoice c;
+    c.newGame = false;
+    c.slot = Narrow(folder);
+    UE_LOGI("host_window_native: NEXT -- created world '%s' conn=%d", c.slot.c_str(), g_connMode);
+    ui::host_session_settings::Open(c, SessionName(), g_connMode);
+}
+
 // Next hands the two choices made here to step two, which owns the host call: a hosting path here
 // as well would be two host actions.
 void DoNext() {
@@ -431,26 +458,26 @@ void DoNext() {
         // two versions, and the choice to launch anyways or return. Here the first Next is the stop
         // and says so; a second Next on the same save is "launch anyways", and choosing any other
         // world is "return".
-        if (save.versionConflict && g_conflictWarnedSlot != save.slot) {
-            g_conflictWarnedSlot = save.slot;
+        if (!save.Hostable()) return;   // shown, never selected; a stale selection does nothing
+        if (save.versionConflict && g_conflictWarnedSlot != save.world) {
+            g_conflictWarnedSlot = save.world;
             // Short on purpose: the footer's middle cell holds about sixty characters at this size,
             // and a longer line is clipped at both ends.
             g_conflictLine = "Conflict version! " +
                              (save.version.empty() ? std::string("unknown") : Narrow(save.version)) +
                              ", game " + Narrow(sb::GameVersion()) + ". Next again to launch.";
             UE_LOGI("host_window_native: NEXT held -- save '%ls' is version '%ls', the game is '%ls'",
-                    save.slot.c_str(), save.version.c_str(), sb::GameVersion().c_str());
+                    save.world.c_str(), save.version.c_str(), sb::GameVersion().c_str());
             return;
         }
         c.newGame = false;
-        c.slot    = Narrow(save.slot);
+        c.slot    = Narrow(save.world);
     }
     DropConflictWarning();
     // The name, derived rather than typed: the browser lists servers by name and "<nick>'s game"
     // tells another player who is hosting. Resolved at the moment the player commits to a world, so
     // the two halves of one decision travel together.
-    const std::string name = sm::Nickname().empty() ? "Multivoid game"
-                                                    : sm::Nickname() + "'s game";
+    const std::string name = SessionName();
     UE_LOGI("host_window_native: NEXT -- world=%s conn=%d name='%s'",
             c.newGame ? "<new game>" : c.slot.c_str(), g_connMode, name.c_str());
     ui::host_session_settings::Open(c, name, g_connMode);
@@ -477,6 +504,13 @@ void PollChrome() {
     // does not, and unifying both on geometry turned a passing close into a failing one.
     if (g_backBtn  && E::WidgetIsHovered(g_backBtn))  { Hide("BACK"); return; }
     if (g_hostBtn  && E::WidgetIsHovered(g_hostBtn))  { DoNext(); return; }
+    if (g_createBtn && E::WidgetIsHovered(g_createBtn)) {
+        // The switcher goes to the game's save menu; this window reconciles itself hidden on the
+        // next tick and is shown again when the creation ends.
+        if (!ui::host_create_world::Begin(g_switcher))
+            g_conflictLine = "Create world is not available in this menu.";
+        return;
+    }
     for (int i = 0; i < kConnCount; ++i)
         if (g_connRow[i] && NS::CursorOverWidget(g_connRow[i])) { g_connMode = i; RepaintAll(); return; }
     if (g_newGameRow.bg && NS::CursorOverWidget(g_newGameRow.bg)) {
@@ -486,8 +520,9 @@ void PollChrome() {
     // there); re-deriving it here would be a second implementation that could disagree. Bounded by
     // the saves, not by the row widgets: a hover index outside them is a collapsed row and selects
     // nothing, so this branch is not the fall-through for every click that hits no control.
-    if (g_hoverRow >= 0 && g_hoverRow < static_cast<int>(g_saves.size())) {
-        g_selectedSlot = g_saves[static_cast<size_t>(g_hoverRow)].slot;
+    if (g_hoverRow >= 0 && g_hoverRow < static_cast<int>(g_saves.size()) &&
+        g_saves[static_cast<size_t>(g_hoverRow)].Hostable()) {
+        g_selectedSlot = g_saves[static_cast<size_t>(g_hoverRow)].world;
         if (g_selectedSlot != g_conflictWarnedSlot) DropConflictWarning();
         RepaintAll();
         return;
@@ -585,7 +620,8 @@ void OnMenuTick(void* menu, void* switcher) {
     if (menu != g_menu) {
         g_menu = menu;
         g_root = nullptr; g_list = nullptr; g_status = nullptr; g_scrimW = nullptr;
-        g_backBtn = nullptr; g_hostBtn = nullptr;
+        g_backBtn = nullptr; g_hostBtn = nullptr; g_createBtn = nullptr;
+        ui::host_create_world::Reset();
         g_newGameRow = Row{};
         g_saveRows.clear();
         for (int i = 0; i < kConnCount; ++i) { g_connRow[i] = nullptr; g_connLabel[i] = nullptr; }
@@ -645,6 +681,17 @@ void OnMenuTick(void* menu, void* switcher) {
                     "(ttl %llu) -- no main-menu tick arrived to show the window",
                     static_cast<unsigned long long>(age),
                     static_cast<unsigned long long>(kIntentTtlMs));
+    }
+    // A Create world in flight owns the switcher until it ends; then this window takes it back, and a
+    // created world goes on to step two.
+    if (ui::host_create_world::Running()) {
+        std::wstring folder;
+        const ui::host_create_world::State cs = ui::host_create_world::Poll(switcher, folder);
+        if (cs == ui::host_create_world::State::Running) return;
+        U::SwitcherSetIndex(switcher, g_ourIndex);
+        sb::RefreshAsync();
+        if (cs == ui::host_create_world::State::Created) NextWithCreated(folder);
+        return;
     }
     // Reconcile against the live index in both directions: a sibling navigating away is observed,
     // and so is one navigating back. Losing the screen by observation but regaining it only by

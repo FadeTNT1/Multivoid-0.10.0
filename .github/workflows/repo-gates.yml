@@ -56,6 +56,9 @@ jobs:
       - name: Prop motion scan regression
         run: python3 .github/ci/prop_motion_scan_drill.py
 
+      - name: World metadata reader regression
+        run: python3 .github/ci/world_meta_drill.py
+
       - name: Public-leak gate drill
         run: python3 .github/ci/public_leak_gate_drill.py
 

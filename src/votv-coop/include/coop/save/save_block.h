@@ -1,18 +1,13 @@
-// coop/save/save_block.h -- client-side world-save block. During a coop session the HOST's save is
-// the single canonical one; CLIENTS must not write the world save -- their pre-coop save is left
-// UNTOUCHED, and coop-only mirror state (phantom props and NPCs) is never serialized into a
-// client's slot. The write block below is decided when a save fires: shut for a client in a
-// running session and for as long as the mirror world that session built is still what is loaded,
-// open otherwise -- so a player who has left plays single-player again and saves, and a host's save
-// is always written. The cycle block is set on the mirror's gamemode and dies with that world.
-// The WRITE block is a gate on the engine's save function (ue_wrap/engine/save_to_slot_hook, the
-// chokepoint every save path funnels through): it cancels a write of the world-save container
-// (saveSlot_C); the harmless meta save (save_main_C) never reaches it.
-// The CYCLE block holds gamemode.disableSave true, which saveSlot_C::save tests at its head and
-// returns on, before the world gather (saveObjects) and the write funnel. The gamemode's own
-// triggers funnel through save(), and no bytecode in mainGamemode ever writes disableSave; a few
-// callers elsewhere reach the engine's save function without it, which is what the write block is
-// for.
+// coop/save/save_block.h -- only the host saves. The host's world is the one canonical save,
+// written into its own world folder; a client never writes a world file. Every world-save verb is
+// gated at its body through the script gate: the gamemode's save (the pause menu's and the
+// quicksave key's entry), saveSlot_C's save, saveToSlot, saveManual, savePlayerOnly and saveSelf,
+// and the metadata's and the persistent object's writes. The role is read when the call fires: a
+// client of a running session, or a process whose loaded world is still that client's mirror, is
+// refused; a host and a solo world run. A save the client asked for (the gamemode's save from the
+// player or the pause menu, not an autosave) puts "You're not the host, you can't save." in its
+// chat. Two belts: gamemode.disableSave held true on a client's mirror, and the SaveGameToSlot
+// detour (ue_wrap/engine/save_to_slot_hook) refusing a flat-slot world write. docs/saving.md.
 
 #pragma once
 
@@ -20,16 +15,21 @@ namespace coop::net { class Session; }
 
 namespace coop::save_block {
 
-// Register the write-block's gate and make sure the engine hook is installed. Idempotent; safe to
-// call every tick from the install pump (subsystems::Install). In every role: the hook is
-// one per process and the gate decides per save, so a host's save passes and is reported to
-// whoever listens for it.
+// Register the gates. Idempotent, in every role. Called at session start, before a joiner's world
+// loads (a client's post-load save must meet the gate), and again by the world-up install pump.
 void Install(coop::net::Session* session);
 
-// Part 3 driver: hold gamemode.disableSave=true on the CLIENT of a running session (no-op on
-// the host / with no session running). Cheap steady state (one liveness check + one masked-bit
-// read); the gamemode re-walk after a world change is throttled to 2 s. Call
-// per gameplay pump tick.
+// Drive the gate's name resolve until every save-verb watch has settled. Every session tick from
+// the first, the menu-mode join's transfer wait included. Game thread.
+void Pump();
+
+// Hold gamemode.disableSave=true on the client of a running session (a no-op on the host). Cheap
+// steady state. Call per gameplay pump tick.
 void Tick(coop::net::Session* session);
+
+// Called on the game thread after saveSlot_C::saveToSlot ran on a peer that may save, with the save
+// object that was written: the moment the world on disk changed. One listener.
+using WrittenFn = void (*)(void* saveObject);
+void SetWritten(WrittenFn fn);
 
 }  // namespace coop::save_block
