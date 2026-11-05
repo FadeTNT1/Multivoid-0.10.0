@@ -482,15 +482,11 @@ inline constexpr size_t Aprop_sleep         = 0x02E5;  // bool (prop settled/sle
 inline constexpr size_t Aprop_Key           = 0x02E8;  // FName (ComparisonIndex @ +0, Number @ +4)
 inline constexpr size_t Aactor_save_Key     = 0x0230;  // FName: actor_save_C's key (a trash-bits pile's identity)
 inline constexpr size_t Aprop_StaticMesh    = 0x0238;  // UStaticMeshComponent*
-// The per-material prop sound set: prop.physicsImpact -> physSoundData -> soft_30, the cue
-// the native E grab plays (mainPlayer ubergraph @100337, volume 0.5, pitch 1.0). The cache
-// fills LAZILY, from the lib_C::physSound DataTable row on an impact, so a never-impacted
-// prop reads empty and a caller must fall back to a fresh lookup rather than treat the
-// empty cache as a row miss.
+// prop.physicsImpact: the comp_physicsImpact_C component. The grab / land cue is not read from an
+// inline struct cached on it (the old physSoundData / PhysMat offsets were the 0.9.x layout and are
+// gone); ue_wrap/engine/physical_audio resolves the component's material and its cue by reflected
+// property name. Kept here only for the sdk_check offset audit.
 inline constexpr size_t Aprop_physicsImpact          = 0x0230;  // Ucomp_physicsImpact_C*  prop.hpp:8
-inline constexpr size_t CompPhysImpact_physSoundData = 0x00C8;  // Fstruct_physSound (inline, 0x98)  comp_physicsImpact.hpp:9
-inline constexpr size_t CompPhysImpact_PhysMat       = 0x0290;  // UPhysicalMaterial*  comp_physicsImpact.hpp (the comp's cached physmat -- input for a fresh lib_C::physSound lookup)
-inline constexpr size_t FstructPhysSound_soft        = 0x0010;  // USoundBase* soft_30  struct_physSound.hpp
 
 // The freecam gamma fix: a bare ACameraActor renders with the default post-process, so the
 // player camera's FPostProcessSettings are copied onto it, with the one TArray

@@ -6,6 +6,7 @@
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/actors/prop.h"
+#include "ue_wrap/engine/physical_audio.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
 
@@ -33,36 +34,7 @@ void* ResolveAttenuation() {
     return sAtt;
 }
 
-// Which row of the material's Fstruct_physSound to pull.
-enum class PhysCue { kSoft, kImpact };
-
-// The FRESH DataTable lookup the local grab itself does (mainPlayer uber
-// @100003: lib_C::physSound(hit.PhysMat)). The lookup's `return` bool is the
-// @100067 row-miss gate: false -> NO sound, same as the local grabber hears
-// for unmapped materials. Null physmat / unresolved lib -> null. `which`
-// selects the row: kSoft = the grab pickup cue; kImpact = the land/impact thud.
-void* CueFromPhysMat(void* physmat, void* worldCtx, PhysCue which) {
-    if (!physmat || !R::IsLive(physmat)) return nullptr;
-    static void* sLibCdo = nullptr;
-    static void* sPhysSoundFn = nullptr;
-    if (!sLibCdo || !sPhysSoundFn) {
-        if (void* cls = R::FindClass(L"lib_C")) {
-            sLibCdo = R::FindClassDefaultObject(L"lib_C");
-            sPhysSoundFn = R::FindFunction(cls, L"physSound");
-        }
-    }
-    if (!sLibCdo || !sPhysSoundFn) return nullptr;
-    ue_wrap::ParamFrame f(sPhysSoundFn);
-    f.Set<void*>(L"PhysMat", physmat);
-    f.Set<void*>(L"__WorldContext", worldCtx);
-    if (!ue_wrap::Call(sLibCdo, f) || !f.Get<bool>(L"return")) return nullptr;
-    // The head of the Fstruct_physSound out-param, in field order: three cue rows,
-    // of which we read the impact one and the soft one (soft_30).
-    struct PhysSoundHead { void* step; void* impact; void* soft; };
-    const PhysSoundHead head = f.Get<PhysSoundHead>(L"Data");
-    void* cue = (which == PhysCue::kImpact) ? head.impact : head.soft;
-    return (cue && R::IsLive(cue)) ? cue : nullptr;
-}
+using ue_wrap::physical_audio::Cue;
 
 }  // namespace
 
@@ -71,36 +43,26 @@ void PlayGrabSound(void* propActor) {
     void* soft = nullptr;
     const char* path = nullptr;
     if (ue_wrap::prop::IsDescendantOfProp(propActor)) {
-        // prop_C path: the physicsImpact component caches both the material row and the
-        // PhysMat. Tier 1 (fast) reads the CACHED physSoundData.soft_30 -- but a
-        // never-impacted prop's cache can be EMPTY, since it fills lazily, so a null
-        // cache is NOT a row miss and tier 2 redoes the fresh lookup from the
-        // component's own PhysMat.
-        void* impactComp = *reinterpret_cast<void**>(
-            reinterpret_cast<uint8_t*>(propActor) + P::off::Aprop_physicsImpact);
-        if (!impactComp || !R::IsLive(impactComp)) {
-            UE_LOGI("prop_sound: grab cue SKIP -- physicsImpact null/dead (prop=%p)", propActor);
-            return;
-        }
-        soft = *reinterpret_cast<void**>(
-            reinterpret_cast<uint8_t*>(impactComp) +
-            P::off::CompPhysImpact_physSoundData + P::off::FstructPhysSound_soft);
-        path = "cache";
-        if (!soft || !R::IsLive(soft)) {
-            path = "fresh";
-            void* physmat = *reinterpret_cast<void**>(
-                reinterpret_cast<uint8_t*>(impactComp) + P::off::CompPhysImpact_PhysMat);
-            soft = CueFromPhysMat(physmat, propActor, PhysCue::kSoft);
+        // prop_C path: the physicsImpact component's own material (override, else physmat),
+        // resolved to its audio material through lib_C::getPhysicalAsAudio; the pickup cue
+        // is that material's sound_soft, exactly what the native grab plays. The root
+        // surface material backs it up when the component or its material is absent.
+        path = "impact-comp";
+        soft = ue_wrap::physical_audio::CueFromPropImpactComponent(propActor, Cue::kSoft);
+        if (!soft) {
+            path = "root-mat";
+            soft = ue_wrap::physical_audio::CueFromPhysicalMaterial(
+                ue_wrap::engine::GetActorRootPhysicalMaterial(propActor), propActor, Cue::kSoft);
         }
     } else {
         // Generic-actor path: the trash clump derives from plain Actor DESPITE the prop_
         // name, so pile and clump grabs were silent on peers while the grabber natively
         // heard the garbage soft cue. Resolve the physmat the way the grabber's trace
         // did -- root surface material -> physical material -- and feed the same
-        // physSound lookup.
+        // getPhysicalAsAudio lookup.
         path = "root-mat";
-        soft = CueFromPhysMat(
-            ue_wrap::engine::GetActorRootPhysicalMaterial(propActor), propActor, PhysCue::kSoft);
+        soft = ue_wrap::physical_audio::CueFromPhysicalMaterial(
+            ue_wrap::engine::GetActorRootPhysicalMaterial(propActor), propActor, Cue::kSoft);
     }
     if (!soft || !R::IsLive(soft)) {
         UE_LOGI("prop_sound: grab cue SKIP -- no soft cue (%s miss; actor=%p)",
@@ -169,15 +131,14 @@ void PlayThrowWhoosh(void* propActor) {
 
 void PlayLandSound(void* propActor) {
     if (!propActor || !R::IsLive(propActor)) return;
-    // The pile's landed-material IMPACT cue (physSound.impact) -- the sibling of the
-    // grab's soft cue. A pile is a plain actor (not Aprop_C), so resolve the physmat
-    // the same way the generic-actor grab path does: root surface material ->
-    // physical material -> the physSound row. Silent on a row miss (native parity,
-    // the @100067 gate). Neither the clump-to-pile conversion nor the pile's
-    // BeginPlay and init play an explicit sound; the native "thud" IS this material
-    // impact.
-    void* impact = CueFromPhysMat(
-        ue_wrap::engine::GetActorRootPhysicalMaterial(propActor), propActor, PhysCue::kImpact);
+    // The pile's landed-material IMPACT cue (the audio material's sound_impact) -- the
+    // sibling of the grab's soft cue. A pile is a plain actor (not Aprop_C), so resolve
+    // the physmat the same way the generic-actor grab path does: root surface material ->
+    // physical material -> lib_C::getPhysicalAsAudio. Silent when it resolves nothing.
+    // Neither the clump-to-pile conversion nor the pile's BeginPlay and init play an
+    // explicit sound; the native "thud" IS this material impact.
+    void* impact = ue_wrap::physical_audio::CueFromPhysicalMaterial(
+        ue_wrap::engine::GetActorRootPhysicalMaterial(propActor), propActor, Cue::kImpact);
     if (!impact || !R::IsLive(impact)) {
         UE_LOGI("prop_sound: land thud SKIP -- no impact cue (root-mat miss; pile=%p)", propActor);
         return;
