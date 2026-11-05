@@ -12,6 +12,7 @@
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/object_index.h"  // the fuzzy dedupe: one class and its instances
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflection_props.h"  // PropertyOffsetAndClass
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/desk/tape_caddy.h"  // the reel Progress reader and writer
 
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 namespace ue_wrap::prop {
@@ -266,21 +268,74 @@ bool EnsurePropBaseResolved() {
     return PropBaseClass() != nullptr;
 }
 
-// The trash pile's collect counters, raw int32 fields per the header dump; the displayed uses
-// count is their sum, formatted live by the look-at, so no refresh verb is needed.
+// The trash pile's collect counters, amountA and amountB, resolved by reflection on the pile's own
+// class. Both are IntProperty (4 bytes). The 0.9.0n offsets are a UObject* in 0.10.0, so the
+// offsets are never numeric: a class whose amountA /
+// amountB are missing, or are any type but IntProperty, is refused (no read, no write) and said once.
+// The displayed uses count is their sum, formatted live by the look-at, so no refresh verb is needed.
+struct PileCounterOffsets {
+    int32_t a = -1;
+    int32_t b = -1;
+    bool ok() const { return a >= 0 && b >= 0; }
+};
+
+bool ResolveIntCounter(void* cls, const wchar_t* name, int32_t& off) {
+    std::wstring type;
+    if (!R::PropertyOffsetAndClass(cls, name, off, type)) {
+        UE_LOGW("trash_pile: %ls not found on %ls -- counters refused for this class", name,
+                R::ToString(R::NameOf(cls)).c_str());
+        off = -1;
+        return false;
+    }
+    if (type != P::name::TrashPileCounterType || off < 0) {
+        UE_LOGW("trash_pile: %ls on %ls is %ls at %d, not %ls -- counters refused for this class", name,
+                R::ToString(R::NameOf(cls)).c_str(), type.c_str(), off, P::name::TrashPileCounterType);
+        off = -1;
+        return false;
+    }
+    return true;
+}
+
+// Resolved once per class object, success or refusal alike, so a refusal logs once and a good
+// class is never walked twice. Any thread may ask.
+PileCounterOffsets PileCounters(void* actor) {
+    static std::mutex s_mu;
+    static std::unordered_map<void*, PileCounterOffsets> s_byClass;
+    void* cls = R::ClassOf(actor);
+    if (!cls) return {};
+    std::lock_guard<std::mutex> lk(s_mu);
+    auto it = s_byClass.find(cls);
+    if (it != s_byClass.end()) return it->second;
+    PileCounterOffsets r;
+    if (ResolveIntCounter(cls, P::name::TrashPileCounterA, r.a) &&
+        ResolveIntCounter(cls, P::name::TrashPileCounterB, r.b)) {
+        UE_LOGI("trash_pile: counters resolved on %ls: %ls@0x%04X %ls@0x%04X",
+                R::ToString(R::NameOf(cls)).c_str(), P::name::TrashPileCounterA, r.a,
+                P::name::TrashPileCounterB, r.b);
+    } else {
+        r = {};
+    }
+    s_byClass.emplace(cls, r);
+    return r;
+}
+
 bool ReadTrashPileAmounts(void* actor, int32_t& a, int32_t& b) {
     if (!actor || !IsTrashBitsPile(actor)) return false;
+    const PileCounterOffsets o = PileCounters(actor);
+    if (!o.ok()) return false;
     const uint8_t* base = reinterpret_cast<const uint8_t*>(actor);
-    a = *reinterpret_cast<const int32_t*>(base + 0x0260);
-    b = *reinterpret_cast<const int32_t*>(base + 0x0264);
+    a = *reinterpret_cast<const int32_t*>(base + o.a);
+    b = *reinterpret_cast<const int32_t*>(base + o.b);
     return true;
 }
 
 bool WriteTrashPileAmounts(void* actor, int32_t a, int32_t b) {
     if (!actor || !IsTrashBitsPile(actor)) return false;
+    const PileCounterOffsets o = PileCounters(actor);
+    if (!o.ok()) return false;
     uint8_t* base = reinterpret_cast<uint8_t*>(actor);
-    *reinterpret_cast<int32_t*>(base + 0x0260) = a;
-    *reinterpret_cast<int32_t*>(base + 0x0264) = b;
+    *reinterpret_cast<int32_t*>(base + o.a) = a;
+    *reinterpret_cast<int32_t*>(base + o.b) = b;
     return true;
 }
 

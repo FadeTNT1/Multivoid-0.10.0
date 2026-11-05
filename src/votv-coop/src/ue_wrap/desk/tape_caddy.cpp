@@ -48,8 +48,11 @@ bool EnsureResolved() {
     if (!unitCls || !reelCls) return false;  // classes not loaded yet -- backoff above throttles
     int32_t big   = R::FindPropertyOffset(unitCls, L"reelBig");
     int32_t small = R::FindPropertyOffset(unitCls, L"reelSmall");
-    if (big < 0)   { UE_LOGW("tape_caddy: reelBig offset not found -- fallback 0x0288");   big = 0x0288; }
-    if (small < 0) { UE_LOGW("tape_caddy: reelSmall offset not found -- fallback 0x028C"); small = 0x028C; }
+    // No numeric fallback: the reel slots are written, and a stale offset lands in another field.
+    if (big < 0 || small < 0) {
+        UE_LOGW("tape_caddy: reelBig/reelSmall offset not found -- caddy access refused (retry in 1s)");
+        return false;
+    }
     void* updFn = R::FindFunction(unitCls, L"upd");
     if (!updFn) UE_LOGW("tape_caddy: upd() not found on wallunit_tapes_C -- slot repaint disabled");
     g_unitCls = unitCls; g_reelBaseCls = reelCls;
