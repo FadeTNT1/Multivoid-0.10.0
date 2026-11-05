@@ -15,6 +15,8 @@
 // world is world_identity's. Game thread.
 #pragma once
 
+#include <cstdint>
+
 namespace ue_wrap::world_singleton {
 
 // The live instance of the class named `className`, or null when none is loaded or the object index
@@ -25,5 +27,16 @@ void* Find(const wchar_t* className);
 // The common ones, by the names the profile gives them.
 void* Gamemode();       // mainGamemode_C
 void* GameInstance();   // the GameInstance class the profile names
+
+// The byte offset, on gamemode `gm`'s class, of its live save-object member: `save_slot` on 0.10.0,
+// `saveSlot` before (profile::name::GamemodeSaveSlotProp / ...Legacy, the current name tried first).
+// The ONE place that name is resolved, so every save-field reader follows a rename together. -1 when
+// `gm` is null or its class declares neither. Cached per class object.
+int32_t GamemodeSaveSlotOffset(void* gm);
+// The same, asked of the gamemode class itself.
+int32_t GamemodeSaveSlotOffsetOnClass(void* gmCls);
+
+// The live save object (UsaveSlot_C) the running gamemode holds, or null. Game thread.
+void* SaveSlot();
 
 }  // namespace ue_wrap::world_singleton

@@ -90,7 +90,8 @@ ItemSig CaptureContainerSlotSig(void* containerActor, int32_t slotIdx) {
     const uint8_t* base = ContainerSliceBase(containerActor, num);
     if (!base || slotIdx < 0 || slotIdx >= num) return {};
     SR::SaveRecord rec;
-    SR::ReadSaveRecord(base + static_cast<size_t>(slotIdx) * SR::kSaveStride, rec);
+    if (SR::RecordStride() <= 0) return {};
+    SR::ReadSaveRecord(base + static_cast<size_t>(slotIdx) * static_cast<size_t>(SR::RecordStride()), rec);
     const ItemSig s = SigOf(rec);
     UE_LOGI("dup_verifier: captured X from container slot %d -- cls=%ls key=%ls hash=%016llx valid=%d",
             slotIdx, s.className.c_str(), s.key.c_str(), static_cast<unsigned long long>(s.contentHash), s.valid ? 1 : 0);
@@ -116,7 +117,7 @@ int CountItemInstances(const ItemSig& x, bool print) {
             if (inner.num > 0) ++scannedSlices;
             for (int32_t j = 0; j < inner.num; ++j) {
                 SR::SaveRecord rec;
-                SR::ReadSaveRecord(inner.data + static_cast<size_t>(j) * SR::kSaveStride, rec);
+                if (!SR::ReadSaveRecord(inner.data + static_cast<size_t>(j) * static_cast<size_t>(SR::RecordStride()), rec)) break;
                 ++scannedRows;
                 if (SigOf(rec) == x) {
                     ++gobj;

@@ -214,9 +214,10 @@ std::wstring CompSignal() {
 
 int32_t CompLevel() {
     const uint8_t* base = static_cast<const uint8_t*>(ue_wrap::comp_pane::CompDataPtr());
-    if (!base) return -1;
+    const SD::Layout* L = SD::GetLayout();
+    if (!base || !L) return -1;
     int32_t level = 0;
-    std::memcpy(&level, base + SD::kOff_level, sizeof(level));
+    std::memcpy(&level, base + L->level, sizeof(level));
     return level;
 }
 
@@ -365,8 +366,9 @@ bool SetCompProgress(float progress) {
 
 bool SetCompLevel(int32_t level) {
     uint8_t* base = static_cast<uint8_t*>(ue_wrap::comp_pane::CompDataPtr());
-    if (!base) return false;
-    std::memcpy(base + SD::kOff_level, &level, sizeof(level));
+    const SD::Layout* L = SD::GetLayout();
+    if (!base || !L) return false;
+    std::memcpy(base + L->level, &level, sizeof(level));
     return true;
 }
 

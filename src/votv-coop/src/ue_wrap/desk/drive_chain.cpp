@@ -231,11 +231,13 @@ bool ReadRack(void* rackActor, RackRow out[kRackSlots], int& outNum) {
     uint8_t* data = ArrayAt(rackActor, offData, nData);
     uint8_t* has  = ArrayAt(rackActor, offHas, nHas);
     if (!data || !has || nData < 0 || nHas < 0) return false;
+    const int32_t stride = SD::Stride();
+    if (stride <= 0) return false;
     const int n = (nData < nHas ? nData : nHas);
     outNum = n < kRackSlots ? n : kRackSlots;
     for (int i = 0; i < outNum; ++i) {
         out[i].has = has[i] != 0;
-        if (!SD::ReadStruct(data + static_cast<size_t>(i) * SD::kStride, out[i].row))
+        if (!SD::ReadStruct(data + static_cast<size_t>(i) * static_cast<size_t>(stride), out[i].row))
             return false;
     }
     return true;
@@ -248,9 +250,10 @@ bool WriteRackRow(void* rackActor, int idx, const RackRow& in) {
     int32_t nData = 0, nHas = 0;
     uint8_t* data = ArrayAt(rackActor, offData, nData);
     uint8_t* has  = ArrayAt(rackActor, offHas, nHas);
-    if (!data || !has || idx >= nData || idx >= nHas) return false;
+    const int32_t stride = SD::Stride();
+    if (!data || !has || idx >= nData || idx >= nHas || stride <= 0) return false;
     static const SD::Row kEmpty{};
-    if (!SD::WriteStructLive(data + static_cast<size_t>(idx) * SD::kStride,
+    if (!SD::WriteStructLive(data + static_cast<size_t>(idx) * static_cast<size_t>(stride),
                              in.has ? in.row : kEmpty))
         return false;
     has[idx] = in.has ? 1 : 0;

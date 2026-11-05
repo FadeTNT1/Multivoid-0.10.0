@@ -183,11 +183,13 @@ bool ReadContents(void* inventory, std::vector<SR::SaveRecord>& out, size_t maxR
     const SR::Arr objs = SR::ReadArr(slot, 0);  // struct_mObject.obj @ +0
     if (countOut) *countOut = objs.num;
     if (static_cast<size_t>(objs.num) > maxRecords) return false;
+    const int32_t stride = SR::RecordStride();
+    if (stride <= 0) return false;
     out.clear();
     out.reserve(static_cast<size_t>(objs.num));
     for (int32_t i = 0; i < objs.num; ++i) {
         SR::SaveRecord r;
-        SR::ReadSaveRecord(objs.data + static_cast<size_t>(i) * SR::kSaveStride, r);
+        SR::ReadSaveRecord(objs.data + static_cast<size_t>(i) * static_cast<size_t>(stride), r);
         out.push_back(std::move(r));
     }
     return true;

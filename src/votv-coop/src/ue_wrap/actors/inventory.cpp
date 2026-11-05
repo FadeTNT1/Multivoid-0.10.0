@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 
 namespace ue_wrap::inventory {
 namespace {
@@ -20,22 +21,89 @@ namespace {
 namespace R = ue_wrap::reflection;
 namespace SR = ue_wrap::save_record;
 
-// saveSlot.hpp player-scoped arrays. The carried items are not among them: they live in
-// GObjStack[kPersonalSlot], resolved by reflection below.
-constexpr int32_t kOff_equipment     = 0x0440;  // TArray<Fstruct_equipment>
-constexpr int32_t kOff_hold          = 0x0450;  // TArray<Fstruct_equipment>
+// The equipment and hold arrays, MEASURED. Both are TArray<Fstruct_equipment> on the save object,
+// an element holding a propDynamic id, an embedded record and a tag. 0.10.0 moved both arrays,
+// dropped `hold`, and its struct_equipment1 carries a struct_betterSave (`betterdata`) instead of a
+// record. Swapping a header in at the old build's offsets, or zeroing a whole old record's span
+// inside an element, is then a write into whatever lives there now -- heap corruption. So the array offsets, the element struct, its stride
+// and its members are read off the running classes, the embedded member must BE the measured
+// record struct, and a layout that does not read that way makes the equipment half of this file
+// refuse (said once) while the carried half keeps working.
+struct EquipLayout {
+    bool    ok = false;
+    int32_t offEquipment = -1;  // saveSlot.equipment (TArray header)
+    int32_t offHold = -1;       // saveSlot.hold, -1 when the build has none
+    int32_t stride = 0;         // element stride (the array's inner ElementSize)
+    int32_t propName = -1;      // Fstruct_propDynamic.name FName, -1 when absent
+    int32_t propKey = -1;       // Fstruct_propDynamic.key FName, -1 when absent
+    int32_t data = -1;          // the embedded record
+    int32_t tag = -1;           // FName, -1 when absent
+};
+EquipLayout g_equip;
+void* g_equipMeasuredFor = nullptr;   // the save class the layout was measured on
 
-// Fstruct_equipment FIELD layout (struct_equipment.hpp; raw size 0x118, ARRAY STRIDE 0x120 -- see
-// kEquipStride below).
-constexpr int32_t kEquip_propName  = 0x00;   // Fstruct_propDynamic.name FName
-constexpr int32_t kEquip_propKey   = 0x08;   // Fstruct_propDynamic.key  FName
-constexpr int32_t kEquip_data      = 0x10;   // embedded Fstruct_save (in a 0x100 slot)
-constexpr int32_t kEquip_tag       = 0x110;  // FName
-// 16-ALIGNED stride (raw `Size: 0x118` -> Align(0x118,16) = 0x120). Fstruct_equipment embeds the
-// 16-aligned Fstruct_save, so it too is 16-aligned, and the struct that embeds it reports the
-// member as 0x120 wide. Same crash class as save_record::kSaveStride if the raw 0x118 is used for
-// the equipment/hold arrays with N>=2.
-constexpr int32_t kEquipStride     = 0x120;
+bool StartsWithI(const std::wstring& s, const wchar_t* prefix) {
+    const size_t n = std::wcslen(prefix);
+    return s.size() >= n && ::_wcsnicmp(s.c_str(), prefix, n) == 0;
+}
+
+// One equipment element struct's members, measured against the record layout.
+bool MeasureEquipStruct(void* equipStruct, int32_t stride, EquipLayout& L) {
+    if (!equipStruct || stride <= 0) return false;
+    const int32_t span = R::StructSize(equipStruct);
+    if (span <= 0 || span > stride) return false;
+    L.stride = stride;
+    for (const R::StructFieldInfo& f : R::EnumerateStructFields(equipStruct)) {
+        if (f.offset < 0 || f.offset + f.size > span) continue;
+        void* inner = R::PropertyInnerStruct(equipStruct, f.name.c_str());
+        if (inner && SR::IsRecordStruct(inner) && f.size >= SR::RecordSpan()) {
+            L.data = f.offset;
+        } else if (inner && f.offset == 0 && f.size == 16) {
+            // Fstruct_propDynamic {name, key}: two FNames.
+            const int32_t n = R::FindPropertyOffsetByPrefix(inner, L"name_");
+            const int32_t k = R::FindPropertyOffsetByPrefix(inner, L"key_");
+            if (n >= 0 && n + 8 <= 16) L.propName = n;
+            if (k >= 0 && k + 8 <= 16) L.propKey = k;
+        } else if (StartsWithI(f.name, L"tag_") && f.size == 8) {
+            L.tag = f.offset;
+        }
+    }
+    return L.data >= 0;
+}
+
+// The equipment layout of `save`'s class, measured once per class object.
+const EquipLayout* EquipLayoutOf(void* save) {
+    void* cls = save ? R::ClassOf(save) : nullptr;
+    if (!cls) return nullptr;
+    if (cls == g_equipMeasuredFor) return g_equip.ok ? &g_equip : nullptr;
+    if (!SR::Layout()) return nullptr;   // the record must be measured first; retried next call
+    g_equipMeasuredFor = cls;
+    g_equip = EquipLayout{};
+    EquipLayout L;
+    L.offEquipment = R::FindPropertyOffset(cls, L"equipment");
+    R::ArrayInnerInfo eq;
+    const bool eqOk = L.offEquipment >= 0 && R::ArrayPropertyInner(cls, L"equipment", eq) &&
+                      MeasureEquipStruct(eq.innerStruct, eq.elementSize, L);
+    if (eqOk) {
+        R::ArrayInnerInfo hd;
+        const int32_t offHold = R::FindPropertyOffset(cls, L"hold");
+        if (offHold >= 0 && R::ArrayPropertyInner(cls, L"hold", hd) && hd.innerStruct == eq.innerStruct &&
+            hd.elementSize == eq.elementSize)
+            L.offHold = offHold;
+    }
+    if (!eqOk) {
+        UE_LOGW("inventory: %ls.equipment does not read as an array of {propDynamic, record, tag} "
+                "(this build files equipment differently) -- the worn and held halves are NOT read or "
+                "written; the carried half is unaffected (this line prints once per save class)",
+                R::ToString(R::NameOf(cls)).c_str());
+        return nullptr;
+    }
+    L.ok = true;
+    g_equip = L;
+    UE_LOGI("inventory: equipment measured -- equipment@0x%X hold@%d stride=0x%X data@0x%X name@%d key@%d tag@%d",
+            L.offEquipment, L.offHold, L.stride, L.data, L.propName, L.propKey, L.tag);
+    return &g_equip;
+}
 
 // The player's GObjStack slot. Baked, not restored: prop_inventoryContainer_player_C's component
 // template serializes index=0, and the saveSlot CDO pre-seeds the slot, so it is the one index
@@ -78,18 +146,18 @@ template <class T> T ReadAt(const void* base, int32_t off) {
     return v;
 }
 
-void ReadEquipRecord(const void* base, EquipRecord& rec) {
-    rec.propName = SR::ReadFNameAt(base, kEquip_propName);
-    rec.propKey  = SR::ReadFNameAt(base, kEquip_propKey);
-    SR::ReadSaveRecord(reinterpret_cast<const uint8_t*>(base) + kEquip_data, rec.data);
-    rec.tag      = SR::ReadFNameAt(base, kEquip_tag);
+void ReadEquipRecord(const EquipLayout& L, const void* base, EquipRecord& rec) {
+    if (L.propName >= 0) rec.propName = SR::ReadFNameAt(base, L.propName);
+    if (L.propKey >= 0)  rec.propKey  = SR::ReadFNameAt(base, L.propKey);
+    SR::ReadSaveRecord(reinterpret_cast<const uint8_t*>(base) + L.data, rec.data);
+    if (L.tag >= 0)      rec.tag      = SR::ReadFNameAt(base, L.tag);
 }
 
-void WriteEquipRecord(uint8_t* base, const EquipRecord& r) {
-    SR::WriteFNameField(base + kEquip_propName, r.propName);
-    SR::WriteFNameField(base + kEquip_propKey, r.propKey);
-    SR::WriteSaveRecord(base + kEquip_data, r.data);  // embedded Fstruct_save (0x100 slot)
-    SR::WriteFNameField(base + kEquip_tag, r.tag);
+void WriteEquipRecord(const EquipLayout& L, uint8_t* base, const EquipRecord& r) {
+    if (L.propName >= 0) SR::WriteFNameField(base + L.propName, r.propName);
+    if (L.propKey >= 0)  SR::WriteFNameField(base + L.propKey, r.propKey);
+    SR::WriteSaveRecord(base + L.data, r.data);  // the embedded record, in a zeroed element
+    if (L.tag >= 0)      SR::WriteFNameField(base + L.tag, r.tag);
 }
 
 // Build one engine TArray<RecordT> from `recs` and overwrite the header at base+off. The
@@ -171,7 +239,7 @@ int32_t ValidatedPersonalSlot(SR::Arr& contents) {
 void* ResolveSaveSlot() {
     void* gm = world_singleton::Gamemode();
     if (!gm) return nullptr;
-    if (g_offSave < 0) g_offSave = R::FindPropertyOffset(R::ClassOf(gm), L"saveSlot");
+    if (g_offSave < 0) g_offSave = world_singleton::GamemodeSaveSlotOffset(gm);
     if (g_offSave < 0) return nullptr;
     void* save = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(gm) + g_offSave);
     return (save && R::IsLive(save)) ? save : nullptr;
@@ -179,18 +247,20 @@ void* ResolveSaveSlot() {
 
 std::wstring ReadHeldItemName() {
     void* save = ResolveSaveSlot();
-    if (!save) return {};
-    const SR::Arr hd = SR::ReadArr(save, kOff_hold);
+    const EquipLayout* L = EquipLayoutOf(save);
+    if (!save || !L || L->offHold < 0 || L->propName < 0) return {};
+    const SR::Arr hd = SR::ReadArr(save, L->offHold);
     if (!hd.data || hd.num < 1) return {};
-    std::wstring name = SR::ReadFNameAt(hd.data, kEquip_propName);
+    std::wstring name = SR::ReadFNameAt(hd.data, L->propName);
     if (name == L"None") name.clear();
     return name;
 }
 
 bool WriteHeldItem(const std::wstring& name, const wchar_t* classLeaf) {
     void* save = ResolveSaveSlot();
-    if (!save) return false;
-    const SR::Arr hd = SR::ReadArr(save, kOff_hold);
+    const EquipLayout* L = EquipLayoutOf(save);
+    if (!save || !L || L->offHold < 0 || L->propName < 0) return false;
+    const SR::Arr hd = SR::ReadArr(save, L->offHold);
     if (!hd.data || hd.num < 1) return false;
     if (classLeaf && !R::FindClass(classLeaf)) return false;
     auto* slot = const_cast<uint8_t*>(hd.data);
@@ -199,13 +269,14 @@ bool WriteHeldItem(const std::wstring& name, const wchar_t* classLeaf) {
     // propToDynamic also made the slot's own name from; an emptied hand's has neither. The rest of the
     // record stays, and its old buffers are orphaned, as every rewrite of one is.
     SR::SaveRecord rec;
-    SR::ReadSaveRecord(slot + kEquip_data, rec);
+    if (!SR::ReadSaveRecord(slot + L->data, rec)) return false;
     rec.className = classLeaf ? classLeaf : L"";
     if (classLeaf) rec.names.assign(1, std::vector<std::wstring>{name});
     else rec.names.clear();
-    std::memset(slot + kEquip_data, 0, SR::kSaveStride);
-    SR::WriteSaveRecord(slot + kEquip_data, rec);
-    SR::WriteFNameField(slot + kEquip_propName, name);
+    // Zeroed over the record's OWN measured span, inside the element the layout proved holds it.
+    std::memset(slot + L->data, 0, static_cast<size_t>(SR::RecordSpan()));
+    if (!SR::WriteSaveRecord(slot + L->data, rec)) return false;
+    SR::WriteFNameField(slot + L->propName, name);
     return true;
 }
 
@@ -218,20 +289,20 @@ bool ReadAll(PlayerInventory& out) {
     void* save = ResolveSaveSlot();
     if (!save) return false;
     out.inventory = std::move(live.records);
-    const SR::Arr eq = SR::ReadArr(save, kOff_equipment);
-    out.equipment.reserve(static_cast<size_t>(eq.num));
-    for (int32_t i = 0; i < eq.num; ++i) {
-        EquipRecord r;
-        ReadEquipRecord(eq.data + static_cast<size_t>(i) * kEquipStride, r);
-        out.equipment.push_back(std::move(r));
-    }
-    const SR::Arr hd = SR::ReadArr(save, kOff_hold);
-    out.hold.reserve(static_cast<size_t>(hd.num));
-    for (int32_t i = 0; i < hd.num; ++i) {
-        EquipRecord r;
-        ReadEquipRecord(hd.data + static_cast<size_t>(i) * kEquipStride, r);
-        out.hold.push_back(std::move(r));
-    }
+    const EquipLayout* L = EquipLayoutOf(save);
+    if (!L) return true;   // this build's equipment is not a record array: the carried half only
+    auto readArr = [&](int32_t off, std::vector<EquipRecord>& dst) {
+        if (off < 0) return;
+        const SR::Arr a = SR::ReadArr(save, off);
+        dst.reserve(static_cast<size_t>(a.num));
+        for (int32_t i = 0; i < a.num; ++i) {
+            EquipRecord r;
+            ReadEquipRecord(*L, a.data + static_cast<size_t>(i) * static_cast<size_t>(L->stride), r);
+            dst.push_back(std::move(r));
+        }
+    };
+    readArr(L->offEquipment, out.equipment);
+    readArr(L->offHold, out.hold);
     return true;
 }
 
@@ -247,11 +318,13 @@ bool ReadLivePersonalStore(LivePersonalStore& out) {
     const int32_t idx = ValidatedPersonalSlot(contents);
     if (idx < 0) return false;
 
+    const int32_t stride = SR::RecordStride();
+    if (stride <= 0) return false;
     out.slotIndex = idx;
     out.records.reserve(static_cast<size_t>(contents.num));
     for (int32_t i = 0; i < contents.num; ++i) {
         SR::SaveRecord r;
-        SR::ReadSaveRecord(contents.data + static_cast<size_t>(i) * SR::kSaveStride, r);
+        SR::ReadSaveRecord(contents.data + static_cast<size_t>(i) * static_cast<size_t>(stride), r);
         out.records.push_back(std::move(r));
     }
     return true;
@@ -272,22 +345,30 @@ bool ApplyToSaveObject(void* saveSlot, const PlayerInventory& inv) {
                 "write a partial inventory", saveSlot, kPersonalSlot);
         return false;
     }
-    BuildAndSwapArray(carried, 0, SR::kSaveStride, inv.inventory,
+    const int32_t stride = SR::RecordStride();
+    if (stride <= 0) {
+        UE_LOGW("inventory: ApplyToSaveObject -- the record layout is not measured; refusing to write");
+        return false;
+    }
+    BuildAndSwapArray(carried, 0, stride, inv.inventory,
                       [](uint8_t* e, const SR::SaveRecord& r) { SR::WriteSaveRecord(e, r); });
     // equipment and hold are FIXED-SHAPE slot arrays: the game finds an empty slot to equip into
     // (AddEquipment: Array_Find, "Not enough space" on -1) and writes hold[0] in place, and
     // nothing in it ever grows them. A profile with fewer slots than the save object -- an empty
-    // one above all -- is padded with blank slots to the shape the save object came with.
-    auto slotsOf = [saveSlot](int32_t off, const std::vector<EquipRecord>& recs) {
-        std::vector<EquipRecord> out = recs;
-        const size_t shape = static_cast<size_t>(SR::ReadArr(saveSlot, off).num);
-        if (out.size() < shape) out.resize(shape);
-        return out;
-    };
-    BuildAndSwapArray(saveSlot, kOff_equipment, kEquipStride, slotsOf(kOff_equipment, inv.equipment),
-                      [](uint8_t* e, const EquipRecord& r) { WriteEquipRecord(e, r); });
-    BuildAndSwapArray(saveSlot, kOff_hold, kEquipStride, slotsOf(kOff_hold, inv.hold),
-                      [](uint8_t* e, const EquipRecord& r) { WriteEquipRecord(e, r); });
+    // one above all -- is padded with blank slots to the shape the save object came with. A build
+    // whose equipment is not a record array (EquipLayoutOf null) keeps the save object's own.
+    if (const EquipLayout* L = EquipLayoutOf(saveSlot)) {
+        auto slotsOf = [saveSlot](int32_t off, const std::vector<EquipRecord>& recs) {
+            std::vector<EquipRecord> out = recs;
+            const size_t shape = static_cast<size_t>(SR::ReadArr(saveSlot, off).num);
+            if (out.size() < shape) out.resize(shape);
+            return out;
+        };
+        auto writeOne = [L](uint8_t* e, const EquipRecord& r) { WriteEquipRecord(*L, e, r); };
+        BuildAndSwapArray(saveSlot, L->offEquipment, L->stride, slotsOf(L->offEquipment, inv.equipment), writeOne);
+        if (L->offHold >= 0)
+            BuildAndSwapArray(saveSlot, L->offHold, L->stride, slotsOf(L->offHold, inv.hold), writeOne);
+    }
     UE_LOGI("inventory: ApplyToSaveObject(%p) wrote carried=%zu equipment=%zu hold=%zu",
             saveSlot, inv.inventory.size(), inv.equipment.size(), inv.hold.size());
     return true;

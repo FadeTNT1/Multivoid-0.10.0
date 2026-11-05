@@ -47,7 +47,7 @@ void ResolvePass() {
     void* gm = world_singleton::Gamemode();
     if (!gm) return;
     if (g_offGmLaptop < 0) g_offGmLaptop = R::FindPropertyOffset(R::ClassOf(gm), L"laptop");
-    if (g_offGmSaveSlot < 0) g_offGmSaveSlot = R::FindPropertyOffset(R::ClassOf(gm), L"saveSlot");
+    if (g_offGmSaveSlot < 0) g_offGmSaveSlot = world_singleton::GamemodeSaveSlotOffset(gm);
     if (g_offWidgetLaptop < 0) {
         if (void* w = LiveAt(gm, g_offGmLaptop)) g_offWidgetLaptop = R::FindPropertyOffset(R::ClassOf(w), L"laptop");
     }
@@ -162,8 +162,9 @@ int32_t Count() {
 
 bool ReadRow(int32_t index, SD::Row& out) {
     TArrayView* a = Rows();
-    if (!a || index < 0 || index >= a->num) return false;
-    return SD::ReadStruct(a->data + static_cast<size_t>(index) * SD::kStride, out);
+    const int32_t stride = SD::Stride();
+    if (!a || index < 0 || index >= a->num || stride <= 0) return false;
+    return SD::ReadStruct(a->data + static_cast<size_t>(index) * static_cast<size_t>(stride), out);
 }
 
 bool ApplyAddSignal(const SD::Row& row) {
@@ -173,13 +174,19 @@ bool ApplyAddSignal(const SD::Row& row) {
     if (!fn) { UE_LOGW("meadow_store: addSignal not found on the laptop widget's class"); return false; }
     ue_wrap::ParamFrame f(fn);
     if (!f.valid()) { UE_LOGW("meadow_store: addSignal ParamFrame invalid"); return false; }
-    uint8_t sig[SD::kStride];
+    std::vector<uint8_t> sig;
     if (!SD::BuildParamBytes(row, sig)) {
         UE_LOGW("meadow_store: addSignal BuildParamBytes failed ('%ls')", row.name.c_str());
         return false;
     }
-    if (!f.SetRaw(L"data", sig, SD::kStride)) {
-        UE_LOGW("meadow_store: addSignal SetRaw('data', %d B) failed", SD::kStride);
+    const int32_t paramSize = ue_wrap::reflection::FindParamSize(fn, L"data");
+    if (paramSize != static_cast<int32_t>(sig.size())) {
+        UE_LOGW("meadow_store: addSignal's data parameter is %d B, the measured row %zu B -- refused",
+                paramSize, sig.size());
+        return false;
+    }
+    if (!f.SetRaw(L"data", sig.data(), static_cast<int32_t>(sig.size()))) {
+        UE_LOGW("meadow_store: addSignal SetRaw('data', %zu B) failed", sig.size());
         return false;
     }
     if (!ue_wrap::Call(w, f)) {
@@ -211,7 +218,8 @@ bool ReorderRows(const int32_t* srcIdx, int32_t n) {
         if (s < 0 || s >= n || seen[static_cast<size_t>(s)]) return false;
         seen[static_cast<size_t>(s)] = true;
     }
-    const size_t stride = static_cast<size_t>(SD::kStride);
+    if (SD::Stride() <= 0) return false;
+    const size_t stride = static_cast<size_t>(SD::Stride());
     std::vector<uint8_t> tmp(static_cast<size_t>(n) * stride);
     for (int32_t i = 0; i < n; ++i)
         std::memcpy(tmp.data() + static_cast<size_t>(i) * stride,

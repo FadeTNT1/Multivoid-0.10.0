@@ -72,19 +72,21 @@ int32_t Count() {
 
 bool ReadRow(int32_t index, SD::Row& out, bool withImage) {
     TArrayView* a = Rows();
-    if (!a || index < 0 || index >= a->num) return false;
-    return SD::ReadStruct(a->data + static_cast<size_t>(index) * SD::kStride, out, withImage);
+    const int32_t stride = SD::Stride();
+    if (!a || index < 0 || index >= a->num || stride <= 0) return false;
+    return SD::ReadStruct(a->data + static_cast<size_t>(index) * static_cast<size_t>(stride), out, withImage);
 }
 
 bool ReadRowKey(int32_t index, RowKey& out) {
     TArrayView* a = Rows();
-    if (!a || index < 0 || index >= a->num) return false;
-    const uint8_t* rp = a->data + static_cast<size_t>(index) * SD::kStride;
-    std::memcpy(&out.namePtr, rp + SD::kOff_name, sizeof(out.namePtr));
-    std::memcpy(&out.idPtr, rp + SD::kOff_id, sizeof(out.idPtr));
-    std::memcpy(&out.date, rp + SD::kOff_date, sizeof(out.date));
-    std::memcpy(&out.level, rp + SD::kOff_level, sizeof(out.level));
-    out.isCopy = *(rp + SD::kOff_isCopy);
+    const SD::Layout* L = SD::GetLayout();
+    if (!a || !L || index < 0 || index >= a->num) return false;
+    const uint8_t* rp = a->data + static_cast<size_t>(index) * static_cast<size_t>(L->stride);
+    std::memcpy(&out.namePtr, rp + L->name, sizeof(out.namePtr));
+    std::memcpy(&out.idPtr, rp + L->id, sizeof(out.idPtr));
+    std::memcpy(&out.date, rp + L->date, sizeof(out.date));
+    std::memcpy(&out.level, rp + L->level, sizeof(out.level));
+    out.isCopy = *(rp + L->isCopy);
     return true;
 }
 
@@ -100,10 +102,15 @@ RowApply ApplySaveSignal(const SD::Row& row) {
     // the process, so what fails here fails on every try.
     ue_wrap::ParamFrame f(g_saveSignalFn);
     if (!f.valid()) return {Res::Refused, "saveSignal's parameter frame could not be built"};
-    uint8_t sig[SD::kStride];
+    if (!SD::GetLayout()) return {Res::NotNow, "the signal row layout is not measured yet"};
+    std::vector<uint8_t> sig;
     if (!SD::BuildParamBytes(row, sig))  // row outlives the call (FStrings alias it)
         return {Res::Refused, "a name in the row could not be made an FName"};
-    if (!f.SetRaw(L"signal", sig, SD::kStride)) return {Res::Refused, "the signal parameter was refused"};
+    // The parameter's own extent must be the measured row, or the write would run past it.
+    if (ue_wrap::reflection::FindParamSize(g_saveSignalFn, L"signal") != static_cast<int32_t>(sig.size()))
+        return {Res::Refused, "saveSignal's signal parameter is not the measured row size"};
+    if (!f.SetRaw(L"signal", sig.data(), static_cast<int32_t>(sig.size())))
+        return {Res::Refused, "the signal parameter was refused"};
     f.Set<bool>(L"new", false);          // dead param (RE: never read)
     f.Set<bool>(L"checkOnly", false);
     f.Set<float>(L"downloadedAtQuality", row.downloadedAtQuality);

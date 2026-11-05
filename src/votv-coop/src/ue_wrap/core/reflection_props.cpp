@@ -240,6 +240,46 @@ void* PropertyEnum(void* owningStruct, const wchar_t* propName) {
 
 namespace {
 
+std::wstring FieldClassNameOf(const uint8_t* field) {
+    if (!field) return {};
+    const uint8_t* const fieldClass = *reinterpret_cast<const uint8_t* const*>(field + O::FField_ClassPrivate);
+    if (!PlausibleHeapPtr(const_cast<uint8_t*>(fieldClass))) return {};
+    return ToString(*reinterpret_cast<const FName*>(fieldClass + O::FFieldClass_Name));
+}
+
+}  // namespace
+
+bool ArrayPropertyInner(void* owningStruct, const wchar_t* propName, ArrayInnerInfo& out) {
+    out = ArrayInnerInfo{};
+    uint8_t* field = FindPropertyField(owningStruct, propName);
+    if (!field || FieldClassNameOf(field) != L"ArrayProperty") return false;
+    for (int32_t cand : { 0x70, 0x78 }) {
+        uint8_t* inner = *reinterpret_cast<uint8_t**>(field + cand);
+        if (!PlausibleHeapPtr(inner)) continue;
+        // The inner FProperty's Owner is the array property: an FField owner (not a UObject).
+        void* owner = *reinterpret_cast<void**>(inner + O::FField_Owner);
+        if (owner != field) continue;
+        const std::wstring type = FieldClassNameOf(inner);
+        if (type.empty()) continue;
+        const int32_t elem = *reinterpret_cast<int32_t*>(inner + O::FProperty_ElementSize);
+        if (elem <= 0 || elem > 0x100000) continue;
+        out.innerType = type;
+        out.elementSize = elem;
+        if (type == L"StructProperty") {
+            for (int32_t sc : { 0x70, 0x78 }) {
+                if (g_structPropSlot >= 0 && sc != g_structPropSlot) continue;
+                void* p = *reinterpret_cast<void**>(inner + sc);
+                if (LooksLikeScriptStruct(p)) { out.innerStruct = p; break; }
+            }
+            if (!out.innerStruct) return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+namespace {
+
 // FBoolProperty payload slot (= sizeof(FProperty), same boundary as
 // FStructProperty::Struct above). -1 until calibrated.
 int32_t g_boolPropSlot = -1;

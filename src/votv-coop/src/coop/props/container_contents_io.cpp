@@ -51,14 +51,17 @@ WriteResult WriteRecords(uint32_t eid, void* inv, const std::vector<SR::SaveReco
         return WriteResult::Refused;
     }
 
+    // The element stride is the running record struct's, measured; unmeasured, nothing is written.
+    const int32_t stride = SR::RecordStride();
+    if (stride <= 0) return WriteResult::NotReady;
     const int32_t n = static_cast<int32_t>(recs.size());
-    void* buf = SR::AllocZeroed(static_cast<size_t>(n), static_cast<size_t>(SR::kSaveStride));
+    void* buf = SR::AllocZeroed(static_cast<size_t>(n), static_cast<size_t>(stride));
     if (!buf && n > 0) {
         UE_LOGW("container_contents: eid=%u -- alloc of %d records failed; leaving contents", eid, n);
         return WriteResult::Refused;
     }
     for (int32_t i = 0; i < n; ++i)
-        SR::WriteSaveRecord(reinterpret_cast<uint8_t*>(buf) + static_cast<size_t>(i) * SR::kSaveStride,
+        SR::WriteSaveRecord(reinterpret_cast<uint8_t*>(buf) + static_cast<size_t>(i) * static_cast<size_t>(stride),
                             recs[i], resolve);
     // The previous buffer is orphaned: freeing the nested sub-arrays, minted FStrings and signal
     // rows recursively is far more crash-prone than leaking them, and the engine never double-frees

@@ -541,19 +541,21 @@ bool ArmDownloadFromSignal(float decoded, int32_t polarity) {
 
 bool ReadDownloadProgress(float& decoded, int32_t& polarity) {
     void* d = Instance();
-    if (!d || g_offDLData < 0) return false;
+    const ue_wrap::signal_dynamic::Layout* L = ue_wrap::signal_dynamic::GetLayout();
+    if (!d || g_offDLData < 0 || !L) return false;
     auto* dld = reinterpret_cast<uint8_t*>(d) + g_offDLData;
-    // The dynamic signal-data member offsets (ue_wrap/desk/signal_dynamic.h).
-    decoded = SigRead<float>(dld, ue_wrap::signal_dynamic::kOff_decoded);
-    polarity = SigRead<int32_t>(dld, ue_wrap::signal_dynamic::kOff_polarity);
+    // The dynamic signal-data member offsets, measured (ue_wrap/desk/signal_dynamic.h).
+    decoded = SigRead<float>(dld, L->decoded);
+    polarity = SigRead<int32_t>(dld, L->polarity);
     return true;
 }
 
 bool ReadDLSignalKey(uint64_t& out) {
     void* d = Instance();
-    if (!d || g_offDLData < 0) return false;
+    const ue_wrap::signal_dynamic::Layout* L = ue_wrap::signal_dynamic::GetLayout();
+    if (!d || g_offDLData < 0 || !L) return false;
     auto* dld = reinterpret_cast<uint8_t*>(d) + g_offDLData;
-    out = SigRead<uint64_t>(dld, ue_wrap::signal_dynamic::kOff_signal);
+    out = SigRead<uint64_t>(dld, L->signal);
     return true;
 }
 
@@ -636,7 +638,8 @@ bool ReadSimOutputs(SimOutputs& out) {
     out.frData = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(d) + g_offDLFrData);
     out.poData = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(d) + g_offDLPoData);
     auto* dld = reinterpret_cast<uint8_t*>(d) + g_offDLData;
-    out.decoded = SigRead<float>(dld, ue_wrap::signal_dynamic::kOff_decoded);
+    const ue_wrap::signal_dynamic::Layout* L = ue_wrap::signal_dynamic::GetLayout();
+    out.decoded = L ? SigRead<float>(dld, L->decoded) : 0.f;
     return true;
 }
 
@@ -653,7 +656,8 @@ bool WriteSimOutputs(const SimOutputs& in) {
     *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(d) + g_offDLFrData) = in.frData;
     *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(d) + g_offDLPoData) = in.poData;
     auto* dld = reinterpret_cast<uint8_t*>(d) + g_offDLData;
-    *reinterpret_cast<float*>(dld + ue_wrap::signal_dynamic::kOff_decoded) = in.decoded;
+    if (const ue_wrap::signal_dynamic::Layout* L = ue_wrap::signal_dynamic::GetLayout())
+        *reinterpret_cast<float*>(dld + L->decoded) = in.decoded;
     // The widget's own tick paints every field above, and the refresh chain paints none of them.
     // The pulse that used to run that chain here is deleted, not conditioned -- see the chain's
     // comment for what it was doing to the player instead. The write is not a crossing's apply:

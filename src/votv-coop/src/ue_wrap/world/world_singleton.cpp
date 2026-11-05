@@ -4,7 +4,9 @@
 
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/hot_path_guard.h"
+#include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
+#include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/engine/world_identity.h"
 #include "ue_wrap/world/world_instances.h"
@@ -75,6 +77,36 @@ void* GameInstance() {
     UE_ASSERT_GAME_THREAD("world_singleton::GameInstance");
     static CachedObjRef s_ref;
     return Cached(s_ref, profile::name::GameInstanceClass);
+}
+
+int32_t GamemodeSaveSlotOffset(void* gm) {
+    return GamemodeSaveSlotOffsetOnClass(gm ? reflection::ClassOf(gm) : nullptr);
+}
+
+int32_t GamemodeSaveSlotOffsetOnClass(void* cls) {
+    if (!cls) return -1;
+    static void* s_cls = nullptr;
+    static int32_t s_off = -1;
+    if (cls == s_cls) return s_off;
+    int32_t off = reflection::FindPropertyOffset(cls, profile::name::GamemodeSaveSlotProp);
+    if (off < 0) off = reflection::FindPropertyOffset(cls, profile::name::GamemodeSaveSlotPropLegacy);
+    s_cls = cls;
+    s_off = off;
+    if (off < 0)
+        UE_LOGW("world_singleton: %ls declares neither '%ls' nor '%ls' -- no save-object reader can "
+                "reach the save", reflection::ToString(reflection::NameOf(cls)).c_str(), profile::name::GamemodeSaveSlotProp,
+                profile::name::GamemodeSaveSlotPropLegacy);
+    else
+        UE_LOGI("world_singleton: the gamemode's save object is at +0x%X", off);
+    return off;
+}
+
+void* SaveSlot() {
+    void* gm = Gamemode();
+    const int32_t off = GamemodeSaveSlotOffset(gm);
+    if (off < 0) return nullptr;
+    void* save = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(gm) + off);
+    return (save && reflection::IsLive(save)) ? save : nullptr;
 }
 
 }  // namespace ue_wrap::world_singleton
