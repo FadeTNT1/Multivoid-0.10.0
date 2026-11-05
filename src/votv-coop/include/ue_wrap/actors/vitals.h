@@ -22,7 +22,8 @@
 namespace ue_wrap::vitals {
 
 // The rows of the stat table. The values are permanent (a wire id): a new
-// row takes the next number. Rows 0-8 are the profile snapshot's nine floats, in its order.
+// row takes the next number. Rows 0-8 are the profile snapshot's nine floats, in its order (each on
+// whichever object owns it: on 0.10.0 the pawn for 0-6, the save slot for strength and agility).
 enum class Field : uint8_t {
     Health = 0, MaxHealth = 1, Food = 2, Sleep = 3, Battery = 4, CoffeePower = 5, GasolinePilled = 6,
     Strength = 7, Agility = 8, Irradiation = 9, Air = 10, BurningTime = 11, Pooped = 12, FoodDrain = 13,
@@ -50,6 +51,12 @@ bool FieldFromId(uint8_t id, Field* out);
 // is absent every call repeats the owner lookup, so a caller on a repeating path gates on its own
 // readiness first.
 bool Read(Field f, float* out);
+
+// True when `f` can never be read or written on this build: its owner object resolves but the
+// property is absent from the owner's class. False while that is merely not known yet (no world, no
+// pawn) or when the row works. A caller whose conjunction needs a row uses this to drop that leg
+// instead of failing on a build gap. Game thread only.
+bool RowUnavailable(Field f);
 
 // Write `v` by the row's rule (a Bool row stores v != 0). False, having written nothing, for
 // f >= Count, a ReadOnly row, a non-finite `v`, or when the owner, the property or (Strength,

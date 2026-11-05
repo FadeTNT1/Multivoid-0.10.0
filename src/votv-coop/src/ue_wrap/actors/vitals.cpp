@@ -39,13 +39,15 @@ Cache g_cache;
 
 using F = Field;
 constexpr Row kRows[] = {
-    {F::Health,         "health",      Owner::SaveSlot, L"health",           Type::Float, WriteRule::Raw},
-    {F::MaxHealth,      "maxhealth",   Owner::SaveSlot, L"maxHealth",        Type::Float, WriteRule::Raw},
-    {F::Food,           "food",        Owner::SaveSlot, L"food",             Type::Float, WriteRule::Raw},
-    {F::Sleep,          "sleep",       Owner::SaveSlot, L"sleep",            Type::Float, WriteRule::Raw},
-    {F::Battery,        "battery",     Owner::SaveSlot, L"battery",          Type::Float, WriteRule::Raw},
-    {F::CoffeePower,    "coffee",      Owner::SaveSlot, L"coffeePower",      Type::Float, WriteRule::Raw},
-    {F::GasolinePilled, "gasoline",    Owner::SaveSlot, L"gasolinepilled",   Type::Float, WriteRule::Raw},
+    // 0.10.0: the survival floats are the pawn's SAVE_* properties (names in sdk_profile_names.h);
+    // strength and agility stayed on the save slot.
+    {F::Health,         "health",      Owner::Pawn,     P::name::PawnHealth,         Type::Float, WriteRule::Raw},
+    {F::MaxHealth,      "maxhealth",   Owner::Pawn,     P::name::PawnMaxHealth,      Type::Float, WriteRule::Raw},
+    {F::Food,           "food",        Owner::Pawn,     P::name::PawnFood,           Type::Float, WriteRule::Raw},
+    {F::Sleep,          "sleep",       Owner::Pawn,     P::name::PawnSleep,          Type::Float, WriteRule::Raw},
+    {F::Battery,        "battery",     Owner::Pawn,     P::name::PawnBattery,        Type::Float, WriteRule::Raw},
+    {F::CoffeePower,    "coffee",      Owner::Pawn,     P::name::PawnCoffeePower,    Type::Float, WriteRule::Raw},
+    {F::GasolinePilled, "gasoline",    Owner::Pawn,     P::name::PawnGasolinePilled, Type::Float, WriteRule::Raw},
     {F::Strength,       "strength",    Owner::SaveSlot, L"strength",         Type::Float, WriteRule::RawThenUpdateStrAgl},
     {F::Agility,        "agility",     Owner::SaveSlot, L"agility",          Type::Float, WriteRule::RawThenUpdateStrAgl},
     {F::Irradiation,    "radiation",   Owner::Pawn,     L"irradiation",      Type::Float, WriteRule::Raw},
@@ -60,7 +62,7 @@ constexpr Row kRows[] = {
     {F::Dreaming,       "dreaming",    Owner::Gamemode, L"dreaming",         Type::Bool,  WriteRule::ReadOnly},
     {F::Exhausted,      "exhausted",   Owner::Pawn,     L"isExhausted_bool", Type::Bool,  WriteRule::ReadOnly},
     {F::Nearsighted,    "nearsighted", Owner::Pawn,     L"velmaMode",        Type::Bool,  WriteRule::ReadOnly},
-    {F::Glasses,        "glasses",     Owner::Pawn,     L"hasGlasses",       Type::Bool,  WriteRule::ReadOnly},
+    {F::Glasses,        "glasses",     Owner::Pawn,     P::name::PawnGlasses, Type::Bool, WriteRule::ReadOnly},
 };
 constexpr size_t kRowCount = sizeof(kRows) / sizeof(kRows[0]);
 constexpr size_t kSnapshotRows = 9;  // rows 0-8 are the profile snapshot's floats
@@ -73,14 +75,18 @@ constexpr bool RowsInOrder() {
 static_assert(kRowCount == static_cast<size_t>(Field::Count), "one row per Field value");
 static_assert(RowsInOrder(), "kRows[i].field == i: a reordered row does not compile");
 
-// The snapshot's rows are the leading save-slot floats, ending on Agility.
+// The snapshot's rows are the leading persistent floats, ending on Agility. Each sits on the pawn or
+// the save slot, whichever owns it on this build (0.10.0: the pawn holds the survival floats, the
+// slot keeps strength and agility).
 constexpr bool SnapshotRowsShape() {
     for (size_t i = 0; i < kSnapshotRows; ++i)
-        if (kRows[i].owner != Owner::SaveSlot || kRows[i].type != Type::Float) return false;
+        if ((kRows[i].owner != Owner::SaveSlot && kRows[i].owner != Owner::Pawn) ||
+            kRows[i].type != Type::Float)
+            return false;
     return kRows[kSnapshotRows - 1].field == Field::Agility;
 }
 static_assert(kSnapshotRows <= kRowCount && SnapshotRowsShape(),
-              "rows 0..kSnapshotRows-1 are SaveSlot floats and the last is Agility");
+              "rows 0..kSnapshotRows-1 are SaveSlot/Pawn floats and the last is Agility");
 
 // Where each row's property sits on its owner's class. mask 0 is a Float; a Bool carries its byte
 // and bit mask. -1: it did not resolve for the class the owner's stamp names.
@@ -93,9 +99,14 @@ void* g_pawnCls = nullptr;       // ... the Pawn rows
 int32_t g_gamemodeMainPlayerOff = -1;  // mainGamemode_C.mainPlayer: the pawn, off the gamemode
 void* g_updateStrAglFn = nullptr;      // mainPlayer_C.updateStrAgl, for g_pawnCls
 
+// The one row with no home on 0.10.0 (no battery property on the pawn or anywhere else in the
+// capture). It stays in the table, unresolved, and says so once at INFO instead of as an error.
+constexpr bool ExpectedGap(Field f) { return f == Field::Battery; }
+
 // Resolve every row of `owner` on `cls` at once. A name that does not resolve stays unresolved for
-// this class and is logged once.
+// this class and is logged once (an expected gap: once per process, at INFO).
 void ResolveRows(Owner owner, void* cls) {
+    static bool s_gapSaid[kRowCount] = {};
     for (size_t i = 0; i < kRowCount; ++i) {
         const Row& r = kRows[i];
         if (r.owner != owner) continue;
@@ -108,8 +119,16 @@ void ResolveRows(Owner owner, void* cls) {
             uint8_t mask = 0;
             if (R::FindBoolProperty(cls, r.property, byte, mask) && mask != 0) { res.off = byte; res.mask = mask; }
         }
-        if (res.off < 0)
+        if (res.off >= 0) continue;
+        if (ExpectedGap(r.field)) {
+            if (!s_gapSaid[i]) {
+                s_gapSaid[i] = true;
+                UE_LOGI("vitals: %ls.%ls does not exist on this game build -- the %s row stays unresolved "
+                        "(expected, nothing breaks)", R::ToString(R::NameOf(cls)).c_str(), r.property, r.name);
+            }
+        } else {
             UE_LOGE("vitals: %ls.%ls did not resolve", R::ToString(R::NameOf(cls)).c_str(), r.property);
+        }
     }
 }
 
@@ -163,6 +182,17 @@ void* GamemodeObject() {
     return gm;
 }
 
+// The pawn rows and `updateStrAgl`, resolved for `cls` once (the live pawn's class, or the class
+// looked up by name for its defaults).
+void EnsurePawnRows(void* cls) {
+    if (!cls || cls == g_pawnCls) return;
+    g_pawnCls = cls;
+    ResolveRows(Owner::Pawn, cls);
+    g_updateStrAglFn = R::FindFunction(cls, L"updateStrAgl");
+    if (!g_updateStrAglFn)
+        UE_LOGE("vitals: %ls.updateStrAgl did not resolve", R::ToString(R::NameOf(cls)).c_str());
+}
+
 // The local player's pawn: the gamemode's own `mainPlayer`, live, with the pawn rows and
 // `updateStrAgl` resolved for its class. Null when there is none.
 void* PawnObject() {
@@ -170,13 +200,7 @@ void* PawnObject() {
     if (!gm || g_gamemodeMainPlayerOff < 0) return nullptr;
     void* const pawn = *reinterpret_cast<void* const*>(static_cast<const uint8_t*>(gm) + g_gamemodeMainPlayerOff);
     if (!pawn || !R::IsLive(pawn)) return nullptr;
-    if (void* const cls = R::ClassOf(pawn); cls != g_pawnCls) {
-        g_pawnCls = cls;
-        ResolveRows(Owner::Pawn, cls);
-        g_updateStrAglFn = R::FindFunction(cls, L"updateStrAgl");
-        if (!g_updateStrAglFn)
-            UE_LOGE("vitals: %ls.updateStrAgl did not resolve", R::ToString(R::NameOf(cls)).c_str());
-    }
+    EnsurePawnRows(R::ClassOf(pawn));
     return pawn;
 }
 
@@ -221,8 +245,11 @@ bool EnsureSnapshotOffsets() {
         }
         return off;
     };
+    // Only the SaveSlot rows gate the snapshot. The pawn's rows ride along when the pawn (or its
+    // class) is reachable -- it does not exist pre-world, and a build may lack a row -- and are
+    // skipped when not.
     for (size_t i = 0; i < kSnapshotRows; ++i) {
-        if (g_res[i].off >= 0) continue;
+        if (kRows[i].owner != Owner::SaveSlot || g_res[i].off >= 0) continue;
         ok = false;
         UE_LOGE("vitals: saveSlot.%ls did not resolve -- the vitals snapshot is inert", kRows[i].property);
     }
@@ -240,10 +267,32 @@ std::wstring ReadFString(const uint8_t* e) {
     return std::wstring(f.Data, static_cast<size_t>(f.Num - 1));  // Num counts the terminator
 }
 
+// The pawn's snapshot rows into `out` from `obj` (the live pawn, or the pawn class's default
+// object); a row that did not resolve is left as it was. Best effort: with no object the rows keep
+// their value, said once.
+void ReadPawnRows(const void* obj, Snapshot& out) {
+    if (!obj) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGW("vitals: the pawn is not reachable -- the snapshot carries no health, food, sleep, coffee "
+                    "or gasoline (strength and agility only)");
+        }
+        return;
+    }
+    const auto* base = static_cast<const uint8_t*>(obj);
+    for (size_t i = 0; i < kSnapshotRows; ++i) {
+        if (kRows[i].owner != Owner::Pawn || g_res[i].off < 0) continue;
+        std::memcpy(SnapshotField(out, static_cast<Field>(i)), base + g_res[i].off, sizeof(float));
+    }
+}
+
 void ReadFrom(const void* slot, Snapshot& out) {
     const auto* base = static_cast<const uint8_t*>(slot);
-    for (size_t i = 0; i < kSnapshotRows; ++i)
+    for (size_t i = 0; i < kSnapshotRows; ++i) {
+        if (kRows[i].owner != Owner::SaveSlot) continue;
         std::memcpy(SnapshotField(out, static_cast<Field>(i)), base + g_res[i].off, sizeof(float));
+    }
     void* cls = nullptr;
     std::memcpy(&cls, base + g_snap.flashlightBattery, sizeof(cls));
     out.flashlightBattery =
@@ -267,6 +316,7 @@ bool ReadSnapshot(Snapshot& out) {
     void* slot = ResolveSlot();
     if (!slot || !R::IsLive(slot) || !EnsureSnapshotOffsets()) return false;
     ReadFrom(slot, out);
+    ReadPawnRows(PawnObject(), out);
     return true;
 }
 
@@ -279,6 +329,10 @@ bool ReadDefaults(Snapshot& out) {
         void* cdo = R::FindClassDefaultObject(P::name::SaveSlotClass);
         if (!cdo) return false;
         ReadFrom(cdo, s_defaults);
+        // The pawn class's own defaults, by class name (there is no pawn this early).
+        void* const pawnCls = R::FindClass(P::name::MainPlayerClass);
+        if (pawnCls) EnsurePawnRows(pawnCls);
+        ReadPawnRows(pawnCls ? R::FindClassDefaultObject(P::name::MainPlayerClass) : nullptr, s_defaults);
         s_have = true;
     }
     out = s_defaults;
@@ -288,8 +342,26 @@ bool ReadDefaults(Snapshot& out) {
 bool ApplySnapshot(void* saveSlot, const Snapshot& s) {
     if (!saveSlot || !R::IsLive(saveSlot) || !EnsureSnapshotOffsets()) return false;
     auto* base = static_cast<uint8_t*>(saveSlot);
-    for (size_t i = 0; i < kSnapshotRows; ++i)
+    for (size_t i = 0; i < kSnapshotRows; ++i) {
+        if (kRows[i].owner != Owner::SaveSlot) continue;
         std::memcpy(base + g_res[i].off, SnapshotField(s, static_cast<Field>(i)), sizeof(float));
+    }
+    // The survival floats are the pawn's on 0.10.0: onto the live pawn, best effort (a join applies
+    // before any world exists, when there is none; the world then starts from the game's numbers).
+    if (void* const pawn = PawnObject()) {
+        auto* const pb = static_cast<uint8_t*>(pawn);
+        for (size_t i = 0; i < kSnapshotRows; ++i) {
+            if (kRows[i].owner != Owner::Pawn || g_res[i].off < 0) continue;
+            std::memcpy(pb + g_res[i].off, SnapshotField(s, static_cast<Field>(i)), sizeof(float));
+        }
+    } else {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGW("vitals: no pawn yet -- the survival numbers (health, food, sleep, coffee, gasoline) were "
+                    "not applied; strength and agility were");
+        }
+    }
     void* battery = s.flashlightBattery.empty() ? nullptr : R::FindClass(s.flashlightBattery.c_str());
     if (battery || s.flashlightBattery.empty())  // an empty name IS the ejected battery
         std::memcpy(base + g_snap.flashlightBattery, &battery, sizeof(battery));
@@ -365,6 +437,12 @@ bool Read(Field f, float* out) {
     else v = (*p & res.mask) != 0 ? 1.f : 0.f;
     if (out) *out = v;
     return true;
+}
+
+bool RowUnavailable(Field f) {
+    if (f >= Field::Count) return true;
+    const size_t idx = static_cast<size_t>(f);
+    return OwnerObject(kRows[idx].owner) != nullptr && g_res[idx].off < 0;
 }
 
 bool Write(Field f, float v) {

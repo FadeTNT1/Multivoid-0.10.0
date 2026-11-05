@@ -43,6 +43,21 @@ inline constexpr const wchar_t* GameInstanceLoadObjectsLegacy = L"loadObjects";
 // offsets are resolved at runtime through FindPropertyOffset (a BP-cooked class).
 inline constexpr const wchar_t* SaveSlotClass = L"saveSlot_C";
 
+// 0.10.0 moved the survival floats off saveSlot_C (its health/maxHealth/food/sleep/battery/
+// coffeePower/gasolinepilled are now dead `obsoleteVar_*`) onto the PAWN, mainPlayer_C, as `SAVE_*`
+// properties (the Blueprint bytecode of mainPlayer_C's damage writer, `add player damage`, reads
+// and writes SAVE_health / SAVE_maxHealth on the pawn). strength/agility stayed on saveSlot_C.
+// There is no battery property on the pawn in the 0.10.0 capture: that row stays unresolved.
+// hasGlasses is now the Bool `equipped_glasses`. FindPropertyOffset is case-insensitive.
+inline constexpr const wchar_t* PawnHealth         = L"SAVE_health";
+inline constexpr const wchar_t* PawnMaxHealth      = L"SAVE_maxHealth";
+inline constexpr const wchar_t* PawnFood           = L"SAVE_food";
+inline constexpr const wchar_t* PawnSleep          = L"SAVE_sleep";
+inline constexpr const wchar_t* PawnBattery        = L"SAVE_battery";  // absent in 0.10.0
+inline constexpr const wchar_t* PawnCoffeePower    = L"SAVE_coffeePower";
+inline constexpr const wchar_t* PawnGasolinePilled = L"SAVE_gasolinepilled";
+inline constexpr const wchar_t* PawnGlasses        = L"equipped_glasses";
+
 // 0.10.0's starter loadout. A new save is born with an empty startupEquipment map; the game's own
 // create (lib_C::createSaveSlotTreeDirectory) copies defaultStartupEquipment into it, and the
 // player's inventory screen spawns those items into the equipment slots on the first world
