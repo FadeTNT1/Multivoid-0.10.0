@@ -59,6 +59,12 @@ struct Profile {
     // additive: the footstep sound layered by the stepped verb over the audible default.
     // Bytecode-derived per variant.
     bool stepReplace;
+    // Instance the variant class's own construction-script rig (its decals, emitters, lights) on
+    // top of the base kerfur rig. Off for mynet on 0.10.0: its variant rig (11 grid decals, 17
+    // electricity emitters) turns observers' whole view white even with the absolute-rotation and
+    // tick-off fidelity fixes in scs_rig, so the skin keeps its mesh, materials and step effect
+    // and drops only the extra rig until the whiteout is isolated.
+    bool variantRig = true;
 };
 constexpr Profile kProfiles[] = {
     {"kerfur_omega",        L"kerfurOmega",              true,  false, false},
@@ -84,7 +90,7 @@ constexpr Profile kProfiles[] = {
     {"kerfur_igetis",       L"kerfurOmega_igetis",       false, false, false},
     {"kerfur_monique",      L"kerfurOmega_monique",      false, false, false},
     {"kerfur_krampus",      L"kerfurOmega",              false, false, false},
-    {"kerfur_mynet",        L"kerfurOmega_mynet",        false, true,  true},
+    {"kerfur_mynet",        L"kerfurOmega_mynet",        false, true,  true,  false},
     {"kerfur_furfur",       L"kerfurOmega_furfur",       false, false, false},
 };
 
@@ -431,7 +437,7 @@ void Apply(void* bodyActor, const std::string& skinName) {
     std::vector<void*> comps;
     int made = ue_wrap::scs_rig::InstantiateCosmetics(bodyActor, meshComp, meshComp,
                                                       baseClass, comps);
-    if (variantClass != baseClass)
+    if (variantClass != baseClass && prof->variantRig)
         made += ue_wrap::scs_rig::InstantiateCosmetics(bodyActor, meshComp, meshComp,
                                                        variantClass, comps);
     rig.comps.reserve(comps.size());
