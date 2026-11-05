@@ -47,7 +47,8 @@ coop::blob_chunks::Assembler g_assembler;
 // Client: the send-dedup state.
 uint64_t          g_lastItemsHash = 0;  // the items half of the last profile sent
 Clock::time_point g_lastSend{};
-uint64_t          g_oversizeHash = 0;  // the state already reported as too large to send
+coop::player_profile::Pose g_lastSentPose;  // the pose the last sent profile carried
+uint64_t         g_oversizeHash = 0;  // the state already reported as too large to send
 uint32_t          g_sendSeq = 0;
 Clock::time_point g_lastPoll{};
 Clock::time_point g_lastSweep{};
@@ -65,6 +66,10 @@ constexpr auto kItemsMinInterval = std::chrono::seconds(5);
 // at the poll rate. They ride a change of the items at once, and on their own at this cadence,
 // which is the most a crash or a kill of the client can cost them.
 constexpr auto kVitalsCadence = std::chrono::seconds(30);
+// The return position travels with the profile, so a walk that moved the safe pose far sends the
+// profile on its own: past this distance since the last send, not more often than the interval.
+constexpr float kPoseSendDistCm = 200.0f;
+constexpr auto kPoseMinInterval = std::chrono::seconds(2);
 constexpr auto kAsmTtl      = std::chrono::seconds(30);
 
 // The live per-player apply on join. The host pushes each joiner its profile (the one the store
@@ -172,6 +177,7 @@ static bool SendProfile(coop::net::Session* s, std::vector<uint8_t> blob, uint64
                     blob.size(), carried);
         g_lastItemsHash = itemsHash;
         g_lastSend = now;
+        g_lastSentPose = g_standingPose;
         return true;
     }
     return false;  // refused -> retry next poll under a fresh seq
@@ -192,7 +198,24 @@ void ClientStreamTick(coop::net::Session* s) {
     std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(true, items);
     const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
     const bool itemsChanged = itemsHash != g_lastItemsHash;
-    if (itemsChanged ? now - g_lastSend < kItemsMinInterval : now - g_lastSend < kVitalsCadence) return;
+    bool poseMoved = false;
+    if (g_standingPose.valid) {
+        if (!g_lastSentPose.valid) {
+            poseMoved = true;
+        } else {
+            const double dx = double(g_standingPose.x) - double(g_lastSentPose.x);
+            const double dy = double(g_standingPose.y) - double(g_lastSentPose.y);
+            const double dz = double(g_standingPose.z) - double(g_lastSentPose.z);
+            poseMoved = std::sqrt(dx * dx + dy * dy + dz * dz) > double(kPoseSendDistCm);
+        }
+    }
+    if (itemsChanged ? now - g_lastSend < kItemsMinInterval : now - g_lastSend < kVitalsCadence) {
+        // Neither the items nor the cadence send: the return position alone may.
+        if (!poseMoved || now - g_lastSend < kPoseMinInterval) return;
+        UE_LOGI("player_inventory[client]: the return position moved past %.0f cm -- sending the profile "
+                "for it (%.0f, %.0f, %.0f)", double(kPoseSendDistCm), double(g_standingPose.x),
+                double(g_standingPose.y), double(g_standingPose.z));
+    }
     SendProfile(s, std::move(blob), itemsHash, items.size(), now);
 }
 
@@ -614,6 +637,7 @@ void OnDisconnect() {
     g_joinPose = {};
     g_joinPlacement = JoinPlacement::StartPoint;
     g_standingPose = {};
+    g_lastSentPose = {};
     g_oversizeHash = 0;
     g_lastPoll = Clock::time_point{};
     g_hasPendingApply.store(false, std::memory_order_release);
