@@ -41,15 +41,16 @@ Reports live under `local/tests/synctest/<run>/`: `report.md`, CSV/JSON results,
 catalog, full peer logs, per-case log excerpts, and memory and CPU samples. `-ReuseBuild` reuses
 this worktree's built DLLs; `-Events solar` selects a case; `-ObserveSeconds 30` extends the
 default twelve-second observation; `earthTp` always receives at least 120 seconds for its
-delayed sky and cue sequence. A two-second receiver grace covers delivery and log buffering.
+delayed sky and cue sequence, and `boarwar` 75, since its first shooter is minted a minute in. A two-second receiver grace covers delivery and log buffering.
 `Test-Verdict.ps1` runs missing-evidence, runtime-fault,
 unchanged-state and process-containment controls without starting a game.
 
 The sweep uses one cumulative fresh world. A PASS proves the named native replay, matching
-entity identity, or sampled weather/sky state; it does not establish delayed effects, all
+entity identity, every host prop birth of the row's own classes bound on the client by key, or
+sampled weather, sky or ATV-trap state; it does not establish delayed effects, all
 visuals, audibility or late joins. FAIL distinguishes a measured mismatch, an explicitly
 host-local/missing lane, insufficient effect evidence, and a blocked launch. Native events
-that only arm an overlap can therefore be unproven. Firefly ticks retain their native night/RNG
+that only arm an overlap are unproven, and a row the policy calls overlap-armed says so. Firefly ticks retain their native night/RNG
 gates. Flesh-rain and gift rows expose missing deterministic drivers rather than silently claiming
 coverage. The alarm probes assert both broadcast and native replay of each edge. Church and
 UFO-controller internal schedules need separate scenario drivers; the event table covers their
