@@ -3331,8 +3331,15 @@ struct WeatherStatePayload {
     float    windTargetX;       // AdirectionalWind_C::windTarget->RelativeLocation.X
     float    windTargetY;       //                                              .Y
     float    windTargetZ;       //                                              .Z
+    // The super fog's ramp, so a client mirror renders the host's density. AsuperFog_C is spawned
+    // at the identity transform and is global (its tick writes the cycle's thickFog from these
+    // three), so presence (kSuperFogActive) plus this state reproduces it. All 0 with no live host
+    // super fog; the receiver then spawns nothing.
+    float    superFogAlpha;     // AsuperFog_C::alpha     (0..1 progress; the tick adds dt/duration)
+    float    superFogDuration;  // AsuperFog_C::duration  (seconds for alpha 0 -> 1)
+    float    superFogThickness; // AsuperFog_C::thickness (the peak thickFog)
 };
-static_assert(sizeof(WeatherStatePayload) == 68, "WeatherStatePayload must be 68 bytes");
+static_assert(sizeof(WeatherStatePayload) == 80, "WeatherStatePayload must be 80 bytes");
 static_assert(sizeof(WeatherStatePayload) <= 256 - 20 - 8,
               "WeatherStatePayload must fit in one reliable datagram");
 

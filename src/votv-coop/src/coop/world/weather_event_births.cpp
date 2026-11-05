@@ -35,12 +35,13 @@ bool g_namesMinted   = false;   // the two class FNames resolved (GT-only mint)
 
 // The suppressed birth classes, matched by FName index (int compares on the
 // hot path -- FinishSpawningActor fires for EVERY actor spawn, so no string
-// build here). Index 0..1: weatherFogController_C / blackFog_C.
-constexpr int kNumClasses = 2;
+// build here). Index 0..2: weatherFogController_C / blackFog_C / superFog_C.
+constexpr int kNumClasses = 3;
 R::FName g_classNames[kNumClasses] = {};
 const wchar_t* const kClassNameStrs[kNumClasses] = {
     P::name::WeatherFogControllerClass, // L"weatherFogController_C"
     P::name::BlackFogClass,             // L"blackFog_C"
+    P::name::SuperFogClass,             // L"superFog_C" (superFogEvent's roll; the fog lane mirrors the host's)
 };
 
 // Rate-latched suppression log (a stuck roll cannot spam the log).
@@ -66,8 +67,9 @@ void OnFinishSpawnPost(void* /*context*/, void* /*srcObj*/, void* result) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
     // A wire-commanded mirror birth passes: the fog lane raises its echo flag
-    // around its own reflected spawn Call. (blackFog_C has no apply lane yet --
-    // every client birth of it is organic by construction.)
+    // around its own reflected spawn Call (the rolling fog's spawnFog, the super
+    // fog's SpawnActor). (blackFog_C has no apply lane yet -- every client birth
+    // of it is organic by construction.)
     if (coop::weather_fog::MirrorEchoActive()) return;
     if (!R::IsLive(actor)) return;
     E::DestroyActor(actor);
@@ -105,7 +107,7 @@ bool Install(coop::net::Session* session, bool isHost) {
         }
         g_hookInstalled = true;
         UE_LOGI("weather_births: FinishSpawningActor POST hook installed "
-                "(client birth-catch for weatherFogController_C/blackFog_C)");
+                "(client birth-catch for weatherFogController_C/blackFog_C/superFog_C)");
     }
     return true;
 }

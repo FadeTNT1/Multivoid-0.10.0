@@ -55,7 +55,15 @@ writes, because the snow function alone has dozens of Blueprint listeners (`coop
 
 Fog is not a flag: the enable flags are config gates, and the active fog is an actor (the rolling
 fog controller, the super fog) that ramps the height-fog density over its own duration and
-destroys itself; the host mirrors the actor's life (`coop/world/weather_fog`). A lightning
+destroys itself; the host mirrors the actor's life (`coop/world/weather_fog`). The super fog is
+global: the cycle spawns it at the world origin on a 5 % roll every 30 to 60 minutes, and its own
+tick writes the shared fog target from three numbers (its progress, its duration and its peak
+thickness), so the weather state carries those three and a client spawns its own copy of the
+host's super fog and snaps it to them on every two-second pulse; a joiner gets it in the
+connect seed `[RD]`. The super fog also brings a UFO that drifts over the map and, once a
+second, may burn and damage things near it: the host runs it, a client's copy of the super fog
+is refused its own UFO, and the host's reaches clients on the world-actor mirror with its attack
+timers refused `[RD]`. A lightning
 strike is a transient actor; the host observes its spawn and sends the location
 (`coop/world/weather_lightning`). The red sky is a story event actor that the clock's hour pulse
 toggles at noon on every peer -- a living one ends, else a one-percent roll starts one --
@@ -231,6 +239,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | the base alarm | whoever transitions | polled; the host canonicalises |
 | the Stolas church | the host | its verbs refused on a client; its four save fields polled and mirrored |
 | the UFO flocks | the host | the controllers refused on a client; the ships on the world-actor mirror |
+| the super fog and its UFO | the host | presence and ramp on `WeatherState`, a client copy snapped to it with its UFO refused; the host's UFO on the world-actor mirror, its attack refused on a client |
 | emails, the daily task | the host | one reflected append; a change-hash poll |
 
 ## Wire messages
@@ -238,7 +247,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | Kind | Direction | Carries |
 |---|---|---|
 | `ClockPose` (stream), `SkyState` | the host to all | the clock and the day number; the dome, the moon and the eye |
-| `WeatherState`, `LightningStrike`, `RedSky`, `BadSun` | the host to all | the state fields; a strike location; the red sky's edge; whether a Bad Sun exists |
+| `WeatherState`, `LightningStrike`, `RedSky`, `BadSun` | the host to all | the state fields, the fog actors' presence and ramps (the super fog's included); a strike location; the red sky's edge; whether a Bad Sun exists |
 | `FireflySpawn` | each peer, relayed | one spawn |
 | `EventFire`, `EventSnapshot`, `EventCue` | the host to all; the host to one joiner; the host to all | a fired row; an in-flight event; an emitter cue |
 | `WorldActorSpawn`, `WorldActorDestroy`, `WorldActorPose` (stream) | the host to all | an event actor's birth with scale and blob; its death; full-rotation poses |
@@ -266,6 +275,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | Limit | Evidence |
 |---|---|
 | A black fog the host rolls has no wire lane yet; the client's own rolls are suppressed | `[V]` `coop/world/weather_event_births` |
+| The super fog's sync and its UFO's mirror have not been seen in a play session yet; the dev event menu's `superFog` row spawns one on the host (the roll's success arm, without the 5 % roll) | `[RD]` `coop/world/weather_fog`, `coop/dev/event_trigger`; the roll is `daynightCycle_C::superFogEvent` |
 | The flesh rain is rolled by every peer's own hour pulse and is not mirrored (the sky eye and the jellyfish are not: `SkyState` carries the eye, the world-actor lane the host's fish, and a client's own `setEye` and path spawn are refused) | `[RD]` the clock's hour roll; the jellyfish is on the world-actor mirror's list, but its spawn happens inside a Blueprint where the mirror's catch does not see it |
 | A decorated Christmas tree spawns its gifts on each peer whose player sleeps through midnight, and a client's gifts are its own | `[RD]` the tree's own check of the local player's sleep at hour 0 |
 | Several rolls are still per peer: the rare gamemode rolls (the one-percent forced quit), the server break-minigame variant, the underground loot mounds, the signal scramble and the radio-tower shuffle | `[V]` no lane under `coop/world` carries them; `coop/interactables/garbage_sync` names the mounds |

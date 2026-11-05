@@ -118,6 +118,7 @@ struct LaneOwned { const char* className; const char* lane; };
 const LaneOwned kLaneOwnedClasses[] = {
     { "trigger_alarm_C", "alarm_sync" },
     { "badSun_C", "weather_badsun" },
+    { "superFog_C", "weather_fog" },        // its presence and ramp ride WeatherState (every pulse and the seed)
     { "outsideChurch_C", "church_sync" },   // 0.10.0: level-placed, host-run; its state rides ChurchState
 };
 const char* LaneFor(const std::string& className) {

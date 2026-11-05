@@ -11,8 +11,11 @@
 // carries kFogActive, kSuperFogActive and kPermanentFog, the host stamps them, and the
 // client suppresses its own spawnFog and asserts what the host reports. The rolling actor
 // self-destructs with NO observable UFunction, so the scheduler observers miss the fog END
-// and HostFogStateChanged supplies the edge. Super-fog SPAWN is deferred, leaving this lane
-// clear-only for it. docs/events-and-weather.md is the player-facing page.
+// and HostFogStateChanged supplies the edge. Super fog is global (AsuperFog_C spawns at the
+// identity transform and its tick writes the cycle's thickFog from alpha, duration and
+// thickness), so the host also carries those three and the client mirror-spawns one and snaps
+// it; the mirror's spawnUfo (the HoelUfo_C encounter) is refused on a client, whose UFO is the
+// host's on the world-actor lane. docs/events-and-weather.md is the player-facing page.
 
 #pragma once
 
@@ -30,15 +33,17 @@ bool Install(bool isHost);
 
 // HOST: stamp the active-fog bits into payload.flags2 from the live cycle -- kFogActive
 // (fogEventObject is non-null), kSuperFogActive (a live AsuperFog_C), kPermanentFog (the
-// gamerule). Called from weather_sync::ReadCycleState. Game thread. Reads
-// CountObjectsByClass for the super fog, but only on the occasional broadcast path, never
-// per frame.
+// gamerule) -- and the super fog's ramp (alpha, duration, thickness) when one lives. Called
+// from weather_sync::ReadCycleState. Game thread. The super fog is found through a cached
+// actor revalidated by index, with a by-class walk at most once per 5 s while none is cached.
 void ReadHostFogState(void* cycle, coop::net::WeatherStatePayload& out);
 
 // CLIENT receiver: assert the host's fog state on the local cycle (MTA DoPulse,
 // no diff-skip). Rolling fog: host clear + client actor live -> destroy + null
-// the slot; host fog + client none -> echo-suppressed spawnFog(). Super fog:
-// clear-only (destroy stray when host has none). Always mirror enable_fog /
+// the slot; host fog + client none -> echo-suppressed spawnFog(). Super fog: host has
+// one + client none -> spawn a superFog_C mirror at the identity transform (echo-flagged
+// past the birth catch, ramp seeded before BeginPlay), then snap alpha / duration /
+// thickness every apply; host has none -> destroy the client's. Always mirror enable_fog /
 // enable_superfog / permanentFog. Game thread. Called from weather_sync::ApplyFromHost.
 void ApplyFromHost(void* cycle, const coop::net::WeatherStatePayload& payload);
 
@@ -61,9 +66,9 @@ bool HostFogStateChanged(void* cycle);
 // Disconnect hook: clear the echo-suppress flag + the cached host detector state.
 void OnDisconnect();
 
-// True while ApplyFromHost is mid mirror-spawn -- the spawnFog echo window. Read by
-// coop/world/weather_event_births so the wire-commanded fog-controller birth passes the
-// client birth-catch.
+// True while ApplyFromHost is mid mirror-spawn -- the spawnFog echo window or the super-fog
+// mirror spawn. Read by coop/world/weather_event_births so a wire-commanded fog-controller or
+// super-fog birth passes the client birth-catch.
 bool MirrorEchoActive();
 
 }  // namespace coop::weather_fog

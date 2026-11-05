@@ -8,6 +8,9 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/core/types.h"
+#include "ue_wrap/engine/engine.h"
 
 #include <string>
 
@@ -180,6 +183,7 @@ const std::vector<EventInfo>& Events() {
         // ---- Weather (the AMBIENT layer -- daynightCycle/mainGamemode timer verbs, not the eventer;
         //      each button calls the SAME UFunction the game's own timer/RNG calls, on the live instance) ----
         { "spawnFog",       D::Ambient, C::Weather, -1, "ambient", "thick rolling fog NOW (weatherFogController_C, 5-20 min)", Risk::Safe },
+        { "superFog",       D::Ambient, C::Weather, -1, "ambient", "SUPER fog + its HoelUfo_C NOW (superFog_C at the origin, superFogEvent's spawn without its 5% roll)", Risk::Caution },
         { "rain ON",        D::Ambient, C::Weather, -1, "ambient", "daynightCycle.causeRain(true)",                Risk::Safe },
         { "rain OFF",       D::Ambient, C::Weather, -1, "ambient", "daynightCycle.causeRain(false)",               Risk::Safe },
         { "spawnRedSky",    D::Ambient, C::Weather, -1, "ambient", "red-sky ambience (mainGamemode.spawnRedSky)",  Risk::Caution },
@@ -218,6 +222,17 @@ bool Trigger(const EventInfo& ev) {
     // UFunction the timer's success-arm calls, on the live instance (the exact pattern the
     // autonomous fogprobe proved; autotest_fog_probe.cpp). Dev-only, never on the wire.
     GT::Post([name] {
+        // The super fog: superFogEvent is a 5 % roll that also re-arms its own 30-60 min timer, so the
+        // lever performs only its success arm, a superFog_C spawned at the identity transform (the
+        // transform superFogEvent's BeginDeferred and FinishSpawning both pass).
+        if (name == "superFog") {
+            void* cls = R::FindClass(ue_wrap::profile::name::SuperFogClass);
+            if (!cls) { UE_LOGW("event_trigger: %ls class not loaded", ue_wrap::profile::name::SuperFogClass); return; }
+            void* sf = ue_wrap::engine::SpawnActor(cls, ue_wrap::FVector{0.f, 0.f, 0.f});
+            if (sf) UE_LOGI("event_trigger: ambient superFog spawned %p (superFogEvent's success arm)", sf);
+            else    UE_LOGW("event_trigger: ambient superFog spawn FAILED");
+            return;
+        }
         struct AmbientVerb { const wchar_t* cls; const wchar_t* fn; int boolArg; const wchar_t* boolName; };
         static const struct { const char* key; AmbientVerb v; } kAmbient[] = {
             { "spawnFog",          { L"daynightCycle_C", L"spawnFog",          -1, nullptr } },

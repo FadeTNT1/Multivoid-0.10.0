@@ -8,7 +8,9 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/core/types.h"
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
@@ -22,8 +24,15 @@ namespace P  = ue_wrap::profile;
 namespace R  = ue_wrap::reflection;
 namespace GT = ue_wrap::game_thread;
 namespace E  = ue_wrap::engine;
+namespace SG = ue_wrap::script_gate;
 
 UE_FACT_FN(kRowSpawnFog, "weather_fog", L"daynightCycle_C", L"spawnFog", Declared);
+// superFog_C::spawnUfo, called from the super fog's BeginPlay (after its 1 s Delay) through
+// EX_LocalVirtualFunction: it projects a random point to the navmesh and mints the HoelUfo_C
+// encounter there. The script-body gate refuses it on a client, so a mirror stays fog only; the
+// host's UFO reaches the client on the world-actor lane (npc_world_enum's superFog_C source row).
+UE_FACT_FN(kRowSuperFogSpawnUfo, "weather_fog", L"superFog_C", L"spawnUfo", Declared);
+constexpr int kTagSpawnUfo = 0x57460055;  // 'WF', 'U'
 
 // Resolved once. spawnFog spawns the fog controller into the cycle's fog slot and drives the
 // height-fog density; SetFogDensity pushes the final density into the cycle's height-fog
@@ -65,14 +74,156 @@ long long g_lastReconcileMs    = 0;
 // the host. Super fog is a rare, minutes-long encounter, so: cache the actor and revalidate
 // by index (constant time, and it catches the despawn edge every detection), and walk to
 // find a freshly spawned one only on a coarse throttle (a 5 s edge latency is fine for a
-// multi-minute event, and the apply path is clear-only anyway).
+// multi-minute event).
 void*     g_superFogActor   = nullptr;
 int32_t   g_superFogIdx     = -1;
 long long g_lastSuperScanMs = 0;
 
+// The super fog's ramp state, read reflectively on whichever instance is asked (the host's actor,
+// the client's mirror). AsuperFog_C's tick: alpha += dt / duration; cyc.thickFog =
+// lerp(0, thickness, sin(alpha * 180)^3); alpha > 1 -> thickFog = 0, destroy ufo, destroy self.
+R::InstanceOffset g_offSuperAlpha{P::name::SuperFog_AlphaProp};
+R::InstanceOffset g_offSuperDuration{P::name::SuperFog_DurationProp};
+R::InstanceOffset g_offSuperThickness{P::name::SuperFog_ThicknessProp};
+R::InstanceOffset g_offSuperUfo{P::name::SuperFog_UfoProp};
+
+// The client's super-fog mirror (the one this lane spawned or adopted), revalidated by index. Game
+// thread only.
+void*     g_superFogMirror     = nullptr;
+int32_t   g_superFogMirrorIdx  = -1;
+long long g_lastSuperSnapLogMs = 0;
+
+// The echo flag for the super-fog mirror spawn: weather_event_births' client birth catch lets a
+// superFog_C birth through only while it is raised (see MirrorEchoActive).
+std::atomic<bool> g_superFogEchoSuppress{false};
+
+// True while connected as a client: gates the spawnUfo refusal. Set by Install, cleared on
+// disconnect, so a single-player super fog after a session keeps its UFO.
+std::atomic<bool> g_clientSessionActive{false};
+bool g_spawnUfoWatchReg = false;
+
+// A mirror is not spawned this late in the host's ramp: the host's own actor is about to destroy
+// itself, the density is already near zero (sin^3 near 180 degrees), and a mirror spawned now would
+// self-destroy and be re-spawned by the next pulse.
+constexpr float kSuperFogNoSpawnAlpha = 0.97f;
+
 long long NowMs() {
     using namespace std::chrono;
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+bool ReadFloatAt(void* obj, R::InstanceOffset& off, float& out) {
+    const int32_t o = off.Of(obj);
+    if (o < 0) return false;
+    out = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(obj) + o);
+    return true;
+}
+
+bool WriteFloatAt(void* obj, R::InstanceOffset& off, float v) {
+    const int32_t o = off.Of(obj);
+    if (o < 0) return false;
+    *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(obj) + o) = v;
+    return true;
+}
+
+// Write the host's ramp onto a client super fog (the deferred mirror before its BeginPlay, or a
+// live one each apply). A zero duration means the host did not read its actor: nothing is written.
+void WriteSuperFogRamp(void* sf, const coop::net::WeatherStatePayload& p) {
+    if (!sf || p.superFogDuration <= 0.f) return;
+    WriteFloatAt(sf, g_offSuperDuration, p.superFogDuration);
+    WriteFloatAt(sf, g_offSuperThickness, p.superFogThickness);
+    WriteFloatAt(sf, g_offSuperAlpha, p.superFogAlpha);
+}
+
+// engine::SpawnActor's before-finish callback: seed the deferred mirror before its BeginPlay runs.
+void SeedSuperFogMirror(void* ctx, void* actor) {
+    WriteSuperFogRamp(actor, *static_cast<const coop::net::WeatherStatePayload*>(ctx));
+}
+
+// The client's spawnUfo refusal: a client never mints its own super-fog UFO (the host's crosses on
+// the world-actor lane). Gated on a connected client session, so single player is untouched.
+SG::Verdict OnSpawnUfoPre(const SG::Call& call) {
+    if (!g_clientSessionActive.load(std::memory_order_acquire)) return SG::Verdict::Run;
+    UE_LOGI("weather_fog: client super fog %p spawnUfo REFUSED (the UFO encounter is the host's)",
+            call.object);
+    return SG::Verdict::Cancel;
+}
+
+// The client's super fog, if one lives: the cached mirror first (constant time), else one by-class
+// find (an object-array walk, so only while the host reports super fog and no mirror is cached).
+void* FindClientSuperFog() {
+    if (g_superFogMirror && R::IsLiveByIndex(g_superFogMirror, g_superFogMirrorIdx)) return g_superFogMirror;
+    g_superFogMirror    = nullptr;
+    g_superFogMirrorIdx = -1;
+    void* sf = R::FindObjectByClass(P::name::SuperFogClass);
+    if (sf && R::IsLive(sf)) {
+        g_superFogMirror    = sf;
+        g_superFogMirrorIdx = R::InternalIndexOf(sf);
+        return sf;
+    }
+    return nullptr;
+}
+
+// CLIENT: the host has a live super fog. Ensure one client super fog exists (spawned at the
+// identity transform, as daynightCycle_C::superFogEvent spawns it) and snap its ramp to the host's.
+void ApplyHostSuperFog(const coop::net::WeatherStatePayload& payload) {
+    void* sf = FindClientSuperFog();
+    if (!sf) {
+        if (payload.superFogDuration <= 0.f) {
+            UE_LOGI("weather_fog: host SUPER FOG but its ramp was not read (duration=0) -- no mirror yet");
+            return;
+        }
+        if (payload.superFogAlpha >= kSuperFogNoSpawnAlpha) {
+            UE_LOGI("weather_fog: host SUPER FOG ending (alpha=%.3f) -- no mirror spawned", payload.superFogAlpha);
+            return;
+        }
+        void* cls = R::FindClass(P::name::SuperFogClass);
+        if (!cls) {
+            static bool s_said = false;
+            if (!s_said) {
+                s_said = true;
+                UE_LOGW("weather_fog: %ls class not loaded -- the super-fog mirror cannot spawn",
+                        P::name::SuperFogClass);
+            }
+            return;
+        }
+        coop::net::WeatherStatePayload seed = payload;
+        g_superFogEchoSuppress.store(true, std::memory_order_release);
+        sf = E::SpawnActor(cls, ue_wrap::FVector{0.f, 0.f, 0.f}, false, &SeedSuperFogMirror, &seed);
+        g_superFogEchoSuppress.store(false, std::memory_order_release);
+        if (!sf || !R::IsLive(sf)) {
+            UE_LOGW("weather_fog: host SUPER FOG -> mirror spawn FAILED");
+            return;
+        }
+        g_superFogMirror    = sf;
+        g_superFogMirrorIdx = R::InternalIndexOf(sf);
+        UE_LOGI("weather_fog: host SUPER FOG -> mirror-spawned client super fog %p (alpha=%.3f "
+                "duration=%.1f thickness=%.4f)",
+                sf, payload.superFogAlpha, payload.superFogDuration, payload.superFogThickness);
+    }
+
+    // The snap: the host's ramp onto the client's actor, whose own tick then writes the cycle's
+    // thickFog from it and keeps advancing alpha at the host's rate until the next pulse.
+    WriteSuperFogRamp(sf, payload);
+
+    // A client super fog that predates the interceptors (an organic roll in the connect window) may
+    // already have minted its own UFO: that encounter is not the host's, so it goes.
+    const int32_t ufoOff = g_offSuperUfo.Of(sf);
+    if (ufoOff >= 0) {
+        void** ufo = reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(sf) + ufoOff);
+        if (*ufo && R::IsLive(*ufo)) {
+            E::DestroyActor(*ufo);
+            *ufo = nullptr;
+            UE_LOGI("weather_fog: client super fog's own UFO destroyed (encounter suppressed; the host's mirrors)");
+        }
+    }
+
+    const long long now = NowMs();
+    if (now - g_lastSuperSnapLogMs >= 10000) {
+        g_lastSuperSnapLogMs = now;
+        UE_LOGI("weather_fog: host SUPER FOG snap -> alpha=%.3f duration=%.1f thickness=%.4f",
+                payload.superFogAlpha, payload.superFogDuration, payload.superFogThickness);
+    }
 }
 
 // True iff a live super-fog actor exists. Constant time when one is cached (an index
@@ -119,6 +270,20 @@ bool Install(bool isHost) {
     // different role, and the interceptor is gated at runtime on it, so it goes inert on the
     // host without re-registration.
     g_isClient.store(!isHost, std::memory_order_release);
+    g_clientSessionActive.store(!isHost, std::memory_order_release);
+    // The spawnUfo refusal: a name watch, so it holds whenever superFog_C loads. Registered once for
+    // both roles (it self-gates at fire time). Not part of the latch: a failed registration only
+    // leaves a client mirror able to mint its own UFO, said loudly, never a client without fog sync.
+    if (!g_spawnUfoWatchReg) {
+        g_spawnUfoWatchReg = true;
+        if (SG::WatchName(kRowSuperFogSpawnUfo, kTagSpawnUfo, &OnSpawnUfoPre, nullptr)) {
+            UE_LOGI("weather_fog: superFog_C.spawnUfo watch registered (client-refused: the super-fog "
+                    "mirror mints no UFO)");
+        } else {
+            UE_LOGE("weather_fog: superFog_C.spawnUfo watch did NOT register -- a client super-fog "
+                    "mirror would mint its own UFO");
+        }
+    }
     if (g_installed) return true;
 
     void* cls = R::FindClass(P::name::DaynightCycleClass);
@@ -164,6 +329,18 @@ void ReadHostFogState(void* cycle, coop::net::WeatherStatePayload& out) {
         auto* ab = reinterpret_cast<uint8_t*>(actor);
         out.fogAlpha    = *reinterpret_cast<float*>(ab + P::off::WeatherFogController_Alpha);
         out.fogStrength = *reinterpret_cast<float*>(ab + P::off::WeatherFogController_Strength);
+    }
+    // The super fog's ramp, from the actor ComputeHostFogBits just validated. All three stay 0 when
+    // any read fails, and the receiver then spawns nothing (a zero duration is "not read").
+    if ((out.flags2 & coop::net::fog_flags2::kSuperFogActive) && g_superFogActor) {
+        float a = 0.f, d = 0.f, t = 0.f;
+        if (ReadFloatAt(g_superFogActor, g_offSuperAlpha, a) &&
+            ReadFloatAt(g_superFogActor, g_offSuperDuration, d) &&
+            ReadFloatAt(g_superFogActor, g_offSuperThickness, t)) {
+            out.superFogAlpha     = a;
+            out.superFogDuration  = d;
+            out.superFogThickness = t;
+        }
     }
 }
 
@@ -224,16 +401,22 @@ void ApplyFromHost(void* cycle, const coop::net::WeatherStatePayload& payload) {
                 payload.fogAlpha, payload.fogStrength, payload.finalFogDensity);
     }
 
-    // Super fog: clear-only (destroy a stray when the host has none). The spawn is deferred: the
-    // super-fog actor owns a UFO encounter, and its spawn was not reliably reproducible in the
-    // probe. A bounded loop, since the by-class find returns one.
-    if (!hostSuperActive) {
+    // Super fog: the host has one -> ensure the client mirror and snap its ramp; the host has none
+    // -> destroy any client super fog (the mirror, or a stray). The mirror's spawnUfo is refused at
+    // the script-body gate, so it is fog only. A bounded loop, since the by-class find returns one.
+    if (hostSuperActive) {
+        ApplyHostSuperFog(payload);
+    } else {
         for (int k = 0; k < 8; ++k) {
             void* sf = R::FindObjectByClass(P::name::SuperFogClass);
             if (!sf || !R::IsLive(sf)) break;
+            const bool wasMirror = (sf == g_superFogMirror);
             E::DestroyActor(sf);
-            UE_LOGI("weather_fog: host CLEAR -> destroyed stray client super-fog actor");
+            UE_LOGI("weather_fog: host CLEAR -> destroyed client super fog %p (%s)", sf,
+                    wasMirror ? "the mirror" : "a stray");
         }
+        g_superFogMirror    = nullptr;
+        g_superFogMirrorIdx = -1;
     }
 
     // The base ambient height-fog density: snap to the host's value unconditionally (also when
@@ -279,7 +462,8 @@ void TickClientReconcile(void* cycle) {
 }
 
 bool MirrorEchoActive() {
-    return g_spawnFogEchoSuppress.load(std::memory_order_acquire);
+    return g_spawnFogEchoSuppress.load(std::memory_order_acquire) ||
+           g_superFogEchoSuppress.load(std::memory_order_acquire);
 }
 
 bool HostFogStateChanged(void* cycle) {
@@ -297,6 +481,11 @@ bool HostFogStateChanged(void* cycle) {
 
 void OnDisconnect() {
     g_spawnFogEchoSuppress.store(false, std::memory_order_release);
+    g_superFogEchoSuppress.store(false, std::memory_order_release);
+    g_clientSessionActive.store(false, std::memory_order_release);
+    g_superFogMirror     = nullptr;  // a live mirror is left to its own tick, which destroys it
+    g_superFogMirrorIdx  = -1;
+    g_lastSuperSnapLogMs = 0;
     g_lastHostFogBits = 0xFF;
     g_lastDetectMs    = 0;
     g_superFogActor   = nullptr;  // session-scoped; a reconnect re-scans

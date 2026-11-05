@@ -89,6 +89,11 @@ UE_FACT_FN(kRowShootLazerUk, "spawn_authority", L"ufo_UK_C", L"shootLazer", Decl
 UE_FACT_FN(kRowChangeSpeedUk, "spawn_authority", L"ufo_UK_C", L"changeSpeed", Declared);
 UE_FACT_FN(kRowSetEnemyTargetUk, "spawn_authority", L"ufo_UK_C", L"setEnemyTarget", Declared);
 UE_FACT_FN(kRowExplodeUk, "spawn_authority", L"ufo_UK_C", L"explode", Declared);
+// The super fog's UFO (HoelUfo_C): the timer bodies its BeginPlay arms.
+UE_FACT_FN(kRowAttackHoelUfo, "spawn_authority", L"HoelUfo_C", L"attack", Declared);
+UE_FACT_FN(kRowAttackBeamHoelUfo, "spawn_authority", L"HoelUfo_C", L"attackBeam", Declared);
+UE_FACT_FN(kRowChangeSpeedHoelUfo, "spawn_authority", L"HoelUfo_C", L"changeSpeed", Declared);
+UE_FACT_FN(kRowChangeSpringDirHoelUfo, "spawn_authority", L"HoelUfo_C", L"changeSpringDir", Declared);
 
 // One row: the facts row a client must not run, and the tag its refusal log carries.
 struct Row {
@@ -223,6 +228,14 @@ constexpr Row kRows[] = {
     {&kRowChangeSpeedUk,                  "ufoUk.changeSpeed"},
     {&kRowSetEnemyTargetUk,               "ufoUk.setEnemyTarget"},
     {&kRowExplodeUk,                      "ufoUk.explode"},
+    // The super fog's UFO on a client is a world-actor mirror too (tick off, pose streamed), but its
+    // BeginPlay arms a 1 s attack timer (attack -> attackBeam: a sphere overlap that mints
+    // hoelUfoAttack_C beams, each igniting and damaging its target) and the 5 s speed and 10 s heading
+    // re-rolls. The beams are the host's; the re-rolls only steer a tick the mirror does not run.
+    {&kRowAttackHoelUfo,                  "hoelUfo.attack"},
+    {&kRowAttackBeamHoelUfo,              "hoelUfo.attackBeam"},
+    {&kRowChangeSpeedHoelUfo,             "hoelUfo.changeSpeed"},
+    {&kRowChangeSpringDirHoelUfo,         "hoelUfo.changeSpringDir"},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x53410000;   // 'SA', then the row

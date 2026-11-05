@@ -56,8 +56,9 @@ enum class Dispatch : uint8_t {
     SpecialEvent,  // runSpecialEvent(name) -- ONE specific, addressable ariral prank
     Ambient,       // an ambient/weather verb on daynightCycle_C / mainGamemode_C (ev.name keys the
                    // verb table in the .cpp) -- the exact UFunction the game's own timer/RNG calls.
-                   // NOT exposed (documented, deliberate): superFogEvent (a literal 5%% roll inside --
-                   // a deterministic lever needs the superFog_C spawn transform, follow-up),
+                   // The "superFog" row is not a UFunction: superFogEvent is a literal 5 % roll that
+                   // re-arms its own timer, so the lever spawns superFog_C at the identity transform,
+                   // which is the roll's success arm. NOT exposed (documented, deliberate):
                    // fleshRain/spawnErrorObject (need a spawn transform); the sky's setEye and
                    // the jellyfish path's spawn are driven by the world roll drill
                    // (coop/dev/world_roll_drill) instead.

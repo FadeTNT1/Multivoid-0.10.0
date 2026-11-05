@@ -163,6 +163,7 @@ constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
 constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", nullptr};
 constexpr const wchar_t* kUfoKnobOutputs[] = {P::name::UfoKnobClass, nullptr};
 constexpr const wchar_t* kUfoUkOutputs[] = {P::name::UfoUkClass, P::name::UfoUkEnemyClass, nullptr};
+constexpr const wchar_t* kSuperFogOutputs[] = {P::name::HoelUfoClass, nullptr};
 constexpr ExSpawnSource kExSpawnSources[] = {
     {L"trigger_wispSwarm_C",     nullptr},          // the wisps event swarm
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
@@ -180,6 +181,9 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {P::name::UfoKnobControllerClass, kUfoKnobOutputs},  // the knob flock (startEvent)
     {P::name::UfoUkControllerClass, kUfoUkOutputs},    // the UK flock (beginEvent, ufoClass)
     {P::name::UfoUkControllerEnemyClass, kUfoUkOutputs},  // the enemy UK flock (the same beginEvent body)
+    // The super fog's UFO: superFog_C::spawnUfo mints it under EX_CallMath; a client's spawnUfo is
+    // refused in coop/world/weather_fog and the mirror's attack timers in spawn_authority.
+    {P::name::SuperFogClass, kSuperFogOutputs},
 };
 
 // Whether `cls`'s own name is one of `names` (null-terminated). One render, then plain compares.
@@ -276,7 +280,7 @@ void InstallExSpawnCatch() {
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
                 "mainGamemode_C -> geomOcta_C + eg_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
-                "ufo_UK_enemy_C; EX_CallMath spawns now enroll)");
+                "ufo_UK_enemy_C, superFog_C -> HoelUfo_C; EX_CallMath spawns now enroll)");
     } else {
         UE_LOGW("npc-sync[ex-spawn]: InstallPostHook FAILED -- EX_CallMath creature spawns will "
                 "NOT mirror this session (event-swarm wisps host-only)");

@@ -8,11 +8,11 @@
 //
 // The verbs' BODIES are plain blueprint SpawnActor chains, so they all funnel through
 // GameplayStatics::FinishSpawningActor, where our Func-patch POST hook chain already lives. This
-// module adds one more consumer: on a CLIENT an UNCOMMANDED birth of weatherFogController_C or
-// blackFog_C is destroyed at birth, the client being the suppressed producer, while a wire-commanded
-// mirror birth passes on its echo flag. Host births are untouched. That hook fires for EVERY spawn,
-// so the class test is an FName-index compare against two names minted once at install: no
-// allocation per spawn.
+// module adds one more consumer: on a CLIENT an UNCOMMANDED birth of weatherFogController_C,
+// blackFog_C or superFog_C is destroyed at birth, the client being the suppressed producer, while a
+// wire-commanded mirror birth passes on its echo flag. Host births are untouched. That hook fires for
+// EVERY spawn, so the class test is an FName-index compare against three names minted once at
+// install: no allocation per spawn.
 
 #pragma once
 

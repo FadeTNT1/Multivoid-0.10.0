@@ -253,6 +253,8 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     L"ufo_knob_C",                 // the knob flock (ufo_knob_controller_C::startEvent)
     L"ufo_UK_C",                   // the UK flock (ufo_UK_controller_C::beginEvent, ufoClass)
     L"ufo_UK_enemy_C",             // the enemy UK flock (the enemy controller's ufoClass)
+    L"HoelUfo_C",                  // the super fog's UFO (superFog_C::spawnUfo; the source row in npc_world_enum,
+                                   // the client's spawnUfo refused in coop/world/weather_fog)
     // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
     // base classes are unverified -- a prop-derived wreck would ride the prop lane as well.
 };
@@ -762,8 +764,21 @@ inline constexpr const wchar_t* DaynightCycleClass = L"daynightCycle_C";
 inline constexpr const wchar_t* LightningStrikeClass = L"lightningStrike_C";
 
 // AsuperFog_C: the dense "super fog" event actor. Not stored on the cycle; its existence is its
-// active state, so the receiver finds and destroys live instances by class.
-inline constexpr const wchar_t* SuperFogClass = L"superFog_C";
+// active state. daynightCycle_C::superFogEvent spawns it at the identity transform; its BeginPlay
+// (after a 1 s Delay) registers it with lib_C::setEvent, caches the cycle in cyc, enables its tick
+// and calls spawnUfo (a HoelUfo_C 500 uu above a navmesh-projected point, held in ufo); its tick
+// adds dt/duration to alpha and writes cyc.thickFog = lerp(0, thickness, sin(alpha*180)^3), and
+// past alpha 1 zeroes thickFog, destroys the ufo and itself. The four properties are reflected
+// (FindPropertyOffset is case-insensitive).
+inline constexpr const wchar_t* SuperFogClass          = L"superFog_C";
+inline constexpr const wchar_t* SuperFog_AlphaProp     = L"alpha";
+inline constexpr const wchar_t* SuperFog_DurationProp  = L"duration";
+inline constexpr const wchar_t* SuperFog_ThicknessProp = L"thickness";
+inline constexpr const wchar_t* SuperFog_UfoProp       = L"ufo";
+// AHoelUfo_C: the super fog's UFO. A 1 s looping attack timer sphere-overlaps 8000 uu around it
+// and, per actor at 1 %, mints a hoelUfoAttack_C beam that ignites and damages its target; 5 s and
+// 10 s timers re-roll its speed and heading. Host-run; mirrored on the world-actor lane.
+inline constexpr const wchar_t* HoelUfoClass           = L"HoelUfo_C";
 
 // AdirectionalWind_C: the wind actor (a singleton), resolved by class like the cycle
 // (coop/weather_sync through ue_wrap/directionalwind).
