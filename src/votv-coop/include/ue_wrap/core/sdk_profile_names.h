@@ -58,8 +58,19 @@ inline constexpr const wchar_t* PawnCoffeePower    = L"SAVE_coffeePower";
 inline constexpr const wchar_t* PawnGasolinePilled = L"SAVE_gasolinepilled";
 inline constexpr const wchar_t* PawnGlasses        = L"equipped_glasses";
 
+// 0.10.0's starter loadout. A new save is born with an empty startupEquipment map; the game's own
+// create (lib_C::createSaveSlotTreeDirectory) copies defaultStartupEquipment into it, and the
+// player's inventory screen spawns those items into the equipment slots on the first world
+// (saveSlot_C::addStartupEquipment), then clears the map. reset_player does the same copy, plus a
+// reset of playerTransform to def (the caller keeps and restores it) and a clear of betterObjectsData.
+inline constexpr const wchar_t* SaveSlotStartupEquipment        = L"startupEquipment";
+inline constexpr const wchar_t* SaveSlotDefaultStartupEquipment = L"defaultStartupEquipment";
+inline constexpr const wchar_t* SaveSlotResetPlayerFn           = L"reset_player";
+inline constexpr const wchar_t* SaveSlotPlayerTransform         = L"playerTransform";
+inline constexpr const wchar_t* SaveSlotPlayerTransformDefault  = L"def";
+
 // 0.10.0's world arrays on saveSlot_C.
-inline constexpr const wchar_t* SaveSlotBetterObjectsData       = L"betterObjectsData";
+inline constexpr const wchar_t* SaveSlotBetterObjectsData      = L"betterObjectsData";
 inline constexpr const wchar_t* SaveSlotBetterPrimitivesData    = L"betterPrimitivesData";
 inline constexpr const wchar_t* SaveSlotBetterTriggerData       = L"betterTriggerData";
 // 0.9.0n's world object array (TArray<Fstruct_save>); 0.10.0 gathers into betterObjectsData instead.
