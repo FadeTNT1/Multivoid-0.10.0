@@ -802,6 +802,23 @@ inline constexpr const wchar_t* LightningStrikeClass = L"lightningStrike_C";
 // adds dt/duration to alpha and writes cyc.thickFog = lerp(0, thickness, sin(alpha*180)^3), and
 // past alpha 1 zeroes thickFog, destroys the ufo and itself. The four properties are reflected
 // (FindPropertyOffset is case-insensitive).
+// Anewsky_C::tp, the earthTp event (trigger_eventer_C::runEvent('earthTp') calls it on the cycle's
+// skysphere): a latent sequence -- setEvent, PlaySound2D(earthTP_in, 1.5, 0.4), 20 s, light_blackhole
+// visible + skyVisibility(true) (the black-hole sky), 6 s, an email, 60 s, PlaySound2D(earthTP_out,
+// 1.5, 0.4), 20 s, then unless the permanent-black-hole gamerule holds, light_blackhole hidden +
+// skyVisibility(false), and two emails. skyVisibility(bNewHidden) writes skyHidden, the state.
+inline constexpr const wchar_t* NewSky_TpFn              = L"tp";
+inline constexpr const wchar_t* NewSky_SkyVisibilityFn   = L"skyVisibility";
+inline constexpr const wchar_t* NewSky_SkyVisibilityParam = L"bNewHidden";
+inline constexpr const wchar_t* NewSky_SkyHiddenProp     = L"skyHidden";
+inline constexpr const wchar_t* NewSky_LightBlackHoleProp = L"light_blackhole";
+// The tp's two 2D sounds (/Game/audio/effects; the asset class is tried as SoundWave, then SoundCue).
+inline constexpr const wchar_t* EarthTpInSoundPath  = L"/Game/audio/effects/earthTP_in.earthTP_in";
+inline constexpr const wchar_t* EarthTpOutSoundPath = L"/Game/audio/effects/earthTP_out.earthTP_out";
+inline constexpr float          EarthTpSoundVolume  = 1.5f;
+inline constexpr float          EarthTpSoundPitch   = 0.4f;
+inline constexpr float          EarthTpOutDelaySec  = 86.f;  // 20 + 6 + 60 s from the tp's start
+
 inline constexpr const wchar_t* SuperFogClass          = L"superFog_C";
 inline constexpr const wchar_t* SuperFog_AlphaProp     = L"alpha";
 inline constexpr const wchar_t* SuperFog_DurationProp  = L"duration";

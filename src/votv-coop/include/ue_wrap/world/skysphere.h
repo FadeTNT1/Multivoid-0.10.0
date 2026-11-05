@@ -55,4 +55,16 @@ bool ReadSunIntensityMult(float& mult);
 // resolve. Game thread.
 bool CallSetEye(bool eye);
 
+// The black-hole sky the earthTp event shows, Anewsky_C::skyHidden. False if not resolved or not
+// streamed in. Game thread.
+bool ReadBlackHole(bool& on);
+
+// Show or hide the black-hole sky as tp does: light_blackhole's visibility, then the sky's own
+// skyVisibility(on). False if not streamed in or the verb did not resolve. Game thread.
+bool ApplyBlackHole(bool on);
+
+// One of tp's two 2D sounds (in: the start, else the end) on this machine, at tp's volume and pitch.
+// False if the sky or the sound is not loaded. Game thread.
+bool PlayEarthTpSound(bool in);
+
 }  // namespace ue_wrap::skysphere

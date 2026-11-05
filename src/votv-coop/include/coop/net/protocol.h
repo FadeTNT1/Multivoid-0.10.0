@@ -3947,7 +3947,9 @@ struct SkyStatePayload {
     float skyRoll;     //   roll
     float moonPhase;   // Anewsky_C::moonPhase_mirror (= UsaveSlot_C::moonPhase)
     uint8_t eye;       // Anewsky_C::eye, the noon roll's setEye (the moon's texture swapped for an eye's)
-    uint8_t pad[3];
+    uint8_t blackHole; // Anewsky_C::skyHidden, the earthTp black-hole sky (persistent with its gamerule)
+    uint8_t tpSeq;     // the host's count of newsky_C::tp runs, wrapping; a change is the earthTp cue
+    uint8_t pad;
 };
 static_assert(sizeof(SkyStatePayload) == 20, "SkyStatePayload must be 20 bytes");
 

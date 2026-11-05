@@ -10,6 +10,7 @@
 
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/script_gate.h"
+#include "ue_wrap/core/sdk_profile.h"  // the earthTp end-sound offset
 #include "ue_wrap/facts/function_row.h"
 #include "ue_wrap/world/skysphere.h"
 #include "ue_wrap/core/types.h"  // FRotator
@@ -25,6 +26,11 @@ namespace SKY = ue_wrap::skysphere;
 namespace sg  = ue_wrap::script_gate;
 
 UE_FACT_FN(kRowSetEye, "sky_sync", L"newsky_C", L"setEye", Declared);
+// newsky_C::tp, the earthTp event's whole body (a latent sequence: two 2D sounds, the black-hole sky,
+// three emails). The host counts its runs into SkyState.tpSeq; a client refuses its own, since its
+// emails would be local rows the host never authored, and plays the cue and shows the sky from SkyState.
+UE_FACT_FN(kRowTp, "sky_sync", L"newsky_C", L"tp", Declared);
+constexpr int kTpTag = 0x534b5450;  // 'SKTP'
 
 std::atomic<coop::net::Session*> g_session{nullptr};
 std::chrono::steady_clock::time_point g_lastBroadcast{};
@@ -41,6 +47,14 @@ bool     g_applyingEye = false;          // the lane's own apply of the host's e
 uint64_t g_eyeRefused = 0;               // a client's own setEye calls refused this session
 bool     g_saidEyeRefused = false;
 uint64_t g_eyeApplyFailed = 0;           // the host's eye samples whose setEye did not run this session
+
+// earthTp. HOST: the count of tp runs (SkyState.tpSeq) and a send owed at once. CLIENT: the last count
+// seen (-1 before the first sample, which is a baseline: a joiner's seed plays no cue), and the end
+// sound's due time (zero when none is owed). Game thread.
+uint8_t   g_tpSeq = 0;
+bool      g_tpSendNow = false;
+int       g_seenTpSeq = -1;
+std::chrono::steady_clock::time_point g_tpOutDue{};
 
 // The lane's own apply, for the length of one setEye call: the gate lets exactly this call run.
 struct ApplyingEye {
@@ -66,6 +80,23 @@ sg::Verdict OnSetEyePre(const sg::Call& call) {
     return sg::Verdict::Cancel;
 }
 
+// Before newsky's tp. The host's run is counted and sent; a client's own is refused (the earthTp row is
+// not replayed on a client, so this is its cheat menu or a stray call).
+sg::Verdict OnTpPre(const sg::Call& call) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected()) return sg::Verdict::Run;
+    if (s->role() == coop::net::Role::Host) {
+        ++g_tpSeq;
+        g_tpSendNow = true;
+        UE_LOGI("sky_sync: host earthTp (newsky %p tp) -- cue #%u sent on SkyState", call.object, g_tpSeq);
+        return sg::Verdict::Run;
+    }
+    if (!call.object || !coop::net_pump::IsInAnnouncedWorld(call.object)) return sg::Verdict::Run;
+    UE_LOGI("sky_sync: a client refused its own newsky tp -- earthTp is the host's (its cue and sky come on "
+            "SkyState)");
+    return sg::Verdict::Cancel;
+}
+
 bool Finite(const coop::net::SkyStatePayload& p) {
     return std::isfinite(p.skyPitch) && std::isfinite(p.skyYaw) &&
            std::isfinite(p.skyRoll) && std::isfinite(p.moonPhase);
@@ -82,6 +113,10 @@ bool MakePayload(coop::net::SkyStatePayload& out) {
     bool eye = false;
     SKY::ReadEye(eye);  // unread, the sky shows no eye
     out.eye = eye ? 1 : 0;
+    bool hole = false;
+    SKY::ReadBlackHole(hole);  // unread, no black hole
+    out.blackHole = hole ? 1 : 0;
+    out.tpSeq = g_tpSeq;
     return Finite(out);  // never push NaN/inf onto the wire
 }
 
@@ -95,6 +130,9 @@ void Install(coop::net::Session* session) {
         if (!sg::WatchName(kRowSetEye, kSetEyeTag, &OnSetEyePre, nullptr))
             UE_LOGE("sky_sync: the script gate refused the watch on newsky_C.setEye -- a client's own noon roll "
                     "can still set its eye");
+        if (!sg::WatchName(kRowTp, kTpTag, &OnTpPre, nullptr))
+            UE_LOGE("sky_sync: the script gate refused the watch on newsky_C.tp -- earthTp neither crosses nor "
+                    "is refused on a client");
     }
 }
 
@@ -118,6 +156,25 @@ void OnReliable(const coop::net::SkyStatePayload& payload) {
             UE_LOGW("sky_sync: the host's eye %d did not apply -- the sky's setEye did not run (first failure; the "
                     "rest are counted, and each next sample tries again)", want ? 1 : 0);
     }
+    // earthTp: a changed count is the host's tp starting now, so the start sound plays and the end
+    // sound is owed at the tp's own offset; the first sample is the baseline.
+    if (g_seenTpSeq >= 0 && payload.tpSeq != static_cast<uint8_t>(g_seenTpSeq)) {
+        const bool played = SKY::PlayEarthTpSound(true);
+        g_tpOutDue = std::chrono::steady_clock::now() +
+                     std::chrono::milliseconds(static_cast<int>(ue_wrap::profile::name::EarthTpOutDelaySec * 1000.f));
+        UE_LOGI("sky_sync: host earthTp cue #%u -> start sound %s, end sound in %.0f s", payload.tpSeq,
+                played ? "played" : "NOT played (sound not loaded)", ue_wrap::profile::name::EarthTpOutDelaySec);
+    }
+    g_seenTpSeq = payload.tpSeq;
+    // The black-hole sky is state: asserted on every sample, so a joiner's seed and the permanent gamerule
+    // hold, and the host's own flip times the client's.
+    const bool wantHole = payload.blackHole != 0;
+    bool curHole = false;
+    if (SKY::ReadBlackHole(curHole) && curHole != wantHole) {
+        const bool ok = SKY::ApplyBlackHole(wantHole);
+        UE_LOGI("sky_sync: applied the host's black-hole sky %d%s", wantHole ? 1 : 0,
+                ok ? "" : " -- skyVisibility did not run");
+    }
     static int s_n = 0;
     if ((s_n++ % 10) == 0)  // ~every 10s -- confirm convergence, not spam
         UE_LOGI("sky_sync: applied host sky yaw=%.1f moonPhase=%.3f", payload.skyYaw, payload.moonPhase);
@@ -138,9 +195,19 @@ void Tick() {
     sg::ResolvePendingNames();  // the eye gate's name, on the game thread
     if (!SKY::EnsureResolved()) return;
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;  // host broadcasts; client applies on receipt
+    if (!s || !s->connected()) return;
     const auto now = std::chrono::steady_clock::now();
-    if (now - g_lastBroadcast < kPushInterval) return;
+    if (s->role() != coop::net::Role::Host) {
+        // The client's owed earthTp end sound; otherwise the client applies on receipt.
+        if (g_tpOutDue != std::chrono::steady_clock::time_point{} && now >= g_tpOutDue) {
+            g_tpOutDue = {};
+            const bool played = SKY::PlayEarthTpSound(false);
+            UE_LOGI("sky_sync: earthTp end sound %s", played ? "played" : "NOT played (sound not loaded)");
+        }
+        return;
+    }
+    // A tp run is sent at once, not on the next second: its start sound is a cue.
+    if (now - g_lastBroadcast < kPushInterval && !g_tpSendNow) return;
     // A joiner is connected for tens of seconds before it has a world, and SkyState is not on the
     // pre-world allowlist, so the fan-out drops it per slot and reports no delivery. That is a
     // vacuous success for this lane, not a failure: QueueConnectBroadcastForSlot seeds the sky the
@@ -150,6 +217,7 @@ void Tick() {
     coop::net::SkyStatePayload p{};
     if (!MakePayload(p)) return;
     g_lastBroadcast = now;
+    g_tpSendNow = false;
     if (s->SendReliable(coop::net::ReliableKind::SkyState, &p, sizeof(p))) {
         static int s_n = 0;
         if ((s_n++ % 10) == 0)  // ~every 10s
@@ -170,6 +238,9 @@ void OnDisconnect() {
     g_eyeRefused = 0;
     g_saidEyeRefused = false;
     g_eyeApplyFailed = 0;
+    g_tpSendNow = false;
+    g_seenTpSeq = -1;   // the next session's first sample is a baseline again
+    g_tpOutDue = {};
 }
 
 }  // namespace coop::sky_sync

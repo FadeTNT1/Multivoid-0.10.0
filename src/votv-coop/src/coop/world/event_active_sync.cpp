@@ -120,6 +120,8 @@ const LaneOwned kLaneOwnedClasses[] = {
     { "badSun_C", "weather_badsun" },
     { "superFog_C", "weather_fog" },        // its presence and ramp ride WeatherState (every pulse and the seed)
     { "blackFog_C", "weather_blackfog" },   // its presence and `a` ride WeatherState (every pulse and the seed)
+    { "newsky_C", "sky_sync" },             // earthTp's tp: the black-hole sky rides SkyState (its seed included)
+    { "noiser_C", "event_fire" },           // alienSounds: a per-viewer replay of the special; a joiner misses the cue
     { "outsideChurch_C", "church_sync" },   // 0.10.0: level-placed, host-run; its state rides ChurchState
 };
 const char* LaneFor(const std::string& className) {

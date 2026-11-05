@@ -23,6 +23,11 @@ const char* const kReplayRows[] = {
     // Cosmetic or sound with no lane (the solar row's lights-dark converges with the light lane,
     // the same resulting state, echo-suppressed by its last-known prime):
     "solar", "call0",
+    // The alien sounds: the special mints three invisible noiser_C walkers at fixed points, each
+    // wandering around ITS machine's player 0 and playing outsideAlien_cue every 5-10 s until seen or
+    // 60-120 s pass. Per-viewer scare sounds with no shared output, so the host's fire is the cue and
+    // each peer hears its own (the replay is the client's one eventer call):
+    "alienSounds",
     // Trigger-box scare arms, per-viewer scares by design; arming both sides is the correct coop
     // semantics (each player gets the scare on their own overlap):
     "toeStab", "falseEnter", "mann", "vent", "crys", "fakeGrays", "susArir",
@@ -53,9 +58,10 @@ const NoReplayRow kNoReplayRows[] = {
     // and punches getMainPlayer -- a replay would double-spawn the props client-local and hit the
     // client's own player. Host-only until the scene gets a lane:
     { "obelisk", "obelisk_C prop spawns + getMainPlayer punch (no lane)" },
-    // earthTp fires newsky_C.tp: the black hole, sky and ambience flip plus a 2D sound and
-    // emails -- the emails already ride the host's append feed, and no lane carries the rest:
-    { "earthTp", "newsky_C.tp sky/blackhole flip + 2D cue (emails ride the host append feed)" },
+    // earthTp fires newsky_C.tp: the black hole, sky and ambience flip plus two 2D sounds and
+    // emails. The emails ride the host's append feed, and a replay would add local copies; the sky
+    // and the sounds ride SkyState (its black-hole state and tp count), a client's own tp refused:
+    { "earthTp", "sky_sync (SkyState black hole + tp cue; emails ride the host append feed)" },
     { "vehtp", "atv lane" },
     // bedEvent runs trigger_bedEvent -> bedEvent_C, which moves the bed and teleports
     // getMainPlayer on wake; the sleep lane only gates client dreams, it does not carry this:
@@ -100,7 +106,6 @@ const NoReplayRow kNoReplayRows[] = {
     { "bombBox", "prank special (prop lane)" },
     { "rockThrow", "prank spawner (no lane)" }, { "hillRoller", "prank spawner (no lane)" },
     { "alienJump", "prank spawner (no lane)" }, { "trashBase", "prank spawner (no lane)" },
-    { "alienSounds", "sound gap (future WorldSoundCue)" },
 };
 
 // The interaction rows: the row's entire effect is the prank special, host-local RNG.

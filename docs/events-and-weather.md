@@ -151,7 +151,14 @@ registration in the event count (`coop/world/creature_event_relay`) [?]; the cre
 is computed from the local camera, render state or player 0 (the killer wisp, the fossilhound, the antibreather, the egg) keep their own per viewer. Events whose only trace is a one-shot particle emitter
 (the meteor shower) are mirrored as cues: the host sees the row's `runEvent` return and broadcasts
 the emitter's identity and position, a joiner's snapshot reads the live emitters from the object
-index, and a client spawns the same emitter (`coop/world/event_cue_sync`).
+index, and a client spawns the same emitter (`coop/world/event_cue_sync`). The earth teleport
+(`earthTp`) is the sky's own two-minute sequence: a sound, the black-hole sky twenty seconds later,
+emails, a second sound, and the normal sky again unless the permanent-black-hole rule holds. A client
+refuses its own run; the host counts its runs into the sky state, so a client plays the two sounds
+at the host's start and at the sequence's own offset, and the black-hole sky is sky state, asserted
+each second and seeded to a joiner; the emails ride the host's email feed (`coop/world/sky_sync`)
+`[RD]`. The alien sounds are replayed: three unseen walkers circle each machine's own player with
+alien noises, so each peer hears its own `[RD]`.
 
 ### The actors an event flies in
 
@@ -241,7 +248,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 
 | State | Owner | Shape |
 |---|---|---|
-| the clock, the sky | the host | streamed; the client's clock held at zero rate |
+| the clock, the sky | the host | streamed; the client's clock held at zero rate; the earthTp black hole and its cue on `SkyState` |
 | rain, snow, fog, wind, lightning | the host | scheduler observed on the host, cancelled on the client; the client's births killed |
 | the red sky | the host | its toggle sent from the host as it returns, refused on the client |
 | the Bad Sun's existence | the host | its spawn and its copy's `remove()` sent as they return, a client's own spawn refused; each peer's copy runs by the shared clock and its harm is local |
@@ -262,7 +269,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 
 | Kind | Direction | Carries |
 |---|---|---|
-| `ClockPose` (stream), `SkyState` | the host to all | the clock and the day number; the dome, the moon and the eye |
+| `ClockPose` (stream), `SkyState` | the host to all | the clock and the day number; the dome, the moon, the eye, the black hole and the earthTp count |
 | `WeatherState`, `LightningStrike`, `RedSky`, `BadSun` | the host to all | the state fields, the fog actors' presence and ramps (the super fog's and the black fog's included); a strike location; the red sky's edge; whether a Bad Sun exists |
 | `FireflySpawn` | each peer, relayed | one spawn |
 | `EventFire`, `EventSnapshot`, `EventCue` | the host to all; the host to one joiner; the host to all | a fired row; an in-flight event; an emitter cue |
@@ -292,6 +299,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 |---|---|
 | The black fog's sync has not been seen in a play session yet; the dev event menu's `spawnBlackFog` row spawns one on the host. The host's eyes stalk the host's player only (the eye's brain reads its own machine's player, and a client's display copy is parked), so a client in the black fog is watched but never hunted | `[RD]` `coop/world/weather_blackfog`, `coop/creatures/owner_entity_sync` |
 | The super fog's sync and its UFO's mirror have not been seen in a play session yet; the dev event menu's `superFog` row spawns one on the host (the roll's success arm, without the 5 % roll) | `[RD]` `coop/world/weather_fog`, `coop/dev/event_trigger`; the roll is `daynightCycle_C::superFogEvent` |
+| The earthTp cue and black hole and the alien-sound replay have not been seen in a play session yet; the earthTp sounds' asset class is looked up as a sound wave, then a sound cue | `[RD]` `coop/world/sky_sync`, `ue_wrap/world/skysphere`, `coop/world/event_fire_policy` |
 | The flesh rain is rolled by every peer's own hour pulse and is not mirrored (the sky eye and the jellyfish are not: `SkyState` carries the eye, the world-actor lane the host's fish, and a client's own `setEye` and path spawn are refused) | `[RD]` the clock's hour roll; the jellyfish is on the world-actor mirror's list, but its spawn happens inside a Blueprint where the mirror's catch does not see it |
 | A decorated Christmas tree spawns its gifts on each peer whose player sleeps through midnight, and a client's gifts are its own | `[RD]` the tree's own check of the local player's sleep at hour 0 |
 | Several rolls are still per peer: the rare gamemode rolls (the one-percent forced quit), the server break-minigame variant, the underground loot mounds, the signal scramble and the radio-tower shuffle | `[V]` no lane under `coop/world` carries them; `coop/interactables/garbage_sync` names the mounds |

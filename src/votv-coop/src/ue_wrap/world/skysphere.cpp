@@ -13,6 +13,12 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflection_props.h"
+#include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/engine/engine_audio.h"       // PlaySound2D, FindSound: the earthTp sounds
+#include "ue_wrap/engine/engine_flashlight.h"  // SetSceneComponentVisibility: light_blackhole
+
+#include <string>
 
 #include <atomic>
 #include <chrono>
@@ -178,6 +184,48 @@ bool ReadEye(bool& eye) {
     }
     if (sOff < 0) return false;
     eye = (*(reinterpret_cast<const uint8_t*>(sky) + sOff) & sMask) != 0;
+    return true;
+}
+
+bool ReadBlackHole(bool& on) {
+    void* sky = Sky();
+    if (!sky) return false;
+    static int32_t sOff = -2;
+    static uint8_t sMask = 0;
+    if (sOff == -2) {
+        int32_t off = -1;
+        sOff = R::FindBoolProperty(R::ClassOf(sky), profile::name::NewSky_SkyHiddenProp, off, sMask) ? off : -1;
+        if (sOff < 0) UE_LOGW("skysphere: newsky_C.skyHidden did not resolve by name -- the black hole cannot be read");
+    }
+    if (sOff < 0) return false;
+    on = (*(reinterpret_cast<const uint8_t*>(sky) + sOff) & sMask) != 0;
+    return true;
+}
+
+bool ApplyBlackHole(bool on) {
+    static R::InstanceOffset s_light{profile::name::NewSky_LightBlackHoleProp};
+    void* sky = Sky();
+    if (!sky) return false;
+    const int32_t lightOff = s_light.Of(sky);
+    if (lightOff >= 0) {
+        if (void* light = *reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(sky) + lightOff))
+            E::SetSceneComponentVisibility(light, on, false);
+    }
+    void* fn = R::FindDispatchFunctionCached(R::ClassOf(sky), profile::name::NewSky_SkyVisibilityFn);
+    if (!fn) return false;
+    ue_wrap::ParamFrame f(fn);
+    if (!f.valid() || !f.Set<bool>(profile::name::NewSky_SkyVisibilityParam, on)) return false;
+    return ue_wrap::Call(sky, f);
+}
+
+bool PlayEarthTpSound(bool in) {
+    void* sky = Sky();
+    if (!sky) return false;
+    const wchar_t* path = in ? profile::name::EarthTpInSoundPath : profile::name::EarthTpOutSoundPath;
+    void* sound = E::FindSound(std::wstring(L"SoundWave ") + path);
+    if (!sound) sound = E::FindSound(std::wstring(L"SoundCue ") + path);
+    if (!sound) return false;
+    E::PlaySound2D(sky, sound, profile::name::EarthTpSoundVolume, profile::name::EarthTpSoundPitch, 0.f, true);
     return true;
 }
 
