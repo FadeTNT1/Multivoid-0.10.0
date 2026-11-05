@@ -23,6 +23,10 @@ void* GetStaticMeshComponent(void* actor);
 // fight the pose drive. Game thread.
 bool SetComponentTickEnabled(void* component, bool enabled);
 
+// UPrimitiveComponent::SetCollisionResponseToChannel(channel, response): channel is an ECollisionChannel
+// value, response 0 Ignore, 1 Overlap, 2 Block. False when it does not resolve or run. Game thread.
+bool SetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, uint8_t response);
+
 // UActorComponent::IsComponentTickEnabled; false when it does not read. Game thread.
 bool IsComponentTickEnabled(void* component);
 

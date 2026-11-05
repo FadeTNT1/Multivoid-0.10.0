@@ -797,6 +797,9 @@ inline constexpr const wchar_t* BlackFogClass                  = L"blackFog_C";
 // (QueryAndPhysics=3) on wire-converged props whose local copy a natural-spawn pipeline left at
 // NoCollision. The param is `NewType` (ECollisionEnabled::Type).
 inline constexpr const wchar_t* SetCollisionEnabledFn                = L"SetCollisionEnabled";
+// SetCollisionResponseToChannel (UPrimitiveComponent; params `Channel` ECollisionChannel, `NewResponse`
+// ECollisionResponse): the player puppet's capsule ignores PhysicsBody so it never shoves a simulated prop.
+inline constexpr const wchar_t* SetCollisionResponseToChannelFn      = L"SetCollisionResponseToChannel";
 // The cap-mushroom class: it overrides Aprop_C::Init and its natural-spawn path
 // (AmushroomSpawner_C::Spawn -> spawnedNaturally()) sets its StaticMesh to NoCollision.
 // mushroom7_C grows into prop_puffballMature_C, a separate species.

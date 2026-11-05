@@ -397,6 +397,19 @@ bool SetComponentTickEnabled(void* component, bool enabled) {
     return Call(component, f);
 }
 
+bool SetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, uint8_t response) {
+    if (!primitiveComponent || !R::IsLive(primitiveComponent)) return false;
+    static void* sFn = nullptr;
+    if (!sFn) {
+        void* pc = R::FindClass(P::name::PrimitiveComponentClass);
+        if (pc) sFn = R::FindFunction(pc, P::name::SetCollisionResponseToChannelFn);
+    }
+    if (!sFn) return false;
+    ParamFrame f(sFn);
+    if (!f.Set<uint8_t>(L"Channel", channel) || !f.Set<uint8_t>(L"NewResponse", response)) return false;
+    return Call(primitiveComponent, f);
+}
+
 bool IsComponentTickEnabled(void* component) {
     if (!component || !R::IsLive(component)) return false;
     static void* sFn = nullptr;

@@ -193,6 +193,24 @@ static void* SpawnPuppetMainPlayer(const FVector& loc,
         E::SetComponentTickEnabled(cmc, false);
         UE_LOGI("puppet[MainPlayer]: disabled orphan CMC tick @ %p (puppet driven by SetActorLocation, not physics)", cmc);
     }
+    // The puppet never physically shoves a simulated prop. Its capsule and body meshes are teleported
+    // to the wire pose by SetActorLocation, so any overlap with a simulated body (a player crouching on
+    // a desk lowers the wire Z a few cm, a step onto a prop lands inside it) resolves as a depenetration
+    // impulse on the prop: a fling that prop sync then spreads. Props belong to prop sync and the real
+    // player's machine, so the puppet ignores ECC_PhysicsBody; it still blocks the visibility/camera/pawn
+    // channels that hit judging, grab and nameplate traces use.
+    {
+        constexpr uint8_t kEccPhysicsBody = 5;
+        constexpr uint8_t kResponseIgnore = 0;
+        void* capsule = ReadPtr(actor, P::off::ACharacter_CapsuleComponent);
+        const bool capOk = capsule && E::SetCollisionResponseToChannel(capsule, kEccPhysicsBody, kResponseIgnore);
+        E::SetCollisionResponseToChannel(meshComp, kEccPhysicsBody, kResponseIgnore);
+        if (void* slot = ReadPtr(actor, P::off::ACharacter_Mesh)) {
+            E::SetCollisionResponseToChannel(slot, kEccPhysicsBody, kResponseIgnore);
+        }
+        UE_LOGI("puppet[MainPlayer]: capsule %p ignores PhysicsBody (ok=%d) -- no depenetration shove on props",
+                capsule, capOk ? 1 : 0);
+    }
     // The orphan's actor tick disabled: mainPlayer_C's ReceiveTick runs single-player logic each
     // frame (HUD updates, look traces, hunger and thirst, wind-sound placement), and branches
     // reading other fields still run with GameMode nulled. The mesh AnimBP keeps ticking
