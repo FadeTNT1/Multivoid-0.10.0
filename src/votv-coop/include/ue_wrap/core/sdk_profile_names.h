@@ -84,6 +84,9 @@ inline constexpr const wchar_t* SignalDynamicStruct = L"struct_signalDataDynamic
 inline constexpr const wchar_t* ContainerInventoryComponentProp = L"inventoryComponent";
 inline constexpr const wchar_t* InventoryComponentOwnerProp     = L"owner";
 
+// The static mesh prop_C::init sets when its props-table row gives no mesh (and no meshOverride).
+inline constexpr const wchar_t* PropErrorMesh = L"00000000error";
+
 // Actor spawning (the BlueprintCallable deferred-spawn pair the K2 SpawnActorFromClass node uses)
 // and transform get/set.
 inline constexpr const wchar_t* GameplayStaticsClass = L"GameplayStatics";
