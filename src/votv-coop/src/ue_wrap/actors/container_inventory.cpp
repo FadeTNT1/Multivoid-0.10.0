@@ -10,6 +10,7 @@
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/reflection_props.h"
+#include "ue_wrap/core/sdk_profile.h"
 
 #include <cstring>
 
@@ -260,6 +261,22 @@ bool SetMaxVolume(void* inventory, float value) {
 // The host's world-settle edge: propInventory.init sets `obj` on its first line and nothing clears it,
 // so a live `obj` is the mark that a container's inventory has run its init.
 bool InventoryInitialized(void* container) {
+    if (!container) return false;
+    // 0.10.0: the grid inventory component, started when its BeginPlay's makeOwner has set `owner`.
+    // Asked first and quietly, so a build with the component never reaches the propInventory lookup.
+    static int32_t s_offComp = -2, s_offOwner = -2;
+    if (s_offComp == -2)
+        s_offComp = R::FindPropertyOffset(R::ClassOf(container), ue_wrap::profile::name::ContainerInventoryComponentProp);
+    if (s_offComp >= 0) {
+        void* const comp = ReadAt<void*>(container, s_offComp);
+        if (!comp || !SR::PlausibleObjPtr(comp) || !R::IsLive(comp)) return false;
+        if (s_offOwner == -2)
+            s_offOwner = R::FindPropertyOffset(R::ClassOf(comp), ue_wrap::profile::name::InventoryComponentOwnerProp);
+        if (s_offOwner < 0) return false;
+        void* const owner = ReadAt<void*>(comp, s_offOwner);
+        return owner && R::IsLive(owner);
+    }
+    // 0.9.0n: propInventory_C's `obj`, set on init's first line and never cleared.
     void* const inv = InventoryOf(container);
     if (!inv || CachedOffset(g_offInvObj, R::ClassOf(inv), L"obj") < 0) return false;
     void* const obj = ReadAt<void*>(inv, g_offInvObj);

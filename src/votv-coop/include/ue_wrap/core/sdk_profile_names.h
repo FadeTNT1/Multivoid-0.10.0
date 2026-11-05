@@ -77,6 +77,13 @@ inline constexpr const wchar_t* BetterSaveStruct = L"struct_betterSave";
 // signalObjectImageName member mid-struct; its layout is measured (ue_wrap/desk/signal_dynamic.h).
 inline constexpr const wchar_t* SignalDynamicStruct = L"struct_signalDataDynamic";
 
+// 0.10.0's container inventory: prop_container_C.inventoryComponent (an inventoryComponent_C, the
+// grid inventory that replaced propInventory_C + saveSlot.GObjStack), whose `owner` its BeginPlay
+// (makeOwner) sets to the container -- the "this container has started" mark the host's world
+// settle counts.
+inline constexpr const wchar_t* ContainerInventoryComponentProp = L"inventoryComponent";
+inline constexpr const wchar_t* InventoryComponentOwnerProp     = L"owner";
+
 // Actor spawning (the BlueprintCallable deferred-spawn pair the K2 SpawnActorFromClass node uses)
 // and transform get/set.
 inline constexpr const wchar_t* GameplayStaticsClass = L"GameplayStatics";
