@@ -15,4 +15,9 @@ namespace ue_wrap::int_objects {
 // live, the class has no `addDamage`, the hit cannot be built, or the call faulted.
 bool InvokeAddDamage(void* target, void* actor, float damage, const FVector& hitLoc, const FVector& impact);
 
+// The same call with the hit built on `component` of `target`, for a class whose struck body is not a `Mesh` (a
+// prop's StaticMesh). `component` may be null: the hit then names the actor alone.
+bool InvokeAddDamageOn(void* target, void* component, void* actor, float damage, const FVector& hitLoc,
+                       const FVector& impact);
+
 }  // namespace ue_wrap::int_objects

@@ -14,8 +14,10 @@
 namespace ue_wrap::physical_audio {
 
 enum class Cue {
-    kSoft,    // sound_soft: the grab / pickup cue
-    kImpact,  // sound_impact: the land / impact cue
+    kSoft,       // sound_soft: the grab / pickup cue
+    kImpact,     // sound_impact: the land / impact cue
+    kDamaged,    // sound_damaged: a hit that took damage
+    kDestroyed,  // sound_destroyed: a break
 };
 
 // The cue (a USoundBase*) of a UPhysicalMaterial, through lib_C::getPhysicalAsAudio. `worldCtx` is

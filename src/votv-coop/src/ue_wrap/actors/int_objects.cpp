@@ -31,6 +31,13 @@ void* MeshOf(void* actor) {
 
 bool InvokeAddDamage(void* target, void* actor, float damage, const FVector& hitLoc, const FVector& impact) {
     if (!target || !R::IsLive(target)) return false;
+    return InvokeAddDamageOn(target, MeshOf(target), actor, damage, hitLoc, impact);
+}
+
+bool InvokeAddDamageOn(void* target, void* component, void* actor, float damage, const FVector& hitLoc,
+                       const FVector& impact) {
+    if (!target || !R::IsLive(target)) return false;
+    if (component && !R::IsLive(component)) component = nullptr;
     void* cls = R::ClassOf(target);
     void* fn = cls ? R::FindDispatchFunctionCached(cls, L"addDamage") : nullptr;
     if (!fn) return false;
@@ -39,7 +46,7 @@ bool InvokeAddDamage(void* target, void* actor, float damage, const FVector& hit
     f.Set<void*>(L"actor", actor);
     f.Set<float>(L"damage", damage);
     f.Set<FVector>(L"impact", impact);
-    if (!hit_result::Write(f, L"hit", target, MeshOf(target), hitLoc)) return false;
+    if (!hit_result::Write(f, L"hit", target, component, hitLoc)) return false;
     return Call(target, f);
 }
 

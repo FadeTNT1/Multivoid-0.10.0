@@ -636,9 +636,14 @@ inline constexpr const wchar_t* GetPhysicalAsAudioWorldParam = L"__WorldContext"
 inline constexpr const wchar_t* GetPhysicalAsAudioOutParam   = L"AudioPhysMat";
 inline constexpr const wchar_t* PhysAudioSoftProp            = L"sound_soft";    // physMat_SoundsAndParticles_C: grab / pickup cue
 inline constexpr const wchar_t* PhysAudioImpactProp          = L"sound_impact";  // physMat_SoundsAndParticles_C: impact / land cue
+// The break cues of the same object (physSnd_wood_crate: damage_wood_Cue and break_crate_Cue), which
+// comp_physicsImpact_C plays inside impactDamage; read from the pak's name map, not yet from a dump.
+inline constexpr const wchar_t* PhysAudioDamagedProp         = L"sound_damaged";    // damage taken, still standing
+inline constexpr const wchar_t* PhysAudioDestroyedProp       = L"sound_destroyed";  // the break
 inline constexpr const wchar_t* PropPhysicsImpactProp        = L"physicsImpact";      // prop_C -> comp_physicsImpact_C
 inline constexpr const wchar_t* PhysImpactMatOverrideProp    = L"physmat_override";   // comp_physicsImpact_C UPhysicalMaterial*, wins when valid
 inline constexpr const wchar_t* PhysImpactMatProp            = L"physmat";            // comp_physicsImpact_C UPhysicalMaterial*
+inline constexpr const wchar_t* PhysImpactDamageFn           = L"impactDamage";       // comp_physicsImpact_C (damage, impact, hit, actor)
 
 // mainPlayer_C drives every ragdoll cause through `ragdollMode(bool ragdoll, bool passOut, bool
 // death)` (mainPlayer.hpp:484) and recovers through `forceGetUp()` (line 641). On an unpossessed puppet

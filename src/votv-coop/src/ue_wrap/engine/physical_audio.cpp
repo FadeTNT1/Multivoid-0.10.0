@@ -66,8 +66,16 @@ void* CueFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which) {
 
     static R::InstanceOffset sSoft(N::PhysAudioSoftProp);
     static R::InstanceOffset sImpact(N::PhysAudioImpactProp);
-    void* cue = ReadObjectProp(audioMat, which == Cue::kImpact ? sImpact : sSoft);
-    if (!cue) LogOnce(sSaidProp, "audio material has no sound_soft / sound_impact property or it is empty");
+    static R::InstanceOffset sDamaged(N::PhysAudioDamagedProp);
+    static R::InstanceOffset sDestroyed(N::PhysAudioDestroyedProp);
+    R::InstanceOffset& off = which == Cue::kImpact    ? sImpact
+                           : which == Cue::kDamaged   ? sDamaged
+                           : which == Cue::kDestroyed ? sDestroyed
+                                                      : sSoft;
+    void* cue = ReadObjectProp(audioMat, off);
+    // A material may leave its break cues empty; only the two every material carries are worth a warning.
+    if (!cue && (which == Cue::kSoft || which == Cue::kImpact))
+        LogOnce(sSaidProp, "audio material has no sound_soft / sound_impact property or it is empty");
     return cue;
 }
 

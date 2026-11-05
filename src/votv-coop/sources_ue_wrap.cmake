@@ -161,6 +161,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/fossilhound.cpp
     src/ue_wrap/actors/geom_octa.cpp
     src/ue_wrap/actors/int_objects.cpp
+    src/ue_wrap/actors/physics_impact.cpp
     src/ue_wrap/world/votv_lib.cpp
     src/ue_wrap/world/economy.cpp
     src/ue_wrap/world/profile.cpp
