@@ -113,6 +113,11 @@ bool g_subAfterLoad = false;  // the join's loadObjects returned with no local p
 Clock::time_point g_subRepeatUntil{};
 bool g_subFromProfile = false;
 std::vector<uint8_t> g_subBytes;
+// Client: 0.10.0 keeps health, food, sleep, coffee and gasoline on the pawn, which does not exist
+// when the save object is prepared. The numbers wait here and are applied once, when the local
+// player has loaded (ApplyPendingPawnVitals).
+bool g_pawnVitalsPending = false;
+ue_wrap::vitals::Snapshot g_pawnVitals;
 
 // Host: the per-slot send sequence for the on-join push (independent of the client stream's
 // sequence space; assembler keys are per sender and sequence, so they never collide).
@@ -270,6 +275,7 @@ void OnSaveObjectReady(void* saveSlotObject) {
         UE_LOGW("player_inventory[client]: the game's effect reset did not run -- this player may "
                 "start with the host's effects");
     g_profileApplied = false;
+    g_pawnVitalsPending = false;
     g_joinPose = {};
     g_joinPlacement = JoinStaysAtHost() ? JoinPlacement::AtHost : JoinPlacement::StartPoint;
     // The items are replaced as the world loads, not here: 0.10.0 keeps them inside the player's
@@ -282,6 +288,10 @@ void OnSaveObjectReady(void* saveSlotObject) {
         ue_wrap::vitals::Snapshot fresh;
         const bool vitals = ue_wrap::vitals::ReadDefaults(fresh) &&
                             ue_wrap::vitals::ApplySnapshot(saveSlotObject, fresh);
+        if (vitals) {
+            g_pawnVitals = fresh;
+            g_pawnVitalsPending = true;
+        }
         namespace N = ue_wrap::profile::name;
         if (g_joinPlacement == JoinPlacement::StartPoint)
             ue_wrap::vitals::WritePlayerTransform(saveSlotObject, N::kKPPSpawnX, N::kKPPSpawnY,
@@ -311,6 +321,11 @@ void OnSaveObjectReady(void* saveSlotObject) {
     if (!vitalsOk)
         UE_LOGE("player_inventory[client]: the vitals were NOT written -- this player starts at "
                 "the host's numbers");
+    else {
+        g_pawnVitals = v;
+        g_pawnVitalsPending = true;
+        UE_LOGI("player_inventory[client]: the pawn's survival vitals wait for the local player to load");
+    }
     // The pose is a world position off the wire: finite and inside the bound every other world
     // position on the wire is held to (an extreme finite coordinate still asserts in the engine).
     const auto& pose = g_pendingApply.pose;
@@ -344,8 +359,17 @@ void OnSaveObjectReady(void* saveSlotObject) {
 // Client: carry out the armed substitution on `player`. The stream opens only when the bytes in
 // place are this player's own (or their starting kit), so an unread world never overwrites the
 // profile the host holds.
+void ApplyPendingPawnVitals(const char* when) {
+    if (!g_pawnVitalsPending) return;
+    if (!ue_wrap::vitals::ApplyPawnRows(g_pawnVitals)) return;  // no pawn yet: stays pending
+    g_pawnVitalsPending = false;  // once
+    UE_LOGI("player_inventory[client]: the pawn's survival vitals applied %s (hp=%.0f food=%.0f sleep=%.0f)",
+            when, g_pawnVitals.health, g_pawnVitals.food, g_pawnVitals.sleep);
+}
+
 void Substitute(void* player, const char* when) {
     g_subPending = false;
+    ApplyPendingPawnVitals(when);
     namespace IC = ue_wrap::inventory_component;
     const IC::Counts before = IC::CountItems(player);
     const bool ok = IC::Restore(player, g_subBytes);
@@ -472,6 +496,9 @@ void Tick() {
             ue_wrap::inventory_component::CallUpdateEquipment(pawn);  // the game mode's own ran already
         }
     }
+    // A pawn that was not reachable when the player loaded: the vitals land once it is.
+    if (g_pawnVitalsPending && !g_subPending && !g_subAfterLoad && coop::players::Registry::Get().Local())
+        ApplyPendingPawnVitals("once the pawn was reachable");
     if (s && s->connected()) {
         if (s->role() == coop::net::Role::Client) ClientStreamTick(s);
         else                                      HostPersistTick(s);
@@ -638,6 +665,7 @@ void OnDisconnect() {
     g_joinPlacement = JoinPlacement::StartPoint;
     g_standingPose = {};
     g_lastSentPose = {};
+    g_pawnVitalsPending = false;
     g_oversizeHash = 0;
     g_lastPoll = Clock::time_point{};
     g_hasPendingApply.store(false, std::memory_order_release);

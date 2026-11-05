@@ -101,6 +101,11 @@ bool ReadDefaults(Snapshot& out);
 // False, having written nothing, if `saveSlot` is dead or a field is missing.
 bool ApplySnapshot(void* saveSlot, const Snapshot& s);
 
+// The pawn-owned rows of `s` (health, food, sleep, coffee, gasoline on 0.10.0) onto the live local
+// pawn. False, having written nothing, when there is no live pawn yet: ApplySnapshot cannot place
+// them before the world exists, so a join's caller defers them and calls this once the pawn is up.
+bool ApplyPawnRows(const Snapshot& s);
+
 // saveSlot.playerTransform: where the game believes the player is. On a client nothing writes it
 // (saveObjects never runs there), so it stays the HOST's position from the join capture -- and it
 // is where the game's anti-noclip check puts a player it finds behind geometry. Written before

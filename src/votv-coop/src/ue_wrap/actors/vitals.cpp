@@ -339,6 +339,18 @@ bool ReadDefaults(Snapshot& out) {
     return true;
 }
 
+bool ApplyPawnRows(const Snapshot& s) {
+    if (!EnsureSnapshotOffsets()) return false;
+    void* const pawn = PawnObject();
+    if (!pawn) return false;
+    auto* const pb = static_cast<uint8_t*>(pawn);
+    for (size_t i = 0; i < kSnapshotRows; ++i) {
+        if (kRows[i].owner != Owner::Pawn || g_res[i].off < 0) continue;
+        std::memcpy(pb + g_res[i].off, SnapshotField(s, static_cast<Field>(i)), sizeof(float));
+    }
+    return true;
+}
+
 bool ApplySnapshot(void* saveSlot, const Snapshot& s) {
     if (!saveSlot || !R::IsLive(saveSlot) || !EnsureSnapshotOffsets()) return false;
     auto* base = static_cast<uint8_t*>(saveSlot);
@@ -346,15 +358,9 @@ bool ApplySnapshot(void* saveSlot, const Snapshot& s) {
         if (kRows[i].owner != Owner::SaveSlot) continue;
         std::memcpy(base + g_res[i].off, SnapshotField(s, static_cast<Field>(i)), sizeof(float));
     }
-    // The survival floats are the pawn's on 0.10.0: onto the live pawn, best effort (a join applies
-    // before any world exists, when there is none; the world then starts from the game's numbers).
-    if (void* const pawn = PawnObject()) {
-        auto* const pb = static_cast<uint8_t*>(pawn);
-        for (size_t i = 0; i < kSnapshotRows; ++i) {
-            if (kRows[i].owner != Owner::Pawn || g_res[i].off < 0) continue;
-            std::memcpy(pb + g_res[i].off, SnapshotField(s, static_cast<Field>(i)), sizeof(float));
-        }
-    } else {
+    // The survival floats are the pawn's on 0.10.0: onto the live pawn when there is one. A join
+    // applies before any world exists; the caller then defers them to ApplyPawnRows.
+    if (!ApplyPawnRows(s)) {
         static bool s_said = false;
         if (!s_said) {
             s_said = true;
