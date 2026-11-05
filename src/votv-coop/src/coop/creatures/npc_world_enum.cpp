@@ -156,12 +156,14 @@ struct ExSpawnSource {
     const wchar_t* cls;
     const wchar_t* const* outputs;   // null-terminated; null: any allowlisted output
 };
-// The world actors are ventKnocker's, morningGay's, borgRozital's and the fallbody / fallcar droppers'
-// (a dropper's kerfur kill and prop drop are refused on a client in spawn_authority).
+// The world actors are ventKnocker's, morningGay's, borgRozital's, the fallbody / fallcar droppers' and
+// graystank's tank or pig dropper (a dropper's kerfur kill and prop drop are refused on a client in
+// spawn_authority, and its generator break by the power grid).
 constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
                                               P::name::KockerClass, P::name::MorningUfoClass,
                                               P::name::RozitBorgClass, P::name::UfoDropperBodyClass,
-                                              P::name::UfoDropperCarClass, nullptr};
+                                              P::name::UfoDropperCarClass, P::name::UfoDropperTankClass,
+                                              P::name::UfoDropperPigClass, nullptr};
 // The gamemode mints many classes besides these, and most of its other spawners are not refused on a client yet,
 // so its source is narrowed to the two outputs of the night roll (mainGamemode_C::CustomEvent_5, an Octa or a
 // night egg), whose client roll the spawn authority refuses.
@@ -285,7 +287,8 @@ void InstallExSpawnCatch() {
         UE_LOGI("npc-sync[ex-spawn]: Func-thunk catch installed on BeginDeferred (source-gated: "
                 "trigger_wispSwarm_C -> wisp_C, piramidSpawner_C -> killerwisp_C + piramid2_C, "
                 "jellyfishPath_C -> jellyfish_C, trigger_eventer_C -> ventCrawler_C + superEgger_C, "
-                "trigger_eventer_C -> kocker_C + morningUfo_C + rozitBorg_C + ufoDropper_body_C + ufoDropper_car_C, "
+                "trigger_eventer_C -> kocker_C + morningUfo_C + rozitBorg_C + ufoDropper_body_C + ufoDropper_car_C + "
+                "ufoDropper_tank_C + ufoDropper_pig_C, "
                 "trigger_spawnFollowingArir_C -> npc_arirFollower_C, "
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
                 "mainGamemode_C -> geomOcta_C + eg_C, "

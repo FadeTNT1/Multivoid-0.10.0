@@ -226,7 +226,8 @@ inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcA
 inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     L"ufoDropper_body_C",          // ufoDropper delivery saucer body (the gray "drop pod")
     L"ufoDropper_car_C",           // ufoDropper car variant
-    L"ufoDropper_tank_C",          // ufoDropper tank variant
+    L"ufoDropper_tank_C",          // ufoDropper tank variant (graystank with the eventer's `combat` set)
+    L"ufoDropper_pig_C",           // ufoDropper pig variant (graystank otherwise)
     L"rozitBorg_C",                // Rozital mothership (borgRozital event)
     L"arirShip_C",                 // ariral ship
     L"skyUfo_C",                   // high-altitude sky UFO
@@ -272,6 +273,12 @@ inline constexpr const wchar_t* MorningUfoClass     = L"morningUfo_C";
 inline constexpr const wchar_t* RozitBorgClass      = L"rozitBorg_C";
 inline constexpr const wchar_t* UfoDropperBodyClass = L"ufoDropper_body_C";
 inline constexpr const wchar_t* UfoDropperCarClass  = L"ufoDropper_car_C";
+// graystank's droppers (runEvent('graystank'): the tank when the eventer's `combat` is set, else the pig).
+// Both are ufoDropper_C children whose BeginPlay runs the parent's and then breaks generator 0: on a
+// client mirror the parent's kerfur kill and drop are refused (spawn_authority) and the break is the
+// power grid's to refuse (coop/world/power_grid), so a mirror is the saucer alone.
+inline constexpr const wchar_t* UfoDropperTankClass = L"ufoDropper_tank_C";
+inline constexpr const wchar_t* UfoDropperPigClass  = L"ufoDropper_pig_C";
 // The arirFollower event's spawner: runTrigger mints npc_arirFollower_C at its own transform
 // (EX_CallMath), so the npc lane sees it only through a source row.
 inline constexpr const wchar_t* TriggerSpawnFollowingArirClass = L"trigger_spawnFollowingArir_C";

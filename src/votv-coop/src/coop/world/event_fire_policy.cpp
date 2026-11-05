@@ -87,7 +87,10 @@ const NoReplayRow kNoReplayRows[] = {
     { "morningGay", "world-actor lane (eventer EX-catch: morningUfo_C)" },
     { "borgRozital", "world-actor lane (eventer EX-catch: rozitBorg_C, its tick kept on the mirror)" },
     { "graysforest", "npc lane (controller EX-catch)" },
-    { "graystank", "creature spawn (no lane yet)" }, { "arirBuster", "creature spawn (no lane yet)" },
+    // graystank mints a ufoDropper_tank_C (the eventer's `combat` set) or a ufoDropper_pig_C: the dropper is a
+    // world-actor mirror whose kerfur kill, drop and generator break a client refuses.
+    { "graystank", "world-actor lane (eventer EX-catch: ufoDropper_tank_C / ufoDropper_pig_C)" },
+    { "arirBuster", "creature spawn (no lane yet)" },
     { "eggvasion", "npc and world-actor lanes (eventer and egger EX-catch)" },
     { "boarwar", "creature spawn (no lane yet)" },
     { "soltoClean", "world-actor spawn (no lane yet: soltomiaCleaning_C plays gameplay on a mirror)" },
