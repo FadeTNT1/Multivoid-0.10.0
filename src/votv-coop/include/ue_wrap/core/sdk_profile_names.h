@@ -540,6 +540,13 @@ inline constexpr const wchar_t* PropThrownFn          = L"thrown";
 // load, inventory drops); the host broadcasts, the client skips.
 inline constexpr const wchar_t* PropInitFn            = L"Init";
 
+// trashBitsPile_C's collect counters (declared on the pile class, 0.10.0 Blueprint capture), resolved
+// by reflection and required to be IntProperty before any read or write; the 0.9.0n offsets are a
+// UObject* in 0.10.0 and are never used.
+inline constexpr const wchar_t* TrashPileCounterA     = L"amountA";
+inline constexpr const wchar_t* TrashPileCounterB     = L"amountB";
+inline constexpr const wchar_t* TrashPileCounterType  = L"IntProperty";
+
 // Classes that are intermediate state of a host-authoritative pipeline. Mushrooms grow through
 // class identity, mushroom7_C (growing, hidden, collision off) to a mature class through a
 // timer-driven Transform. On a client a local spawn of these is destroyed on Init POST and a wire

@@ -376,6 +376,35 @@ void RunOffsetChecks(int& ok, int& fail, int& failPriority) {
         }
         ReportLine(buf);
     }
+
+    // Reflection-only fields: no numeric constant exists to compare, so the check asks that each
+    // resolves AND is the type the wrapper writes it as. The trash pile's counters moved to a
+    // pointer's place in 0.10.0; a wrapper that writes them as int32 over a changed layout corrupts
+    // the object, so an unresolved or retyped counter is reported above cosmetic severity.
+    struct TypedRow { const wchar_t* cls; const wchar_t* prop; const wchar_t* type; };
+    const TypedRow kTyped[] = {
+        {L"trashBitsPile_C", P::name::TrashPileCounterA, P::name::TrashPileCounterType},
+        {L"trashBitsPile_C", P::name::TrashPileCounterB, P::name::TrashPileCounterType},
+    };
+    for (const auto& t : kTyped) {
+        void* cls = FindLoadedClass(t.cls);
+        int32_t off = -1;
+        std::wstring type;
+        if (cls && R::PropertyOffsetAndClass(cls, t.prop, off, type) && off >= 0 && type == t.type) {
+            ++ok;
+            continue;
+        }
+        UE_LOGE("sdk-check[IMPORTANT]: FIELD %ls.%ls not an %ls (live offset %d, type '%ls')", t.cls,
+                t.prop, t.type, off, type.c_str());
+        char buf[512];
+        std::snprintf(buf, sizeof(buf), "  [IMPORTANT] FIELD %s.%s not an %s (live offset %d, type '%s')",
+                      Narrow(t.cls).c_str(), Narrow(t.prop).c_str(), Narrow(t.type).c_str(), off,
+                      Narrow(type.c_str()).c_str());
+        ReportLine(buf);
+        ++fail;
+        ++failPriority;
+        Failed(Severity::Important);
+    }
 }
 
 void RunFunctionChecks(int& ok, int& fail, int& failPriority, int& skipped) {
