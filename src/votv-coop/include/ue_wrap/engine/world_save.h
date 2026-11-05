@@ -1,11 +1,10 @@
 // ue_wrap/engine/world_save.h -- the game's own full world save, run on request.
 //
-// Engine-wrapper layer (principle 7): one UFunction call, saveSlot_C::saveToSlot on the running
-// world's save object (mainGamemode.saveSlot), with a zeroed frame -- quicksave=false,
-// overwriteSubsave=false, isForcedSave=false -- the same body the game's own save and autosave run.
-// Whatever the mod hooks on that path (the disk hook of ue_wrap/engine/save_to_slot_hook, the gather
-// watch of ue_wrap/engine/save_capture) sees it as it sees the game's own. No gameplay, network or
-// coop state. The dedicated server's autosave and its `save` command are the callers.
+// Engine-wrapper layer (principle 7): one UFunction call, saveSlot_C::save on the running world's
+// save object (mainGamemode.save_slot) with every flag false -- the gather (saveObjects) and the
+// write (saveToSlot) the game's pause-menu save runs, into the loaded world's folder. Whatever the
+// mod gates on that path (coop/save/save_block) sees it as it sees the game's own. No gameplay,
+// network or coop state. The dedicated server's autosave and its `save` command are the callers.
 // Implementation: src/ue_wrap/engine/world_save.cpp.
 
 #pragma once

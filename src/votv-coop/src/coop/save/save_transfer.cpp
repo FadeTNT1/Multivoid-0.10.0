@@ -35,6 +35,8 @@
 #include "ue_wrap/actors/prop.h"        // IsChipPile: a grabbed clump belongs to the convert stream
 #include "ue_wrap/core/reflection.h"  // IsLive
 #include "ue_wrap/engine/save_capture.h"
+#include "ue_wrap/engine/world_folder.h"  // the host world's key
+#include "ue_wrap/engine/world_meta.h"    // the canonical file's inflated size
 #include "ue_wrap/engine/world_identity.h"  // whether a world is coming in
 #include "ue_wrap/world/game_mode.h"   // the host's own mode, for the begin
 #include "ue_wrap/world/world_singleton.h"  // the gamemode that owns the world's save
@@ -62,8 +64,9 @@ coop::net::Session* g_session = nullptr;  // set once at Install (boot), read th
 
 // The host side, game thread only: OnRequest, TickHost, CancelForSlot.
 
-std::wstring g_hostSlot;  // the slot the host's world was loaded from
-std::atomic<uint32_t> g_hostSlotSerial{0};  // one per SetHostSlot, i.e. per world loaded to host (the boot load names it off the game thread)
+std::wstring g_hostSlot;  // the world the host loaded: a world key, or a legacy slot name
+fs::path g_hostFile;      // that world's entry on disk, which the stale fallback streams
+std::atomic<uint32_t> g_hostSlotSerial{0};  // one per SetHostWorld, i.e. per world loaded to host (the boot load names it off the game thread)
 
 struct HostStream {
     // The joiner asked while the host's world was still coming in: TickHost captures it once it is in.
@@ -157,7 +160,7 @@ void BeginStreamFromBlob_(int slot, HostStream& hs, std::vector<uint8_t>&& bytes
 // One stable-read attempt for a slot still capturing; true once the blob is captured.
 bool TryCaptureBlob_(int slot, HostStream& hs) {
     namespace SR = coop::slot_file_read;
-    const fs::path file = coop::save_guard::SaveGamesDir() / (g_hostSlot + L".sav");
+    const fs::path file = g_hostFile;
     std::vector<uint8_t> bytes;
     uint32_t crc = 0;
     switch (SR::PollStable(hs.read, file, slot, bytes, crc)) {
@@ -339,10 +342,20 @@ void Install(coop::net::Session* session) {
 
 // The host.
 
-void SetHostSlot(const std::wstring& slot) {
-    g_hostSlot = slot;
+void SetHostWorld(const std::wstring& world) {
+    g_hostSlot = world;
+    g_hostFile.clear();
+    if (!world.empty()) {
+        const fs::path dir = coop::save_guard::SaveGamesDir();
+        std::wstring folder, entry;
+        std::error_code ec;
+        if (ue_wrap::world_folder::SplitKey(world, folder, entry) && fs::is_directory(dir / folder, ec))
+            g_hostFile = dir / folder / (entry + L".sav");
+        else
+            g_hostFile = dir / (world + L".sav");
+    }
     g_hostSlotSerial.fetch_add(1, std::memory_order_release);
-    UE_LOGI("save_transfer: host slot = '%ls'", slot.c_str());
+    UE_LOGI("save_transfer: host world = '%ls' (file '%ls')", world.c_str(), g_hostFile.c_str());
 }
 
 // The throwaway slot the live host world is serialised into: the zcoop_ prefix means the boot
@@ -378,10 +391,11 @@ void CaptureAndBegin_(int peerSlot, HostStream& hs) {
         // canonical against a small capture; a stale gamemode's full container serialises a
         // complete world that is not the host's, and nothing here sees that.
         if (got && !g_hostSlot.empty()) {
-            std::error_code sizeEc;
-            const uint64_t canonical =
-                fs::file_size(coop::save_guard::SaveGamesDir() / (g_hostSlot + L".sav"), sizeEc);
-            if (!sizeEc && canonical > 0 && bytes.size() * 8 < canonical) {
+            // Against what the canonical file stands for: a 0.10.0 world's main.sav is compressed,
+            // the capture is not.
+            uint64_t canonical = 0;
+            const bool sized = ue_wrap::world_meta::LogicalSize(g_hostFile.wstring(), canonical);
+            if (sized && canonical > 0 && bytes.size() * 8 < canonical) {
                 UE_LOGW("save_transfer: slot %d -- live capture produced %zu B against a canonical "
                         "'%ls.sav' of %llu B: the game had not finished writing it. REFUSING to "
                         "stream a world we cannot vouch for; falling back to the canonical slot.",

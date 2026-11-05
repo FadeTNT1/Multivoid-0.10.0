@@ -21,8 +21,19 @@ bool ReturnToMainMenu();
 // Load a save slot through the game's own entry (LoadGameFromSlot, setSaveSlotObject with
 // loadObjects=true, then untitled_1; the save selects the mode). `forceGameMode` >= 0 writes that
 // enum_gamemode ordinal instead of deriving it from the slot-name prefix, which the coop slot
-// `zcoop_<pid>` lacks. False if the slot is missing or the load cannot dispatch. Game thread.
+// `zcoop_<pid>` lacks. A slot file in the 0.10.0 compressed format (a host's stale fallback
+// streams its world's main.sav as it is) loads through LoadGameCompressed instead. The save is
+// registered with no world folder: a joiner never saves. False if the slot is missing or the load
+// cannot dispatch. Game thread.
 bool LoadStorySave(const wchar_t* slot, int forceGameMode = -1);
+
+// A 0.10.0 world folder's entry ("main" or "autosave"), loaded as the game's save menu loads one:
+// the save, the metadata and the persistent object through LoadGameCompressed, all three
+// registered with setSaveSlotObject so the game's own saves write back into SaveGames/<folder>,
+// the metadata's rules and mode put in force, then untitled_1. Polled like LoadStorySave; Failed is
+// final (an entry that does not load, or one saved inside an area level). Game thread.
+enum class LoadResult { Pending, InGameplay, Failed };
+LoadResult LoadWorld(const std::wstring& folder, const std::wstring& entry);
 
 // Drop the cached USaveGame* and the GameMode latch so a second in-process LoadStorySave re-loads
 // from disk. Game thread.

@@ -45,7 +45,7 @@ std::unordered_set<std::string> g_quarantined;  // stored profile unreadable: ne
 std::wstring g_setSlot;
 
 // What is held belongs to ONE loaded world. A process names the slot once per world it loads
-// (save_transfer::SetHostSlot), so a new serial means another world took this one's place -- and
+// (save_transfer::SetHostWorld), so a new serial means another world took this one's place -- and
 // that world is as old as its save, so the profiles to go with it are the files', not the ones
 // held from the world before.
 uint32_t g_heldForSerial = 0;
@@ -62,8 +62,11 @@ void DropHeldOfAnotherWorld() {
 }
 
 // <mod data dir>/coop_players/<slot>, empty if a piece is missing. The slot name is the game's and
-// becomes ONE path component, so a name that could be more than one is refused.
-fs::path SlotDir(const std::wstring& slot) {
+// becomes ONE path component, so a name that could be more than one is refused. A world key names
+// its folder first ("<folder>/autosave", ue_wrap/engine/world_folder): the players belong to the
+// world, so both of its entries share the folder's directory.
+fs::path SlotDir(const std::wstring& key) {
+    const std::wstring slot = key.substr(0, key.find(L'/'));
     if (slot.empty() || slot == L"." || slot == L".." ||
         slot.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos)
         return {};

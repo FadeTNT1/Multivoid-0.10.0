@@ -58,16 +58,7 @@ inline constexpr const wchar_t* PawnCoffeePower    = L"SAVE_coffeePower";
 inline constexpr const wchar_t* PawnGasolinePilled = L"SAVE_gasolinepilled";
 inline constexpr const wchar_t* PawnGlasses        = L"equipped_glasses";
 
-// 0.10.0's starter loadout. A new save is born with an empty startupEquipment map; the game's own
-// create (lib_C::createSaveSlotTreeDirectory) copies defaultStartupEquipment into it, and the
-// player's inventory screen spawns those items into the equipment slots on the first world
-// (saveSlot_C::addStartupEquipment), then clears the map. reset_player does the same copy, plus a
-// reset of playerTransform to def (the caller keeps and restores it) and a clear of betterObjectsData.
-inline constexpr const wchar_t* SaveSlotStartupEquipment        = L"startupEquipment";
-inline constexpr const wchar_t* SaveSlotDefaultStartupEquipment = L"defaultStartupEquipment";
-inline constexpr const wchar_t* SaveSlotResetPlayerFn           = L"reset_player";
-inline constexpr const wchar_t* SaveSlotPlayerTransform         = L"playerTransform";
-inline constexpr const wchar_t* SaveSlotPlayerTransformDefault  = L"def";
+// 0.10.0's world arrays on saveSlot_C.
 inline constexpr const wchar_t* SaveSlotBetterObjectsData       = L"betterObjectsData";
 inline constexpr const wchar_t* SaveSlotBetterPrimitivesData    = L"betterPrimitivesData";
 inline constexpr const wchar_t* SaveSlotBetterTriggerData       = L"betterTriggerData";
@@ -251,6 +242,55 @@ inline constexpr const wchar_t* FinishSpawningActorFn = L"FinishSpawningActor";
 // the mode).
 inline constexpr const wchar_t* LoadGameFromSlotFn = L"LoadGameFromSlot";
 inline constexpr const wchar_t* SetSaveSlotObjectFn = L"setSaveSlotObject";
+
+// 0.10.0's world folders (ue_wrap/engine/world_folder): SaveGames/<world>/ holds main and autosave
+// (.sav + .meta + .png) and persistent.sav, all written through the CompressedSaveLoadLib plugin.
+// LoadGameCompressed(name, path, ext, userIndex) -> USaveGame*;
+// SaveGameCompressed(object, path, name, ext, userIndex) -> bool. Positional: the plugin's
+// parameter names are read off the UFunction at the call.
+inline constexpr const wchar_t* CompressedSaveLibClass   = L"CompressedSaveLoadLib";
+inline constexpr const wchar_t* LoadGameCompressedFn     = L"LoadGameCompressed";
+inline constexpr const wchar_t* SaveGameCompressedFn     = L"SaveGameCompressed";
+inline constexpr const wchar_t* WorldEntryMain           = L"main";
+inline constexpr const wchar_t* WorldEntryAutosave       = L"autosave";
+inline constexpr const wchar_t* WorldPersistentName      = L"persistent";
+inline constexpr const wchar_t* WorldSaveExt             = L".sav";
+inline constexpr const wchar_t* WorldMetaExt             = L".meta";
+// lib_C::createSaveSlotTreeDirectory(slotName) -> return, metadata_main, metadata_autosave,
+// saveSlot_main, saveSlot_autosave, saveSlot_persistent: the game's own world creation.
+inline constexpr const wchar_t* CreateSaveSlotTreeFn     = L"createSaveSlotTreeDirectory";
+inline constexpr const wchar_t* SaveMetadataClass        = L"save_metadata_C";
+inline constexpr const wchar_t* SaveMetadataRulesProp    = L"Rules";
+inline constexpr const wchar_t* SaveMetadataGameModeProp = L"gamemode_type";
+inline constexpr const wchar_t* SaveMetadataSavedTimeProp = L"savedtime";
+inline constexpr const wchar_t* SaveMetadataAreaProp     = L"area";
+inline constexpr const wchar_t* SaveSelfFn               = L"saveSelf";  // saveSlot_C, save_metadata_C, save_persistent_C
+// The world-save verbs a client must never run (coop/save/save_block). mainGamemode_C::save(asBackup,
+// bypassEvent, asAutosave) is the pause menu's and the quicksave key's entry; saveSlot_C::save(asBackup,
+// asAutosave, skipEventBlock) gathers then calls saveToSlot(asBackup, asAutosave), which writes the
+// entry, the screenshot, the persistent object and the metadata; saveManual(folderSlot) and
+// savePlayerOnly() call saveToSlot directly; save_metadata_C::saveMetadata(path, slot, bool) and the
+// three classes' saveSelf write their own file.
+inline constexpr const wchar_t* MainGamemodeSaveFn       = L"save";
+inline constexpr const wchar_t* SaveSlotSaveFn           = L"save";
+inline constexpr const wchar_t* SaveSlotSaveToSlotFn     = L"saveToSlot";
+inline constexpr const wchar_t* SaveSlotSaveManualFn     = L"saveManual";
+inline constexpr const wchar_t* SaveSlotSavePlayerOnlyFn = L"savePlayerOnly";
+inline constexpr const wchar_t* SaveMetadataSaveFn       = L"saveMetadata";
+inline constexpr const wchar_t* SavePersistentClass      = L"save_persistent_C";
+inline constexpr const wchar_t* MainGamemodeSaveAutosaveParam = L"asAutosave";
+// The quicksave key's input event on mainPlayer_C, which calls mainGamemode.save (the save test drives it).
+inline constexpr const wchar_t* MainPlayerQuickSaveFn = L"InpActEvt_quicksave_K2Node_InputActionEvent_50";
+inline constexpr const wchar_t* GameInstanceGameRulesProp = L"gameRules";
+inline constexpr const wchar_t* SaveSlotLocalRulesProp   = L"localGameRules";
+// The game's save menu (ui_saveSlots_C, a child of the main menu's switcher) and the parts of it the
+// hosting window drives to create a world with the game's own rules editor.
+inline constexpr const wchar_t* SaveSlotsWidgetClass     = L"ui_saveSlots_C";
+inline constexpr const wchar_t* SaveSlotsOpenCreateFn    =
+    L"BndEvt__button_create_K2Node_ComponentBoundEvent_8_OnButtonClickedEvent__DelegateSignature";
+inline constexpr const wchar_t* SaveSlotsSubmitCreateFn  =
+    L"BndEvt__umg_saveSlots_button_create_1_K2Node_ComponentBoundEvent_11_OnButtonClickedEvent__DelegateSignature";
+inline constexpr const wchar_t* SaveSlotsInnerSwitcher   = L"WidgetSwitcher_308";
 
 // The live host-world capture (save_capture.cpp): repopulate the world save from live actors, then
 // serialise it to a scratch slot for a joiner (a kerfur the host turned on after its last

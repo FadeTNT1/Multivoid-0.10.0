@@ -86,9 +86,10 @@ hold across two polls and two full reads agree. A joiner that asks while the hos
 world -- a quick rejoin after a rehost lands seconds after the host is up -- waits for that world, the
 host saying it is capturing, and then gets the live capture, with the join snapshots the seeds diff
 against; a host world that never comes in ends that join as the host never preparing it. If the live
-capture cannot run otherwise, at the menu or with the world identity unreadable, the host streams its
-slot file as it is on disk (the stale fallback; the reconcile in step 6 owns the difference, and the
-meadow, signal and email seeds are skipped).
+capture cannot run otherwise, at the menu or with the world identity unreadable, the host streams the
+hosted world's entry as it is on disk, `SaveGames/<world>/main.sav` (or `autosave.sav`) in the game's
+compressed format (the stale fallback; the reconcile in step 6 owns the difference, and the meadow,
+signal and email seeds are skipped).
 If the host has no save at all, the header says so and the joiner boots a fresh world.
 
 Prepended to the blob, under the same checksum, is the identity sidecar: the map from the save's
@@ -97,7 +98,9 @@ powered-off kerfur bodies).
 
 The client verifies the checksum, writes the blob as `zcoop_<pid>.sav`, a prefix the game's load
 menu never lists and a name two peers on one machine cannot share, and loads it through the game's
-own loader with the host's game mode. Every prop is placed by the engine, at rest, with the host's
+own loader with the host's game mode: `LoadGameFromSlot` for the live capture, `LoadGameCompressed`
+when the stale fallback sent a compressed entry. The save is registered with no world folder, so
+nothing the client's game does can write it back anywhere. Every prop is placed by the engine, at rest, with the host's
 keys. The slot lives for the session (the game re-reads it for sub-level saves), is deleted at
 disconnect, and a boot sweep removes stale ones older than an hour. The global progression file
 is never transferred.
@@ -227,11 +230,12 @@ not announced ready: that world's load is the host's save (`coop::net_pump::IsIn
 A slot teardown is a roster-row transition: the leaver's mirrors, proxies, seed brackets and
 half-assembled transfers are dropped, its send gate closes, and the slot is recycled with no
 observable absence. A rejoin runs the whole pipeline again; after death a client returns to the
-menu and may rejoin. The host owns the save throughout. A client cannot write the world save: a
-native detour at the engine's one write chokepoint cancels the world-save container on a client
-(`coop/save/save_block`), the pause-menu Save button is greyed out to say so
-(`coop/save/save_button_disable`), and the host's save directory is backed up before a session
-because the game's in-place writes leave no other recovery (`coop/save/save_guard`).
+menu and may rejoin. The host owns the save throughout, and it lands in the host's own world
+folder ([saving.md](saving.md)). A client cannot write any world file: every world-save verb of the
+game is refused at its body on a client (`coop/save/save_block`); a save the client asked for (the
+pause menu's Save, the quicksave key) is answered in its chat with "You're not the host, you can't
+save."; and the host's save directory is backed up before a session because the game's in-place
+writes leave no other recovery (`coop/save/save_guard`).
 
 On the P2P route a rejoin also depends on something the host does not think about: its own
 registration with the signaling relay, which is one long-lived TCP connection that carries no
@@ -479,7 +483,7 @@ not raise the game's own active-event counter, whose save and pause blocks the m
 | the client join state machine and its screen | `coop/session/join_progress`, `ui/loading_screen`, `ui/join_curtain`, `ui/end_reason_dialog` |
 | why a join or a session ended, as a code | `coop/net/end_reason` |
 | the save transfer | `coop/save/save_transfer`, `ue_wrap/engine/save_capture`, `coop/props/save_identity_map`, `coop/props/save_identity_bind` |
-| the host owns the save | `coop/save/save_guard`, `coop/save/save_block`, `coop/save/save_button_disable`, `coop/save/save_indicator_suppress` |
+| the host owns the save | `coop/save/save_guard`, `coop/save/save_block`, `coop/save/save_indicator_suppress`, [saving.md](saving.md) |
 | the world-load episode and the probe | `coop/session/world_load_episode`, `coop/session/save_replay_watch` |
 | the announce, the placement, the edges | `coop/session/net_pump`, `coop/session/teleport_client` |
 | the connect replay | `coop/session/subsystems`, `coop/props/prop_snapshot`, `coop/props/snapshot_census`, `coop/session/join_seed` |

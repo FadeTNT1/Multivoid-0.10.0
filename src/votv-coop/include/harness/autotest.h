@@ -105,19 +105,18 @@ DWORD WINAPI SeedDrillThread(LPVOID arg);  // the seeds lane's red/green drill (
 DWORD WINAPI ScanParityThread(LPVOID arg);  // the scan hub's N-match parity drill (either role)
 
 // The client save-block test, client only: after the settle the live saveSlot_C is resolved and
-// its saveToSlot called by reflection, driving UGameplayStatics::SaveGameToSlot (the hook
-// target) without an autosave; the client log shows the invoke line and then the block line, so
-// the hook cancels the write rather than merely installing. The host runs nothing. Env
-// VOTVCOOP_RUN_SAVEBLOCK_TEST=1.
+// its saveToSlot called by reflection, without an autosave; the client log shows the invoke line
+// and then save_block's refusal, so the verb gate cancels the write rather than merely
+// installing. The host runs nothing. Env VOTVCOOP_RUN_SAVEBLOCK_TEST=1.
 void RunAutonomousSaveBlockTest();
 DWORD WINAPI SaveBlockTestThread(LPVOID arg);
 
-// The client Save-button grey-out test, client only: mainPlayer_C::InpActEvt_Escape is driven
-// by reflection (a real ESC is impossible autonomously) so save_button_disable's observer
-// disables the live pause-menu button_Save and logs the GetIsEnabled read-back; the visual grey
-// needs a human glance. Env VOTVCOOP_RUN_SAVEBTN_TEST=1.
-void RunAutonomousSaveBtnDisableTest();
-DWORD WINAPI SaveBtnDisableTestThread(LPVOID arg);
+// The client save-request test, client only: mainPlayer_C's quicksave input event is driven by
+// reflection (a real key press is impossible autonomously), which calls the gamemode's save as the
+// key does; the client log shows save_block refusing a "save request" and the chat carries "You're
+// not the host, you can't save." Env VOTVCOOP_RUN_SAVEMSG_TEST=1.
+void RunAutonomousSaveMessageTest();
+DWORD WINAPI SaveMessageTestThread(LPVOID arg);
 
 // The dead-element reaper self-test (harness/autotest/autotest_tracker_selftest.cpp), both peers: a
 // synthetic dead local Prop element must be evicted by ReapDeadLocalPropElements (a level

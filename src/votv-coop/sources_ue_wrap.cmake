@@ -140,6 +140,8 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/engine/umg_build.cpp
     src/ue_wrap/engine/save_browser.cpp
     src/ue_wrap/engine/gvas_meta.cpp
+    src/ue_wrap/engine/world_meta.cpp
+    src/ue_wrap/engine/world_folder.cpp
     src/ue_wrap/core/reflected_offset.cpp
     src/ue_wrap/core/call.cpp
     src/ue_wrap/core/fname_utils.cpp

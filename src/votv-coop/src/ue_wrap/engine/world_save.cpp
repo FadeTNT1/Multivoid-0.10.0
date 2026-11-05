@@ -35,19 +35,22 @@ bool SaveNow() {
         UE_LOGW("world_save: the gamemode's save object is unresolved or null -- nothing saved");
         return false;
     }
-    void* fn = R::FindFunction(R::ClassOf(saveSlot), L"saveToSlot");
+    // saveSlot_C::save, the whole cycle the game's own pause-menu save runs: the world gathered into
+    // the save object (mainGamemode.saveObjects), then saveToSlot writing it into the loaded world's
+    // folder. saveToSlot alone wrote whatever the last gather left.
+    void* fn = R::FindFunction(R::ClassOf(saveSlot), P::name::SaveSlotSaveFn);
     if (!fn) {
-        UE_LOGW("world_save: saveSlot_C::saveToSlot does not resolve -- nothing saved");
+        UE_LOGW("world_save: saveSlot_C::%ls does not resolve -- nothing saved", P::name::SaveSlotSaveFn);
         return false;
     }
-    // A zeroed frame: a full, non-quick, non-forced save (the game's own autosave shape).
+    // A zeroed frame: asBackup, asAutosave and skipEventBlock false, the pause menu's own call.
     const int32_t frameSize = R::FunctionFrameSize(fn);
     std::vector<uint8_t> frame(frameSize > 0 ? static_cast<size_t>(frameSize) : 0u, 0u);
     if (!R::CallFunction(saveSlot, fn, frame.empty() ? nullptr : frame.data())) {
-        UE_LOGW("world_save: saveToSlot did not dispatch -- nothing saved");
+        UE_LOGW("world_save: save did not dispatch -- nothing saved");
         return false;
     }
-    UE_LOGI("world_save: saveToSlot ran (the game's own full save)");
+    UE_LOGI("world_save: saveSlot_C::save ran (the game's own full save)");
     return true;
 }
 

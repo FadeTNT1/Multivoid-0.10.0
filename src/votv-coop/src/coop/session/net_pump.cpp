@@ -36,6 +36,7 @@
 #include "coop/player/remote_player.h"
 #include "coop/props/remote_prop.h"
 #include "coop/props/save_identity_bind.h"  // BindUnboundReCreates: re-bind on re-seed
+#include "coop/save/save_block.h"
 #include "coop/save/save_transfer.h"
 #include "coop/session/subsystems.h"
 
@@ -287,6 +288,7 @@ void Tick(coop::net::Session& session) {
     coop::prop_key_index::Tick();  // a seed still owed, the births that finished loading: before any inbox read
     coop::subsystems::InstallLoadWatchers(session);
     coop::trash_morph_gate::Tick();  // drives the gate's name resolve until its three watches are live
+    coop::save_block::Pump();        // the same for the save-verb gates, live before a joiner's world loads
 
     // ---- Hitch and source probe (diagnostic, always on, near free) ----
     // [HITCH] times the gap between consecutive game-thread Ticks (the whole frame); [HITCH-SRC],

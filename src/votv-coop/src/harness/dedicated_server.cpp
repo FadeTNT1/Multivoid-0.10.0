@@ -315,17 +315,15 @@ DWORD WINAPI CommandFileThread(LPVOID) {
 
 // ---- the driver --------------------------------------------------------------------------------
 
-// The world to host: an existing `<slot>`, an existing `s_<slot>` (the story prefix the game puts on
-// a named save), or a new story save named `<slot>`.
+// The world to host: an existing world folder `<slot>` (SaveGames/<slot>/main.meta), or a new
+// story world named `<slot>`.
 coop::session_manager::SaveChoice ResolveSave(const Settings& s) {
     coop::session_manager::SaveChoice c;
     const fs::path dir = coop::save_guard::SaveGamesDir();
     std::error_code ec;
-    const std::wstring wslot(s.saveSlot.begin(), s.saveSlot.end());  // ASCII slot names
-    if (!dir.empty() && fs::exists(dir / (wslot + L".sav"), ec)) {
+    const std::wstring wslot(s.saveSlot.begin(), s.saveSlot.end());  // ASCII world names
+    if (!dir.empty() && fs::is_regular_file(dir / wslot / L"main.meta", ec)) {
         c.slot = s.saveSlot;
-    } else if (!dir.empty() && fs::exists(dir / (L"s_" + wslot + L".sav"), ec)) {
-        c.slot = "s_" + s.saveSlot;
     } else {
         c.newGame = true;
         c.newName = s.saveSlot;
@@ -347,10 +345,9 @@ DWORD WINAPI DriverThread(LPVOID) {
 
     const coop::session_manager::SaveChoice choice = ResolveSave(s);
     if (choice.newGame)
-        UE_LOGI("[server] no save '%s' or 's_%s' -- creating a new story save named '%s'",
-                s.saveSlot.c_str(), s.saveSlot.c_str(), s.saveSlot.c_str());
+        UE_LOGI("[server] no world '%s' -- creating a new story world of that name", s.saveSlot.c_str());
     else
-        UE_LOGI("[server] hosting the save '%s'", choice.slot.c_str());
+        UE_LOGI("[server] hosting the world '%s'", choice.slot.c_str());
 
     coop::session::HostMode mode;
     mode.reach = s.brokered ? coop::session::Reachability::Brokered : coop::session::Reachability::Direct;

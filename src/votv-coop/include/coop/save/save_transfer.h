@@ -37,16 +37,17 @@ void Install(coop::net::Session* session);
 
 // Host side, game thread.
 
-// The slot name the host's world was loaded from (harness boot or the host picker set it), empty
-// for a New Game that has no file yet. The transfer reads the slot's .sav under the save directory
-// fresh per request.
-void SetHostSlot(const std::wstring& slot);
+// The world the host loaded (harness boot or the host picker set it): a world key
+// (ue_wrap/engine/world_folder, "<folder>" or "<folder>/autosave"), a legacy flat slot name, or
+// empty for a New Game that has no file yet. The stale fallback streams that entry's .sav as it is
+// on disk, read fresh per request.
+void SetHostWorld(const std::wstring& world);
 
-// The host slot name; the per-player inventory keys its per-save directory on it. Empty until
-// SetHostSlot. Game thread.
+// The host world's key; the per-player inventory keys its per-world directory on it. Empty until
+// SetHostWorld. Game thread.
 const std::wstring& HostSlot();
 
-// How many times SetHostSlot has run. A process names the slot once per world it loads to host, so
+// How many times SetHostWorld has run. A process names the slot once per world it loads to host, so
 // this tells state that belongs to ONE loaded world (coop/player/player_profile_store) that
 // another has taken its place. Game thread.
 uint32_t HostSlotSerial();

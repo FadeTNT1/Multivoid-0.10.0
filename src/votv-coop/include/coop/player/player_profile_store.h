@@ -31,7 +31,7 @@ std::string NickForJson(const std::wstring& nick);
 // which costs nothing at the next cut. Held for as long as the hosted world lives -- past the
 // player's disconnect and past the last player's, so a rejoin gets what they left with and a save
 // made after they left still cuts their last state. Loading another world to host
-// (save_transfer::SetHostSlot) drops what is held: that world is as old as its save.
+// (save_transfer::SetHostWorld) drops what is held: that world is as old as its save.
 bool Put(const std::string& guid, std::vector<uint8_t> blob, const std::string& nickJson);
 
 // The newest profile of `guid`: the one held in memory, else the file (FNV-verified, falling back

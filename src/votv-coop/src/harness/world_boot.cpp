@@ -19,7 +19,7 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/engine/engine.h"
-#include "ue_wrap/engine/save_browser.h"
+#include "ue_wrap/engine/world_folder.h"
 #include "ui/host_session_settings.h"   // it paints a failed host's reason on itself
 #include "ui/host_window_native.h"      // ...and so does step one
 #include "ui/server_browser_surface.h"  // WHICH browser this session uses
@@ -42,6 +42,15 @@ namespace cfg = coop::config;
 // The process's one session object, read for its role and state and stopped when a join this
 // module is driving cannot reach a world.
 coop::net::Session& S() { return harness::session_runtime::Session(); }
+
+std::wstring Widen(const std::string& s) {
+    if (s.empty()) return {};
+    const int n = ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    if (n <= 1) return {};
+    std::wstring w(static_cast<size_t>(n - 1), L'\0');
+    ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+    return w;
+}
 
 // A join that reached this machine's own world load and could not finish it. Every exit from the
 // boot below either has the host's world or has come through here: the reason is stashed for the
@@ -166,8 +175,19 @@ bool BootStorySaveBlocking(bool forceFresh, const wchar_t* slotOverride, int for
             UE_LOGI("harness: BootStorySaveBlocking aborting -- shutdown signaled");
             return false;
         }
-        auto st = std::make_shared<std::atomic<int>>(0);  // 0 pending,1 retry,2 ok
-        GT::Post([slot, st, freshBoot, forceGameMode, freshMode] {
+        auto st = std::make_shared<std::atomic<int>>(0);  // 0 pending,1 retry,2 ok,3 failed
+        const bool configured = !slotOverride && !freshBoot;
+        GT::Post([slot, st, freshBoot, forceGameMode, freshMode, configured] {
+            // A configured name that is a 0.10.0 world folder loads as the game loads a world; any
+            // other is a flat slot (the downloaded coop slot, or a legacy save).
+            std::wstring folder, entry;
+            if (configured && !ue_wrap::world_folder::SaveGamesDir().empty() &&
+                ue_wrap::world_folder::SplitKey(slot, folder, entry) && ue_wrap::world_folder::Exists(folder)) {
+                const ue_wrap::engine::LoadResult r = ue_wrap::engine::LoadWorld(folder, entry);
+                st->store(r == ue_wrap::engine::LoadResult::InGameplay ? 2
+                          : r == ue_wrap::engine::LoadResult::Failed   ? 3 : 1);
+                return;
+            }
             const bool inGame =
                 freshBoot ? ue_wrap::engine::StartFreshGame(freshMode)
                           : ue_wrap::engine::LoadStorySave(slot.c_str(), forceGameMode);
@@ -182,8 +202,12 @@ bool BootStorySaveBlocking(bool forceFresh, const wchar_t* slotOverride, int for
             // a New Game, which has no file yet -- named all the same, because what is kept per
             // loaded world has to learn that another one took its place. The picker sets its own,
             // and the coop override is a client load that never serves.
-            if (!slotOverride) coop::save_transfer::SetHostSlot(freshBoot ? std::wstring() : slot);
+            if (!slotOverride) coop::save_transfer::SetHostWorld(freshBoot ? std::wstring() : slot);
             return true;
+        }
+        if (st->load() == 3) {
+            UE_LOGW("harness: the world '%ls' did not load", slot.c_str());
+            return false;
         }
         ::Sleep(1500);
     }
@@ -320,11 +344,12 @@ void DriveMenuModeJoinWorldBoot() {
 
 void DriveHostBootIfPending() {
     // The per-boot state lives in a shared_ptr captured by value into the posted task, so a task
-    // queued when a shutdown breaks the wait keeps its storage alive. `slot` and `created` carry
-    // across the retry loop: the create runs once, then the load is polled.
+    // queued when a shutdown breaks the wait keeps its storage alive. `world` and `created` carry
+    // across the retry loop: the create runs once, then the load is polled. `world` is a world key
+    // (ue_wrap/engine/world_folder): the folder, or "<folder>/autosave".
     struct Boot {
         coop::session_manager::PendingHost ph;
-        std::wstring slot;
+        std::wstring world;
         bool created = false;
         std::atomic<int> st{0};  // 0 pending,1 retry,2 in-gameplay,3 fail
     };
@@ -343,7 +368,7 @@ void DriveHostBootIfPending() {
     }
     auto b = std::make_shared<Boot>();
     b->ph = std::move(pending);
-    if (!b->ph.save.newGame) b->slot.assign(b->ph.save.slot.begin(), b->ph.save.slot.end());  // ASCII
+    if (!b->ph.save.newGame) b->world = Widen(b->ph.save.slot);
     b->created = !b->ph.save.newGame;  // existing save: nothing to create
 
     const std::string newGameWhat =
@@ -356,33 +381,36 @@ void DriveHostBootIfPending() {
         b->st.store(0);
         GT::Post([b] {
             if (b->ph.save.newGame && !b->created) {
-                std::wstring wname(b->ph.save.newName.begin(), b->ph.save.newName.end());
-                std::wstring outSlot;
+                const std::wstring wname = Widen(b->ph.save.newName);
+                std::wstring folder;
                 // The choice decides: a name the player typed keeps the exact primitive and its
                 // refusal; a derived name is disambiguated, since no human is there to be told it
                 // was taken.
                 const bool created =
                     b->ph.save.nameIsDerived
-                        ? ue_wrap::save_browser::CreateNamedSaveUnique(wname, b->ph.save.mode, outSlot)
-                        : ue_wrap::save_browser::CreateNamedSave(wname, b->ph.save.mode, outSlot);
+                        ? ue_wrap::world_folder::CreateUnique(wname, b->ph.save.mode, folder)
+                        : ue_wrap::world_folder::Create(wname, b->ph.save.mode, folder);
                 if (!created) { b->st.store(3); return; }
-                b->slot = outSlot;
+                b->world = folder;
                 b->created = true;
-                UE_LOGI("harness: host-with-save created + persisted new save '%ls'", b->slot.c_str());
-                // The name was free on disk, which a deleted save's name is too: what its players
+                UE_LOGI("harness: host-with-save created the new world '%ls'", b->world.c_str());
+                // The name was free on disk, which a deleted world's name is too: what its players
                 // left beside it belongs to no world, least of all to this new one.
-                coop::player_profile_store::ForgetSlot(b->slot);
+                coop::player_profile_store::ForgetSlot(b->world);
             }
-            if (b->slot.empty()) { b->st.store(3); return; }
-            const bool inGame = ue_wrap::engine::LoadStorySave(b->slot.c_str());
-            // The picked slot is what this host serves to joiners.
-            if (inGame) coop::save_transfer::SetHostSlot(b->slot);
+            std::wstring folder, entry;
+            if (!ue_wrap::world_folder::SplitKey(b->world, folder, entry)) { b->st.store(3); return; }
+            const ue_wrap::engine::LoadResult r = ue_wrap::engine::LoadWorld(folder, entry);
+            if (r == ue_wrap::engine::LoadResult::Failed) { b->st.store(3); return; }
+            const bool inGame = r == ue_wrap::engine::LoadResult::InGameplay;
+            // The picked world is what this host serves to joiners.
+            if (inGame) coop::save_transfer::SetHostWorld(b->world);
             b->st.store(inGame ? 2 : 1);
         });
         while (b->st.load() == 0 && !coop::shutdown::IsShuttingDown()) ::Sleep(5);
         const int s = b->st.load();
         if (s == 2) {
-            UE_LOGI("harness: host-with-save world loaded ('%ls') -- starting host session", b->slot.c_str());
+            UE_LOGI("harness: host-with-save world loaded ('%ls') -- starting host session", b->world.c_str());
             harness::session_runtime::StartCoopSession(b->ph.cfg);
             coop::join_progress::Reset();  // world up + session started -> drop the host cover -> gameplay
             return;
@@ -396,12 +424,12 @@ void DriveHostBootIfPending() {
             // to the menu.
             coop::join_progress::Reset();
             coop::session_manager::SetHostStatus(
-                b->ph.save.newGame ? "Host failed: could not create the new save"
-                                   : "Host failed: could not load that save");
+                b->ph.save.newGame ? "Host failed: could not create the new world"
+                                   : "Host failed: could not load that world");
             ReturnToMenuAfterFailedHost();
             return;
         }
-        ::Sleep(1500);  // throttle LoadStorySave's `open` re-issue (matches BootStorySaveBlocking)
+        ::Sleep(1500);  // throttle LoadWorld's `open` re-issue (matches BootStorySaveBlocking)
     }
     if (!coop::shutdown::IsShuttingDown()) {
         UE_LOGW("harness: host-with-save did not reach gameplay in time -- aborting host");

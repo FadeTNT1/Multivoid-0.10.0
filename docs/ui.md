@@ -42,18 +42,19 @@ and the nickname are typed in their own small windows rather than inline
 and needing a restart (`ui/server_browser`, `ui/server_browser_surface`); it has no tabs, lists
 the chosen master's lobbies and names that master at the head of its status line.
 
-Hosting is two windows. The first chooses the world (a save, or a new game through the game's
-own save creation) and how the session is reachable, direct or brokered through the master
-(`ui/host_window_native`, `ui/host_save_picker`); the second chooses who may join and who may
+Hosting is two windows. The first chooses the world (a world folder, a new one made silently,
+or **Create world**, the game's own create pane with its world-rules editor) and how the session
+is reachable, direct or brokered through the master (`ui/host_window_native`,
+`ui/host_save_picker`, `ui/host_create_world`); the second chooses who may join and who may
 find it: a password, and whether the lobby is listed (`ui/host_session_settings`), and it names
 the master the game will be listed on, the tab chosen in the browser. Only then is Host offered.
 
-The save list is scanned rather than loaded (`ue_wrap/engine/save_browser`). Driving the game's
-own slot loader would deserialize every world file on the game thread to fill a row that needs
-half a dozen numbers, so the scan lists the directory and reads the game's own defaults on the
-game thread, then tag-walks each file's metadata on a worker and caches it by modification time.
-Which slots are worlds and which are the game's sub-saves is decided by the game's own
-classifier, never by matching slot names.
+The world list is scanned rather than loaded (`ue_wrap/engine/save_browser`): each 0.10.0 world
+folder's `.meta` is inflated and tag-walked on a worker and cached by modification time, so no
+world is deserialised on the game thread to fill a row. A world's autosave is its own row once the
+game has written one; pre-0.10.0 flat saves are listed after the worlds, greyed, with the pointer
+to the game's Load menu that converts them. Creating, loading and the host-only save are
+[saving.md](saving.md).
 
 The top row of the game's own build labels gets one more native label: the mod's game target and
 build, white as the game's own labels, amber when the master reports a newer release, and silent
@@ -238,7 +239,7 @@ scoreboard fills as roster rows arrive; nameplates appear with each puppet's fir
 | Concept | Files |
 |---|---|
 | the thanks roll | `ui/thanks_roll`, `coop/thanks/thanks_list`, `assets/thanks/thanks.txt`, `resources/thanks.rc` |
-| the main menu and the native screens | `ui/multiplayer_menu`, `ui/server_browser_native` with `ui/server_browser_rows`, `ui/server_browser_tabs`, `ui/server_browser_actions`, `ui/server_browser_panels`, `ui/server_browser_surface`, `ui/host_window_native`, `ui/host_save_picker`, `ui/host_session_settings`, `ui/host_session_choices`, `ui/browser_input_screens`, `ui/native_screen`, `ui/native_text_field`, `ue_wrap/engine/umg_build` |
+| the main menu and the native screens | `ui/multiplayer_menu`, `ui/server_browser_native` with `ui/server_browser_rows`, `ui/server_browser_tabs`, `ui/server_browser_actions`, `ui/server_browser_panels`, `ui/server_browser_surface`, `ui/host_window_native`, `ui/host_save_picker`, `ui/host_create_world`, `ui/host_session_settings`, `ui/host_session_choices`, `ui/browser_input_screens`, `ui/native_screen`, `ui/native_text_field`, `ue_wrap/engine/umg_build` |
 | the fallback browser | `ui/server_browser` |
 | joining and failing | `ui/loading_screen`, `ui/join_curtain`, `ui/end_reason_dialog`, `ui/boot_warning_dialog`, `ui/console` |
 | the overlay host | `ui/imgui_overlay`, `ui/overlay_seams`, `ui/overlay_backend`, `ui/overlay_backend_dx11`, `ui/overlay_backend_dx12`, `ui/overlay_backend_vk`, `ui/overlay_backend_vk_frame`, `ui/overlay_cursor`, `ui/input_focus`, `ui/fonts`, `ui/atlas_watch`, `ui/scale`, `ui/style` |

@@ -2,7 +2,8 @@
 //
 // The per-world settings are one struct, Fstruct_gameRules: 36 members, fall damage, difficulty,
 // seasons, food spoilage, the minigame and decay toggles. The game keeps it twice. The SAVED copy is
-// saveSlot.localGameRules, and a save file names only the rules that differ from the defaults. The
+// saveSlot.localGameRules (on 0.10.0 the world's metadata Rules is the authority and a load copies
+// it here: ue_wrap/engine/world_folder), and a save file names only the rules that differ. The
 // PER-PROCESS copy is mainGameInstance.gameRules, never saved, and it is the one nearly every rule
 // is read from (three are read off the save object: blood loss, experimental WIP, cold swap). One
 // blueprint writes the process copy, the game's slot menu on its way into a world, so a load that
@@ -65,6 +66,12 @@ int ReadDifficulty();
 // on a BeginPlay. Returns how many rules the copy changed, 0 when the two already agreed, -1 when
 // either struct could not be resolved (nothing written). Game thread.
 int ApplySavedToProcess(void* gameInstance, void* save);
+
+// The copy under ApplySavedToProcess, between any two struct_gameRules properties: `srcObj.srcProp`
+// over `dstObj.dstProp`. On 0.10.0 a world's rules live on its metadata (save_metadata_C.Rules),
+// which ue_wrap/engine/world_folder copies to the game instance and to the save object. Same
+// return as ApplySavedToProcess. Game thread.
+int CopyRules(void* dstObj, const wchar_t* dstProp, void* srcObj, const wchar_t* srcProp);
 
 // The outcome of WriteSavedRule.
 enum class WriteResult { Written, UnknownKey, BadValue, Unresolved };

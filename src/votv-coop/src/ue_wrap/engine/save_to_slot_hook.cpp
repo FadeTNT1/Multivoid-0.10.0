@@ -9,7 +9,7 @@
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/sig_scan.h"
 
-#include <windows.h>  // SEH (__try/__except) -- the firewall around the two seams
+#include <windows.h>  // SEH (__try/__except) -- the firewall around the gate
 
 #include <atomic>
 #include <chrono>
@@ -36,8 +36,7 @@ SaveGameToSlotFn g_saveGameToSlotTrampoline = nullptr;
 // The world-save container UClass (saveSlot_C), published before the detour is armed.
 void* g_saveSlotClass = nullptr;
 
-std::atomic<Gate>    g_gate{nullptr};
-std::atomic<Written> g_written{nullptr};
+std::atomic<Gate> g_gate{nullptr};
 
 // Install answered for good: armed, or the signature is stale for this build.
 std::atomic<bool> g_done{false};
@@ -66,42 +65,29 @@ Verdict Decide(void* saveGameObject, void* slotNameFStr) {
     return (!gate || gate(saveGameObject, SlotOf(slotNameFStr))) ? Verdict::Write : Verdict::Cancel;
 }
 
-// A fault absorbed by a seam is said, the first few times: a gate that faults cancels every world
+// A fault absorbed by the gate is said, the first few times: a gate that faults cancels every world
 // save of a host, and nobody would know why it stopped saving.
-void LogSeamFault(const char* seam, unsigned long code) {
+void LogSeamFault(unsigned long code) {
     static std::atomic<int> s_said{0};
     if (s_said.fetch_add(1, std::memory_order_relaxed) < 5)
-        UE_LOGE("save_to_slot_hook: the %s seam FAULTED (exception 0x%08lX) -- %s", seam, code,
-                seam[0] == 'g' ? "this world save is cancelled" : "the rest of the notice did not run");
+        UE_LOGE("save_to_slot_hook: the gate FAULTED (exception 0x%08lX) -- this world save is cancelled", code);
 }
 
-// The two seams run inside SEH-only frames (no C++ objects to unwind, so the __try is legal). The
+// The gate runs inside an SEH-only frame (no C++ objects to unwind, so the __try is legal). The
 // engine's own write is NOT inside one: a fault in the engine's save is the engine's to raise,
 // not ours to turn into a save that quietly failed.
 Verdict DecideSEH(void* saveGameObject, void* slotNameFStr) {
     __try {
         return Decide(saveGameObject, slotNameFStr);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        LogSeamFault("gate", GetExceptionCode());
+        LogSeamFault(GetExceptionCode());
         return Verdict::Cancel;  // faulted deciding -> do not write
     }
 }
 
-void NotifySEH(void* saveGameObject, void* slotNameFStr) {
-    __try {
-        if (const Written w = g_written.load(std::memory_order_acquire))
-            w(saveGameObject, SlotOf(slotNameFStr));
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        LogSeamFault("written", GetExceptionCode());
-    }
-}
-
 bool __fastcall SaveGameToSlotDetour(void* saveGameObject, void* slotNameFStr, int32_t userIndex) {
-    const Verdict v = DecideSEH(saveGameObject, slotNameFStr);
-    if (v == Verdict::Cancel) return false;
-    const bool ok = g_saveGameToSlotTrampoline(saveGameObject, slotNameFStr, userIndex);
-    if (ok && v == Verdict::Write) NotifySEH(saveGameObject, slotNameFStr);
-    return ok;
+    if (DecideSEH(saveGameObject, slotNameFStr) == Verdict::Cancel) return false;
+    return g_saveGameToSlotTrampoline(saveGameObject, slotNameFStr, userIndex);
 }
 
 }  // namespace
@@ -152,6 +138,5 @@ bool Install() {
 }
 
 void SetGate(Gate gate) { g_gate.store(gate, std::memory_order_release); }
-void SetWritten(Written written) { g_written.store(written, std::memory_order_release); }
 
 }  // namespace ue_wrap::save_to_slot_hook

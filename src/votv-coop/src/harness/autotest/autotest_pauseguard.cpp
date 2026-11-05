@@ -5,8 +5,8 @@
 // while connected, and this test drives the exact STATE the native ESC path engages.
 // mainGamemode pauses through GameplayStatics::SetGamePaused, an EX_CallMath dispatch our
 // ProcessEvent detour cannot see, so the state is reproduced through our own engine wrapper of
-// the SAME verb rather than by replaying the input event; save_button_disable's test already
-// established that a reflective InpActEvt_Escape produces no real pause.
+// the SAME verb rather than by replaying the input event: a reflective InpActEvt_Escape produces
+// no real pause.
 //
 // CLIENT-ONLY: settle 75 s (connect, world, possession), read IsGamePaused for a baseline of
 // 0, call SetGamePaused(true), then sample every 100 ms for 3 s. The guard runs in the

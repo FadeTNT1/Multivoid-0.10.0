@@ -5,6 +5,7 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/engine/save_browser.h"
+#include "ue_wrap/engine/world_folder.h"
 
 #include <windows.h>
 
@@ -18,6 +19,7 @@ namespace {
 
 namespace GT = ue_wrap::game_thread;
 namespace SB = ue_wrap::save_browser;
+namespace WF = ue_wrap::world_folder;
 
 std::string ReadEnv(const char* name) {
     char buf[256] = {};
@@ -44,7 +46,7 @@ DWORD WINAPI Thread(LPVOID) {
     PostEnumerate("enum1");
     ue_wrap::log::Flush();
 
-    // Optional: create NAMED story saves then re-enumerate to confirm they persist + appear.
+    // Optional: create NAMED story worlds then re-enumerate to confirm they persist + appear.
     // VOTVCOOP_TEST_SAVE_CREATE=<base name> (e.g. "coopProbe"). ASCII.
     //
     // THREE CALLS ON ONE NAME, because what needs proving is a DIFFERENTIAL and not a
@@ -60,14 +62,14 @@ DWORD WINAPI Thread(LPVOID) {
         auto done = std::make_shared<std::atomic<int>>(0);  // 0 pending,1 done
         GT::Post([wname, done] {
             std::wstring first, dup, second;
-            const bool okFirst  = SB::CreateNamedSaveUnique(wname, /*mode=*/0 /*story*/, first);
-            const bool okDup    = SB::CreateNamedSave(wname, /*mode=*/0 /*story*/, dup);
-            const bool okSecond = SB::CreateNamedSaveUnique(wname, /*mode=*/0 /*story*/, second);
-            UE_LOGI("save_probe: unique#1('%ls') ok=%d slot='%ls'", wname.c_str(), okFirst ? 1 : 0,
+            const bool okFirst  = WF::CreateUnique(wname, /*mode=*/0 /*story*/, first);
+            const bool okDup    = WF::Create(wname, /*mode=*/0 /*story*/, dup);
+            const bool okSecond = WF::CreateUnique(wname, /*mode=*/0 /*story*/, second);
+            UE_LOGI("save_probe: unique#1('%ls') ok=%d world='%ls'", wname.c_str(), okFirst ? 1 : 0,
                     first.c_str());
-            UE_LOGI("save_probe: exact-on-taken('%ls') ok=%d slot='%ls' (MUST be ok=0)",
+            UE_LOGI("save_probe: exact-on-taken('%ls') ok=%d world='%ls' (MUST be ok=0)",
                     wname.c_str(), okDup ? 1 : 0, dup.c_str());
-            UE_LOGI("save_probe: unique#2('%ls') ok=%d slot='%ls' (MUST differ from unique#1)",
+            UE_LOGI("save_probe: unique#2('%ls') ok=%d world='%ls' (MUST differ from unique#1)",
                     wname.c_str(), okSecond ? 1 : 0, second.c_str());
             const bool pass = okFirst && !okDup && okSecond && !second.empty() && second != first;
             UE_LOGI("save_probe: UNIQUE-NAME DIFFERENTIAL %s", pass ? "PASS" : "FAIL");
