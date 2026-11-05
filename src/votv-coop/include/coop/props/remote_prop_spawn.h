@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 // coop/props/remote_prop_spawn.h -- the wire-driven PropSpawn receiver: the OnSpawn pipeline that
@@ -50,6 +51,22 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
 
 // The radius of the position match: a same-class actor this near the wire prop is its twin.
 inline constexpr float kFuzzyRadiusCm = 30.f;
+
+// The host's word for a keyed prop's pose and physics flags (the PropSpawn payload's fields).
+struct HostPose {
+    float locX, locY, locZ;
+    float rotPitch, rotYaw, rotRoll;
+    uint8_t physFlags;   // coop::net::propspawn_flags
+};
+
+// Converges a keyed actor this peer already holds onto `pose`: no write when it already agrees (2 cm / 1 degree),
+// otherwise the kinematic move and the single-player physics state at the host's pose; the stuck state, frozen and
+// sleep follow the flags either way, and a collision a spawner stripped is restored. The one convergence path:
+// OnSpawn's exact-key hit and the join sweep's replay onto a same-key re-create (coop/props/join_keyed_replay) both
+// run it. The caller judges the held, driven and thrown guards first. Game thread.
+void ConvergeKeyedToHost(void* actor, const HostPose& pose, const std::wstring& keyW,
+                         const std::wstring& classW);
+
 
 // Adopts `actor`, a position match the caller chose, as the mirror of the wire prop: the
 // host-authority handback, the claim, the held and drive guards, the converge, the rekey to the

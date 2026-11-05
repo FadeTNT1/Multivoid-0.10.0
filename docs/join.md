@@ -185,7 +185,13 @@ end marker arms the divergence sweep, deferred to quiescence: the locals the hos
 are the client's save-loaded world minus the host's, and they go
 (`coop/props/join_membership_sweep`). Two bounds keep a racing bracket from wiping a world: a
 per-class completeness floor keeps a class when the host expressed fewer of it than the joiner's
-census counted, and a valve aborts a sweep that would remove more than half of what it sees.
+census counted, and a valve aborts a sweep that would remove more than half of what it sees. Both
+count the whole loaded keyed world: the save-loaded locals the sweep may remove and the actors this
+bracket's snapshot adopted as mirrors, which are counted but never removed
+(`coop/props/join_sweep_tally.h`). A keyed prop whose actor churned mid-join and was re-created is
+rebound onto its row by the sweep, and the host's pose and flags for it, kept through the bracket, are
+replayed onto the re-create through the convergence the snapshot apply runs
+(`coop/props/join_keyed_replay`).
 
 Visually the joiner never sees the reconcile. A full-screen curtain rises at connect and fades
 out when the primary world is assembled, at the end marker plus the spawn drain, seconds before

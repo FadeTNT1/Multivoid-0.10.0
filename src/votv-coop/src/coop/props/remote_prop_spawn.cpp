@@ -23,6 +23,7 @@
 #include "coop/props/pile_look.h"
 #include "coop/props/pile_spawn_bind.h"  // the pile's spawn-time twin destroy and adopt
 #include "coop/props/join_membership_sweep.h"  // the claim set and the divergence sweep
+#include "coop/props/join_keyed_replay.h"  // NoteSpawn: the host's retained word for a keyed row
 #include "coop/dev/spawn_order_probe.h"  // the keyless load-spawn coverage probe
 #include "coop/dev/join_window_pos_trace.h"  // the keyed-prop join-window position trace
 #include "coop/dev/spawn_match_probe.h"  // the fuzzy-match candidate set and the adoption watch
@@ -219,6 +220,79 @@ void AdoptByPosition(const coop::net::PropSpawnPayload& payload, int senderSlot,
     coop::remote_prop::RegisterPropMirror(payload.elementId, fuzzy, keyW, classW, senderSlot);
 }
 
+// The converge of a keyed actor this peer already holds onto the host's word for it: the aligned test, the
+// kinematic move and the flag convergence. Shared by OnSpawn's exact-key path and by the join sweep's replay of
+// the retained row onto a same-key re-create (coop/props/join_keyed_replay). The caller has already judged the
+// held, driven and thrown guards.
+void ConvergeKeyedToHost(void* actor, const HostPose& pose, const std::wstring& keyW,
+                         const std::wstring& classW) {
+    // An exact-key match is the same logical base-world prop, spawned by both peers at the same
+    // position; a blind teleport to the host transform wakes its rigid body, and on a heavy
+    // save the snapshot woke hundreds of resting bodies at once that never re-slept, a
+    // permanent ~45 ms/frame physics cost (the client at ~20 fps against the host's 116). The
+    // converge runs only when the prop actually moved (2 cm / 1 degree; deterministic base
+    // spawns are sub-millimetre identical), so undisturbed scenery gets no write, no wake, no
+    // spike.
+    // A failed read is not known to be aligned: the host's transform, which is authoritative,
+    // converges it like a divergence.
+    ue_wrap::FVector curLoc{};
+    ue_wrap::FRotator curRot{};
+    const bool curRead = ue_wrap::engine::TryGetActorLocation(actor, curLoc);
+    const bool rotRead = ue_wrap::engine::TryGetActorRotation(actor, curRot);
+    const float dx = curLoc.X - pose.locX;
+    const float dy = curLoc.Y - pose.locY;
+    const float dz = curLoc.Z - pose.locZ;
+    constexpr float kAlignedDistCm = 2.0f;   // squared-compared below
+    constexpr float kAlignedAngDeg = 1.0f;
+    const bool locAligned = curRead && (dx * dx + dy * dy + dz * dz)
+                                           <= (kAlignedDistCm * kAlignedDistCm);
+    auto angAligned = [](float a, float b) {
+        float d = std::fabs(std::fmod(std::fabs(a - b), 360.0f));
+        if (d > 180.0f) d = 360.0f - d;
+        return d <= kAlignedAngDeg;
+    };
+    const bool rotAligned = rotRead
+                         && angAligned(curRot.Pitch, pose.rotPitch)
+                         && angAligned(curRot.Yaw,   pose.rotYaw)
+                         && angAligned(curRot.Roll,  pose.rotRoll);
+    if (locAligned && rotAligned) {
+        // Aligned, the save-transfer common case: no transform write and no physics touch,
+        // since the client's save-loaded copy already carries the exact single-player physics
+        // state (simulating, asleep), which keeps it grabbable; an unconditional kinematic
+        // reconcile here made every bound prop ungrabbable until a host grab.
+        UE_LOGI("remote_prop::OnSpawn: key '%ls' resolves to live actor %p -- already aligned (d=%.2fcm), skipping teleport (no physics wake)",
+                keyW.c_str(), actor, std::sqrt(dx * dx + dy * dy + dz * dz));
+        // Its stuck state, frozen and sleep still converge where they differ: a prop the host
+        // stuck, froze or woke in place after the blob was cut. The game's own verbs, which wake
+        // nothing that agrees.
+        coop::prop_stick_sync::ConvergeStuck(actor, pose.physFlags);
+        ConvergeFrozenSleep(actor, pose.physFlags);
+    } else {
+        UE_LOGI("remote_prop::OnSpawn: key '%ls' resolves to live actor %p -- diverged (d=%.1fcm%s), converging transform to host (loc=(%.1f,%.1f,%.1f))",
+                keyW.c_str(), actor, std::sqrt(dx * dx + dy * dy + dz * dz),
+                curRead ? (rotRead ? "" : ", rotation unread") : ", location unread", pose.locX, pose.locY,
+                pose.locZ);
+        // The kinematic converge: kinematic before the teleport so the move neither wakes nor
+        // ejects the body, then the single-player physics state restored at the host's rest
+        // pose, where the body re-settles instead of storming.
+        ReconcileToHostPhysics(actor, pose.physFlags);
+        ue_wrap::engine::SetActorLocation(actor,
+            ue_wrap::FVector{pose.locX, pose.locY, pose.locZ});
+        ue_wrap::engine::SetActorRotation(actor,
+            ue_wrap::FRotator{pose.rotPitch, pose.rotYaw, pose.rotRoll});
+        // The host's stuck state, frozen and sleep after the move (the extinguisher it took off a
+        // mount is no longer frozen there, a sign it pried is no longer on its wall), then the
+        // simulate state the flags give.
+        coop::prop_stick_sync::ConvergeStuck(actor, pose.physFlags);
+        ConvergeFrozenSleep(actor, pose.physFlags);
+        RestoreSpParityPhysicsAfterConverge(actor, pose.physFlags);
+    }
+    // The client's copy may have come through spawnedNaturally() in its own spawner, leaving
+    // the mesh with no collision; the converge reuses the actor without a fresh Init, so the
+    // default collision is restored, or a later host release drops the body through the floor.
+    RestoreCollisionIfNeeded(L"exact-key", classW, actor);
+}
+
 void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
              void* localPlayer, bool fromConvert, bool deferKerfur,
              void** outSpawned, bool skipBind) {
@@ -250,6 +324,17 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
         UE_LOGW("remote_prop::OnSpawn: unkeyed + no eid (cls='%ls' key='%ls') -- dropping",
                 classW.c_str(), keyW.c_str());
         return;
+    }
+    // A keyed row the host expresses inside an open join bracket is retained as the host's word for that identity, so a
+    // same-key re-create the sweep later rebinds onto a dead row gets the pose and flags it would have converged to
+    // (join_keyed_replay).
+    if (!fromConvert && !eidOnly && senderSlot == 0 && payload.elementId != 0 &&
+        coop::join_membership_sweep::IsClaimTrackingActive()) {
+        coop::join_keyed_replay::NoteSpawn(
+            payload.elementId,
+            HostPose{payload.locX, payload.locY, payload.locZ,
+                     payload.rotPitch, payload.rotYaw, payload.rotRoll, payload.physFlags},
+            keyW, classW);
     }
     // The trash path: a chip pile, a garbage clump or a variant, mirrored as the GAME's own actor
     // with its brain parked -- coop/props/trash_morph_gate refuses the three verbs a trash actor
@@ -402,71 +487,10 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
             coop::remote_prop::RegisterPropMirror(payload.elementId, existing, keyW, classW, senderSlot);
             return;
         }
-        // An exact-key match is the same logical base-world prop, spawned by both peers at the same
-        // position; a blind teleport to the host transform wakes its rigid body, and on a heavy
-        // save the snapshot woke hundreds of resting bodies at once that never re-slept, a
-        // permanent ~45 ms/frame physics cost (the client at ~20 fps against the host's 116). The
-        // converge runs only when the prop actually moved (2 cm / 1 degree; deterministic base
-        // spawns are sub-millimetre identical), so undisturbed scenery gets no write, no wake, no
-        // spike.
-        // A failed read is not known to be aligned: the host's transform, which is authoritative,
-        // converges it like a divergence.
-        ue_wrap::FVector curLoc{};
-        ue_wrap::FRotator curRot{};
-        const bool curRead = ue_wrap::engine::TryGetActorLocation(existing, curLoc);
-        const bool rotRead = ue_wrap::engine::TryGetActorRotation(existing, curRot);
-        const float dx = curLoc.X - payload.locX;
-        const float dy = curLoc.Y - payload.locY;
-        const float dz = curLoc.Z - payload.locZ;
-        constexpr float kAlignedDistCm = 2.0f;   // squared-compared below
-        constexpr float kAlignedAngDeg = 1.0f;
-        const bool locAligned = curRead && (dx * dx + dy * dy + dz * dz)
-                                               <= (kAlignedDistCm * kAlignedDistCm);
-        auto angAligned = [](float a, float b) {
-            float d = std::fabs(std::fmod(std::fabs(a - b), 360.0f));
-            if (d > 180.0f) d = 360.0f - d;
-            return d <= kAlignedAngDeg;
-        };
-        const bool rotAligned = rotRead
-                             && angAligned(curRot.Pitch, payload.rotPitch)
-                             && angAligned(curRot.Yaw,   payload.rotYaw)
-                             && angAligned(curRot.Roll,  payload.rotRoll);
-        if (locAligned && rotAligned) {
-            // Aligned, the save-transfer common case: no transform write and no physics touch,
-            // since the client's save-loaded copy already carries the exact single-player physics
-            // state (simulating, asleep), which keeps it grabbable; an unconditional kinematic
-            // reconcile here made every bound prop ungrabbable until a host grab.
-            UE_LOGI("remote_prop::OnSpawn: key '%ls' resolves to live actor %p -- already aligned (d=%.2fcm), skipping teleport (no physics wake)",
-                    keyW.c_str(), existing, std::sqrt(dx * dx + dy * dy + dz * dz));
-            // Its stuck state, frozen and sleep still converge where they differ: a prop the host
-            // stuck, froze or woke in place after the blob was cut. The game's own verbs, which wake
-            // nothing that agrees.
-            coop::prop_stick_sync::ConvergeStuck(existing, payload.physFlags);
-            ConvergeFrozenSleep(existing, payload.physFlags);
-        } else {
-            UE_LOGI("remote_prop::OnSpawn: key '%ls' resolves to live actor %p -- diverged (d=%.1fcm%s), converging transform to host (loc=(%.1f,%.1f,%.1f))",
-                    keyW.c_str(), existing, std::sqrt(dx * dx + dy * dy + dz * dz),
-                    curRead ? (rotRead ? "" : ", rotation unread") : ", location unread", payload.locX, payload.locY,
-                    payload.locZ);
-            // The kinematic converge: kinematic before the teleport so the move neither wakes nor
-            // ejects the body, then the single-player physics state restored at the host's rest
-            // pose, where the body re-settles instead of storming.
-            ReconcileToHostPhysics(existing, payload.physFlags);
-            ue_wrap::engine::SetActorLocation(existing,
-                ue_wrap::FVector{payload.locX, payload.locY, payload.locZ});
-            ue_wrap::engine::SetActorRotation(existing,
-                ue_wrap::FRotator{payload.rotPitch, payload.rotYaw, payload.rotRoll});
-            // The host's stuck state, frozen and sleep after the move (the extinguisher it took off a
-            // mount is no longer frozen there, a sign it pried is no longer on its wall), then the
-            // simulate state the flags give.
-            coop::prop_stick_sync::ConvergeStuck(existing, payload.physFlags);
-            ConvergeFrozenSleep(existing, payload.physFlags);
-            RestoreSpParityPhysicsAfterConverge(existing, payload.physFlags);
-        }
-        // The client's copy may have come through spawnedNaturally() in its own spawner, leaving
-        // the mesh with no collision; the converge reuses the actor without a fresh Init, so the
-        // default collision is restored, or a later host release drops the body through the floor.
-        RestoreCollisionIfNeeded(L"exact-key", classW, existing);
+        ConvergeKeyedToHost(existing,
+                            HostPose{payload.locX, payload.locY, payload.locZ,
+                                     payload.rotPitch, payload.rotYaw, payload.rotRoll, payload.physFlags},
+                            keyW, classW);
         // No sleep write after a converge: a simulating body teleported into a divergent layout
         // penetrates and PhysX ejects it, and PutRigidBodyToSleep mid-depenetration dereferences
         // null inside PhysX. The mirror binding lets a later PropDestroy and every eid lookup
