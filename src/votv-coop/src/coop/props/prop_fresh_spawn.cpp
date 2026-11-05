@@ -23,6 +23,9 @@
 #include "ue_wrap/core/types.h"
 #include "ue_wrap/core/object_index.h"
 
+#include <string>
+#include <unordered_set>
+
 namespace coop::prop_fresh_spawn {
 
 namespace P = ue_wrap::profile;
@@ -221,6 +224,18 @@ void* Materialize(const coop::net::PropSpawnPayload& payload, int senderSlot,
     }
     UE_LOGI("remote_prop::OnSpawn: spawned %p of '%ls' at (%.1f, %.1f, %.1f)",
             spawned, classW.c_str(), payload.locX, payload.locY, payload.locZ);
+    // prop_C::init falls back to the error mesh when the row name is not a props-table row and no
+    // per-instance meshOverride is set -- the override rides the sender's save data, not the spawn
+    // row. Said once per class so a red mirror names its cause in the log.
+    if (ue_wrap::prop::IsDescendantOfProp(spawned) &&
+        ue_wrap::prop::GetShownMeshName(spawned) == P::name::PropErrorMesh) {
+        static std::unordered_set<std::wstring> s_saidError;
+        if (s_saidError.insert(classW).second)
+            UE_LOGW("remote_prop::OnSpawn: mirror of '%ls' (row '%ls') built with the ERROR mesh -- the "
+                    "row is not in the props table here, or the sender's prop takes its mesh from a "
+                    "per-instance override the spawn row does not carry (said once per class)",
+                    classW.c_str(), propNameW.c_str());
+    }
     // Ambient owner-effect mirrors (the pinecone, stick and crystal): the native prop
     // self-expires by the spawner's lifespan, and the mirror's despawn normally arrives through
     // the owner's death-watch destroy, but an owner that disconnects would leave the mirror

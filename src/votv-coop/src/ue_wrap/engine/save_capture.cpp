@@ -153,27 +153,43 @@ bool CaptureLiveWorldToScratchSlot(const std::wstring& scratchSlotName) {
         return false;
     }
 
-    // 2. The world save container the populate writes into. Read it BEFORE the populate so we
-    //    can probe objectsData's count delta. That delta is also the one safety check this design
-    //    needs: saveObjects MUST rebuild objectsData rather than append for a standalone call to
-    //    be correct. It does rebuild -- it fills a local struct_save array and then assigns that
-    //    to the member, the build-local-then-replace shape -- and a single-player save/reload
-    //    never duplicates the world, which it would if the array only ever grew. The probe below
-    //    confirms it live; a >1.5x growth would mean it appends, and then we would have to clear
-    //    first. The failure mode is host-safe either way, since a doubled scratch blob
+    // 2. The world save container the populate writes into, through the gamemode's save member as
+    //    the running build names it (save_slot on 0.10.0, saveSlot before) and never a fixed offset.
+    //    Read it BEFORE the populate so we can probe the object array's count delta. That delta is
+    //    also the one safety check this design needs: saveObjects MUST rebuild the array rather
+    //    than append for a standalone call to be correct. It does -- 0.10.0 clears
+    //    betterObjectsData, betterPrimitivesData and betterTriggerData first (bytecode @10-@12) and
+    //    0.9.0n built a local array and assigned it -- and a single-player save/reload never
+    //    duplicates the world, which it would if the array only ever grew. The probe confirms it
+    //    live; the failure mode is host-safe either way, since a doubled scratch blob
     //    over-populates only the JOINER and the host's slot is never written.
-    void* saveSlot = *reinterpret_cast<void* const*>(
-        reinterpret_cast<const uint8_t*>(gm) + P::off::AmainGamemode_saveSlot);
-    if (!saveSlot) {
-        UE_LOGW("save_capture: mainGamemode.saveSlot is null -- nothing to serialize");
+    const int32_t offSave = world_singleton::GamemodeSaveSlotOffset(gm);
+    void* saveSlot = offSave >= 0 ? *reinterpret_cast<void* const*>(
+        reinterpret_cast<const uint8_t*>(gm) + offSave) : nullptr;
+    if (!saveSlot || !R::IsLive(saveSlot)) {
+        UE_LOGW("save_capture: the gamemode's save object is unresolved or null -- nothing to serialize");
         return false;
     }
-    // objectsData is a UE TArray {Data@0x0, Num@0x8, Max@0xC}; read its Num.
-    auto objectsDataNum = [saveSlot]() -> int32_t {
-        return *reinterpret_cast<const int32_t*>(
-            reinterpret_cast<const uint8_t*>(saveSlot) + P::off::UsaveSlot_objectsData + 0x8);
+    // The world's object array: 0.10.0 gathers into betterObjectsData (struct_betterSave rows) and
+    // its two siblings; 0.9.0n into objectsData. Whichever the save class declares, by name.
+    void* const saveCls = R::ClassOf(saveSlot);
+    struct Gathered { const wchar_t* name; int32_t off; };
+    Gathered objects{P::name::SaveSlotBetterObjectsData, R::FindPropertyOffset(saveCls, P::name::SaveSlotBetterObjectsData)};
+    Gathered prims{P::name::SaveSlotBetterPrimitivesData, R::FindPropertyOffset(saveCls, P::name::SaveSlotBetterPrimitivesData)};
+    Gathered triggers{P::name::SaveSlotBetterTriggerData, R::FindPropertyOffset(saveCls, P::name::SaveSlotBetterTriggerData)};
+    if (objects.off < 0) objects = {P::name::SaveSlotObjectsDataLegacy, R::FindPropertyOffset(saveCls, P::name::SaveSlotObjectsDataLegacy)};
+    if (objects.off < 0) {
+        UE_LOGE("save_capture: the save object declares neither %ls nor %ls -- the world gather "
+                "cannot be checked, so no capture is made", P::name::SaveSlotBetterObjectsData,
+                P::name::SaveSlotObjectsDataLegacy);
+        return false;
+    }
+    // A UE TArray {Data@0x0, Num@0x8, Max@0xC}; read its Num.
+    auto numAt = [saveSlot](int32_t off) -> int32_t {
+        if (off < 0) return -1;
+        return *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(saveSlot) + off + 0x8);
     };
-    const int32_t objCountBefore = objectsDataNum();
+    const int32_t objCountBefore = numAt(objects.off);
 
     // 3. Repopulate the in-memory world save from LIVE actors. saveObjects is the critical
     //    step: it walks every int_save_C world actor (props + NPCs, including a turned-on kerfur,
@@ -194,86 +210,103 @@ bool CaptureLiveWorldToScratchSlot(const std::wstring& scratchSlotName) {
         }
         ue_wrap::ParamFrame f(fn);
         if (!f.valid()) return false;
-        // saveObjects(bool quicksave): the zeroed frame leaves quicksave=false (the
-        // full populate, matching a normal save) -- exactly what we want.
+        // 0.10.0: saveObjects(bool quicksave, bool skipEventBlock). skipEventBlock=true is the
+        // game's own "gather whatever the event state" switch: the body jumps straight to the
+        // gather (bytecode @9 -> @10), never asking getEvent, and the gather fills the object,
+        // primitive and trigger arrays in one loop (Save Primitives is an obsolete stub there).
+        // quicksave stays false (the full populate, matching a normal save).
+        const bool skipFlag = R::FindParamOffset(fn, P::name::MainGamemodeSaveObjectsSkipEventParam) >= 0;
+        if (skipFlag) {
+            f.Set<bool>(P::name::MainGamemodeSaveObjectsSkipEventParam, true);
+            if (!ue_wrap::Call(gm, f)) {
+                UE_LOGW("save_capture: mainGamemode.saveObjects dispatch failed -- abort");
+                return false;
+            }
+            UE_LOGI("save_capture: saveObjects(skipEventBlock=true) ran -- %ls=%d %ls=%d %ls=%d",
+                    objects.name, numAt(objects.off), prims.name, numAt(prims.off),
+                    triggers.name, numAt(triggers.off));
+        }
+        // 0.9.0n: saveObjects(bool quicksave). The zeroed frame leaves quicksave=false.
         //
         // The gather must run whatever the game thinks of events (see OnGetEvent), so this call
         // holds the script gate for its length, beside the session's own hold if there is one.
-        const bool watching = InstallGatherWatch();
-        bool called = false;
-        {
-            // Both scoped, so an unwind past the call still lets go: a flag left set would go on
-            // refusing the game's event test for the three gatherers.
-            struct Capturing {
-                Capturing() { g_capturing = true; }
-                ~Capturing() { g_capturing = false; }
-            };
-            script_gate::Hold gate("the save capture");
-            g_worldGateRefused = 0;
-            g_otherGatesRefused = 0;
-            Capturing capturing;
-            called = ue_wrap::Call(gm, f);
-        }
-        if (!called) {
-            UE_LOGW("save_capture: mainGamemode.saveObjects dispatch failed -- abort");
-            return false;
-        }
-        // What ran is read off the refusals, not assumed. saveObjects asks its event test on the
-        // way into the world gather and nowhere else, so a refusal there IS the gather; the two it
-        // calls each ask once.
-        if (g_worldGateRefused >= 1 && g_otherGatesRefused >= 2) {
-            UE_LOGI("save_capture: the world, trigger and primitive gathers ran with the game's event "
-                    "test refused (getEvent: saveObjects %d, the two it calls %d)",
-                    g_worldGateRefused, g_otherGatesRefused);
-        } else if (g_worldGateRefused >= 1) {
-            // The world is current; doors, lights and keypads reach a joiner on their own lanes too.
-            UE_LOGE("save_capture: the world gather ran, but saveTriggers / Save Primitives were held "
-                    "open %d time(s) of 2 -- a function was renamed by a recook; during an event "
-                    "their half of this capture is a previous gather's", g_otherGatesRefused);
-        } else if (watching) {
-            // Watched, and never asked. By the bytecode that is saveObjects' map test refusing the
-            // level before anything else runs (`isSublevelAllowed(level) || subArea == None`, cfg
-            // @5 -> @668, "Save error: invalid map"); a fault absorbed in our own callback lands
-            // here too. Either way no gather can be shown, and a container that holds a previous
-            // gather is not streamed as the live world: the caller has a path that KNOWS it is
-            // stale.
-            UE_LOGE("save_capture: saveObjects never asked its event test -- it returned before its "
-                    "world gather (the game's map test refuses this level?). Refusing this capture.");
-            return false;
-        } else {
-            // No watch, so nothing could be refused and nothing forced: the game decided.
-            const EventState ev = GameEventState();
-            if (ev != EventState::Off) {
-                UE_LOGE("save_capture: the event test could not be watched and %s -- the container "
-                        "may hold a PREVIOUS gather. Refusing this capture.",
-                        ev == EventState::On ? "an event IS active: saveObjects skipped its gather"
-                                             : "the game cannot be asked whether an event is active");
+        if (!skipFlag) {
+            const bool watching = InstallGatherWatch();
+            bool called = false;
+            {
+                // Both scoped, so an unwind past the call still lets go: a flag left set would go on
+                // refusing the game's event test for the three gatherers.
+                struct Capturing {
+                    Capturing() { g_capturing = true; }
+                    ~Capturing() { g_capturing = false; }
+                };
+                script_gate::Hold gate("the save capture");
+                g_worldGateRefused = 0;
+                g_otherGatesRefused = 0;
+                Capturing capturing;
+                called = ue_wrap::Call(gm, f);
+            }
+            if (!called) {
+                UE_LOGW("save_capture: mainGamemode.saveObjects dispatch failed -- abort");
                 return false;
             }
-            UE_LOGW("save_capture: the event test could not be watched; the game says no event is "
-                    "active, so the gathers ran -- a capture during an event will be refused");
+            // What ran is read off the refusals, not assumed. saveObjects asks its event test on the
+            // way into the world gather and nowhere else, so a refusal there IS the gather; the two it
+            // calls each ask once.
+            if (g_worldGateRefused >= 1 && g_otherGatesRefused >= 2) {
+                UE_LOGI("save_capture: the world, trigger and primitive gathers ran with the game's event "
+                        "test refused (getEvent: saveObjects %d, the two it calls %d)",
+                        g_worldGateRefused, g_otherGatesRefused);
+            } else if (g_worldGateRefused >= 1) {
+                // The world is current; doors, lights and keypads reach a joiner on their own lanes too.
+                UE_LOGE("save_capture: the world gather ran, but saveTriggers / Save Primitives were held "
+                        "open %d time(s) of 2 -- a function was renamed by a recook; during an event "
+                        "their half of this capture is a previous gather's", g_otherGatesRefused);
+            } else if (watching) {
+                // Watched, and never asked. By the bytecode that is saveObjects' map test refusing the
+                // level before anything else runs (`isSublevelAllowed(level) || subArea == None`, cfg
+                // @5 -> @668, "Save error: invalid map"); a fault absorbed in our own callback lands
+                // here too. Either way no gather can be shown, and a container that holds a previous
+                // gather is not streamed as the live world: the caller has a path that KNOWS it is
+                // stale.
+                UE_LOGE("save_capture: saveObjects never asked its event test -- it returned before its "
+                        "world gather (the game's map test refuses this level?). Refusing this capture.");
+                return false;
+            } else {
+                // No watch, so nothing could be refused and nothing forced: the game decided.
+                const EventState ev = GameEventState();
+                if (ev != EventState::Off) {
+                    UE_LOGE("save_capture: the event test could not be watched and %s -- the container "
+                            "may hold a PREVIOUS gather. Refusing this capture.",
+                            ev == EventState::On ? "an event IS active: saveObjects skipped its gather"
+                                                 : "the game cannot be asked whether an event is active");
+                    return false;
+                }
+                UE_LOGW("save_capture: the event test could not be watched; the game says no event is "
+                        "active, so the gathers ran -- a capture during an event will be refused");
+            }
         }
     }
 
-    // Safety probe: confirm saveObjects rebuilt (didn't append) objectsData.
-    const int32_t objCountAfter = objectsDataNum();
+    // Safety probe: confirm saveObjects rebuilt (didn't append) the object array.
+    const int32_t objCountAfter = numAt(objects.off);
     if (objCountBefore > 0 && objCountAfter > objCountBefore + objCountBefore / 2) {
-        UE_LOGW("save_capture: objectsData grew %d -> %d (>1.5x) -- saveObjects appears to APPEND, "
+        UE_LOGW("save_capture: %ls grew %d -> %d (>1.5x) -- saveObjects appears to APPEND, "
                 "not rebuild; the scratch blob may carry DUPLICATE objects. Investigate before "
-                "trusting this build's live capture.", objCountBefore, objCountAfter);
+                "trusting this build's live capture.", objects.name, objCountBefore, objCountAfter);
     } else {
-        UE_LOGI("save_capture: objectsData repopulated %d -> %d live world object(s)",
-                objCountBefore, objCountAfter);
+        UE_LOGI("save_capture: %ls repopulated %d -> %d live world object(s)",
+                objects.name, objCountBefore, objCountAfter);
     }
     // AN EMPTY CONTAINER IS NOT A WORLD, and this count is the exact discriminator: an integer
     // read at the producer, rather than the byte-size ratio a consumer would be left to guess
     // with. A healthy capture repopulates a few thousand objects; the stale-gamemode stub reads
     // zero. Refusing here means the caller falls back to the canonical slot instead of streaming
     // a world nobody lives in.
-    if (objCountAfter == 0) {
-        UE_LOGW("save_capture: saveObjects produced an EMPTY objectsData (%d -> 0) -- refusing "
+    if (objCountAfter <= 0) {
+        UE_LOGW("save_capture: saveObjects produced an EMPTY %ls (%d -> %d) -- refusing "
                 "this capture. The container serialized fine; it just describes no world.",
-                objCountBefore);
+                objects.name, objCountBefore, objCountAfter);
         return false;
     }
 

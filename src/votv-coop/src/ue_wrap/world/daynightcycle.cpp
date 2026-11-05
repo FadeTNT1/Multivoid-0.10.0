@@ -172,7 +172,8 @@ struct LatchedMember {
 
 // The saveSlot substrate (gamemode -> saveSlot). The running world's gamemode, for the callers with no
 // cycle in hand (the host's clock sample, the dev instruments), is the world singleton's.
-LatchedMember g_gmSaveSlot{L"mainGamemode_C", L"saveSlot", "the save slot's clock fields are out of reach"};
+// (gamemode -> save object: world_singleton::GamemodeSaveSlotOffset, the one resolve of that member's
+// name, save_slot on 0.10.0 and saveSlot before.)
 LatchedMember g_slotDailyDelivery{L"saveSlot_C", L"dailyDelivery", "the 6 am order latch cannot be set"};
 LatchedMember g_slotSavedTime{L"saveSlot_C", L"savedtime", "the day number can be neither read nor written"};
 LatchedMember g_slotMusics{L"saveSlot_C", L"musics", "the day's music flags cannot be set again"};
@@ -193,7 +194,7 @@ BoolArray* MusicsIn(void* saveSlot) {
 void* LiveSaveSlot() {
     void* gm = world_singleton::Gamemode();   // world-stamped: never a dying world's
     if (!gm) return nullptr;
-    const int32_t off = g_gmSaveSlot.Of(gm);
+    const int32_t off = world_singleton::GamemodeSaveSlotOffset(gm);
     if (off < 0) return nullptr;
     void* slot = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(gm) + off);
     return (slot && R::IsLive(slot)) ? slot : nullptr;
@@ -204,7 +205,7 @@ void* SaveSlotOfCycle(void* cycle) {
     if (!cycle || g_cycleGmOff < 0) return nullptr;
     void* gm = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(cycle) + g_cycleGmOff);
     if (!gm || !R::IsLive(gm)) return nullptr;
-    const int32_t off = g_gmSaveSlot.Of(gm);
+    const int32_t off = world_singleton::GamemodeSaveSlotOffset(gm);
     if (off < 0) return nullptr;
     void* slot = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(gm) + off);
     return (slot && R::IsLive(slot)) ? slot : nullptr;

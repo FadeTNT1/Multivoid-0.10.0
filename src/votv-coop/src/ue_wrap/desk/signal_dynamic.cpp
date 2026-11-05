@@ -4,15 +4,90 @@
 
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/fstring_utils.h"
+#include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile.h"
 
+#include <chrono>
 #include <cstring>
+#include <cwchar>
 
 namespace ue_wrap::signal_dynamic {
 
 namespace R = ue_wrap::reflection;
 
 namespace {
+
+// ---- the measured layout -----------------------------------------------------------------------
+
+struct MemberSpec { const wchar_t* prefix; int32_t size; int32_t Layout::*slot; };
+// The trailing underscore keeps "signal_" off "signalLocation_" and "object_" off "objectType_".
+constexpr MemberSpec kMembers[] = {
+    {L"name_",                16, &Layout::name},
+    {L"level_",                4, &Layout::level},
+    {L"id_",                  16, &Layout::id},
+    {L"size_",                 4, &Layout::size},
+    {L"decoded_",              4, &Layout::decoded},
+    {L"date_",                 8, &Layout::date},
+    {L"isCopy_",               1, &Layout::isCopy},
+    {L"polarity_",             4, &Layout::polarity},
+    {L"signalLocation_",       8, &Layout::loc},
+    {L"object_",               8, &Layout::object},
+    {L"signal_",               8, &Layout::signal},
+    {L"image_",               16, &Layout::image},
+    {L"frequency_",            1, &Layout::freq},
+    {L"quality_",              1, &Layout::qual},
+    {L"objectType_",           1, &Layout::objType},
+    {L"downloadedAtQuality_",  4, &Layout::daq},
+};
+
+Layout   g_layout;
+bool     g_measured = false;   // a struct was found and judged (ok or not)
+bool     g_ok = false;
+uint64_t g_nextTryMs = 0;
+
+bool StartsWithI(const std::wstring& s, const wchar_t* prefix) {
+    const size_t n = std::wcslen(prefix);
+    return s.size() >= n && ::_wcsnicmp(s.c_str(), prefix, n) == 0;
+}
+
+void Measure() {
+    if (g_measured) return;
+    const uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+    if (now < g_nextTryMs) return;
+    g_nextTryMs = now + 1000;
+    void* script = R::FindObject(ue_wrap::profile::name::SignalDynamicStruct, L"UserDefinedStruct");
+    if (!script) return;   // not loaded yet: retried
+    g_measured = true;
+    Layout L;
+    L.span = R::StructSize(script);
+    if (L.span <= 0 || L.span > 0x1000) {
+        UE_LOGE("signal_dynamic: struct_signalDataDynamic reads an implausible size %d -- every signal "
+                "row read and write is REFUSED", L.span);
+        return;
+    }
+    L.stride = (L.span + 7) & ~7;
+    for (const R::StructFieldInfo& f : R::EnumerateStructFields(script)) {
+        for (const MemberSpec& m : kMembers) {
+            if (!StartsWithI(f.name, m.prefix) || L.*(m.slot) >= 0) continue;
+            if (f.size == m.size && f.offset >= 0 && f.offset + f.size <= L.span) L.*(m.slot) = f.offset;
+            break;
+        }
+    }
+    for (const MemberSpec& m : kMembers) {
+        if (L.*(m.slot) < 0) {
+            UE_LOGE("signal_dynamic: struct_signalDataDynamic has no '%ls*' member of %d bytes -- every "
+                    "signal row read and write is REFUSED (the struct changed shape; re-derive the row)",
+                    m.prefix, m.size);
+            return;
+        }
+    }
+    g_layout = L;
+    g_ok = true;
+    UE_LOGI("signal_dynamic: measured struct_signalDataDynamic span=0x%X stride=0x%X (name@0x%X "
+            "signal@0x%X image@0x%X daq@0x%X)", L.span, L.stride, L.name, L.signal, L.image, L.daq);
+}
 
 std::wstring ReadFString(const uint8_t* p) {
     R::FString s{};
@@ -50,37 +125,51 @@ struct ByteArray {
 
 }  // namespace
 
+const Layout* GetLayout() {
+    Measure();
+    return g_ok ? &g_layout : nullptr;
+}
+
+int32_t Stride() {
+    const Layout* L = GetLayout();
+    return L ? L->stride : 0;
+}
+
 bool ReadStruct(const void* base, Row& out, bool withImage) {
-    if (!base) return false;
+    const Layout* L = GetLayout();
+    if (!base || !L) return false;
+    const Layout& K = *L;
     const uint8_t* p = static_cast<const uint8_t*>(base);
-    out.name   = ReadFString(p + kOff_name);
-    out.id     = ReadFString(p + kOff_id);
-    out.object = ReadFNameLeaf(p + kOff_object);
-    out.signal = ReadFNameLeaf(p + kOff_signal);
-    std::memcpy(&out.level, p + kOff_level, sizeof(out.level));
-    std::memcpy(&out.polarity, p + kOff_polarity, sizeof(out.polarity));
-    std::memcpy(&out.size, p + kOff_size, sizeof(out.size));
-    std::memcpy(&out.decoded, p + kOff_decoded, sizeof(out.decoded));
-    std::memcpy(&out.date, p + kOff_date, sizeof(out.date));
-    out.isCopy = *(p + kOff_isCopy) != 0;
-    std::memcpy(&out.locX, p + kOff_loc + 0, sizeof(float));
-    std::memcpy(&out.locY, p + kOff_loc + 4, sizeof(float));
-    out.frequency  = *(p + kOff_freq);
-    out.quality    = *(p + kOff_qual);
-    out.objectType = *(p + kOff_objType);
-    std::memcpy(&out.downloadedAtQuality, p + kOff_daq, sizeof(float));
+    out.name   = ReadFString(p + K.name);
+    out.id     = ReadFString(p + K.id);
+    out.object = ReadFNameLeaf(p + K.object);
+    out.signal = ReadFNameLeaf(p + K.signal);
+    std::memcpy(&out.level, p + K.level, sizeof(out.level));
+    std::memcpy(&out.polarity, p + K.polarity, sizeof(out.polarity));
+    std::memcpy(&out.size, p + K.size, sizeof(out.size));
+    std::memcpy(&out.decoded, p + K.decoded, sizeof(out.decoded));
+    std::memcpy(&out.date, p + K.date, sizeof(out.date));
+    out.isCopy = *(p + K.isCopy) != 0;
+    std::memcpy(&out.locX, p + K.loc + 0, sizeof(float));
+    std::memcpy(&out.locY, p + K.loc + 4, sizeof(float));
+    out.frequency  = *(p + K.freq);
+    out.quality    = *(p + K.qual);
+    out.objectType = *(p + K.objType);
+    std::memcpy(&out.downloadedAtQuality, p + K.daq, sizeof(float));
     out.hasData = out.size > 0.0f;
     out.image.clear();
     if (withImage) {
         ByteArray img{};
-        std::memcpy(&img, p + kOff_image, sizeof(img));
+        std::memcpy(&img, p + K.image, sizeof(img));
         if (img.data && img.num > 0 && img.num <= kImageSanity) out.image.assign(img.data, img.data + img.num);
     }
     return true;
 }
 
 bool WriteStructLive(void* base, const Row& in) {
-    if (!base) return false;
+    const Layout* L = GetLayout();
+    if (!base || !L) return false;
+    const Layout& K = *L;
     uint8_t* p = static_cast<uint8_t*>(base);
     // Every step that can fail runs first, into locals, and the struct is written only once all of
     // them have succeeded. Written in place, a failure stopped half way: a drive kept a new name and
@@ -92,32 +181,36 @@ bool WriteStructLive(void* base, const Row& in) {
     // A name minted before a failed id is left unreferenced, as every replaced string is (header).
     if (!ue_wrap::fstring_utils::MintFString(in.name, nameHeader)) return false;
     if (!ue_wrap::fstring_utils::MintFString(in.id, idHeader)) return false;
-    std::memcpy(p + kOff_name, nameHeader, sizeof(nameHeader));
-    std::memcpy(p + kOff_id, idHeader, sizeof(idHeader));
-    std::memcpy(p + kOff_object, &object, sizeof(object));
-    std::memcpy(p + kOff_signal, &signal, sizeof(signal));
-    std::memcpy(p + kOff_level, &in.level, sizeof(in.level));
-    std::memcpy(p + kOff_polarity, &in.polarity, sizeof(in.polarity));
-    std::memcpy(p + kOff_size, &in.size, sizeof(in.size));
-    std::memcpy(p + kOff_decoded, &in.decoded, sizeof(in.decoded));
-    std::memcpy(p + kOff_date, &in.date, sizeof(in.date));
-    *(p + kOff_isCopy) = in.isCopy ? 1 : 0;
-    std::memcpy(p + kOff_loc + 0, &in.locX, sizeof(float));
-    std::memcpy(p + kOff_loc + 4, &in.locY, sizeof(float));
-    *(p + kOff_freq) = in.frequency;
-    *(p + kOff_qual) = in.quality;
-    *(p + kOff_objType) = in.objectType;
-    std::memcpy(p + kOff_daq, &in.downloadedAtQuality, sizeof(float));
+    std::memcpy(p + K.name, nameHeader, sizeof(nameHeader));
+    std::memcpy(p + K.id, idHeader, sizeof(idHeader));
+    std::memcpy(p + K.object, &object, sizeof(object));
+    std::memcpy(p + K.signal, &signal, sizeof(signal));
+    std::memcpy(p + K.level, &in.level, sizeof(in.level));
+    std::memcpy(p + K.polarity, &in.polarity, sizeof(in.polarity));
+    std::memcpy(p + K.size, &in.size, sizeof(in.size));
+    std::memcpy(p + K.decoded, &in.decoded, sizeof(in.decoded));
+    std::memcpy(p + K.date, &in.date, sizeof(in.date));
+    *(p + K.isCopy) = in.isCopy ? 1 : 0;
+    std::memcpy(p + K.loc + 0, &in.locX, sizeof(float));
+    std::memcpy(p + K.loc + 4, &in.locY, sizeof(float));
+    *(p + K.freq) = in.frequency;
+    *(p + K.qual) = in.quality;
+    *(p + K.objType) = in.objectType;
+    std::memcpy(p + K.daq, &in.downloadedAtQuality, sizeof(float));
     // Empty the image (count only; the buffer stays engine-owned) so a stale
     // photo never rides with a different signal's data.
     int32_t zero = 0;
-    std::memcpy(p + kOff_image + 8, &zero, sizeof(zero));  // TArray.Num
+    std::memcpy(p + K.image + 8, &zero, sizeof(zero));  // TArray.Num
     return true;
 }
 
-bool BuildParamBytes(const Row& in, uint8_t out[kStride]) {
-    if (!out) return false;
-    std::memset(out, 0, kStride);
+bool BuildParamBytes(const Row& in, std::vector<uint8_t>& outVec) {
+    outVec.clear();
+    const Layout* L = GetLayout();
+    if (!L) return false;
+    const Layout& K = *L;
+    outVec.assign(static_cast<size_t>(K.span), 0);
+    uint8_t* out = outVec.data();
     // FStrings point at the caller-held Row's buffers; the callee (saveSignal's
     // Array_Add) deep-copies with the engine allocator during the call.
     auto setStr = [&](int32_t off, const std::wstring& s) {
@@ -128,30 +221,30 @@ bool BuildParamBytes(const Row& in, uint8_t out[kStride]) {
         v.Max  = v.Num;
         std::memcpy(out + off, &v, sizeof(v));
     };
-    setStr(kOff_name, in.name);
-    setStr(kOff_id, in.id);
+    setStr(K.name, in.name);
+    setStr(K.id, in.id);
     R::FName object{}, signal{};
-    if (!LeafToFName(in.object, object) || !LeafToFName(in.signal, signal)) return false;
-    std::memcpy(out + kOff_object, &object, sizeof(object));
-    std::memcpy(out + kOff_signal, &signal, sizeof(signal));
-    std::memcpy(out + kOff_level, &in.level, sizeof(in.level));
-    std::memcpy(out + kOff_polarity, &in.polarity, sizeof(in.polarity));
-    std::memcpy(out + kOff_size, &in.size, sizeof(in.size));
-    std::memcpy(out + kOff_decoded, &in.decoded, sizeof(in.decoded));
-    std::memcpy(out + kOff_date, &in.date, sizeof(in.date));
-    out[kOff_isCopy] = in.isCopy ? 1 : 0;
-    std::memcpy(out + kOff_loc + 0, &in.locX, sizeof(float));
-    std::memcpy(out + kOff_loc + 4, &in.locY, sizeof(float));
-    out[kOff_freq] = in.frequency;
-    out[kOff_qual] = in.quality;
-    out[kOff_objType] = in.objectType;
-    std::memcpy(out + kOff_daq, &in.downloadedAtQuality, sizeof(float));
+    if (!LeafToFName(in.object, object) || !LeafToFName(in.signal, signal)) { outVec.clear(); return false; }
+    std::memcpy(out + K.object, &object, sizeof(object));
+    std::memcpy(out + K.signal, &signal, sizeof(signal));
+    std::memcpy(out + K.level, &in.level, sizeof(in.level));
+    std::memcpy(out + K.polarity, &in.polarity, sizeof(in.polarity));
+    std::memcpy(out + K.size, &in.size, sizeof(in.size));
+    std::memcpy(out + K.decoded, &in.decoded, sizeof(in.decoded));
+    std::memcpy(out + K.date, &in.date, sizeof(in.date));
+    out[K.isCopy] = in.isCopy ? 1 : 0;
+    std::memcpy(out + K.loc + 0, &in.locX, sizeof(float));
+    std::memcpy(out + K.loc + 4, &in.locY, sizeof(float));
+    out[K.freq] = in.frequency;
+    out[K.qual] = in.quality;
+    out[K.objType] = in.objectType;
+    std::memcpy(out + K.daq, &in.downloadedAtQuality, sizeof(float));
     if (!in.image.empty()) {
         ByteArray img{};
         img.data = const_cast<uint8_t*>(in.image.data());
         img.num = static_cast<int32_t>(in.image.size());
         img.max = img.num;
-        std::memcpy(out + kOff_image, &img, sizeof(img));
+        std::memcpy(out + K.image, &img, sizeof(img));
     }
     return true;
 }

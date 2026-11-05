@@ -69,6 +69,38 @@ inline constexpr const wchar_t* SaveSlotResetPlayerFn           = L"reset_player
 inline constexpr const wchar_t* SaveSlotPlayerTransform         = L"playerTransform";
 inline constexpr const wchar_t* SaveSlotPlayerTransformDefault  = L"def";
 inline constexpr const wchar_t* SaveSlotBetterObjectsData       = L"betterObjectsData";
+inline constexpr const wchar_t* SaveSlotBetterPrimitivesData    = L"betterPrimitivesData";
+inline constexpr const wchar_t* SaveSlotBetterTriggerData       = L"betterTriggerData";
+// 0.9.0n's world object array (TArray<Fstruct_save>); 0.10.0 gathers into betterObjectsData instead.
+inline constexpr const wchar_t* SaveSlotObjectsDataLegacy       = L"objectsData";
+inline constexpr const wchar_t* SaveSlotPrimitivesDataLegacy    = L"primitivesData";
+
+// The gamemode's live save object. 0.10.0 renamed the member saveSlot -> save_slot; both are tried,
+// the current name first, so a reader resolves it on either build.
+inline constexpr const wchar_t* GamemodeSaveSlotProp       = L"save_slot";
+inline constexpr const wchar_t* GamemodeSaveSlotPropLegacy = L"saveSlot";
+
+// The per-item save record struct (a BP UserDefinedStruct): struct_save1 on 0.10.0, struct_save
+// before. Its layout is MEASURED through reflection (ue_wrap/actors/save_record); the names are only
+// the fallback route to the struct when prop_C::getData has not loaded yet.
+inline constexpr const wchar_t* SaveRecordStruct       = L"struct_save1";
+inline constexpr const wchar_t* SaveRecordStructLegacy = L"struct_save";
+// 0.10.0's better-save record (struct_betterSave): what saveObjects gathers into betterObjectsData.
+inline constexpr const wchar_t* BetterSaveStruct = L"struct_betterSave";
+
+// The dynamic signal row (desk refiner, drive, rack, signal library). 0.10.0 added a
+// signalObjectImageName member mid-struct; its layout is measured (ue_wrap/desk/signal_dynamic.h).
+inline constexpr const wchar_t* SignalDynamicStruct = L"struct_signalDataDynamic";
+
+// 0.10.0's container inventory: prop_container_C.inventoryComponent (an inventoryComponent_C, the
+// grid inventory that replaced propInventory_C + saveSlot.GObjStack), whose `owner` its BeginPlay
+// (makeOwner) sets to the container -- the "this container has started" mark the host's world
+// settle counts.
+inline constexpr const wchar_t* ContainerInventoryComponentProp = L"inventoryComponent";
+inline constexpr const wchar_t* InventoryComponentOwnerProp     = L"owner";
+
+// The static mesh prop_C::init sets when its props-table row gives no mesh (and no meshOverride).
+inline constexpr const wchar_t* PropErrorMesh = L"00000000error";
 
 // Actor spawning (the BlueprintCallable deferred-spawn pair the K2 SpawnActorFromClass node uses)
 // and transform get/set.
@@ -223,7 +255,9 @@ inline constexpr const wchar_t* SetSaveSlotObjectFn = L"setSaveSlotObject";
 // The live host-world capture (save_capture.cpp): repopulate the world save from live actors, then
 // serialise it to a scratch slot for a joiner (a kerfur the host turned on after its last
 // autosave is captured live). All on AmainGamemode_C except SaveGameToSlot.
-inline constexpr const wchar_t* MainGamemodeSaveObjectsFn  = L"saveObjects";   // saveObjects(bool quicksave)
+inline constexpr const wchar_t* MainGamemodeSaveObjectsFn  = L"saveObjects";   // saveObjects(bool quicksave[, bool skipEventBlock])
+// 0.10.0's second saveObjects parameter: true gathers without asking lib_C::getEvent.
+inline constexpr const wchar_t* MainGamemodeSaveObjectsSkipEventParam = L"skipEventBlock";
 inline constexpr const wchar_t* MainGamemodeSaveTriggersFn = L"saveTriggers";  // saveTriggers()
 inline constexpr const wchar_t* SaveGameToSlotFn           = L"SaveGameToSlot";  // (USaveGame*, FString slot, int32 idx) -> bool
 inline constexpr const wchar_t* ActorClassName = L"Actor";  // owns K2_Get/SetActorLocation
@@ -463,7 +497,10 @@ inline constexpr const wchar_t* AddImpulseFn                           = L"AddIm
 // Secondary, the input level: the grabbed prop's identity is read from mainPlayer_C.grabbing_actor
 // inside the InpActEvt observer. The "_41" K2Node ordinal is version-fragile (a BP recook can
 // renumber it).
-inline constexpr const wchar_t* MainPlayerUseInputEventFn    = L"InpActEvt_use_K2Node_InputActionEvent_41";
+// 0.10.0: _37 is the E press (drops a grab, then lookAt / timeuse / useSelectedAction); _38 the release
+// (useAction, playerGrabbed); _34 a second press that traces and calls player_use. 0.9.0n had them
+// as _41, _42 and _38.
+inline constexpr const wchar_t* MainPlayerUseInputEventFn    = L"InpActEvt_use_K2Node_InputActionEvent_37";
 // The LMB (fire) action: the native throw-when-holding seam (InpActEvt_fire -> throwHoldingProp),
 // separate from use/E. Two handlers (_58 press, _59 release); the client registers both and gates
 // on ClientCarryEid so only the edge that finds a live carry acts.

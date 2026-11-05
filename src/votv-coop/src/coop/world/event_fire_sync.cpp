@@ -133,7 +133,7 @@ bool ResolvePass() {
     void* ssCls = OI::ClassByName(L"saveSlot_C");
     void* evCls = OI::ClassByName(L"trigger_eventer_C");
     if (!gmCls || !ssCls || !evCls) return false;  // the world has not loaded them yet
-    g_offSaveSlot = R::FindPropertyOffset(gmCls, L"saveSlot");
+    g_offSaveSlot = ue_wrap::world_singleton::GamemodeSaveSlotOffsetOnClass(gmCls);
     g_offEventer = R::FindPropertyOffset(gmCls, L"eventer");
     g_offPassEvents = R::FindPropertyOffset(ssCls, L"passEvents");
     if (g_offAllEvents < 0) g_offAllEvents = R::FindPropertyOffset(ssCls, L"allEvents");

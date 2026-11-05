@@ -1,4 +1,4 @@
-// ue_wrap/desk/signal_dynamic.h -- the Fstruct_signalDataDynamic (0x70) bridge.
+// ue_wrap/desk/signal_dynamic.h -- the Fstruct_signalDataDynamic bridge.
 //
 // This ONE struct is both the desk refiner's loaded signal (comp_data_0) and an element of
 // gamemode.savedSignals_0, the desk signal library. Its rows are pure POD and strings, with no
@@ -8,8 +8,8 @@
 // byte TArray used solely by the laptop photo view, which the live mirror SKIPS; a joiner converges
 // on it through the save transfer instead.
 //
-// Member offsets are dump-authoritative -- the kOff_* constants below -- because the GUID-mangled
-// cooked names make FindPropertyOffset unreliable here, as with the door box.
+// Member offsets are MEASURED (see Layout below): 0.10.0 added a member mid-struct, so a row
+// written at the old stride lands every row after the first on its neighbour's bytes.
 //
 // Principle-7 engine-wrapper layer; no network logic.
 
@@ -21,24 +21,37 @@
 
 namespace ue_wrap::signal_dynamic {
 
-// Field offsets within Fstruct_signalDataDynamic (stride 0x70).
-inline constexpr int32_t kOff_name     = 0x00;  // FString
-inline constexpr int32_t kOff_level    = 0x10;  // int32
-inline constexpr int32_t kOff_id       = 0x18;  // FString (base64url, ~22 chars)
-inline constexpr int32_t kOff_size     = 0x28;  // float
-inline constexpr int32_t kOff_decoded  = 0x2C;  // float
-inline constexpr int32_t kOff_date     = 0x30;  // FDateTime (int64 ticks)
-inline constexpr int32_t kOff_isCopy   = 0x38;  // bool
-inline constexpr int32_t kOff_polarity = 0x3C;  // int32
-inline constexpr int32_t kOff_loc      = 0x40;  // FVector2D
-inline constexpr int32_t kOff_object   = 0x48;  // FName
-inline constexpr int32_t kOff_signal   = 0x50;  // FName (the template key)
-inline constexpr int32_t kOff_image    = 0x58;  // Fstruct_byteImage = TArray<uint8>
-inline constexpr int32_t kOff_freq     = 0x68;  // enum byte
-inline constexpr int32_t kOff_qual     = 0x69;  // enum byte
-inline constexpr int32_t kOff_objType  = 0x6A;  // enum byte
-inline constexpr int32_t kOff_daq      = 0x6C;  // float downloadedAtQuality
-inline constexpr int32_t kStride       = 0x70;
+// The measured layout of Fstruct_signalDataDynamic: each member's byte offset, the struct's span
+// (PropertiesSize) and the stride an array of it is walked at (the span rounded to the struct's
+// 8-byte alignment: its widest members are pointers and int64).
+struct Layout {
+    int32_t name = -1;      // FString
+    int32_t level = -1;     // int32
+    int32_t id = -1;        // FString (base64url, ~22 chars)
+    int32_t size = -1;      // float
+    int32_t decoded = -1;   // float
+    int32_t date = -1;      // FDateTime (int64 ticks)
+    int32_t isCopy = -1;    // bool
+    int32_t polarity = -1;  // int32
+    int32_t loc = -1;       // FVector2D signalLocation
+    int32_t object = -1;    // FName
+    int32_t signal = -1;    // FName (the template key)
+    int32_t image = -1;     // Fstruct_byteImage = TArray<uint8>
+    int32_t freq = -1;      // enum byte
+    int32_t qual = -1;      // enum byte
+    int32_t objType = -1;   // enum byte
+    int32_t daq = -1;       // float downloadedAtQuality
+    int32_t span = 0;
+    int32_t stride = 0;
+};
+
+// The running build's layout, measured once the struct asset is loaded (retried at most once a
+// second before that). Null while unmeasured or when the struct fails to read as the row; every
+// caller refuses then. Game thread.
+const Layout* GetLayout();
+
+// The measured element stride, 0 while unmeasured: the one number an array walk of rows needs.
+int32_t Stride();
 
 // Wire-facing view of one row. The photo is read only when asked (ReadStruct's withImage): the lanes that
 // poll rows at a cadence leave it out, and the rack packs sixteen rows into one blob.
@@ -67,6 +80,7 @@ struct Row {
 
 // Raw-read the struct at `base` into `out` (FStrings read directly; FNames
 // via the engine name table), the photo too when `withImage`. Zero reflected calls.
+// False while the layout is unmeasured.
 bool ReadStruct(const void* base, Row& out, bool withImage = false);
 
 // Write `in` into the LIVE struct at `base`: PODs raw, FStrings ENGINE-MINTED
@@ -79,10 +93,10 @@ bool ReadStruct(const void* base, Row& out, bool withImage = false);
 // that cannot be minted writes no field at all. Game thread.
 bool WriteStructLive(void* base, const Row& in);
 
-// Build the 0x70 param-frame bytes for a struct PARAMETER (gamemode.saveSignal's
-// `signal`): PODs raw, FStrings and the photo pointing AT `in`'s buffers (the
-// callee deep-copies during the call -- `in` must outlive it), FNames interned.
-// Game thread.
-bool BuildParamBytes(const Row& in, uint8_t out[kStride]);
+// Build the param-frame bytes for a struct PARAMETER (gamemode.saveSignal's `signal`), sized to
+// the measured span: PODs raw, FStrings and the photo pointing AT `in`'s buffers (the callee
+// deep-copies during the call -- `in` must outlive it), FNames interned. False with `out` empty
+// while the layout is unmeasured. Game thread.
+bool BuildParamBytes(const Row& in, std::vector<uint8_t>& out);
 
 }  // namespace ue_wrap::signal_dynamic

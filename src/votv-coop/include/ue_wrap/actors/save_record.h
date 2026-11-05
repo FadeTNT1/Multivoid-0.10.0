@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "ue_wrap/desk/signal_dynamic.h"  // Row -- the 0x70 signal sub-element (reused, not reinvented)
+#include "ue_wrap/desk/signal_dynamic.h"  // Row -- the signal sub-element (reused, not reinvented)
 
 #include <array>
 #include <cstdint>
@@ -54,23 +54,30 @@ struct SaveRecord {
     std::vector<std::vector<std::wstring>>          names;    // FName
 };
 
-// ARRAY ELEMENT STRIDE is the 16-ALIGNED struct size, not the dump's raw `Size:` line.
-// Fstruct_save embeds an FTransform, whose FQuat is 16-aligned, so the struct's own alignment
-// is 16 and its element stride is the size rounded up to that -- which is what the SDK reports
-// for every embedded Fstruct_save field. The engine walks every TArray<Fstruct_save>
-// at THIS stride, so using the unrounded size reads element i+1's class at the wrong byte: a
-// wild class pointer and a heap over-read, which is a crash from the second element onward.
-// In a dump the bottom-line `Size:` is PropertiesSize; the per-field embedded `size:` is the
-// stride.
-inline constexpr int32_t kSaveStride   = 0x100;
-// The record's own FIELD span: the last value group is a TArray, and every field ends inside this
-// many bytes. The stride above is that rounded up to the struct's 16 alignment, and the difference
-// is real padding. This is the bound a parameter frame is checked against before the codec reads or
-// writes a record inside it -- the bytes past the span belong to whatever parameter the engine laid
-// down next, so a frame with less than this much room after the offset is refused.
-inline constexpr int32_t kSaveRecordBytes = 0xF8;
-inline constexpr int32_t kMxStride     = 0x10;  // Fstruct_mX wraps a single TArray<X> @ +0; already 16-aligned
-inline constexpr int32_t kSignalStride = 0x70;  // Fstruct_signalDataDynamic; no 16-aligned member
+// THE LAYOUT IS MEASURED, never a constant. The record struct is a Blueprint UserDefinedStruct
+// whose shape moves between game builds (0.9.0n's Fstruct_save carries a flat `signals` group;
+// 0.10.0's struct_save1 has none, so every later group moved up and the struct shrank by sixteen
+// bytes). Every member offset is read off the running struct by its stable name prefix, every value
+// group is type-checked down to its inner element size, and the array stride is the struct's
+// aligned size as the engine walks it. While the layout is unmeasured, or when the struct fails to
+// read as a record, every read and write below refuses and touches nothing.
+struct RecordLayout {
+    void*   script = nullptr;  // the UScriptStruct measured
+    int32_t span = 0;          // UStruct::PropertiesSize: every field ends inside this many bytes
+    int32_t stride = 0;        // the element stride of a TArray of records (span rounded to 16)
+};
+
+// The running build's record layout (the struct Aprop_C::getData files a prop into, else the struct
+// asset by name). Null while unmeasured; retried at most once a second. Game thread.
+const RecordLayout* Layout();
+// Its stride and span, 0 while unmeasured -- a caller walking an array of records refuses on 0.
+int32_t RecordStride();
+int32_t RecordSpan();
+// Whether `scriptStruct` is the measured record struct: the check a caller makes before walking an
+// array whose element type it found by reflection.
+bool IsRecordStruct(void* scriptStruct);
+
+inline constexpr int32_t kMxStride     = 0x10;  // Fstruct_mX wraps a single TArray<X> @ +0; checked per group as measured
 
 // A corrupt/uninitialized TArray Num must never drive a runaway loop or a giant reserve.
 inline constexpr int32_t kMaxArr = 200000;
@@ -104,11 +111,12 @@ void WriteFNameField(void* dst, const std::wstring& leaf);
 
 // ---- The record codec ------------------------------------------------------------------------
 
-// Read one Fstruct_save at `base` into `rec`. Pure field reads + FName::ToString / FString copy
-// (no UFunction dispatch). `rec` is overwritten field-by-field; pass a fresh record.
-void ReadSaveRecord(const void* base, SaveRecord& rec);
+// Read one record at `base` into `rec` through the measured layout. Pure field reads +
+// FName::ToString / FString copy (no UFunction dispatch). `rec` is overwritten field-by-field; pass
+// a fresh record. False, reading nothing, while the layout is unmeasured.
+bool ReadSaveRecord(const void* base, SaveRecord& rec);
 
-// Write one Fstruct_save into the ZEROED 0x100 slot at `base`, constructing engine-OWNED
+// Write one record into the ZEROED RecordSpan()-byte slot at `base`, constructing engine-OWNED
 // TArrays via reflection::EngineAlloc (FNames interned, FStrings engine-minted, UClasses
 // FindClass'd). The slot MUST be zeroed by the caller (AllocZeroed); any previous buffers it
 // referenced are intentionally orphaned -- recursively freeing nested Fstruct_save sub-arrays +
@@ -117,7 +125,9 @@ void ReadSaveRecord(const void* base, SaveRecord& rec);
 // the engine's later Array realloc / GC free of them is allocator-matched.
 // `resolve` governs how every class leaf (the record's own class and its `classes` group) resolves;
 // null = reflection::FindClass (see ClassResolver).
-void WriteSaveRecord(uint8_t* base, const SaveRecord& r, ClassResolver resolve = nullptr);
+// False, writing nothing, while the layout is unmeasured. A value group the running struct has no
+// member for is dropped (said once).
+bool WriteSaveRecord(uint8_t* base, const SaveRecord& r, ClassResolver resolve = nullptr);
 
 // ---- The GAME's own codec, on a LIVE actor --------------------------------------------------
 //
@@ -186,8 +196,8 @@ bool ApplyRecord(void* actor, const SaveRecord& r, ClassResolver resolve = nullp
 // authority the record's fields need belong to the caller, which is the only party that knows.
 
 // Run `recordFn` (a `getData`-shaped UFunction with a `data` out-parameter) on `actor` and read the
-// record it leaves in the frame. False if the frame has no `data` parameter of the right size or
-// the call fails.
+// record it leaves in the frame. False if the frame has no `data` parameter that measures as a record
+// (its own extent, not the frame's, bounds the read) or the call fails.
 bool CaptureRecordVia(void* actor, void* recordFn, SaveRecord& out);
 
 // Write `r` into `loadFn`'s `data` parameter and call it. THE RECORD IS APPLIED AS GIVEN: there is

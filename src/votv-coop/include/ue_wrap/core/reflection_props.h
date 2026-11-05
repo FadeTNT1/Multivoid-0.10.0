@@ -104,6 +104,20 @@ int32_t FindPropertyOffsetByPrefix(void* owningStruct, const wchar_t* prefix);
 // if the property is not found or no slot validates.
 void* PropertyInnerStruct(void* owningClass, const wchar_t* propName);
 
+// What an array property holds, measured off its FArrayProperty::Inner: the inner property's type as its
+// FFieldClass names it ("StructProperty", "IntProperty"...), its ElementSize -- the stride the engine walks
+// the array at, which for a struct is the struct's ALIGNED size, not its PropertiesSize -- and, for a struct
+// element, the UScriptStruct*. The Inner slot is the first payload member after FProperty, the same boundary
+// as FStructProperty::Struct, so both candidate slots are probed and a candidate is accepted only when its
+// FField::Owner points back at the array property itself (a wrong slot never does). False when the property
+// is not found, is not an ArrayProperty, or no slot validates. Linear walk: cache the result. Game thread.
+struct ArrayInnerInfo {
+    std::wstring innerType;       // FFieldClass name of the inner property
+    int32_t elementSize = -1;     // the array's element stride (inner ElementSize)
+    void* innerStruct = nullptr;  // UScriptStruct* when innerType == "StructProperty"
+};
+bool ArrayPropertyInner(void* owningStruct, const wchar_t* propName, ArrayInnerInfo& out);
+
 // The UEnum* behind a byte-typed enum property (FByteProperty::Enum), e.g. a blueprint struct's
 // TEnumAsByte member: the object to ask for an enumerator's display name. It is the first payload
 // member after the FProperty base, the same boundary as FStructProperty::Struct, so both slots are

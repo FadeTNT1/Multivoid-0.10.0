@@ -37,17 +37,17 @@ namespace GT = ue_wrap::game_thread;
 
 // The flashlight: `updateFlashlight` is BP-inlined into `Flashlight Update` and never dispatches through
 // ProcessEvent, so a POST observer is registered on both; the outer name has a literal space and the
-// FName lookup matches that exact string. The F input events (_13 press, _14 release; recook-fragile
+// FName lookup matches that exact string. The F input events (_48 press, _49 release; 0.9.0n _13/_14; recook-fragile
 // ordinals) are always dispatched as UFunctions; both are observed and the sender dedups on last-sent
 // state. timerHoldFlashlight fires when F is held long enough to switch the beam mode (spread <->
 // focused); its body mutates `flashlightMode` and light_R's cone and intensity, which a POST observer
 // reads to send the cone shape.
 UE_FACT_FN(kRowUpdateFlashlight, "item_activate", L"mainPlayer_C", L"updateFlashlight", Declared);
 UE_FACT_FN(kRowFlashlightUpdate, "item_activate", L"mainPlayer_C", L"Flashlight Update", Declared);
-UE_FACT_FN(kRowFlashlightInput13, "item_activate", L"mainPlayer_C",
-           L"InpActEvt_flashlight_K2Node_InputActionEvent_13", Declared);
-UE_FACT_FN(kRowFlashlightInput14, "item_activate", L"mainPlayer_C",
-           L"InpActEvt_flashlight_K2Node_InputActionEvent_14", Declared);
+UE_FACT_FN(kRowFlashlightPress, "item_activate", L"mainPlayer_C",
+           L"InpActEvt_flashlight_K2Node_InputActionEvent_48", Declared);
+UE_FACT_FN(kRowFlashlightRelease, "item_activate", L"mainPlayer_C",
+           L"InpActEvt_flashlight_K2Node_InputActionEvent_49", Declared);
 UE_FACT_FN(kRowTimerHoldFlashlight, "item_activate", L"mainPlayer_C", L"timerHoldFlashlight", Declared);
 
 bool g_installed = false;
@@ -59,8 +59,8 @@ bool g_installed = false;
 // post-mutation mode and cone shape so the receiver mirrors it.
 void* g_updateFlashlightFn = nullptr;
 void* g_flashlightUpdateFn = nullptr;
-void* g_flashlightInput13Fn = nullptr;
-void* g_flashlightInput14Fn = nullptr;
+void* g_flashlightPressFn = nullptr;
+void* g_flashlightReleaseFn = nullptr;
 void* g_timerHoldFlashlightFn = nullptr;
 
 // The last-sent signature (state, mode, intensity, cone angles): the hold-F mode change keeps
@@ -166,8 +166,8 @@ void OnUpdateFlashlightPost(void* self, void* function, void* /*params*/) {
     const char* which =
         (function == g_flashlightUpdateFn)     ? "Flashlight_Update" :
         (function == g_updateFlashlightFn)     ? "updateFlashlight"  :
-        (function == g_flashlightInput13Fn)    ? "InpActEvt_13"      :
-        (function == g_flashlightInput14Fn)    ? "InpActEvt_14"      :
+        (function == g_flashlightPressFn)    ? "InpActEvt_press"   :
+        (function == g_flashlightReleaseFn)    ? "InpActEvt_release" :
         (function == g_timerHoldFlashlightFn)  ? "timerHoldFlashlight" :
         "<unknown>";
 
@@ -368,8 +368,8 @@ void Install(coop::net::Session* session) {
     Candidate cs[] = {
         { &kRowUpdateFlashlight,    &g_updateFlashlightFn    },
         { &kRowFlashlightUpdate,    &g_flashlightUpdateFn    },
-        { &kRowFlashlightInput13,   &g_flashlightInput13Fn   },
-        { &kRowFlashlightInput14,   &g_flashlightInput14Fn   },
+        { &kRowFlashlightPress,   &g_flashlightPressFn   },
+        { &kRowFlashlightRelease,   &g_flashlightReleaseFn   },
         { &kRowTimerHoldFlashlight, &g_timerHoldFlashlightFn },
     };
     int registered = 0;
@@ -394,10 +394,10 @@ void Install(coop::net::Session* session) {
     g_flashlightClassHash = HashClassName(L"prop_equipment_flashlight_C");
     g_installed = true;
     UE_LOGI("flashlight: %d POST observer(s) installed (updateFlashlight=%p, "
-            "'Flashlight Update'=%p, InpActEvt_13=%p, InpActEvt_14=%p, "
+            "'Flashlight Update'=%p, InpActEvt_press=%p, InpActEvt_release=%p, "
             "timerHoldFlashlight=%p, classHash=0x%08X, probe_log=%d)",
             registered, g_updateFlashlightFn, g_flashlightUpdateFn,
-            g_flashlightInput13Fn, g_flashlightInput14Fn,
+            g_flashlightPressFn, g_flashlightReleaseFn,
             g_timerHoldFlashlightFn, g_flashlightClassHash,
             ProbeLogEnabled() ? 1 : 0);
 }

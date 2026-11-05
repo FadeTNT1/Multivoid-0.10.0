@@ -65,19 +65,21 @@ struct DataKey {
 };
 bool ReadDataKey(DataKey& out) {
     const uint8_t* p = static_cast<const uint8_t*>(CMP::CompDataPtr());
-    if (!p) return false;
-    std::memcpy(&out.namePtr, p + SD::kOff_name, sizeof(out.namePtr));
-    std::memcpy(&out.idPtr, p + SD::kOff_id, sizeof(out.idPtr));
-    std::memcpy(&out.level, p + SD::kOff_level, sizeof(out.level));
-    std::memcpy(&out.sizeBits, p + SD::kOff_size, sizeof(out.sizeBits));
+    const SD::Layout* L = SD::GetLayout();
+    if (!p || !L) return false;
+    std::memcpy(&out.namePtr, p + L->name, sizeof(out.namePtr));
+    std::memcpy(&out.idPtr, p + L->id, sizeof(out.idPtr));
+    std::memcpy(&out.level, p + L->level, sizeof(out.level));
+    std::memcpy(&out.sizeBits, p + L->size, sizeof(out.sizeBits));
     return true;
 }
 DataKey g_lastDataKey;
 
 bool ReadLevel(void* desk, int32_t& out) {
     const uint8_t* p = static_cast<const uint8_t*>(CMP::CompDataPtr(desk));
-    if (!p) return false;
-    std::memcpy(&out, p + SD::kOff_level, sizeof(out));
+    const SD::Layout* L = SD::GetLayout();
+    if (!p || !L) return false;
+    std::memcpy(&out, p + L->level, sizeof(out));
     return true;
 }
 

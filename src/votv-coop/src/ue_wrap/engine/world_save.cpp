@@ -28,10 +28,11 @@ bool SaveNow() {
         UE_LOGW("world_save: no mainGamemode of the current world -- nothing saved");
         return false;
     }
-    void* saveSlot = *reinterpret_cast<void* const*>(
-        reinterpret_cast<const uint8_t*>(gm) + P::off::AmainGamemode_saveSlot);
+    // The gamemode's save member by the name the running build gives it (save_slot on 0.10.0), never
+    // a fixed offset: the old one read some other member on 0.10.0 and asked ITS class for saveToSlot.
+    void* saveSlot = world_singleton::SaveSlot();
     if (!saveSlot) {
-        UE_LOGW("world_save: mainGamemode.saveSlot is null -- nothing saved");
+        UE_LOGW("world_save: the gamemode's save object is unresolved or null -- nothing saved");
         return false;
     }
     void* fn = R::FindFunction(R::ClassOf(saveSlot), L"saveToSlot");
