@@ -17,7 +17,8 @@
 #include "ue_wrap/engine/engine_audio.h"         // a sound at a world location
 #include "ue_wrap/engine/engine_bones.h"         // skeletal-mesh bones by name
 #include "ue_wrap/engine/engine_component.h"     // an actor's components
-#include "ue_wrap/engine/engine_mainplayer.h"    // the local player: grab, flashlight, ragdoll, damage
+#include "ue_wrap/engine/engine_flashlight.h"    // the player's flashlight beam
+#include "ue_wrap/engine/engine_mainplayer.h"    // the local player: grab, ragdoll, damage
 #include "ue_wrap/engine/engine_nav.h"           // nav paths and movement input
 #include "ue_wrap/engine/engine_pawn.h"          // controller, control rotation, view target, camera
 #include "ue_wrap/engine/engine_physics.h"       // a primitive component's rigid body

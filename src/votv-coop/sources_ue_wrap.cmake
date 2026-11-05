@@ -65,6 +65,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/engine/hit_result.cpp
     src/ue_wrap/engine/engine_hurt_flash.cpp
     src/ue_wrap/engine/screen_state.cpp
+    src/ue_wrap/engine/engine_flashlight.cpp
     src/ue_wrap/engine/engine_mainplayer.cpp
     src/ue_wrap/engine/engine_player_verbs.cpp
     src/ue_wrap/engine/scs_rig.cpp

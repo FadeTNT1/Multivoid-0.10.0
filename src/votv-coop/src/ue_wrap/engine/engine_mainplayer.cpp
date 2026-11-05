@@ -1,10 +1,9 @@
-// ue_wrap/engine/engine_mainplayer.cpp -- the player pawn accessors (grab state, flashlight,
-// ragdoll, damage). The public API lives in ue_wrap/engine/engine.h; this TU implements the
+// ue_wrap/engine/engine_mainplayer.cpp -- the player pawn accessors (grab state, ragdoll,
+// damage). The public API lives in ue_wrap/engine/engine.h; this TU implements the
 // wrappers scoped to the player class: every function reads or writes a field of it or
-// dispatches on its directly owned components (the physics handle for grab release, the
-// light and spot-light components for the flashlight setters). These are the canonical
-// engine-substrate accessors; gameplay code uses them in place of inline offset
-// dereferences. The caches here are file-private plain pointers, resolved once per process.
+// dispatches on its directly owned components (the physics handle for grab release). These
+// are the canonical engine-substrate accessors; gameplay code uses them in place of inline
+// offset dereferences. The caches here are file-private plain pointers, resolved once per process.
 
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/engine/engine_component.h"   // GetComponentLocation (the hold frame's camera)
@@ -41,35 +40,6 @@ bool ResolvePhcReleaseCached() {
     if (!g_phcClsCache.Raw()) return false;
     g_phcReleaseFnCache = R::FindFunction(g_phcClsCache.Raw(), P::name::ReleaseComponentFn);
     return g_phcReleaseFnCache != nullptr;
-}
-
-// The cached UFunctions for the light and cone setters below, resolved on the first
-// successful call: one resolve per process, and gameplay code stays reflection-free.
-void* g_setLightIntensityFn      = nullptr;
-void* g_setSceneVisibilityFn     = nullptr;
-void* g_setSpotOuterConeAngleFn  = nullptr;
-void* g_setSpotInnerConeAngleFn  = nullptr;
-
-void* ResolveLightIntensityFn() {
-    if (g_setLightIntensityFn) return g_setLightIntensityFn;
-    void* cls = R::FindClass(L"LightComponent");
-    if (!cls) return nullptr;
-    g_setLightIntensityFn = R::FindFunction(cls, P::name::SetIntensityFn);
-    return g_setLightIntensityFn;
-}
-void* ResolveSceneVisibilityFn() {
-    if (g_setSceneVisibilityFn) return g_setSceneVisibilityFn;
-    void* cls = R::FindClass(P::name::SceneComponentClass);
-    if (!cls) return nullptr;
-    g_setSceneVisibilityFn = R::FindFunction(cls, P::name::SetVisibilityFn);
-    return g_setSceneVisibilityFn;
-}
-void ResolveSpotConeFns() {
-    if (g_setSpotOuterConeAngleFn && g_setSpotInnerConeAngleFn) return;
-    void* cls = R::FindClass(P::name::SpotLightComponentClass);
-    if (!cls) return;
-    if (!g_setSpotOuterConeAngleFn) g_setSpotOuterConeAngleFn = R::FindFunction(cls, P::name::SetOuterConeAngleFn);
-    if (!g_setSpotInnerConeAngleFn) g_setSpotInnerConeAngleFn = R::FindFunction(cls, P::name::SetInnerConeAngleFn);
 }
 
 // The cached ragdoll UFunctions, both owned by the player class. Resolved on the first
@@ -473,80 +443,6 @@ void* ReadMainPlayerGrabTimeline(void* mainPlayer) {
     const int32_t off = ue_wrap::reflected_offset::MainPlayer_grabTimeline();
     if (off < 0) return nullptr;
     return *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(mainPlayer) + off);
-}
-
-void* GetMainPlayerLightR(void* mainPlayer) {
-    if (!mainPlayer || !R::IsLive(mainPlayer)) return nullptr;
-    void* light = *reinterpret_cast<void**>(
-        reinterpret_cast<uint8_t*>(mainPlayer) + P::off::AmainPlayer_light_R);
-    if (!light || !R::IsLive(light)) return nullptr;
-    return light;
-}
-
-bool ReadFlashlightSnapshot(void* light, FlashlightSnapshot& out) {
-    if (!light || !R::IsLive(light)) return false;
-    auto* base = reinterpret_cast<uint8_t*>(light);
-    out.intensity       = *reinterpret_cast<float*>(base + P::off::ULightComponentBase_Intensity);
-    out.outerConeAngle  = *reinterpret_cast<float*>(base + P::off::USpotLightComponent_OuterConeAngle);
-    out.innerConeAngle  = *reinterpret_cast<float*>(base + P::off::USpotLightComponent_InnerConeAngle);
-    const uint8_t flags = *reinterpret_cast<uint8_t*>(base + P::off::USceneComponent_VisFlagsByte);
-    out.visible         = (flags & 0x10) != 0;
-    return true;
-}
-
-bool ReadMainPlayerFlashlightState(void* mainPlayer, MainPlayerFlashlightState& out) {
-    out = {};
-    if (!mainPlayer || !R::IsLive(mainPlayer)) return false;
-    auto* base = reinterpret_cast<uint8_t*>(mainPlayer);
-    out.flashlight      = *reinterpret_cast<bool*>(base + P::off::AmainPlayer_flashlight);
-    out.hasFlashlight   = *reinterpret_cast<bool*>(base + P::off::AmainPlayer_hasFlashlight);
-    out.crankFlashlight = *reinterpret_cast<bool*>(base + P::off::AmainPlayer_crankFlashlight);
-    out.mode            = *reinterpret_cast<uint8_t*>(base + P::off::AmainPlayer_flashlightMode);
-    return true;
-}
-
-bool WriteMainPlayerFlashlight(void* mainPlayer, bool newState) {
-    if (!mainPlayer || !R::IsLive(mainPlayer)) return false;
-    auto* base = reinterpret_cast<uint8_t*>(mainPlayer);
-    *reinterpret_cast<bool*>(base + P::off::AmainPlayer_flashlight) = newState;
-    return true;
-}
-
-bool SetLightIntensity(void* light, float newIntensity) {
-    if (!light || !R::IsLive(light)) return false;
-    void* fn = ResolveLightIntensityFn();
-    if (!fn) return false;
-    ParamFrame f(fn);
-    f.Set<float>(L"NewIntensity", newIntensity);
-    return Call(light, f);
-}
-
-bool SetSceneComponentVisibility(void* sceneComponent, bool newVisibility, bool propagateToChildren) {
-    if (!sceneComponent || !R::IsLive(sceneComponent)) return false;
-    void* fn = ResolveSceneVisibilityFn();
-    if (!fn) return false;
-    ParamFrame f(fn);
-    f.Set<bool>(L"bNewVisibility", newVisibility);
-    f.Set<bool>(L"bPropagateToChildren", propagateToChildren);
-    return Call(sceneComponent, f);
-}
-
-bool SetSpotLightOuterConeAngle(void* spotLight, float newAngle) {
-    if (!spotLight || !R::IsLive(spotLight)) return false;
-    ResolveSpotConeFns();
-    if (!g_setSpotOuterConeAngleFn) return false;
-    ParamFrame f(g_setSpotOuterConeAngleFn);
-    f.Set<float>(L"NewOuterConeAngle", newAngle);
-    return Call(spotLight, f);
-}
-
-bool SetSpotLightInnerConeAngle(void* spotLight, float newAngle) {
-    if (!spotLight || !R::IsLive(spotLight)) return false;
-    ResolveSpotConeFns();
-    if (!g_setSpotInnerConeAngleFn) return false;
-    ParamFrame f(g_setSpotInnerConeAngleFn);
-    f.Set<float>(L"NewInnerConeAngle", newAngle);
-    return Call(spotLight, f);
 }
 
 bool ReadMainPlayerRagdollState(void* mainPlayer, bool& isRagdoll, bool& dead) {
