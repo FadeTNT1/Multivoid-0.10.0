@@ -20,6 +20,8 @@
 #include "coop/net/protocol.h"
 #include "coop/player/hand_item.h"  // CollectHandAxisActors / IsHandAxisActor: what the sweep spares
 #include "coop/player/players_registry.h"  // Registry::Local: the player whose grab the sweep releases
+#include "coop/props/join_keyed_replay.h"  // the host's retained pose for a keyed row, replayed on a re-bind
+#include "coop/props/join_sweep_tally.h"   // the population the valve and the floor judge against
 #include "coop/props/pile_spawn_bind.h"
 #include "coop/props/prop_element_tracker.h"
 #include "coop/props/prop_lifecycle.h"
@@ -118,6 +120,7 @@ void RecordSelfAuthored(void* actor) {
 
 void BeginClaimTracking() {
     g_claimedActors.clear();
+    coop::join_keyed_replay::Clear();  // a fresh bracket retains afresh
     // g_selfAuthored deliberately SURVIVES: see RecordSelfAuthored. It is emptied where it stops
     // meaning anything -- when a sweep has adjudicated the world, and at teardown.
     g_claimTrackingActive = true;
@@ -182,9 +185,10 @@ static void RunDivergenceSweep_(void* localPlayer) {
         for (wchar_t c : w) s.push_back(static_cast<char>(c & 0xFF));
         return s;
     };
-    int inClass = 0;        // live, non-mirror, LOCAL Prop Elements (the membership universe)
-    int claimedCount = 0;
-    int sparedCount = 0;    // see Spared
+    // The population the valve and the floor are ratios of: the whole loaded keyed world. That is the live local
+    // Prop Elements AND the live mirrors this bracket's claim set names (the actors the snapshot adopted); the
+    // mirrors are counted but never destroyed. See SweepTally.
+    SweepTally tally;
     void* handAxis[1 + coop::players::kMaxPeers];
     const size_t handAxisN = coop::hand_item::CollectHandAxisActors(handAxis, 1 + coop::players::kMaxPeers);
     const auto onHandAxis = [&](void* obj) {
@@ -199,19 +203,24 @@ static void RunDivergenceSweep_(void* localPlayer) {
     std::vector<std::wstring> doomedClass;  // Phase 0: class per doomed actor, parallel to `doomed`
     doomedClass.reserve(propPairs.size());
     std::unordered_map<std::wstring, int> doomedByClass;
-    std::unordered_map<std::wstring, int> claimedByClass;  // Phase 0: claimed count per class (floor numerator)
     std::unordered_map<std::wstring, int> keylessSkippedByClass;
     for (const auto& pr : propPairs) {
-        if (pr.mirror) continue;                                    // host-driven mirror -> not a save divergence (automatic kerfur exemption)
         if (!pr.actor) continue;
         if (!R::IsLiveByIndex(pr.actor, pr.internalIdx)) continue;  // dead (no deref) -- the reaper owns it
-        ++inClass;
         void* a = pr.actor;
+        if (pr.mirror) {
+            // A host-driven mirror is never a save divergence (the automatic kerfur exemption), so it is never
+            // doomed. One the snapshot bound this bracket is still part of the loaded world, though: leaving it out of
+            // the count made the valve compare the doomed against the leftovers alone.
+            if (g_claimedActors.count(a)) tally.CountClaimedMirror(a, R::ClassNameOf(a));
+            continue;
+        }
+        if (!tally.CountMember(a)) continue;  // a mirror row on this actor already counted it
         // The class is read before the claimed check: the completeness floor counts claims per
         // class.
         const std::wstring acls = R::ClassNameOf(a);
-        if (g_claimedActors.count(a)) { ++claimedCount; ++claimedByClass[acls]; continue; }  // host-expressed / self-claimed -> converged, keep
-        if (Spared(a, acls, onHandAxis(a))) { ++sparedCount; continue; }
+        if (g_claimedActors.count(a)) { tally.CountClaimed(acls); continue; }  // host-expressed / self-claimed -> converged, keep
+        if (Spared(a, acls, onHandAxis(a))) { tally.CountSpared(); continue; }
         if (ue_wrap::prop::IsTrashActor(a)) {          // a pile or a clump at rest: expressible on the eid lane
             // A body the load hold froze and no row bound by now: the host never bound it, so the host's
             // world does not have it, whatever the class count says. It leaves the floor's reckoning.
@@ -238,6 +247,9 @@ static void RunDivergenceSweep_(void* localPlayer) {
                 coop::dev::join_window_pos_trace::NoteRecreateRebind(key, static_cast<uint32_t>(dr->second), a);
                 coop::remote_prop::RegisterPropMirror(dr->second, a, key, acls, /*senderSlot*/ 0,
                                                       /*rebindInPlace*/ true);
+                // The row now names the re-create, which carries none of the converge the host's row did to the
+                // dead actor: replay the retained word onto it.
+                coop::join_keyed_replay::ReplayOnto(static_cast<uint32_t>(dr->second), a);
                 ue_wrap::FVector rbLoc{};
                 const bool rbRead = ue_wrap::engine::TryGetActorLocation(a, rbLoc);
                 UE_LOGW("join_membership_sweep: keyed churn RE-BIND -- unclaimed '%ls' key='%ls' "
@@ -246,8 +258,7 @@ static void RunDivergenceSweep_(void* localPlayer) {
                         acls.c_str(), key.c_str(), rbLoc.X, rbLoc.Y, rbLoc.Z, rbRead ? "" : " (unread)",
                         static_cast<unsigned>(dr->second));
                 deadKeyedRows.erase(dr);
-                ++claimedCount;
-                ++claimedByClass[acls];
+                tally.CountRebound(acls);
                 continue;
             }
         }
@@ -282,13 +293,14 @@ static void RunDivergenceSweep_(void* localPlayer) {
             }
             if (coop::element::Registry::Get().EidForActor(ke.actor) !=
                 coop::element::kInvalidId) continue;                    // element-bound -> row walk's half
-            ++inClass; ++idxUniverse;
+            if (!tally.CountMember(ke.actor)) continue;  // already counted: nothing is counted twice across the passes
+            ++idxUniverse;
             const std::wstring acls = R::ClassNameOf(ke.actor);
             if (g_claimedActors.count(ke.actor)) {
-                ++claimedCount; ++claimedByClass[acls]; ++idxClaimed;   // floor numerator keeps its semantics
+                tally.CountClaimed(acls); ++idxClaimed;   // floor numerator keeps its semantics
                 continue;
             }
-            if (Spared(ke.actor, acls, onHandAxis(ke.actor))) { ++sparedCount; continue; }
+            if (Spared(ke.actor, acls, onHandAxis(ke.actor))) { tally.CountSpared(); continue; }
             // A cached (actor, idx) pair can survive a slot recycle; only the live actor's current
             // key proves the entry still names it. A mismatch (an impostor or an un-reindexed
             // rekey) evicts the entry, never dooms; the live actor re-enters at the next census
@@ -307,12 +319,12 @@ static void RunDivergenceSweep_(void* localPlayer) {
                         liveKey, static_cast<uint32_t>(dr->second), ke.actor);
                     coop::remote_prop::RegisterPropMirror(dr->second, ke.actor, liveKey, acls,
                                                           /*senderSlot*/ 0, /*rebindInPlace*/ true);
+                    coop::join_keyed_replay::ReplayOnto(static_cast<uint32_t>(dr->second), ke.actor);
                     UE_LOGW("join_membership_sweep: keyed churn RE-BIND (index-half) -- unclaimed '%ls' "
                             "key='%ls' is the re-create of expressed eid=%u -> row rebound, claimed, NOT doomed",
                             acls.c_str(), liveKey.c_str(), static_cast<unsigned>(dr->second));
                     deadKeyedRows.erase(dr);
-                    ++claimedCount;
-                    ++claimedByClass[acls];
+                    tally.CountRebound(acls);
                     continue;
                 }
             }
@@ -367,9 +379,8 @@ static void RunDivergenceSweep_(void* localPlayer) {
         for (size_t i = 0; i < doomed.size(); ++i) {
             const std::wstring& c = doomedClass[i];
             const int hostHas = coop::snapshot_census::HostCountForClass(c);
-            const auto cit = claimedByClass.find(c);
-            const int claimedOfC = (cit == claimedByClass.end()) ? 0 : cit->second;
-            if (hostHas > 0 && claimedOfC < hostHas) {
+            const int claimedOfC = tally.ClaimedOfClass(c);
+            if (SweepTally::FloorKeeps(hostHas, claimedOfC)) {
                 ++floorKeptByClass[c];   // incomplete snapshot for class c -> KEEP, do not doom
                 continue;
             }
@@ -386,8 +397,7 @@ static void RunDivergenceSweep_(void* localPlayer) {
                 keptTotal += static_cast<size_t>(v);
                 if (v > topCnt) { topCnt = v; topCls = c; }
                 const int hostHas = coop::snapshot_census::HostCountForClass(c);
-                const auto cit = claimedByClass.find(c);
-                const int claimedOfC = (cit == claimedByClass.end()) ? 0 : cit->second;
+                const int claimedOfC = tally.ClaimedOfClass(c);
                 UE_LOGW("join_membership_sweep: completeness FLOOR kept %d unclaimed '%ls' -- host census %d, "
                         "claimed only %d this bracket (INCOMPLETE snapshot, NOT a divergence)",
                         v, c.c_str(), hostHas, claimedOfC);
@@ -414,20 +424,22 @@ static void RunDivergenceSweep_(void* localPlayer) {
         doomedClass.push_back(std::move(c));
     }
 
-    // The valve: the client loaded the host's save, so a legitimate divergence is a small delta. A
-    // sweep that would destroy more than half the universe is an incomplete snapshot (the host
+    // The valve: the client loaded the host's save, so a legitimate divergence is a small delta. The universe it is
+    // judged against is the whole loaded keyed world, the adopted mirrors included (SweepTally), never the
+    // leftovers alone. A sweep that would destroy more than half of it is an incomplete snapshot (the host
     // re-seeded mid-connect and sent a tiny first bracket, racing the chunked drain), and
     // destroying on it wipes the just-loaded world. Abort instead: the claimed stay converged, the
     // unclaimed survive until a fuller bracket re-expresses them, and the host's PropDestroy stream
     // still removes real deletions.
-    if (inClass > 0 && static_cast<int>(doomed.size()) * 2 > inClass) {
+    if (SweepTally::ValveAborts(doomed.size(), tally.Universe())) {
         UE_LOGW("join_membership_sweep: claim sweep ABORTED -- would destroy %zu of %d in-universe "
                 "actor(s) (>50%%); the host snapshot is INCOMPLETE (partial/racing bracket), not a "
                 "divergence. Keeping the loaded world (%d claimed stay converged).",
-                doomed.size(), inClass, claimedCount);
+                doomed.size(), tally.Universe(), tally.Claimed());
         // The identity reconcile already ran at the fire edge, before this sweep. The deferred
         // queues survive the bracket; only the spawn-time index resets.
         g_claimedActors.clear();
+        coop::join_keyed_replay::Clear();
         g_selfAuthored.clear();   // the world is adjudicated (here: left alone); nothing left to spare
         g_claimTrackingActive = false;
         coop::pile_spawn_bind::Reset();
@@ -455,7 +467,7 @@ static void RunDivergenceSweep_(void* localPlayer) {
     UE_LOGI("join_membership_sweep: claim sweep -- %d in-universe actors live, "
             "%d claimed (expressed on the wire this bracket), %d spared (the hand axis, the player's own, "
             "per-player state), %d unclaimed locals destroyed (client adopts host world)",
-            inClass, claimedCount, sparedCount, static_cast<int>(doomed.size()));
+            tally.Universe(), tally.Claimed(), tally.Spared(), static_cast<int>(doomed.size()));
     if (!heldUnbound.empty())
         UE_LOGI("join_membership_sweep:   %zu of them held natives the host never bound (past the completeness floor)",
                 heldUnbound.size());
@@ -492,6 +504,7 @@ static void RunDivergenceSweep_(void* localPlayer) {
     // SnapshotBegin) quiescence_drain::OnTick covers it every client tick.
 
     g_claimedActors.clear();
+    coop::join_keyed_replay::Clear();
     g_selfAuthored.clear();   // the sweep has adjudicated; a later bracket re-decides from the host's snapshot
     g_claimTrackingActive = false;
     coop::pile_spawn_bind::Reset();  // the candidate pointers would dangle past the GC below; the deferred reconcile queues survive
@@ -624,6 +637,7 @@ void ResetClaimTracking() {
                 "%zu claims dropped, no sweep", g_claimedActors.size());
     }
     g_claimedActors.clear();
+    coop::join_keyed_replay::Clear();
     g_selfAuthored.clear();
     g_claimTrackingActive = false;
     // A mid-snapshot drop also cancels a deferred sweep, or the tick driver would fire it against a

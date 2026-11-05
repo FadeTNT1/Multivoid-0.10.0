@@ -478,6 +478,6 @@ prop resolves.
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |
 | the pocket blip | `coop/items/inventory_pickup_sync` |
-| the join | `coop/props/prop_snapshot`, `coop/props/snapshot_census`, `coop/props/join_membership_sweep`, `coop/props/unresolved_pose_ledger` |
+| the join | `coop/props/prop_snapshot`, `coop/props/snapshot_census`, `coop/props/join_membership_sweep`, `coop/props/join_sweep_tally`, `coop/props/join_keyed_replay`, `coop/props/unresolved_pose_ledger` |
 | the spawners a client must not run | `coop/world/spawn_authority` |
 | tests | `harness/autotest/autotest_grab.cpp` |

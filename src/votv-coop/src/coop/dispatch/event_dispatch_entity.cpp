@@ -33,6 +33,7 @@
 #include "coop/props/remote_prop_spawn.h"
 #include "coop/props/bracket_position_wait.h"  // OnDestroy: a destroy of a waiting spawn
 #include "coop/props/join_membership_sweep.h"  // HasLoadTailQuiesced
+#include "coop/props/join_keyed_replay.h"  // NoteSnapPos
 #include "coop/props/trash_pile_sync.h"
 
 #include "ue_wrap/core/game_thread.h"
@@ -383,6 +384,10 @@ bool HandleEntityEvent(net::Session& session,
                     p.eid, static_cast<unsigned>(p.driveGen), static_cast<unsigned>(p.driveOpen));
             break;
         }
+        // A keyed row retained this bracket takes the newer pose, so a same-key re-create the sweep rebinds gets the
+        // host's latest word rather than the spawn row's (no-op for a pile or an eid never retained).
+        coop::join_keyed_replay::NoteSnapPos(p.eid, ue_wrap::FVector{p.locX, p.locY, p.locZ},
+                                             ue_wrap::FRotator{p.rotPitch, p.rotYaw, p.rotRoll}, p.physFlags);
         coop::element::quiescence_drain::ArmPendingPosCorrection(
             p.eid, ue_wrap::FVector{p.locX, p.locY, p.locZ},
             ue_wrap::FRotator{p.rotPitch, p.rotYaw, p.rotRoll}, p.physFlags, p.driveGen, p.driveOpen != 0);

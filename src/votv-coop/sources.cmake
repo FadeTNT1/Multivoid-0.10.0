@@ -227,6 +227,7 @@ set(VOTVCOOP_SOURCES
     src/coop/props/prop_wire_parity.cpp
     src/coop/props/remote_prop_spawn.cpp
     src/coop/props/join_membership_sweep.cpp
+    src/coop/props/join_keyed_replay.cpp
     src/coop/session/world_load_episode.cpp
     src/coop/session/save_replay_watch.cpp
     src/coop/interactables/garbage_sync.cpp
