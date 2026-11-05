@@ -4,6 +4,7 @@
 #include "coop/dev/flashlight_setup.h"
 
 #include "ue_wrap/core/call.h"
+#include "ue_wrap/engine/engine.h"  // ReadMainPlayerFlashlightState
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/reflection.h"
@@ -153,9 +154,10 @@ bool SetBatteryFull(void* mainPlayer) {
 bool EnsureFlashlightReady(void* mainPlayer) {
     if (!EnsureReflectionResolved(mainPlayer)) return false;
 
-    // Read current state: hasFlashlight + saveSlot.battery + flashlightBattery.
-    const bool hadFlashlight = *reinterpret_cast<bool*>(
-        reinterpret_cast<uint8_t*>(mainPlayer) + P::off::AmainPlayer_hasFlashlight);
+    // Read current state: equipped_flashlight + saveSlot.battery + flashlightBattery.
+    ue_wrap::engine::MainPlayerFlashlightState fl{};
+    ue_wrap::engine::ReadMainPlayerFlashlightState(mainPlayer, fl);
+    const bool hadFlashlight = fl.equipped;
     const bool crankFlashlight = *reinterpret_cast<bool*>(
         reinterpret_cast<uint8_t*>(mainPlayer) + P::off::AmainPlayer_crankFlashlight);
 
@@ -186,8 +188,8 @@ bool EnsureFlashlightReady(void* mainPlayer) {
     SetBatteryFull(mainPlayer);
 
     // Re-read for post-state log.
-    const bool nowHasFlashlight = *reinterpret_cast<bool*>(
-        reinterpret_cast<uint8_t*>(mainPlayer) + P::off::AmainPlayer_hasFlashlight);
+    ue_wrap::engine::ReadMainPlayerFlashlightState(mainPlayer, fl);
+    const bool nowHasFlashlight = fl.equipped;
     float nowBattery = -1.f;
     if (slot) {
         nowBattery = *reinterpret_cast<float*>(

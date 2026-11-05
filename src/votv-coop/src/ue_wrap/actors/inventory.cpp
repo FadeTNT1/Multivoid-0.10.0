@@ -105,10 +105,9 @@ const EquipLayout* EquipLayoutOf(void* save) {
     return &g_equip;
 }
 
-// The player's GObjStack slot. Baked, not restored: prop_inventoryContainer_player_C's component
-// template serializes index=0, and the saveSlot CDO pre-seeds the slot, so it is the one index
-// that is known before any container actor exists -- which is when the join apply runs. The live
-// reader checks the running component against it.
+// The player's GObjStack slot (0.9.0n). Baked, not restored: prop_inventoryContainer_player_C's
+// component template serializes index=0, and the saveSlot CDO pre-seeds the slot. The live reader
+// checks the running component against it.
 constexpr int32_t kPersonalSlot    = 0;
 
 int32_t g_offSave = -1;
@@ -130,19 +129,6 @@ int32_t CachedOffset(int32_t& slot, void* cls, const wchar_t* name) {
     return slot;
 }
 
-// The contents TArray header of GObjStack[kPersonalSlot] on `save` (the struct_mObject element's
-// single field, at +0), or null when the save object has no such slot or its GObjStack does not
-// measure as record arrays (ReadGObjStack says so once). `recordStride` is then the engine's own
-// element size for one record in it.
-uint8_t* PersonalSlotOf(void* save, int32_t& recordStride) {
-    recordStride = 0;
-    SR::GObjStackView stack;
-    if (!SR::ReadGObjStack(save, stack)) return nullptr;
-    uint8_t* slot = stack.Slot(kPersonalSlot);
-    if (slot) recordStride = stack.recordStride;
-    return slot;
-}
-
 template <class T> T ReadAt(const void* base, int32_t off) {
     T v{};
     std::memcpy(&v, reinterpret_cast<const uint8_t*>(base) + off, sizeof(T));
@@ -154,29 +140,6 @@ void ReadEquipRecord(const EquipLayout& L, const void* base, EquipRecord& rec) {
     if (L.propKey >= 0)  rec.propKey  = SR::ReadFNameAt(base, L.propKey);
     SR::ReadSaveRecord(reinterpret_cast<const uint8_t*>(base) + L.data, rec.data);
     if (L.tag >= 0)      rec.tag      = SR::ReadFNameAt(base, L.tag);
-}
-
-void WriteEquipRecord(const EquipLayout& L, uint8_t* base, const EquipRecord& r) {
-    if (L.propName >= 0) SR::WriteFNameField(base + L.propName, r.propName);
-    if (L.propKey >= 0)  SR::WriteFNameField(base + L.propKey, r.propKey);
-    SR::WriteSaveRecord(base + L.data, r.data);  // the embedded record, in a zeroed element
-    if (L.tag >= 0)      SR::WriteFNameField(base + L.tag, r.tag);
-}
-
-// Build one engine TArray<RecordT> from `recs` and overwrite the header at base+off. The
-// old buffer is intentionally orphaned (see ApplyToSaveObject's contract).
-template <class RecordT, class F>
-void BuildAndSwapArray(void* base, int32_t off, int32_t stride,
-                       const std::vector<RecordT>& recs, F writeOne) {
-    const int32_t num = static_cast<int32_t>(recs.size());
-    void* buf = SR::AllocZeroed(static_cast<size_t>(num), static_cast<size_t>(stride));
-    if (buf) {
-        for (int32_t i = 0; i < num; ++i)
-            writeOne(reinterpret_cast<uint8_t*>(buf) + static_cast<size_t>(i) * stride, recs[i]);
-        SR::WriteArrHeader(base, off, buf, num);
-    } else {
-        SR::WriteArrHeader(base, off, nullptr, 0);  // num==0 or alloc failed -> empty
-    }
 }
 
 // The player's contents array, addressed ONLY through the assertions that prove it is the
@@ -219,13 +182,13 @@ int32_t ValidatedPersonalSlot(SR::Arr& contents, int32_t* recordStride = nullptr
     const int32_t idx = ReadAt<int32_t>(inv, g_offInvIndex);
     if (idx < 0) return -1;  // -1 = never initialised
     if (idx != kPersonalSlot) {
-        // The join apply wrote kPersonalSlot before this component existed. A different running
-        // index means the apply and the game disagree about where the player's items live.
+        // A different running index means the baked slot and the game disagree about where the
+        // player's items live.
         static bool s_warned = false;
         if (!s_warned) {
             s_warned = true;
-            UE_LOGE("inventory: the player container runs on GObjStack[%d], not the baked slot %d "
-                    "-- the join apply addressed the wrong slot", idx, kPersonalSlot);
+            UE_LOGE("inventory: the player container runs on GObjStack[%d], not the baked slot %d",
+                    idx, kPersonalSlot);
         }
     }
 
@@ -331,47 +294,6 @@ bool ReadLivePersonalStore(LivePersonalStore& out) {
         SR::ReadSaveRecord(contents.data + static_cast<size_t>(i) * static_cast<size_t>(stride), r);
         out.records.push_back(std::move(r));
     }
-    return true;
-}
-
-bool ApplyToSaveObject(void* saveSlot, const PlayerInventory& inv) {
-    if (!saveSlot || !R::IsLive(saveSlot)) return false;
-    if (void* probe = R::EngineAlloc(16)) {  // GMalloc probe: a failure -> we'd silently write
-        R::EngineFree(probe);                // empty arrays over a real inventory; refuse instead
-    } else {
-        UE_LOGW("inventory: ApplyToSaveObject -- EngineAlloc unavailable (GMalloc unresolved); "
-                "refusing to write empty inventory over saveSlot %p", saveSlot);
-        return false;
-    }
-    int32_t stride = 0;
-    uint8_t* carried = PersonalSlotOf(saveSlot, stride);
-    if (!carried || stride <= 0) {
-        UE_LOGE("inventory: ApplyToSaveObject -- save object %p has no verified GObjStack[%d] (absent, "
-                "or its element sizes did not measure); refusing to write a partial inventory",
-                saveSlot, kPersonalSlot);
-        return false;
-    }
-    BuildAndSwapArray(carried, 0, stride, inv.inventory,
-                      [](uint8_t* e, const SR::SaveRecord& r) { SR::WriteSaveRecord(e, r); });
-    // equipment and hold are FIXED-SHAPE slot arrays: the game finds an empty slot to equip into
-    // (AddEquipment: Array_Find, "Not enough space" on -1) and writes hold[0] in place, and
-    // nothing in it ever grows them. A profile with fewer slots than the save object -- an empty
-    // one above all -- is padded with blank slots to the shape the save object came with. A build
-    // whose equipment is not a record array (EquipLayoutOf null) keeps the save object's own.
-    if (const EquipLayout* L = EquipLayoutOf(saveSlot)) {
-        auto slotsOf = [saveSlot](int32_t off, const std::vector<EquipRecord>& recs) {
-            std::vector<EquipRecord> out = recs;
-            const size_t shape = static_cast<size_t>(SR::ReadArr(saveSlot, off).num);
-            if (out.size() < shape) out.resize(shape);
-            return out;
-        };
-        auto writeOne = [L](uint8_t* e, const EquipRecord& r) { WriteEquipRecord(*L, e, r); };
-        BuildAndSwapArray(saveSlot, L->offEquipment, L->stride, slotsOf(L->offEquipment, inv.equipment), writeOne);
-        if (L->offHold >= 0)
-            BuildAndSwapArray(saveSlot, L->offHold, L->stride, slotsOf(L->offHold, inv.hold), writeOne);
-    }
-    UE_LOGI("inventory: ApplyToSaveObject(%p) wrote carried=%zu equipment=%zu hold=%zu",
-            saveSlot, inv.inventory.size(), inv.equipment.size(), inv.hold.size());
     return true;
 }
 

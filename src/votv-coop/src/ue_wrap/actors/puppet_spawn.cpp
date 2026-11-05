@@ -86,6 +86,30 @@ void InstallHeadGateHook(void* animClass) {
     }
 }
 
+// The battery ticker a player's BeginPlay claimed, null when the field or the ticker is not there.
+void* FlashlightTickerOf(void* player) {
+    if (!player || !R::IsLive(player)) return nullptr;
+    const int32_t off = ue_wrap::reflected_offset::MainPlayer_ticker_flashlightController();
+    if (off < 0) return nullptr;
+    void* ticker = ReadPtr(player, off);
+    return (ticker && R::IsLive(ticker)) ? ticker : nullptr;
+}
+
+void* TickerOwner(void* ticker) {
+    const int32_t off = ue_wrap::reflected_offset::TickerFlashlight_player();
+    return off < 0 ? nullptr : ReadPtr(ticker, off);
+}
+
+void RestoreTickerOwner(void* ticker, void* owner) {
+    const int32_t off = ue_wrap::reflected_offset::TickerFlashlight_player();
+    if (off < 0 || !owner) return;
+    void* const now = ReadPtr(ticker, off);
+    if (now == owner) return;
+    E::WriteObjectField(ticker, static_cast<size_t>(off), owner);
+    UE_LOGI("puppet[MainPlayer]: flashlight ticker %p owner was taken by the orphan (%p -> %p); "
+            "restored to %p", ticker, owner, now, owner);
+}
+
 }  // namespace
 
 // The mainPlayer_C orphan spawn: the class's mesh_playerVisible carries the body, the IK bones
@@ -113,6 +137,12 @@ static void* SpawnPuppetMainPlayer(const FVector& loc,
     } else {
         UE_LOGW("puppet[MainPlayer]: no live gamemode -- cannot capture mainPlayer pointer for restore");
     }
+    // The battery ticker's owner is captured the same way: the orphan's BeginPlay finds the world's
+    // ticker_playerFlashlight_C and writes ticker.player = self, and the ticker drains only while
+    // ticker.player.flashlight is set, which on a puppet never is -- the local battery stops draining.
+    void* const localPlayer = gmMainPlayerBefore;
+    void* const tickerBefore = FlashlightTickerOf(localPlayer);
+    void* const tickerOwnerBefore = tickerBefore ? TickerOwner(tickerBefore) : nullptr;
     // inertPawn zeros AutoPossessPlayer, AutoPossessAI and AutoReceiveInput and sets bBlockInput in
     // the deferred-spawn window before BeginPlay, so no second PlayerController auto-possesses and
     // no local input is hijacked. The caller's callback runs in the same window, so the body is
@@ -128,6 +158,13 @@ static void* SpawnPuppetMainPlayer(const FVector& loc,
             UE_LOGI("puppet[MainPlayer]: gamemode.mainPlayer was overwritten by orphan (%p -> %p); restored to %p",
                     gmMainPlayerBefore, gmMainPlayerAfter, gmMainPlayerBefore);
         }
+    }
+    // The ticker's owner restored on both tickers the orphan may have touched: the one the local
+    // player claimed, and the one the orphan names (a fresh one, when the world had none).
+    if (tickerBefore) RestoreTickerOwner(tickerBefore, tickerOwnerBefore);
+    if (actor && localPlayer) {
+        void* const tickerSeen = FlashlightTickerOf(actor);
+        if (tickerSeen && tickerSeen != tickerBefore) RestoreTickerOwner(tickerSeen, localPlayer);
     }
     if (!actor) {
         UE_LOGE("puppet[MainPlayer]: SpawnActor(mainPlayer_C) failed");

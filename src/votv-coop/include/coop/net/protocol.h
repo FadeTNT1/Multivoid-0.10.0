@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 266;
+inline constexpr uint16_t kProtocolVersion = 268;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -3178,9 +3178,15 @@ struct ItemActivatePayload {
     float    intensity;       // light_R.Intensity after the Blueprint ran (Unitless scale ~0..10)
     float    outerConeAngle;  // light_R.OuterConeAngle (degrees; ~40 default, ~12 focused)
     float    innerConeAngle;  // light_R.InnerConeAngle (degrees; ~0 default, varies)
+    // The rest of the beam 0.10.0 sets from the equipped item's data and the mode.
+    float    attenuationRadius;  // light_R.AttenuationRadius; < 0 = not read, left as it is
+    uint8_t  colorB, colorG, colorR, colorA;  // light_R.LightColor (sRGB FColor)
+    uint8_t  iesProfile;      // index into the beam profiles (sdk_profile_names); kNoIesProfile = none
+    uint8_t  _pad2[3];
 };
-static_assert(sizeof(ItemActivatePayload) == 28,
-              "ItemActivatePayload must be exactly 28 bytes");
+static_assert(sizeof(ItemActivatePayload) == 40,
+              "ItemActivatePayload must be exactly 40 bytes");
+inline constexpr uint8_t kNoIesProfile = 0xFF;
 static_assert(sizeof(ItemActivatePayload) <= 256 - 20 - 8,
               "ItemActivatePayload must fit in one reliable datagram");
 

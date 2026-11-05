@@ -114,6 +114,9 @@ VC_DEFINE_OFFSET(MainPlayer_activeInterface,      L"mainPlayer_C", L"activeInter
 VC_DEFINE_OFFSET(MainPlayer_HitResult,            L"mainPlayer_C", L"HitResult")
 VC_DEFINE_OFFSET(MainPlayer_releaseEToUse,        L"mainPlayer_C", L"releaseEToUse")
 VC_DEFINE_OFFSET(MainPlayer_actionIndex,          L"mainPlayer_C", L"actionIndex")
+VC_DEFINE_OFFSET(MainPlayer_equipped_flashlight,  L"mainPlayer_C", L"equipped_flashlight")
+VC_DEFINE_OFFSET(MainPlayer_ticker_flashlightController, L"mainPlayer_C", L"ticker_flashlightController")
+VC_DEFINE_OFFSET(TickerFlashlight_player,         P::name::TickerPlayerFlashlightClass, L"player")
 
 VC_DEFINE_OFFSET(AnimBP_kerfur_walkSpeed,           P::name::AnimBPKerfurRegularClass, L"walkSpeed")
 VC_DEFINE_OFFSET(AnimBP_kerfur_Pawn,                P::name::AnimBPKerfurRegularClass, L"Pawn")

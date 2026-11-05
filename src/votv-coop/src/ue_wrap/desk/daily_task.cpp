@@ -134,7 +134,7 @@ bool WriteArray(Which which, const int32_t* vals, int32_t count) {
         return true;
     }
     // Length changed (a fresh rollover mints new arrays): rebuild the engine
-    // allocation (int32 POD; the inventory.cpp ApplyToSaveObject precedent).
+    // allocation (int32 POD, the previous buffer orphaned).
     void* buf = nullptr;
     if (count > 0) {
         buf = R::EngineAlloc(sizeof(int32_t) * static_cast<size_t>(count));

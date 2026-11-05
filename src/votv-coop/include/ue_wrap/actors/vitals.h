@@ -96,7 +96,7 @@ bool ReadDefaults(Snapshot& out);
 
 // Write `s` onto `saveSlot`, which may be a save object whose world does not exist yet. The two
 // food arrays are rebuilt as engine-owned arrays of equal length, the previous buffers orphaned
-// (the contract of inventory::ApplyToSaveObject). An empty battery class is "no battery in the
+// (freeing them is more crash-prone than a bounded leak). An empty battery class is "no battery in the
 // flashlight" and is written as one; a class that is not loaded leaves the field as it was.
 // False, having written nothing, if `saveSlot` is dead or a field is missing.
 bool ApplySnapshot(void* saveSlot, const Snapshot& s);

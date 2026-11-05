@@ -316,7 +316,6 @@ const OffsetRow kOffsets[] = {
     MV_OFF(L"mainPlayer_C", L"flashlight", AmainPlayer_flashlight),
     MV_OFF(L"mainPlayer_C", L"flashlightMode", AmainPlayer_flashlightMode),
     MV_OFF(L"mainPlayer_C", L"GameMode", AmainPlayer_GameMode),
-    MV_OFF(L"mainPlayer_C", L"hasFlashlight", AmainPlayer_hasFlashlight),
     MV_OFF(L"mainPlayer_C", L"crankFlashlight", AmainPlayer_crankFlashlight),
     MV_OFF(L"daynightCycle_C", L"eff_rain", AdaynightCycle_eff_rain),
     MV_OFF(L"daynightCycle_C", L"rain", AdaynightCycle_rain),

@@ -90,6 +90,21 @@ inline constexpr const wchar_t* SignalDynamicStruct = L"struct_signalDataDynamic
 inline constexpr const wchar_t* ContainerInventoryComponentProp = L"inventoryComponent";
 inline constexpr const wchar_t* InventoryComponentOwnerProp     = L"owner";
 
+// 0.10.0's player inventory (ue_wrap/actors/inventory_component): mainPlayer_C's own
+// inventoryComponent_player, its three item arrays (the carried grid, the hands and hotbar, the
+// equipment slots), the game's own byte codec of a whole object (the native ThingsAndStuffLib's
+// ObjectToBytes and BytesIntoObject, which mainPlayer_C.betterGetData and betterLoadData call on the
+// component), and updateEquipment, which rebuilds the equipped state from the equipment slots.
+inline constexpr const wchar_t* MainPlayerInventoryComponent = L"inventoryComponent_player";
+inline constexpr const wchar_t* InventoryCarriedArray        = L"canvasInventory";
+inline constexpr const wchar_t* InventoryHandsArray          = L"SlotArray_A";
+inline constexpr const wchar_t* InventoryEquipmentArray      = L"SlotArray_B";
+inline constexpr const wchar_t* ThingsAndStuffLibClass       = L"ThingsAndStuffLib";
+inline constexpr const wchar_t* ObjectToBytesFn              = L"ObjectToBytes";
+inline constexpr const wchar_t* BytesIntoObjectFn            = L"BytesIntoObject";
+inline constexpr const wchar_t* MainPlayerUpdateEquipmentFn  = L"updateEquipment";
+inline constexpr const wchar_t* CreateSaveGameObjectFn       = L"CreateSaveGameObject";
+
 // The static mesh prop_C::init sets when its props-table row gives no mesh (and no meshOverride).
 inline constexpr const wchar_t* PropErrorMesh = L"00000000error";
 
@@ -563,6 +578,21 @@ inline constexpr const wchar_t* SetIntensityFn      = L"SetIntensity";
 inline constexpr const wchar_t* SetOuterConeAngleFn = L"SetOuterConeAngle";
 inline constexpr const wchar_t* SetInnerConeAngleFn = L"SetInnerConeAngle";
 
+// The rest of the beam 0.10.0's flashlight sets from the equipped item and its mode, read on the
+// sender and mirrored on a puppet's light through the engine's own setters.
+inline constexpr const wchar_t* LightComponentClass        = L"LightComponent";
+inline constexpr const wchar_t* LocalLightComponentClass   = L"LocalLightComponent";
+inline constexpr const wchar_t* LightAttenuationRadiusProp = L"AttenuationRadius";
+inline constexpr const wchar_t* LightColorProp             = L"LightColor";
+inline constexpr const wchar_t* LightIESTextureProp        = L"IESTexture";
+inline constexpr const wchar_t* SetAttenuationRadiusFn     = L"SetAttenuationRadius";
+inline constexpr const wchar_t* SetLightColorFn            = L"SetLightColor";
+inline constexpr const wchar_t* SetIESTextureFn            = L"SetIESTexture";
+// The beam profiles mainPlayer_C's 'Flashlight Update' selects by flashlightMode (0, 1, 2), the
+// UTextureLightProfile objects the payload names by index.
+inline constexpr const wchar_t* TextureLightProfileClass = L"TextureLightProfile";
+inline constexpr const wchar_t* FlashlightIesProfiles[] = {L"complex_ies", L"narrowcomplex_ies", L"narrow10000"};
+
 // The flashlight click is the USoundWave `/Game/audio/effects/flashlight.flashlight`; the receiver
 // plays it at the puppet's location through UGameplayStatics::PlaySoundAtLocation. Resolved by
 // leaf name `flashlight` filtered by class `SoundWave` (a GUObjectArray walk, done once and
@@ -639,6 +669,11 @@ inline constexpr const wchar_t* BattsClass = L"prop_batts_C";
 
 // The flashlight equipment class (the FName the BP uses to identify the item).
 inline constexpr const wchar_t* FlashlightEquipmentClass = L"prop_equipment_flashlight_C";
+
+// The flashlight's battery ticker: one per world, found by the player's BeginPlay and pointed at
+// that player (ticker.player = self). Its tick drains the equipped flashlight's battery while
+// ticker.player.flashlight is set, so whichever mainPlayer_C began play last owns the drain.
+inline constexpr const wchar_t* TickerPlayerFlashlightClass = L"ticker_playerFlashlight_C";
 
 // The UTimelineComponent BP-callable methods (the autotest forces the `grab` timeline so the
 // timeline observers fire without a real E press); ProcessEvent-dispatched.

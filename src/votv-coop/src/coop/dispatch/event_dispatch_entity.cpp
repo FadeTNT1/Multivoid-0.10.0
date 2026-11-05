@@ -637,20 +637,23 @@ bool HandleEntityEvent(net::Session& session,
         // the renderer, and 1e30 a blinding screen.
         if (!std::isfinite(p.intensity) ||
             !std::isfinite(p.outerConeAngle) ||
-            !std::isfinite(p.innerConeAngle)) {
+            !std::isfinite(p.innerConeAngle) ||
+            !std::isfinite(p.attenuationRadius)) {
             UE_LOGW("event_feed: ItemActivate floats non-finite "
-                    "(intensity=%.2f outer=%.2f inner=%.2f) -- dropping",
-                    p.intensity, p.outerConeAngle, p.innerConeAngle);
+                    "(intensity=%.2f outer=%.2f inner=%.2f radius=%.2f) -- dropping",
+                    p.intensity, p.outerConeAngle, p.innerConeAngle, p.attenuationRadius);
             break;
         }
         constexpr float kMaxItemIntensity = 1.0e6f;  // unitless ~10 normal range
         constexpr float kMaxConeAngle     = 180.0f;  // physical degree ceiling
+        constexpr float kMaxLightRadius   = 1.0e6f;  // ten kilometres of reach
         if (std::fabs(p.intensity) > kMaxItemIntensity ||
             std::fabs(p.outerConeAngle) > kMaxConeAngle ||
-            std::fabs(p.innerConeAngle) > kMaxConeAngle) {
+            std::fabs(p.innerConeAngle) > kMaxConeAngle ||
+            p.attenuationRadius > kMaxLightRadius) {
             UE_LOGW("event_feed: ItemActivate floats out of bounds "
-                    "(intensity=%.2f outer=%.2f inner=%.2f) -- dropping",
-                    p.intensity, p.outerConeAngle, p.innerConeAngle);
+                    "(intensity=%.2f outer=%.2f inner=%.2f radius=%.2f) -- dropping",
+                    p.intensity, p.outerConeAngle, p.innerConeAngle, p.attenuationRadius);
             break;
         }
         // The self-echo guard: the wire field is the sender's local Player Element id, and equal to

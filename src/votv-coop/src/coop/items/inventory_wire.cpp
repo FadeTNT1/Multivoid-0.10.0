@@ -1,9 +1,7 @@
 // coop/items/inventory_wire.cpp -- see coop/items/inventory_wire.h.
 //
-// The per-record grammar and the byte primitives live in coop/items/save_record_wire, shared
-// with coop/props/container_contents_sync; what stays here is the
-// player-scoped envelope: the version byte, the three arrays and Fstruct_equipment, then the
-// vitals and the pose.
+// The byte primitives live in coop/items/save_record_wire; what stays here is the player-scoped
+// envelope: the version byte, the inventory bytes, then the vitals and the pose.
 
 #include "coop/items/inventory_wire.h"
 
@@ -17,7 +15,6 @@ namespace {
 namespace W = coop::save_record_wire;
 
 using coop::player_profile::Profile;
-using ue_wrap::inventory::EquipRecord;
 using ue_wrap::vitals::Snapshot;
 
 // The vitals' scalar order on the wire. Appending is a layout change (bump kVersion).
@@ -27,30 +24,17 @@ constexpr float Snapshot::* kVitalScalars[] = {
 };
 constexpr uint32_t kMaxFoods = 4096;  // distinct foods a tolerance list may name
 
-void SerEquip(std::vector<uint8_t>& b, const EquipRecord& r) {
-    W::AppWStr(b, r.propName);
-    W::AppWStr(b, r.propKey);
-    W::SerSave(b, r.data);
-    W::AppWStr(b, r.tag);
-}
-bool DeEquip(const std::vector<uint8_t>& b, size_t& o, EquipRecord& r) {
-    if (!W::RdWStr(b, o, r.propName)) return false;
-    if (!W::RdWStr(b, o, r.propKey)) return false;
-    if (!W::DeSave(b, o, r.data)) return false;
-    return W::RdWStr(b, o, r.tag);
-}
-
 }  // namespace
 
-std::vector<uint8_t> SerializeItems(const ue_wrap::inventory::PlayerInventory& inv) {
+std::vector<uint8_t> SerializeItems(bool hasItems, const std::vector<uint8_t>& items) {
     std::vector<uint8_t> b;
+    b.reserve(items.size() + 6);
     b.push_back(kVersion);
-    W::AppU32(b, static_cast<uint32_t>(inv.inventory.size()));
-    for (const auto& r : inv.inventory) W::SerSave(b, r);
-    W::AppU32(b, static_cast<uint32_t>(inv.equipment.size()));
-    for (const auto& r : inv.equipment) SerEquip(b, r);
-    W::AppU32(b, static_cast<uint32_t>(inv.hold.size()));
-    for (const auto& r : inv.hold) SerEquip(b, r);
+    W::AppU8(b, hasItems ? 1 : 0);
+    const std::vector<uint8_t> none;
+    const std::vector<uint8_t>& body = hasItems ? items : none;
+    W::AppU32(b, static_cast<uint32_t>(body.size()));
+    b.insert(b.end(), body.begin(), body.end());
     return b;
 }
 
@@ -73,29 +57,23 @@ void AppendState(std::vector<uint8_t>& b, const Snapshot* v, const coop::player_
 }
 
 std::vector<uint8_t> Serialize(const Profile& p) {
-    std::vector<uint8_t> b = SerializeItems(p.items);
+    std::vector<uint8_t> b = SerializeItems(p.hasItems, p.items);
     AppendState(b, p.hasVitals ? &p.vitals : nullptr, p.pose);
     return b;
 }
 
-bool Deserialize(const std::vector<uint8_t>& b, Profile& p, uint8_t* outVersion) {
+bool Deserialize(const std::vector<uint8_t>& b, Profile& p) {
     p = Profile{};
-    auto& out = p.items;
     size_t o = 0;
-    uint8_t ver; if (!W::RdU8(b, o, ver)) return false;
-    if (ver != kVersion && !(outVersion && ver == kVersionProjection)) return false;
-    if (outVersion) *outVersion = ver;
+    uint8_t ver; if (!W::RdU8(b, o, ver) || ver != kVersion) return false;
+    uint8_t hasItems = 0;
+    if (!W::RdU8(b, o, hasItems) || hasItems > 1) return false;
     uint32_t n;
-    if (!W::RdU32(b, o, n) || n > W::kMaxRecords || !W::Feasible(n, b, o)) return false;
-    out.inventory.resize(n);
-    for (auto& r : out.inventory) if (!W::DeSave(b, o, r)) return false;
-    if (!W::RdU32(b, o, n) || n > W::kMaxRecords || !W::Feasible(n, b, o)) return false;
-    out.equipment.resize(n);
-    for (auto& r : out.equipment) if (!DeEquip(b, o, r)) return false;
-    if (!W::RdU32(b, o, n) || n > W::kMaxRecords || !W::Feasible(n, b, o)) return false;
-    out.hold.resize(n);
-    for (auto& r : out.hold) if (!DeEquip(b, o, r)) return false;
-    if (ver == kVersionProjection) return true;  // three arrays and nothing after them
+    if (!W::RdU32(b, o, n) || n > kMaxItemBytes || n > b.size() - o) return false;
+    if (!hasItems && n != 0) return false;
+    p.hasItems = hasItems != 0;
+    p.items.assign(b.begin() + static_cast<std::ptrdiff_t>(o), b.begin() + static_cast<std::ptrdiff_t>(o + n));
+    o += n;
 
     uint8_t hasVitals = 0;
     if (!W::RdU8(b, o, hasVitals)) return false;

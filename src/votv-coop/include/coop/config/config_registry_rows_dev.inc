@@ -262,8 +262,6 @@ CFG_ENUM(hookdrag_role, "hookdrag_role", "dev", "host", "host|client|both", "VOT
     "value on BOTH peers.")
 CFG_FLAG(inventory_selftest, "inventory_selftest", "dev", false, nullptr,
     "Autonomous selftest: player inventory sync.")
-CFG_FLAG(starterkit_test, "starterkit_test", "dev", false, nullptr,
-    "Autonomous selftest: starter kit issuance.")
 CFG_FLAG(reseed_orphan_selftest, "reseed_orphan_selftest", "dev", false, nullptr,
     "Autonomous selftest: save-identity reseed/orphan handling.")
 CFG_FLAG(roster_token_selftest, "roster_token_selftest", "dev", false, nullptr,
