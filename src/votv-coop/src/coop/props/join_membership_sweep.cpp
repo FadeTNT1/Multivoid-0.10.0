@@ -369,6 +369,7 @@ static void RunDivergenceSweep_(void* localPlayer) {
     // the snapshot for that class is incomplete. Exact, not a percentage, so a legitimate clear
     // (host has 0, no census entry) still dooms. Applied before the valve, so the valve sees the
     // genuine remainder.
+    std::unordered_map<std::wstring, int> floorKeptLedger;  // per class, for the census ledger below
     if (coop::snapshot_census::HasCensus() && !doomed.empty() &&
         !coop::dev::force_overdestroy_test::FloorDisabledForTest()) {
         std::vector<void*> keptDoomed;
@@ -407,6 +408,7 @@ static void RunDivergenceSweep_(void* localPlayer) {
                     keptTotal, doomed.size(), floorKeptByClass.size(), topCnt, topCls.c_str());
             doomed.swap(keptDoomed);
             doomedClass.swap(keptDoomedClass);
+            floorKeptLedger = std::move(floorKeptByClass);
         }
     }
 
@@ -422,6 +424,23 @@ static void RunDivergenceSweep_(void* localPlayer) {
         ++doomedByClass[c];
         doomed.push_back(a);
         doomedClass.push_back(std::move(c));
+    }
+
+    // The per-class census ledger: what the host counted (current-world instances only, the
+    // census excludes class defaults), what this bracket claimed, what the floor kept and what is
+    // still doomed before the valve. A clean class reads census == claims with nothing kept.
+    if (coop::snapshot_census::HasCensus()) {
+        for (const auto& [c, hostHas] : coop::snapshot_census::Entries()) {
+            const int claimedOfC = tally.ClaimedOfClass(c);
+            const auto kIt = floorKeptLedger.find(c);
+            const int keptOfC = kIt == floorKeptLedger.end() ? 0 : kIt->second;
+            const auto dIt = doomedByClass.find(c);
+            const int doomedOfC = dIt == doomedByClass.end() ? 0 : dIt->second;
+            UE_LOGI("join_membership_sweep: census ledger '%ls' -- host world instances %u, claims %d, "
+                    "floor-kept %d, doomed %d%s",
+                    c.c_str(), hostHas, claimedOfC, keptOfC, doomedOfC,
+                    static_cast<int>(hostHas) == claimedOfC ? " (census == claims)" : "");
+        }
     }
 
     // The valve: the client loaded the host's save, so a legitimate divergence is a small delta. The universe it is

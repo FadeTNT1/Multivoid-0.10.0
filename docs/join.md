@@ -188,8 +188,12 @@ The begin marker arms a claim bracket on the client: every actor a spawn binds i
 end marker arms the divergence sweep, deferred to quiescence: the locals the host never claimed
 are the client's save-loaded world minus the host's, and they go
 (`coop/props/join_membership_sweep`). Two bounds keep a racing bracket from wiping a world: a
-per-class completeness floor keeps a class when the host expressed fewer of it than the joiner's
-census counted, and a valve aborts a sweep that would remove more than half of what it sees. Both
+per-class completeness floor keeps a class when this bracket claimed fewer of it than the host's
+census counted, and a valve aborts a sweep that would remove more than half of what it sees. The
+host's census counts only what the snapshot can express -- current-world trash instances, never a
+class default object, a child actor, a hand-axis actor or a dying world's leftover -- so a clean
+class reads census == claims (the sweep logs a `census ledger` line per class: host world
+instances, claims, floor-kept, doomed). Both bounds
 count the whole loaded keyed world: the save-loaded locals the sweep may remove and the actors this
 bracket's snapshot adopted as mirrors, which are counted but never removed
 (`coop/props/join_sweep_tally.h`). A keyed prop whose actor churned mid-join and was re-created is

@@ -2,9 +2,12 @@
 
 #include "coop/props/snapshot_census.h"
 
+#include "coop/player/hand_item.h"     // CollectHandAxisActors: hand-axis actors are not world piles
 #include "ue_wrap/actors/prop.h"         // IsChipPile
 #include "ue_wrap/core/reflection.h"   // NumObjects / ObjectAt / IsLive / ClassNameOf
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/engine/engine.h"     // IsChildActor
+#include "ue_wrap/engine/world_identity.h"  // WorldOf / CurrentWorld: foreign-world exclusion
 
 #include <algorithm>
 #include <cstring>
@@ -27,14 +30,41 @@ int BuildHostTail(std::vector<uint8_t>& outTail, int budgetBytes) {
     // not it is in the Prop Element registry. The 11:16 root was untracked piles MISSING from the
     // registry -> never expressed; they are still counted here. IsTrashActor is a cheap class-hierarchy
     // test (no per-object string alloc); ClassNameOf runs only for the actual piles and clumps.
+    //
+    // The census counts exactly what snapshot enrollment can express (prop_census.cpp SeedWalk_ and
+    // the re-seed drain): a current-world instance, never a class default object, a child actor, a
+    // hand-axis display actor or a dying world's leftover. A CDO (Default__actorChipPile_C, the
+    // clump defaults) is a live trash-class object the enrollment always skips, so counting it made
+    // the host report N+1 against a joiner that can claim at most N; the floor then read every
+    // trash class as incomplete and kept its unclaimed ghosts, and a class with no real pile
+    // reported 1, so a whole-class clear never doomed anything.
+    void* handAxis[1 + coop::players::kMaxPeers];
+    const size_t handAxisN =
+        coop::hand_item::CollectHandAxisActors(handAxis, 1 + coop::players::kMaxPeers);
+    void* const curWorld = ue_wrap::world_identity::CurrentWorld();
+    int worldInstances = 0, exDefaults = 0, exForeign = 0, exChild = 0, exHand = 0;
     std::unordered_map<std::wstring, uint32_t> byClass;
     const int32_t n = R::NumObjects();
     for (int32_t i = 0; i < n; ++i) {
         void* o = R::ObjectAt(i);
         if (!o || !R::IsLive(o)) continue;
         if (!ue_wrap::prop::IsTrashActor(o)) continue;   // both resting forms are in the sweep's universe
+        if (R::NameStartsWith(R::NameOf(o), L"Default__")) { ++exDefaults; continue; }
+        bool isHand = false;
+        for (size_t h = 0; h < handAxisN; ++h) {
+            if (handAxis[h] == o) { isHand = true; break; }
+        }
+        if (isHand) { ++exHand; continue; }
+        if (ue_wrap::engine::IsChildActor(o)) { ++exChild; continue; }
+        // A null current world (mid-travel, Degraded) fails open: the term only excludes an actor
+        // positively owned by another world, the enrollment drain's rule.
+        if (curWorld && ue_wrap::world_identity::WorldOf(o) != curWorld) { ++exForeign; continue; }
+        ++worldInstances;
         ++byClass[R::ClassNameOf(o)];
     }
+    UE_LOGI("snapshot_census: host census walk -- %d world instance(s) counted; excluded %d class "
+            "default(s), %d foreign-world, %d child, %d hand-axis",
+            worldInstances, exDefaults, exForeign, exChild, exHand);
 
     // Order by count DESC so the MASS classes (the only ones a wipe is catastrophic for) always
     // make the byte budget; only tiny classes can be omitted (and the >50% valve still covers them).
@@ -125,5 +155,9 @@ int HostCountForClass(const std::wstring& cls) {
 }
 
 bool HasCensus() { return g_have; }
+
+std::vector<std::pair<std::wstring, uint32_t>> Entries() {
+    return {g_hostCensus.begin(), g_hostCensus.end()};
+}
 
 }  // namespace coop::snapshot_census

@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace coop::snapshot_census {
@@ -48,5 +49,9 @@ int HostCountForClass(const std::wstring& cls);
 
 // CLIENT: true if any census entry arrived this bracket.
 bool HasCensus();
+
+// CLIENT: every census entry received this bracket, as (class, host count). For the sweep's
+// per-class ledger line (census vs claims vs floor-kept vs doomed).
+std::vector<std::pair<std::wstring, uint32_t>> Entries();
 
 }  // namespace coop::snapshot_census
