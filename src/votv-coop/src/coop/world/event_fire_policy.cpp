@@ -31,6 +31,10 @@ const char* const kReplayRows[] = {
     // Trigger-box scare arms, per-viewer scares by design; arming both sides is the correct coop
     // semantics (each player gets the scare on their own overlap):
     "toeStab", "falseEnter", "mann", "vent", "crys", "fakeGrays", "susArir",
+    // The ship (0.10.0): the level-placed arirShipAppear_C fades in at runTrigger(0) and fades out a second
+    // after ITS machine's camera has seen it, so each peer gets its own sighting. It spawns nothing; the
+    // sixteen emails its fade-out mails are the host's (a client's own finish is refused in spawn_authority).
+    "arirShip",
     // Graffiti decal specials (a grime decal spawn; no lane):
     "arirGraff_0", "arirGraff_1", "arirGraff_2", "arirGraff_3",
     "arirGraff_4", "arirGraff_5", "arirGraff_6",
@@ -50,10 +54,6 @@ const NoReplayRow kNoReplayRows[] = {
     // unmirrored wisps. The arrival comes by mirror: the world-actor pose stream, npc-lane wisps
     // and the pyramid sync's brain suppression and gather relay.
     { "piramid", "piramid mirror lane (WA pose + piramid_sync brain/gather)" },
-    // The ship: the trigger-box arm's overlap spawns the ship and the alarm lamp (and possibly
-    // NPC leaves); replaying the arm would spawn them client-local. Host-only until the ship gets
-    // a lane:
-    { "arirShip", "actor spawn on armed overlap (no lane)" },
     // The obelisk's graph is not a bare flag flip: obelisk_C spawns prop_C/prop_obelisk_C actors
     // and punches getMainPlayer -- a replay would double-spawn the props client-local and hit the
     // client's own player. Host-only until the scene gets a lane:

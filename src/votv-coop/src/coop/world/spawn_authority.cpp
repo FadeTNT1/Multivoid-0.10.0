@@ -98,6 +98,9 @@ UE_FACT_FN(kRowChangeSpringDirHoelUfo, "spawn_authority", L"HoelUfo_C", L"change
 // the 10 s kerfur-kill timer its BeginPlay arms, and the timeline's drop event that mints the prop.
 UE_FACT_FN(kRowKillKerfurUfoDropper, "spawn_authority", L"ufoDropper_C", L"killKerfur", Declared);
 UE_FACT_FN(kRowDropUfoDropper, "spawn_authority", L"ufoDropper_C", L"Timeline_0__Drop__EventFunc", Declared);
+// arirShip's level-placed apparition (0.10.0): the finish of its fade timeline, whose reversed run (the ship
+// faded out) mails sixteen scrambled emails after 10 s.
+UE_FACT_FN(kRowFadeFinishedArirShipAppear, "spawn_authority", L"arirShipAppear_C", L"A__FinishedFunc", Declared);
 
 // One row: the facts row a client must not run, and the tag its refusal log carries.
 struct Row {
@@ -246,6 +249,10 @@ constexpr Row kRows[] = {
     // kerfur dropped to its prop every 10 s) is the host's. The tick's light blink is presentation.
     {&kRowKillKerfurUfoDropper,           "ufoDropper.killKerfur"},
     {&kRowDropUfoDropper,                 "ufoDropper.drop"},
+    // arirShip is replayed (event_fire_policy): each peer's apparition fades in, and out once its own camera
+    // has seen it, a per-viewer sighting. The emails its fade-out mails are the host's, and reach a client
+    // on the email feed; a client's own would stay in its inbox alone, as a client never sends an append.
+    {&kRowFadeFinishedArirShipAppear,     "arirShipAppear.fadeFinished"},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x53410000;   // 'SA', then the row
