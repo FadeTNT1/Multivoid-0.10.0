@@ -49,9 +49,14 @@ void Sync() {
     }
 }
 
+struct Layout;
+const Layout* LayoutFor(int i, void* cls);
+
 void Store(int i, void* cls) {
     g_cls[i] = cls;
     UE_LOGI("[EXPLOSION] class %ls resolved", ClassName(At(i)));
+    // The property layout is read now, not at the first blast: a game build whose names moved says so at load.
+    LayoutFor(i, cls);
 }
 
 // The one load by path this world allows the class; null when it was tried already or fails.
@@ -104,6 +109,9 @@ const Layout* LayoutFor(int i, void* cls) {
     // class default and the wire's shake fields ride unused.
     l.ok = bools && l.damage >= 0 && l.radius >= 0 && l.force >= 0 && l.fireStrength >= 0 && l.fireFuel >= 0 &&
            l.objType >= 0 && l.ignores >= 0;
+    if (l.ok)
+        UE_LOGI("[EXPLOSION] class %ls: layout resolved (shake floats %s)", ClassName(At(i)),
+                l.innerShake >= 0 && l.outerShake >= 0 ? "present" : "absent");
     if (!l.ok)
         UE_LOGE("[EXPLOSION] class %ls: a property to write did not resolve (damage=%d radius=%d force=%d fire=%d/%d "
                 "shake=%d/%d objType=%d ignores=%d bools=%d); no copy of it is spawned",
