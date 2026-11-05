@@ -52,6 +52,12 @@ void* BindOwnSavePile(const coop::net::PropSpawnPayload& payload,
                       int senderSlot,
                       const std::unordered_set<void*>& claimed);
 
+// Converge a bound trash native onto the host's row `payload`: its location and root turn, only
+// when they genuinely diverge (2 cm / 1 degree), so a save-aligned pile is never written or woken.
+// The root is made Movable first, since a Static pile root drops a transform write. Returns true
+// when it was already aligned (nothing written). The caller judges a drive or a hold. Game thread.
+bool ConvergeToRow(void* native, const coop::net::PropSpawnPayload& payload);
+
 // The session is over: every clump of this client's own that a bind parked gets its tick and its
 // physics back, and its drive cleared. Called BEFORE remote_prop::ForceRelease, which destroys a
 // driven clump as a mirror nobody owns. Game thread.

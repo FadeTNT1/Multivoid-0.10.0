@@ -353,6 +353,21 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
             // GUObjectArray slot is read, never a possibly freed pointer.
             if (bn && R::IsLiveByIndex(bn, be->GetInternalIdx()) &&
                 coop::prop_element_tracker::IsBoundMirrorNative(bn)) {
+                // The row is still the host's word for this entity: a reconnect, a re-express or a
+                // second bracket names an eid already bound here. The claim is recorded (no-op
+                // outside a bracket), or the sweep counts the class short and the floor keeps its
+                // ghosts; and the bound native converges to the row's pose, or a pile the host
+                // moved since the first bind stays at the old spot here. A driven body is the
+                // pose stream's, never converged.
+                coop::join_membership_sweep::RecordClaimIfTracking(bn);
+                if (!fromConvert && !coop::remote_prop::IsActorUnderAnyDrive(bn) &&
+                    !coop::prop_drive_stream::IsParked(bn)) {
+                    if (!coop::pile_spawn_bind::ConvergeToRow(bn, payload)) {
+                        UE_LOGI("[PILE] eid=%u already bound to %p -- converged to the row's pose "
+                                "(%.1f,%.1f,%.1f)", payload.elementId, bn, payload.locX, payload.locY,
+                                payload.locZ);
+                    }
+                }
                 if (outSpawned) *outSpawned = bn;
                 return;
             }
