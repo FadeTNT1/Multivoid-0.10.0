@@ -10,12 +10,11 @@
 #include "coop/player/players_registry.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
-#include "coop/props/prop_synth_key.h"  // RandomKeyString, the fresh key of a copied record
 #include "coop/session/player_handshake.h"
-#include "ue_wrap/actors/begin_equipment.h"  // GiveFromClass, the starter-kit probe
 #include "ue_wrap/actors/effects.h"  // ResetOnSaveObject, the host's effects out of the joiner's save
 #include "ue_wrap/engine/engine.h"      // SetSaveObjectReadyHook, the pre-materialise apply point
-#include "ue_wrap/actors/inventory.h"
+#include "ue_wrap/actors/inventory.h"  // ResolveSaveSlot, the hosted world's save object
+#include "ue_wrap/actors/inventory_component.h"
 #include "ue_wrap/actors/puppet.h"  // ReadCharacterIsFalling
 #include "ue_wrap/actors/vitals.h"
 #include "ue_wrap/core/log.h"
@@ -57,6 +56,10 @@ uint32_t g_profilesReceived  = 0;
 uint32_t g_worldSavesWritten = 0;
 
 constexpr auto kClientPoll  = std::chrono::seconds(1);
+// The items change on their own while the player uses them: an equipped flashlight's battery is
+// item state, and drains every frame it is on. A change of the items goes at once, but not more
+// often than this, which is the most of that drain a crash of the client can cost.
+constexpr auto kItemsMinInterval = std::chrono::seconds(5);
 // The vitals drain every second and the player walks, so they would re-send the whole profile
 // at the poll rate. They ride a change of the items at once, and on their own at this cadence,
 // which is the most a crash or a kill of the client can cost them.
@@ -93,6 +96,17 @@ bool g_profileApplied = false;
 // any other load in this process: the session's role outlives a stopped session, so "I am a
 // client" stayed true through a later Host-with-save, whose load the hook would then have emptied.
 std::atomic<bool> g_joinApplyArmed{false};
+// Client: the join's inventory substitution, armed by the save-object hook and carried out as the
+// world loads (OnPlayerLoaded): the joiner's player first loads the HOST's items from the captured
+// save, then this replaces them. `g_subFromProfile` says the bytes are this player's own, so the
+// stream may report back once they are in place.
+bool g_subPending = false;
+bool g_subAfterLoad = false;  // the join's loadObjects returned with no local player to substitute on
+// A substitution made before the player's own load (OnObjectsLoaded) stands ready to be made again
+// if that load does come late in the same world appearance, until this moment.
+Clock::time_point g_subRepeatUntil{};
+bool g_subFromProfile = false;
+std::vector<uint8_t> g_subBytes;
 
 // Host: the per-slot send sequence for the on-join push (independent of the client stream's
 // sequence space; assembler keys are per sender and sequence, so they never collide).
@@ -144,7 +158,7 @@ static bool SendProfile(coop::net::Session* s, std::vector<uint8_t> blob, uint64
         // Said once per state of the items: the host keeps the last profile that fitted.
         if (itemsHash != g_oversizeHash) {
             g_oversizeHash = itemsHash;
-            UE_LOGE("player_inventory[client]: the profile is %zu bytes (%zu carried), past the "
+            UE_LOGE("player_inventory[client]: the profile is %zu bytes (%zu of inventory), past the "
                     "%zu-byte transport ceiling -- NOT sent; the host keeps the last one that fitted",
                     blob.size(), carried, coop::blob_chunks::MaxBlobBytes());
         }
@@ -153,7 +167,7 @@ static bool SendProfile(coop::net::Session* s, std::vector<uint8_t> blob, uint64
     if (coop::blob_chunks::SendBlob(s, coop::net::ReliableKind::PlayerInventoryBlob, ++g_sendSeq, blob)) {
         // Logged for a change of the items only: the vitals cadence is steady state, not an event.
         if (itemsHash != g_lastItemsHash)
-            UE_LOGI("player_inventory[client]: streamed profile (%zu bytes, %zu carried) to host",
+            UE_LOGI("player_inventory[client]: streamed profile (%zu bytes, %zu of inventory) to host",
                     blob.size(), carried);
         g_lastItemsHash = itemsHash;
         g_lastSend = now;
@@ -170,13 +184,15 @@ void ClientStreamTick(coop::net::Session* s) {
     if (now - g_lastPoll < kClientPoll) return;
     g_lastPoll = now;
     if (!g_profileApplied) return;  // this world holds no profile of ours to report
-    ue_wrap::inventory::PlayerInventory items;
-    if (!ue_wrap::inventory::ReadAll(items)) return;  // world not up yet
+    std::vector<uint8_t> items;
+    void* const pawn = coop::players::Registry::Get().Local();
+    if (!pawn || !ue_wrap::inventory_component::Capture(pawn, items)) return;  // world not up yet
     SampleStandingPose();
-    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(items);
+    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(true, items);
     const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
-    if (itemsHash == g_lastItemsHash && now - g_lastSend < kVitalsCadence) return;
-    SendProfile(s, std::move(blob), itemsHash, items.inventory.size(), now);
+    const bool itemsChanged = itemsHash != g_lastItemsHash;
+    if (itemsChanged ? now - g_lastSend < kItemsMinInterval : now - g_lastSend < kVitalsCadence) return;
+    SendProfile(s, std::move(blob), itemsHash, items.size(), now);
 }
 
 // Host: sweep stale half-assemblies and push each newly connected joiner its per-player apply
@@ -232,9 +248,13 @@ void OnSaveObjectReady(void* saveSlotObject) {
     g_profileApplied = false;
     g_joinPose = {};
     g_joinPlacement = JoinStaysAtHost() ? JoinPlacement::AtHost : JoinPlacement::StartPoint;
+    // The items are replaced as the world loads, not here: 0.10.0 keeps them inside the player's
+    // own record in this save object, as the game's serialization of the player, which the player
+    // loads into its inventory component (OnPlayerLoaded). With no profile the host's are emptied.
+    g_subPending = true;
+    g_subFromProfile = false;
+    g_subBytes.clear();
     if (!g_hasPendingApply.load(std::memory_order_acquire)) {
-        const bool emptied = ue_wrap::inventory::ApplyToSaveObject(
-            saveSlotObject, ue_wrap::inventory::PlayerInventory{});
         ue_wrap::vitals::Snapshot fresh;
         const bool vitals = ue_wrap::vitals::ReadDefaults(fresh) &&
                             ue_wrap::vitals::ApplySnapshot(saveSlotObject, fresh);
@@ -242,19 +262,19 @@ void OnSaveObjectReady(void* saveSlotObject) {
         if (g_joinPlacement == JoinPlacement::StartPoint)
             ue_wrap::vitals::WritePlayerTransform(saveSlotObject, N::kKPPSpawnX, N::kKPPSpawnY,
                                                   N::kKPPSpawnZ, 0.f);
-        UE_LOGE("player_inventory[client]: SaveObjectReady with no profile from the host -- %s, "
-                "vitals %s; this session plays empty-handed and reports nothing back, the profile "
-                "on the host is untouched",
-                emptied ? "emptied the host's items out of the save object"
-                        : "the save object could not be written",
+        UE_LOGE("player_inventory[client]: SaveObjectReady with no profile from the host -- the "
+                "host's items are emptied as the world loads, vitals %s; this session plays "
+                "empty-handed and reports nothing back, the profile on the host is untouched",
                 vitals ? "fresh" : "NOT written (the host's)");
         return;
     }
-    if (!ue_wrap::inventory::ApplyToSaveObject(saveSlotObject, g_pendingApply.items)) {
-        UE_LOGE("player_inventory[client]: ApplyToSaveObject FAILED on %p -- the world comes up "
-                "with the host's items and the stream stays shut", saveSlotObject);
-        return;
+    if (g_pendingApply.hasItems) {
+        g_subBytes = g_pendingApply.items;
+    } else if (!ue_wrap::inventory_component::ArmStartupKit(saveSlotObject)) {
+        UE_LOGE("player_inventory[client]: the starting kit could not be armed -- this first join "
+                "starts with nothing");
     }
+    g_subFromProfile = true;
     // A player who left dead, whose numbers are not numbers, or whose profile holds no vitals
     // starts a fresh life at the start point: health 0 applied as stored would kill them again on
     // the first frame.
@@ -285,17 +305,61 @@ void OnSaveObjectReady(void* saveSlotObject) {
     else if (g_joinPlacement == JoinPlacement::StartPoint)
         placed = ue_wrap::vitals::WritePlayerTransform(saveSlotObject, N::kKPPSpawnX, N::kKPPSpawnY,
                                                        N::kKPPSpawnZ, 0.f);
-    g_profileApplied = true;
-    UE_LOGI("player_inventory[client]: applied per-player profile to save object %p (carried=%zu "
-            "equip=%zu hold=%zu | vitals %s: hp=%.0f/%.0f food=%.0f sleep=%.0f | pose %s%s)",
-            saveSlotObject, g_pendingApply.items.inventory.size(),
-            g_pendingApply.items.equipment.size(), g_pendingApply.items.hold.size(),
+    UE_LOGI("player_inventory[client]: applied per-player profile to save object %p (items %s, "
+            "%zu bytes | vitals %s: hp=%.0f/%.0f food=%.0f sleep=%.0f | pose %s%s)",
+            saveSlotObject, g_pendingApply.hasItems ? "their own" : "the starting kit",
+            g_pendingApply.items.size(),
             !vitalsOk ? "NOT WRITTEN" : alive ? "restored" : "fresh", v.health, v.maxHealth, v.food,
             v.sleep,
             g_joinPlacement == JoinPlacement::AtHost        ? "the host's (join_at_host)"
             : g_joinPlacement == JoinPlacement::ProfilePose ? "restored"
                                                             : "start point",
             placed ? "" : ", playerTransform NOT written");
+}
+
+// Client: carry out the armed substitution on `player`. The stream opens only when the bytes in
+// place are this player's own (or their starting kit), so an unread world never overwrites the
+// profile the host holds.
+void Substitute(void* player, const char* when) {
+    g_subPending = false;
+    namespace IC = ue_wrap::inventory_component;
+    const IC::Counts before = IC::CountItems(player);
+    const bool ok = IC::Restore(player, g_subBytes);
+    const IC::Counts after = IC::CountItems(player);
+    g_profileApplied = ok && g_subFromProfile;
+    if (!ok) {
+        UE_LOGE("player_inventory[client]: the inventory substitution FAILED %s -- this player keeps "
+                "what the host's save gave them and the stream stays shut", when);
+        return;
+    }
+    UE_LOGI("player_inventory[client]: inventory replaced %s (%zu bytes of %s): carried %d->%d, "
+            "hands %d->%d, equipment %d->%d", when, g_subBytes.size(),
+            g_subBytes.empty() ? "nothing" : "this player's own", before.carried, after.carried,
+            before.hands, after.hands, before.equipment, after.equipment);
+}
+
+// Client: a player's betterLoadData returned during a join's load: the local player now holds the
+// host's items from the captured save, and this is the game's own moment of loading them, so the
+// substitution lands where the game itself writes. A body with no controller is not this player.
+void OnPlayerLoaded(void* player) {
+    const bool repeat = !g_subPending && Clock::now() < g_subRepeatUntil;
+    if ((!g_subPending && !repeat) || !ue_wrap::engine::GetController(player)) return;
+    g_subRepeatUntil = {};
+    Substitute(player, repeat ? "again, as the player loaded after the world" : "as the player loaded");
+    g_subBytes.clear();
+}
+
+// Client: the join's loadObjects returned without loading the local player (a capture with no
+// player record): what the player holds is the class default, so only this player's own bytes have
+// anything to put in. The game mode refreshes the equipment right after this returns.
+void OnObjectsLoaded(void* /*gamemode*/) {
+    if (!g_subPending) return;
+    if (void* pawn = coop::players::Registry::Get().Local()) {
+        Substitute(pawn, "after the world loaded");
+        g_subRepeatUntil = Clock::now() + std::chrono::seconds(10);
+    } else {
+        g_subAfterLoad = true;  // the tick finishes it once the local player is registered
+    }
 }
 
 // Host: the game is gathering the world into its save object (ue_wrap/engine/save_capture: its own
@@ -371,6 +435,19 @@ void Tick() {
             }
         }
     }
+    // The load watches stand from the first tick on: a join's load can begin before the session
+    // reports connected.
+    static bool s_loadWatches = false;
+    if (!s_loadWatches)
+        s_loadWatches = ue_wrap::inventory_component::InstallLoadWatches(&OnPlayerLoaded, &OnObjectsLoaded);
+    if (g_subPending && g_subAfterLoad) {
+        if (void* pawn = coop::players::Registry::Get().Local()) {
+            g_subAfterLoad = false;
+            Substitute(pawn, "once the player was registered");
+            g_subRepeatUntil = Clock::now() + std::chrono::seconds(10);
+            ue_wrap::inventory_component::CallUpdateEquipment(pawn);  // the game mode's own ran already
+        }
+    }
     if (s && s->connected()) {
         if (s->role() == coop::net::Role::Client) ClientStreamTick(s);
         else                                      HostPersistTick(s);
@@ -382,72 +459,34 @@ void Tick() {
     static bool s_done = false;
     if (s_done) return;
     static int s_ticks = 0;
-    if (++s_ticks < 600) return;  // ~5s settle (world up + saveSlot resolvable)
+    if (++s_ticks < 600) return;  // ~5s settle (world up + the player resolvable)
+    void* const pawn = coop::players::Registry::Get().Local();
     coop::player_profile::Profile mine;
-    if (!ue_wrap::inventory::ReadAll(mine.items)) return;  // world not up yet -> retry next tick
+    if (!pawn || !ue_wrap::inventory_component::Capture(pawn, mine.items)) return;  // retry next tick
     s_done = true;
+    mine.hasItems = true;
     mine.hasVitals = ue_wrap::vitals::ReadSnapshot(mine.vitals);
     mine.pose = g_standingPose;
-    const auto& inv = mine.items;
-    UE_LOGI("inventory[selftest]: read local saveSlot -- inventory=%zu equipment=%zu hold=%zu",
-            inv.inventory.size(), inv.equipment.size(), inv.hold.size());
-    {   // DIAG: name what the LOCAL player actually has post-spawn (find flashlight/glasses/compass).
-        // Explicit, because the implicit iterator copy this replaced both warned (C4244) and
-        // silently mangled every non-ASCII character into whatever its low byte happened to be.
-        // These are engine class and key leaves, ASCII in practice -- so a surprising name must be
-        // VISIBLE in the log as '?' rather than quietly become a different name.
-        auto narrow = [](const std::wstring& w) {
-            std::string s;
-            s.reserve(w.size());
-            for (const wchar_t c : w) s.push_back((c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : '?');
-            return s;
-        };
-        for (size_t i = 0; i < inv.inventory.size(); ++i)
-            UE_LOGI("  selftest inv[%zu]: className='%s' key='%s'", i,
-                    narrow(inv.inventory[i].className).c_str(), narrow(inv.inventory[i].key).c_str());
-        for (size_t i = 0; i < inv.equipment.size(); ++i)
-            UE_LOGI("  selftest eq[%zu]: propName='%s' className='%s'", i,
-                    narrow(inv.equipment[i].propName).c_str(), narrow(inv.equipment[i].data.className).c_str());
-        for (size_t i = 0; i < inv.hold.size(); ++i)
-            UE_LOGI("  selftest hold[%zu]: propName='%s' className='%s'", i,
-                    narrow(inv.hold[i].propName).c_str(), narrow(inv.hold[i].data.className).c_str());
-    }
+    const ue_wrap::inventory_component::Counts c = ue_wrap::inventory_component::CountItems(pawn);
     const std::vector<uint8_t> blob1 = coop::inventory_wire::Serialize(mine);
     coop::player_profile::Profile back;
     const bool de = coop::inventory_wire::Deserialize(blob1, back);
-    const auto& inv2 = back.items;
-    std::vector<uint8_t> blob2;
-    if (de) blob2 = coop::inventory_wire::Serialize(back);
-    const bool roundtrip = de && blob1 == blob2;
-    UE_LOGI("inventory[selftest]: serialize=%zu bytes, deserialize=%d, ROUND-TRIP %s "
-            "(inv2: inventory=%zu equip=%zu hold=%zu)",
-            blob1.size(), de ? 1 : 0, roundtrip ? "OK" : "MISMATCH",
-            inv2.inventory.size(), inv2.equipment.size(), inv2.hold.size());
-
-    // A dev probe (ini starterkit_test=1): equip the three starters through the game's own
-    // add-equipment path and re-read, confirming the canonical equip path adds them. One-shot,
-    // riding the selftest.
-    if (::coop::config::ResolveFlag(::coop::config_registry::rows::starterkit_test)) {
-        for (const wchar_t* c : {L"prop_equipment_flashlight_C", L"prop_equipment_glasses_C",
-                                 L"prop_equipment_compass_C"})
-            ue_wrap::begin_equipment::GiveFromClass(c);
-        ue_wrap::inventory::PlayerInventory after;
-        if (ue_wrap::inventory::ReadAll(after))
-            UE_LOGI("starterkit[probe]: after AddEquipment x3 -- inventory=%zu equip=%zu hold=%zu "
-                    "(was %zu/%zu/%zu)", after.inventory.size(), after.equipment.size(),
-                    after.hold.size(), inv.inventory.size(), inv.equipment.size(), inv.hold.size());
-    }
+    const bool roundtrip = de && coop::inventory_wire::Serialize(back) == blob1;
+    UE_LOGI("inventory[selftest]: the local inventory -- carried=%d hands=%d equipment=%d, %zu bytes; "
+            "profile %zu bytes, deserialize=%d, ROUND-TRIP %s", c.carried, c.hands, c.equipment,
+            mine.items.size(), blob1.size(), de ? 1 : 0, roundtrip ? "OK" : "MISMATCH");
 }
 
 bool SendProfileNow(coop::net::Session* s) {
     if (!s || !s->connected() || !g_profileApplied) return false;
-    ue_wrap::inventory::PlayerInventory items;
-    if (!ue_wrap::inventory::ReadAll(items)) return false;
+    std::vector<uint8_t> items;
+    void* const pawn = coop::players::Registry::Get().Local();
+    if (!pawn || !ue_wrap::inventory_component::Capture(pawn, items)) return false;
     SampleStandingPose();
-    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(items);
+    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(true, items);
     const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
     // No hash or cadence check: the caller has just changed the vitals the profile carries.
-    return SendProfile(s, std::move(blob), itemsHash, items.inventory.size(), Clock::now());
+    return SendProfile(s, std::move(blob), itemsHash, items.size(), Clock::now());
 }
 
 void OnReliable(const coop::net::BlobChunkPayload& p, uint8_t senderPeerSlot) {
@@ -468,9 +507,8 @@ void OnReliable(const coop::net::BlobChunkPayload& p, uint8_t senderPeerSlot) {
         g_pendingApply = std::move(inv);
         g_hasPendingApply.store(true, std::memory_order_release);
         UE_LOGI("player_inventory[client]: received per-player apply blob from host (%zu bytes, "
-                "inventory=%zu equip=%zu hold=%zu)", blob.size(),
-                g_pendingApply.items.inventory.size(), g_pendingApply.items.equipment.size(),
-                g_pendingApply.items.hold.size());
+                "items %s)", blob.size(),
+                g_pendingApply.hasItems ? "of this player's own" : "absent: the starting kit");
         return;
     }
 
@@ -497,76 +535,6 @@ uint32_t ProfilesReceived() { return g_profilesReceived; }
 
 uint32_t WorldSavesWritten() { return g_worldSavesWritten; }
 
-// The single-player starter items: the game's begin-equipment logic gives exactly these three
-// at New Game, and the host save retains them across play.
-int StarterIndex(const std::wstring& className) {
-    if (className == L"prop_equipment_flashlight_C") return 0;
-    if (className == L"prop_equipment_glasses_C")    return 1;
-    if (className == L"prop_equipment_compass_C")    return 2;
-    return -1;
-}
-
-// Build the first-join starter kit (flashlight, glasses, compass) by reading the host's own
-// live inventory and keeping only those three, one per class: valid, complete save records
-// with no hardcoded struct layout and none of the host's other items. The worn-equipment
-// array shape is preserved (non-starter and duplicate slots cleared) so the kit keeps the
-// New Game layout. False if no starter item is present (the host dropped them, or the save
-// slot is unresolvable), and the caller sends empty. Game thread. Every copied record gets a
-// fresh key: the game's key index holds one object per key (lib::assignKey overwrites), so a copy
-// under its source's key aliases the host's item the moment either one is dropped into the world.
-bool BuildFirstJoinStarterKit(ue_wrap::inventory::PlayerInventory& out) {
-    ue_wrap::inventory::PlayerInventory host;
-    if (!ue_wrap::inventory::ReadAll(host)) return false;
-    bool got[3] = {false, false, false};
-    for (const auto& r : host.inventory) {
-        const int k = StarterIndex(r.className);
-        if (k >= 0 && !got[k]) {
-            got[k] = true;
-            out.inventory.push_back(r);
-            out.inventory.back().key = coop::prop_synth_key::RandomKeyString();
-        }
-    }
-    auto rekey = [](ue_wrap::inventory::EquipRecord& e) {
-        e.propKey = coop::prop_synth_key::RandomKeyString();
-        e.data.key = e.propKey;
-    };
-    out.equipment = host.equipment;  // keep the worn-slot array shape
-    for (auto& e : out.equipment) {
-        const int k = StarterIndex(e.data.className);
-        if (k < 0 || got[k]) e = ue_wrap::inventory::EquipRecord{};  // clear non-starter / dup slot
-        else { got[k] = true; rekey(e); }
-    }
-    out.hold = host.hold;
-    for (auto& e : out.hold) {
-        const int k = StarterIndex(e.data.className);
-        if (k < 0 || got[k]) e = ue_wrap::inventory::EquipRecord{};
-        else { got[k] = true; rekey(e); }
-    }
-    return got[0] || got[1] || got[2];
-}
-
-// A stored profile from before the lane moved onto the carried store. Its equipment and hold are
-// the player's own; its inventory third is the projection, so it goes, and the vitals it never
-// held start from the game's defaults. What stays is re-keyed: those files' starter items were
-// copied under the HOST's keys. False if the blob does not parse.
-bool LiftProjectionProfile(std::vector<uint8_t>& blob) {
-    coop::player_profile::Profile p;
-    uint8_t ver = 0;
-    if (!coop::inventory_wire::Deserialize(blob, p, &ver)) return false;
-    if (ver == coop::inventory_wire::kVersion) return true;
-    auto& inv = p.items;
-    inv.inventory.clear();
-    p.hasVitals = ue_wrap::vitals::ReadDefaults(p.vitals);  // those files held none, and no pose
-    for (auto* arr : {&inv.equipment, &inv.hold})
-        for (auto& e : *arr)
-            if (!e.data.className.empty()) {
-                e.propKey = coop::prop_synth_key::RandomKeyString();
-                e.data.key = e.propKey;
-            }
-    blob = coop::inventory_wire::Serialize(p);
-    return true;
-}
-
 bool SendInventoryToSlot(int peerSlot) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || s->role() != coop::net::Role::Host) return false;  // host pushes; clients receive
@@ -581,25 +549,22 @@ bool SendInventoryToSlot(int peerSlot) {
     namespace PS = coop::player_profile_store;
     const PS::Found found = PS::Get(guid, blob);
     // A profile that is there and does not read (a corrupt or locked file, a blob of a build this
-    // one cannot parse) is a RETURNING player: they get the kit for this session, and nothing they
-    // stream back may be written over what is on disk.
-    const bool usable = found == PS::Found::Yes && LiftProjectionProfile(blob);
+    // one cannot parse, a 0.9.0n profile of save records) is a RETURNING player: they get the kit
+    // for this session, and the store quarantines what is on disk rather than misread it.
+    coop::player_profile::Profile parsed;
+    const bool usable = found == PS::Found::Yes && coop::inventory_wire::Deserialize(blob, parsed);
     if (!usable && found != PS::Found::Absent) PS::Quarantine(guid);
     if (!usable) {
-        // First join (nothing held and no stored file), or the quarantined case above: seed the starter kit so the
-        // player is not dropped into the host's world empty-handed (a loaded coop save runs no
-        // begin-equipment, so they would be). Read off the host's own live inventory, filtered to
-        // the three starter classes; if the kit is absent, degrade to empty, never to the host's
-        // other items or another player's. The vitals are the game's own defaults, never the
-        // host's numbers, and there is no pose: a first join appears at the start point.
+        // First join (nothing held and no stored file), or the quarantined case above: a profile
+        // with no items, which the joiner answers with the game's own starting kit
+        // (saveSlot.defaultStartupEquipment), never the host's possessions. The vitals are the
+        // game's own defaults, never the host's numbers, and there is no pose: a first join
+        // appears at the start point.
         coop::player_profile::Profile first;
-        const bool kit = BuildFirstJoinStarterKit(first.items);
-        if (!kit) first.items = {};
         first.hasVitals = ue_wrap::vitals::ReadDefaults(first.vitals);  // else the joiner reads its own
         blob = coop::inventory_wire::Serialize(first);
-        UE_LOGI("player_inventory: slot %d guid=%s -- first join, %s (inventory=%zu equip-slots=%zu)",
-                peerSlot, guid.c_str(), kit ? "seeding the starter kit" : "starter kit unavailable, EMPTY",
-                first.items.inventory.size(), first.items.equipment.size());
+        UE_LOGI("player_inventory: slot %d guid=%s -- first join, the starting kit", peerSlot,
+                guid.c_str());
     }
     if (coop::blob_chunks::SendBlobToSlot(s, peerSlot, coop::net::ReliableKind::PlayerInventoryBlob,
                                           ++g_hostSendSeq[peerSlot], blob)) {
@@ -653,6 +618,11 @@ void OnDisconnect() {
     g_hasPendingApply.store(false, std::memory_order_release);
     g_joinApplyArmed.store(false, std::memory_order_release);
     g_profileApplied = false;
+    g_subPending = false;
+    g_subAfterLoad = false;
+    g_subRepeatUntil = {};
+    g_subFromProfile = false;
+    g_subBytes.clear();
     g_pendingApply = coop::player_profile::Profile{};
     g_clientAssembler.Clear();
 }

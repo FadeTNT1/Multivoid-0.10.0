@@ -1,11 +1,9 @@
 // ue_wrap/actors/inventory.h -- read/write the player-scoped inventory off the live UsaveSlot_C.
 //
 // Engine-wrapper layer: it owns the saveSlot reflection and the Fstruct_save /
-// Fstruct_equipment struct walk. The field offsets and the TArray element strides are named
-// constants in the .cpp, which is also where the stride's one trap is explained -- the stride
-// is the 16-ALIGNED struct size, not the dump's raw `Size:` line. No network logic here:
-// coop/inventory_wire serializes the POD below, and the host persistence and transport live
-// in coop/player_inventory_sync.
+// Fstruct_equipment struct walk, measured off the running classes. This is 0.9.0n's layout, read
+// by the dev drills and the save-object resolve; 0.10.0 keeps the player's items on the player's
+// own inventory component (ue_wrap/actors/inventory_component), which the profile lane uses.
 //
 // An inventory item is DATA, not an actor -- an Fstruct_save record (class, transform, key,
 // typed key/value groups) -- so reading one means walking the nested TArrays. The value-group
@@ -78,9 +76,8 @@ struct LivePersonalStore {
 // `Player == true` is the ADDRESS ASSERTION here, and the same flag is a REFUSAL in
 // coop/props/container_contents_sync -- deliberately, from opposite sides of one boundary:
 // that lane must never author a personal store, and this reader must never read anything
-// else. ReadAll is the lane's reader and goes through this; coop/dev/live_store_readout prints
-// the same records by content. The only writer is ApplyToSaveObject below, which the lane calls
-// on a save object whose world does not exist yet.
+// else. ReadAll goes through this; coop/dev/live_store_readout prints the same records by
+// content.
 bool ReadLivePersonalStore(LivePersonalStore& out);
 
 // How many records the live personal store holds RIGHT NOW, without decoding any of them: the
@@ -91,22 +88,6 @@ bool ReadLivePersonalStore(LivePersonalStore& out);
 // the game refreshed the quick-slot bar" is a question that can only be asked from in there. Pure
 // field reads. Game thread.
 int32_t LivePersonalStoreCount();
-
-// The WRITE side, the apply on join: overwrite the player's GObjStack slot, equipment and hold
-// on `saveSlot` with `inv`, as engine-OWNED TArrays built through reflection::EngineAlloc (FNames
-// interned, FStrings engine-minted, UClasses FindClass'd). The caller writes the REGISTERED save
-// object BEFORE the native loadObjects() materializes it, which is the state a single-player load
-// starts from: the gamemode's BeginPlay calls propInventory.recalculateNames() on every world
-// start, rebuilding the container's name array from the slot's records, and volume and mass
-// follow from the names through the game's own updateVolumesAndMass. equipment and hold are
-// fixed-shape slot arrays the game never grows, so they keep the save object's slot count.
-//
-// The PREVIOUS buffers are orphaned on purpose, a bounded few kilobytes once per join: freeing
-// the old nested sub-arrays and FString buffers recursively is far more crash-prone than leaking
-// them, and the engine never double-frees a buffer it has lost. Ours are GMalloc-owned, so a
-// later engine realloc or free is allocator-matched. False, having written nothing, if
-// `saveSlot` is null or dead, GMalloc is unresolved, or there is no player slot. Game thread.
-bool ApplyToSaveObject(void* saveSlot, const PlayerInventory& inv);
 
 // Writes the live save slot's first hold slot, the hand, for a dev drill that takes an item into the
 // hand: the item's name (list_props' row), and in its record the class the player's updateHold

@@ -65,7 +65,7 @@ WriteResult WriteRecords(uint32_t eid, void* inv, const std::vector<SR::SaveReco
                             recs[i], resolve);
     // The previous buffer is orphaned: freeing the nested sub-arrays, minted FStrings and signal
     // rows recursively is far more crash-prone than leaking them, and the engine never double-frees
-    // a buffer it has lost. inventory::ApplyToSaveObject orphans the same way once per join; this
+    // a buffer it has lost. inventory_component::Restore orphans the same way once per join; this
     // lane is steady-state, and the caller's content-hash gate bounds its own apply, since an apply
     // happens only when the contents changed. The record editor's callers orphan one array per grant
     // and per restore, bounded by the act's queue budget at 4 writes a second per client at most.

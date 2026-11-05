@@ -99,6 +99,21 @@ inline constexpr const wchar_t* SignalDynamicStruct = L"struct_signalDataDynamic
 inline constexpr const wchar_t* ContainerInventoryComponentProp = L"inventoryComponent";
 inline constexpr const wchar_t* InventoryComponentOwnerProp     = L"owner";
 
+// 0.10.0's player inventory (ue_wrap/actors/inventory_component): mainPlayer_C's own
+// inventoryComponent_player, its three item arrays (the carried grid, the hands and hotbar, the
+// equipment slots), the game's own byte codec of a whole object (the native ThingsAndStuffLib's
+// ObjectToBytes and BytesIntoObject, which mainPlayer_C.betterGetData and betterLoadData call on the
+// component), and updateEquipment, which rebuilds the equipped state from the equipment slots.
+inline constexpr const wchar_t* MainPlayerInventoryComponent = L"inventoryComponent_player";
+inline constexpr const wchar_t* InventoryCarriedArray        = L"canvasInventory";
+inline constexpr const wchar_t* InventoryHandsArray          = L"SlotArray_A";
+inline constexpr const wchar_t* InventoryEquipmentArray      = L"SlotArray_B";
+inline constexpr const wchar_t* ThingsAndStuffLibClass       = L"ThingsAndStuffLib";
+inline constexpr const wchar_t* ObjectToBytesFn              = L"ObjectToBytes";
+inline constexpr const wchar_t* BytesIntoObjectFn            = L"BytesIntoObject";
+inline constexpr const wchar_t* MainPlayerUpdateEquipmentFn  = L"updateEquipment";
+inline constexpr const wchar_t* CreateSaveGameObjectFn       = L"CreateSaveGameObject";
+
 // The static mesh prop_C::init sets when its props-table row gives no mesh (and no meshOverride).
 inline constexpr const wchar_t* PropErrorMesh = L"00000000error";
 

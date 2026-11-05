@@ -195,19 +195,27 @@ nightmare chance at zero, so a nightmare is a roll of the host's machine alone. 
 
 Per player and private: the contents never cross the wire as gameplay. The host stores each
 peer's inventory per save under the identity the peer proved at admission and hands it back at
-the next join, before the world exists (`coop/items/player_inventory_sync`). The hand-back is a
-substitution, not an addition: a joiner's world is built from a capture of the host's save
-object, and that object is where the game keeps what a player carries (`GObjStack[0]`), wears
-and holds, so whatever is not replaced there is the host's. A first join gets the three
-starter items as copies under fresh keys, because the game's key index holds one object per
-key and a copy under its source's key aliases the original the moment either is dropped. The
-same profile carries the player's vitals (health, food, sleep, the flashlight charge, the food
+the next join, before the world exists (`coop/items/player_inventory_sync`). 0.10.0 keeps
+everything a player carries, holds and wears on the player's own inventory component (the
+carried grid, the hands and hotbar, the equipment slots, each item with its own saved state, a
+flashlight's battery among it), and saves it as the game's own serialization of that component
+inside the player's record of the save. The profile is exactly those bytes, taken and put back
+through the game's own two natives (`ue_wrap/actors/inventory_component`), so no item layout is
+written by the mod. The hand-back is a substitution, not an addition: a joiner's world is built
+from a capture of the host's save object, whose player record holds the host's items, so the
+joiner's player first loads them; the moment its load returns, the three item arrays are
+emptied and the joiner's own bytes loaded in their place, before the game mode refreshes the
+equipment. A first join takes the game's own starting kit, `saveSlot.defaultStartupEquipment`,
+which the inventory screen grants on the world's first frame: the join copies it into the
+captured save object, never the host's possessions `[RD]`. The same profile carries the player's vitals (health, food, sleep, the flashlight charge, the food
 tolerances and the buffs), which the game keeps in place on that same save object, and where
 the player stood: a first join starts from the game's own defaults at the start point, a
 returning player gets their numbers back and appears at the last spot they were standing on
 (on the ground, not ragdolled, not seated: a position read while driving the ATV is not a place
-a body can be put back), and one who left dead starts a fresh life. The vitals and the position ride a change of the items at once and otherwise go every
-30 seconds. The host holds the newest profile of every player in memory for as long as the hosted
+a body can be put back), and one who left dead starts a fresh life. The vitals and the position ride a change of the items, at most every five seconds since a lit
+flashlight's battery is item state that changes every frame, and otherwise go every 30
+seconds. A stored profile from before 0.10.0 holds save records that build no longer has; it
+does not parse, and the host sets it aside and hands that player the starting kit. The host holds the newest profile of every player in memory for as long as the hosted
 world lives, so a rejoin gets back what the player left with, and writes the profiles to disk
 only with its own world save (`coop/player/player_profile_store`): a pocketed item has left the
 world and entered the profile, so a stored profile newer than the saved world would hold that
@@ -300,7 +308,7 @@ host. A setting that holds a password is never set or shown by command.
 | `HandItem`, `ItemActivate` | each peer, relayed | the held item's class, its actor's name and its hold slot's item name (the key of the game's item tables); the flashlight beam: on or off, mode, intensity, cones, reach, colour, profile |
 | `PlayerHit` | host to the hit peer | a parked creature's hit on the peer's puppet: the verb (addDamage or punch) to run on its own player |
 | `SleepState` | a client to the host; the host to all | a rest state with its bed (awake, resting, dreaming); the host's sleeping flag; one peer's rest state relayed |
-| `PlayerInventoryBlob` | both | the per-player profile (items, vitals, standing spot), pre-world |
+| `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |
 | `TeleportClient` | host to one peer | a placement; the administration action, not the join |
 
 ## Late join
@@ -321,6 +329,7 @@ dead peer through the ragdoll bit of its next pose.
 | After a revive the player can drift horizontally from the base gate, metres over seconds; the cause is unmeasured | `[V]` `harness/autotest/death_state_probe.cpp` reads the position back |
 | Damage a puppet takes on another machine is dropped by design; only the victim's own contacts count | `[V]` `coop/player/player_damage` |
 | A third-party bundle pak cannot be discovered: bundle membership is a fixed table | `[V]` `coop/player/skin_registry` |
+| Worn clothing is not drawn on another player's body: the equipment is synced as the owner's inventory, not as meshes | `[RD]` `coop/items/player_inventory_sync` |
 | A ban is by player id and, on a direct link, by address: a banned player with a new identity key who comes from a new address or through a relay is a new player, and an address ban refuses whoever shares that address | `[V]` `coop/moderation/ban_list` |
 | The connection cap is by address too, so players behind one router share it; over a relayed internet route it counts by the identity a peer proves, so a peer that rotates its identity there gets a fresh count each time | `[V]` `coop/net/connect_history` on the direct lane; `[RD]` on the internet lane, from the transport's source |
 
@@ -337,6 +346,6 @@ dead peer through the ragdoll bit of its next pose.
 | held and toggled items | `coop/player/hand_item`, `coop/player/item_activate`, `coop/player/flashlight_click_sound` |
 | damage and death | `coop/player/player_damage`, `coop/player/death_revive`, `coop/player/run_end_travel`, `coop/player/ragdoll_gate` |
 | sleep | `coop/player/sleep_sync`, `coop/player/sleep_rest` |
-| inventory | `coop/items/player_inventory_sync` |
+| inventory | `coop/items/player_inventory_sync`, `coop/items/inventory_wire`, `ue_wrap/actors/inventory_component` |
 | moderation | `coop/moderation/moderation`, `coop/moderation/ban_list`, `coop/moderation/seen_players` |
 | tests | `harness/autotest/autotest_death.cpp` (the drill) + `death_state_probe.cpp` (the reads it and `autotest_runend.cpp` share), `autotest_damage.cpp`, `autotest_playerdmg.cpp`, `autotest_ragdoll.cpp`, `autotest_puppetframe.cpp` |

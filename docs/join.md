@@ -109,10 +109,11 @@ naming its step: connecting, downloading in bytes, loading the world, receiving 
 
 The joiner's own profile (what they carry, wear and hold, their vitals, and where they stood) is
 per player and never crosses the wire as gameplay: the host stores it per save under the peer's
-identity and pushes it right after the Join, before the world exists, so it is substituted into
-the save object in the one window before the game materialises the world from it
-(`coop/items/player_inventory_sync`). The join boot arms that substitution for the load it is
-about to make, and the placement at the world appearance uses the profile's position once, or
+identity and pushes it right after the Join, before the world exists. The vitals are written into
+the save object in the one window before the game materialises the world from it, and the items
+the moment the joiner's player has loaded the host's from it, or the starting kit is armed on a
+first join (`coop/items/player_inventory_sync`). The join boot arms that substitution for the load
+it is about to make, and the placement at the world appearance uses the profile's position once, or
 the start point on a first join. The same position is written to the save object's
 `playerTransform`, which on a client still held the host's: the game's own check for a player
 behind geometry sends them there.
