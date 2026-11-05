@@ -3,6 +3,7 @@
 
 #include "event_fire_policy.h"
 
+#include <cctype>
 #include <string>
 
 namespace coop::event_fire_sync {
@@ -113,11 +114,21 @@ static bool IsPrankRow(const std::string& n) {
     return n.rfind("arirInteraction_", 0) == 0;
 }
 
+// Row names compare without case: the game spells a row by its own casing ('Salt', 'Console' on 0.10.0, which
+// the 0.9.0 policy rows spelled lowercase), so an exact compare sent them to the unknown-row default.
+static bool SameName(const std::string& a, const char* b) {
+    size_t i = 0;
+    for (; i < a.size() && b[i]; ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+            return false;
+    return i == a.size() && !b[i];
+}
+
 int ReplayVerdict(const std::string& name, const char** laneOut) {
     for (const char* r : kReplayRows)
-        if (name == r) return 1;
+        if (SameName(name, r)) return 1;
     for (const auto& nr : kNoReplayRows)
-        if (name == nr.name) { *laneOut = nr.lane; return 0; }
+        if (SameName(name, nr.name)) { *laneOut = nr.lane; return 0; }
     if (IsPrankRow(name)) { *laneOut = "prank special (host-local RNG)"; return 0; }
     return -1;
 }
