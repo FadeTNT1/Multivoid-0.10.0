@@ -117,6 +117,8 @@ std::vector<uint8_t> g_subBytes;
 // when the save object is prepared. The numbers wait here and are applied once, when the local
 // player has loaded (ApplyPendingPawnVitals).
 bool g_pawnVitalsPending = false;
+// Client: the betterLoadData / loadObjects watches are registered (Install, else the first Tick).
+bool g_loadWatches = false;
 ue_wrap::vitals::Snapshot g_pawnVitals;
 
 // Host: the per-slot send sequence for the on-join push (independent of the client stream's
@@ -465,6 +467,14 @@ void Install(coop::net::Session* session) {
     // Arm the engine's pre-materialise apply point (a no-op until a client join has a pending
     // blob). Re-arming across stop and start is harmless.
     ue_wrap::engine::SetSaveObjectReadyHook(&OnSaveObjectReady);
+    // The load watches stand before any world: the first load can end before the first gameplay
+    // pump, and a substitution is then missed. A name watch is registered pending and resolved on
+    // the game thread; if the gate is not installed yet this is refused and Tick retries.
+    if (!g_loadWatches) {
+        g_loadWatches = ue_wrap::inventory_component::InstallLoadWatches(&OnPlayerLoaded, &OnObjectsLoaded);
+        UE_LOGI("player_inventory: the inventory load watches %s at install",
+                g_loadWatches ? "stand" : "could not be registered yet (Tick retries)");
+    }
 }
 
 void Tick() {
@@ -485,9 +495,8 @@ void Tick() {
     }
     // The load watches stand from the first tick on: a join's load can begin before the session
     // reports connected.
-    static bool s_loadWatches = false;
-    if (!s_loadWatches)
-        s_loadWatches = ue_wrap::inventory_component::InstallLoadWatches(&OnPlayerLoaded, &OnObjectsLoaded);
+    if (!g_loadWatches)
+        g_loadWatches = ue_wrap::inventory_component::InstallLoadWatches(&OnPlayerLoaded, &OnObjectsLoaded);
     if (g_subPending && g_subAfterLoad) {
         if (void* pawn = coop::players::Registry::Get().Local()) {
             g_subAfterLoad = false;
