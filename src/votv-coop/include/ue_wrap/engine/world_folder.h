@@ -45,6 +45,14 @@ bool LoadEntry(const std::wstring& folder, const std::wstring& entry, Entry& out
 int MetadataGameMode(void* metadata);
 // The entry's area, non-empty when it was saved inside an area level.
 std::wstring MetadataArea(void* metadata);
+// The level the world starts in (save_metadata_C.starterMap), or empty when it is None or does not
+// resolve; the game's own launch reads an empty one as untitled_1.
+std::wstring MetadataStarterMap(void* metadata);
+
+// The file a saveSlot_C's saveToSlot writes: <savepath>/<slotName>.sav, its own folder stamped at
+// creation (a relative one is taken under SaveGamesDir). Empty when either field is empty or does not
+// resolve. Game thread.
+std::wstring SaveObjectFile(void* saveSlot);
 
 // Put the metadata's rules in force: copied over mainGameInstance.gameRules, which the game's own
 // launch does, and over the save object's localGameRules, the copy a joiner's transferred save

@@ -174,6 +174,31 @@ std::wstring MetadataArea(void* metadata) {
     return FStrToW(*reinterpret_cast<const R::FString*>(reinterpret_cast<const uint8_t*>(metadata) + off));
 }
 
+std::wstring MetadataStarterMap(void* metadata) {
+    if (!metadata || !R::IsLive(metadata)) return {};
+    const int32_t off = R::FindPropertyOffset(R::ClassOf(metadata), N::SaveMetadataStarterMapProp);
+    if (off < 0) return {};
+    const R::FName n = *reinterpret_cast<const R::FName*>(reinterpret_cast<const uint8_t*>(metadata) + off);
+    if (n.ComparisonIndex == 0 && n.Number == 0) return {};  // None
+    return R::ToString(n);
+}
+
+std::wstring SaveObjectFile(void* saveSlot) {
+    if (!saveSlot || !R::IsLive(saveSlot)) return {};
+    void* cls = R::ClassOf(saveSlot);
+    const int32_t pathOff = R::FindPropertyOffset(cls, N::SaveSlotSavePathProp);
+    const int32_t nameOff = R::FindPropertyOffset(cls, N::SaveSlotSlotNameProp);
+    if (pathOff < 0 || nameOff < 0) return {};
+    const auto* base = reinterpret_cast<const uint8_t*>(saveSlot);
+    const std::wstring dir = FStrToW(*reinterpret_cast<const R::FString*>(base + pathOff));
+    const std::wstring name = FStrToW(*reinterpret_cast<const R::FString*>(base + nameOff));
+    if (dir.empty() || name.empty()) return {};
+    std::filesystem::path p(dir);
+    if (p.is_relative()) p = std::filesystem::path(SaveGamesDir()) / p;
+    p /= name + N::WorldSaveExt;
+    return p.make_preferred().wstring();
+}
+
 int ApplyMetadataRules(void* gameInstance, void* metadata, void* save) {
     const int changed = game_rules::CopyRules(gameInstance, N::GameInstanceGameRulesProp, metadata,
                                               N::SaveMetadataRulesProp);
