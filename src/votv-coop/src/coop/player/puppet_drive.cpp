@@ -108,6 +108,7 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
             bool isNew = false;
             if (!session.TryGetRemotePose(slot, remote, &isNew)) continue;
             sPoseTarget[slot] = remote;  // pose-diag: latest stored pose (the interp target source)
+            bool spawnedNow = false;  // a puppet spawned this tick is seeded from the held pose
             if (!g_puppets[slot].valid()) {
                 // A save-transfer joiner receives poses while still at the MENU (downloading
                 // and loading the host save) -- never spawn a puppet into a non-gameplay
@@ -142,6 +143,7 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
                 // puppet and for cross-peer puppets alike. Falls back to the
                 // placeholder if no identity has landed yet; the handler re-applies
                 // on arrival.
+                spawnedNow = true;
                 g_puppets[slot].SetNickname(
                     coop::player_handshake::NicknameForSlot(slot));
                 // Join announcement at the APPEARANCE seam: the puppet just spawned, which
@@ -160,7 +162,13 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
             // Only RE-BASE the interpolation on a NEW packet; re-pushing the
             // latest every frame would zero `errorPos_` mid-window and freeze
             // motion. The per-frame advance happens in Tick() below.
-            if (isNew) {
+            // A freshly spawned puppet is always seeded from the held pose: the read above
+            // consumed its freshness on an earlier tick (readiness or backoff held the spawn), and
+            // without the seed it would sit at the spawn placeholder until a new packet.
+            if (spawnedNow && !isNew)
+                UE_LOGI("net: slot %d puppet spawned -- seeded from the last received pose (%.0f, %.0f, %.0f)",
+                        slot, double(remote.x), double(remote.y), double(remote.z));
+            if (isNew || spawnedNow) {
                 g_puppets[slot].SetTargetPose(remote);
                 ++sPoseFresh[slot];  // pose-diag: a fresh target this second
             }
