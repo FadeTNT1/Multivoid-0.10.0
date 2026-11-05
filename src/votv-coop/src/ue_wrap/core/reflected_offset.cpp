@@ -101,7 +101,7 @@ VC_DEFINE_OFFSET(MainPlayer_grabLen,              L"mainPlayer_C", L"grabLen")
 VC_DEFINE_OFFSET(MainPlayer_Camera,               L"mainPlayer_C", L"Camera")
 VC_DEFINE_OFFSET(MainPlayer_armLength,            L"mainPlayer_C", L"armLength")
 VC_DEFINE_OFFSET(MainPlayer_Heavy,                L"mainPlayer_C", L"Heavy")
-VC_DEFINE_OFFSET(MainPlayer_holding_actor,        L"mainPlayer_C", L"holding_actor")
+VC_DEFINE_OFFSET(MainPlayer_holding_actor,        L"mainPlayer_C", L"holdingActor_main")  // holding_actor before 0.10.0 split the hands
 VC_DEFINE_OFFSET(MainPlayer_lookAtActor,          L"mainPlayer_C", L"lookAtActor")
 VC_DEFINE_OFFSET(MainPlayer_droppedItem,          L"mainPlayer_C", L"droppedItem")
 VC_DEFINE_OFFSET(MainPlayer_lookAtComponent,      L"mainPlayer_C", L"lookAtComponent")

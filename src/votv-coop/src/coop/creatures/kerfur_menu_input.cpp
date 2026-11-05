@@ -24,7 +24,7 @@ namespace R  = ue_wrap::reflection;
 namespace GT = ue_wrap::game_thread;
 namespace P  = ue_wrap::profile;
 
-UE_FACT_FN(kRowUseInputEvent, "kerfur_menu_input", L"mainPlayer_C", L"InpActEvt_use_K2Node_InputActionEvent_41",
+UE_FACT_FN(kRowUseInputEvent, "kerfur_menu_input", L"mainPlayer_C", L"InpActEvt_use_K2Node_InputActionEvent_37",
            Declared);
 
 std::atomic<coop::net::Session*> g_session{nullptr};

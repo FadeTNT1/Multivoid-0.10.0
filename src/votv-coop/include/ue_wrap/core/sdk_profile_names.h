@@ -479,7 +479,10 @@ inline constexpr const wchar_t* AddImpulseFn                           = L"AddIm
 // Secondary, the input level: the grabbed prop's identity is read from mainPlayer_C.grabbing_actor
 // inside the InpActEvt observer. The "_41" K2Node ordinal is version-fragile (a BP recook can
 // renumber it).
-inline constexpr const wchar_t* MainPlayerUseInputEventFn    = L"InpActEvt_use_K2Node_InputActionEvent_41";
+// 0.10.0: _37 is the E press (drops a grab, then lookAt / timeuse / useSelectedAction); _38 the release
+// (useAction, playerGrabbed); _34 a second press that traces and calls player_use. 0.9.0n had them
+// as _41, _42 and _38.
+inline constexpr const wchar_t* MainPlayerUseInputEventFn    = L"InpActEvt_use_K2Node_InputActionEvent_37";
 // The LMB (fire) action: the native throw-when-holding seam (InpActEvt_fire -> throwHoldingProp),
 // separate from use/E. Two handlers (_58 press, _59 release); the client registers both and gates
 // on ClientCarryEid so only the edge that finds a live carry acts.
