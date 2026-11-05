@@ -25,7 +25,7 @@ bool GiveFlashlight(void* mainPlayer);
 bool SetBatteryFull(void* mainPlayer);
 
 // High-level: ensure flashlight is equipped + battery is full. Reads
-// mainPlayer.hasFlashlight to decide whether GiveFlashlight is needed.
+// mainPlayer.equipped_flashlight to decide whether GiveFlashlight is needed.
 // Logs the verified state. Game thread only.
 bool EnsureFlashlightReady(void* mainPlayer);
 

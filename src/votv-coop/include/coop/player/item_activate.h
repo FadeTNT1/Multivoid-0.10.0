@@ -1,14 +1,13 @@
 // coop/player/item_activate.h -- unified item-activation sync. First instance: the
 // flashlight. The world light cone is a component of the player pawn, not of the flashlight
 // item actor; the puppet (also a pawn orphan) has the same light at the same offset, so
-// toggling its visibility is the full implementation. Sender path: a post-observer on the
-// pawn's flashlight update reads the pawn's flashlight flag and broadcasts the payload to
-// peers; an echo-suppression flag keeps the receiver's apply from bouncing back. Receiver
-// path: ApplyToPuppet writes the puppet's flag and toggles the light's visibility through
-// the engine wrapper. The flashlight_log config flag adds log lines before and after every
-// observed toggle (the blueprint's early return when the player has no flashlight, and the
-// light flipping in lockstep with the flag); off by default.
-
+// driving its light is the full implementation. Sender path: a per-tick poll of the local
+// player's beam (on when the flashlight bool is set and a flashlight is equipped; its
+// intensity, cones, reach, colour and profile) sends the payload to peers on any change,
+// off included, whatever route changed it; an echo-suppression flag keeps the receiver's
+// apply from bouncing back. Receiver path: ApplyToPuppet drives the puppet's light through
+// the engine wrapper. The flashlight_log config flag logs every send, not only on and off;
+// off by default.
 #pragma once
 
 #include <cstdint>
@@ -17,10 +16,8 @@ namespace coop::net { class Session; struct ItemActivatePayload; }
 
 namespace coop::item_activate {
 
-// Idempotent install: resolve the pawn class and its flashlight-update function, register the
-// post-observer. Short-circuits after success; safe to call every pump tick, the lookup
-// retries until the game has loaded the class. The session pointer lets the observer send;
-// null disables broadcasting.
+// Install: cache the session pointer the sender polls with (null disables broadcasting) and the
+// flashlight's class hash. Safe to call every pump tick.
 void Install(coop::net::Session* session);
 
 // Receiver-side apply: a peer reported their flashlight state or cone changed. `puppetActor`
@@ -56,9 +53,8 @@ void QueueConnectBroadcastForSlot(int peerSlot);
 // `newSlot` is the freshly connected client's slot. Game thread only.
 void ReplayPeerStatesToSlot(int newSlot);
 
-// The per-tick worker. Drains the pending broadcast queued at connect (retries the reliable
-// send until the channel accepts it, then updates the observer's dedup signature so the next
-// press does not re-send) and the per-peer pending applies (walks the puppet registry; each
+// The per-tick worker. Polls the local beam and sends a change (the sender), and drains the
+// per-peer pending applies (walks the puppet registry; each
 // slot with a pending payload and a valid puppet is applied and cleared). Cheap when nothing
 // is pending. Game thread only.
 void TickConnect();

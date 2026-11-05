@@ -515,6 +515,21 @@ inline constexpr const wchar_t* SetIntensityFn      = L"SetIntensity";
 inline constexpr const wchar_t* SetOuterConeAngleFn = L"SetOuterConeAngle";
 inline constexpr const wchar_t* SetInnerConeAngleFn = L"SetInnerConeAngle";
 
+// The rest of the beam 0.10.0's flashlight sets from the equipped item and its mode, read on the
+// sender and mirrored on a puppet's light through the engine's own setters.
+inline constexpr const wchar_t* LightComponentClass        = L"LightComponent";
+inline constexpr const wchar_t* LocalLightComponentClass   = L"LocalLightComponent";
+inline constexpr const wchar_t* LightAttenuationRadiusProp = L"AttenuationRadius";
+inline constexpr const wchar_t* LightColorProp             = L"LightColor";
+inline constexpr const wchar_t* LightIESTextureProp        = L"IESTexture";
+inline constexpr const wchar_t* SetAttenuationRadiusFn     = L"SetAttenuationRadius";
+inline constexpr const wchar_t* SetLightColorFn            = L"SetLightColor";
+inline constexpr const wchar_t* SetIESTextureFn            = L"SetIESTexture";
+// The beam profiles mainPlayer_C's 'Flashlight Update' selects by flashlightMode (0, 1, 2), the
+// UTextureLightProfile objects the payload names by index.
+inline constexpr const wchar_t* TextureLightProfileClass = L"TextureLightProfile";
+inline constexpr const wchar_t* FlashlightIesProfiles[] = {L"complex_ies", L"narrowcomplex_ies", L"narrow10000"};
+
 // The flashlight click is the USoundWave `/Game/audio/effects/flashlight.flashlight`; the receiver
 // plays it at the puppet's location through UGameplayStatics::PlaySoundAtLocation. Resolved by
 // leaf name `flashlight` filtered by class `SoundWave` (a GUObjectArray walk, done once and

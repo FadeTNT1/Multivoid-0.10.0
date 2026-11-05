@@ -71,9 +71,15 @@ The item in a player's hand is player state, not a world entity: the game destro
 the held actor on every hotbar switch. The owner polls its own holding actor and broadcasts the
 class and name on change, and every peer keeps a display-only mirror, physics and collision off,
 attached to the puppet's weapon component at the native hold transform
-(`coop/player/hand_item`). The flashlight rides the item-activation kind: the receiver toggles
-the puppet's own light and plays a positional click (`coop/player/item_activate`,
-`coop/player/flashlight_click_sound`). A carried trash clump is driven to the puppet's hand on
+(`coop/player/hand_item`). The flashlight rides the item-activation kind
+(`coop/player/item_activate`). In 0.10.0 it is equipment: the beam is on while the player's
+flashlight bool is set and a flashlight sits in an equipment slot, and the equipped item's own
+data sets its brightness, reach and colour, the mode its cone and beam profile. The beam changes
+on more routes than a press -- hold-F, an empty battery, an unequip, another flashlight -- and
+most of them are Blueprint-to-Blueprint calls, so the owner reads its own beam every tick and
+sends whatever a peer would see on a change, off included; the receiver drives the puppet's own
+light with all of it and plays a positional click (`coop/player/flashlight_click_sound`) `[RD]`.
+The battery itself drains on the owner's machine only. A carried trash clump is driven to the puppet's hand on
 the host each tick (`coop/player/puppet_carry_drive`); a held physics prop is on the props lane.
 
 ### Name, colour and nameplate
@@ -291,7 +297,7 @@ host. A setting that holds a password is never set or shown by command.
 | `RagdollPose` (stream) | each peer, while ragdolled | pelvis transform and velocity |
 | `Join`, `RosterRow` | each peer; the host | identity, nickname, skin, preferences; who occupies each slot |
 | `SkinChange`, `NameplateChange`, `NickColorChange` | each peer, relayed | the three preferences |
-| `HandItem`, `ItemActivate` | each peer, relayed | the held item's class, its actor's name and its hold slot's item name (the key of the game's item tables); the flashlight state |
+| `HandItem`, `ItemActivate` | each peer, relayed | the held item's class, its actor's name and its hold slot's item name (the key of the game's item tables); the flashlight beam: on or off, mode, intensity, cones, reach, colour, profile |
 | `PlayerHit` | host to the hit peer | a parked creature's hit on the peer's puppet: the verb (addDamage or punch) to run on its own player |
 | `SleepState` | a client to the host; the host to all | a rest state with its bed (awake, resting, dreaming); the host's sleeping flag; one peer's rest state relayed |
 | `PlayerInventoryBlob` | both | the per-player profile (items, vitals, standing spot), pre-world |

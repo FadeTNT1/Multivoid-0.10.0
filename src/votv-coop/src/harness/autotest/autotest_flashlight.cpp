@@ -71,7 +71,7 @@ void RunAutonomousFlashlightTest() {
     // ---- Setup. The local flashlight must be equipped and charged before any
     // toggle path can flip the light. The save should carry one, and
     // coop::dev::flashlight_setup::EnsureFlashlightReady() makes sure of it: it
-    // reads hasFlashlight and calls addPropToPlayer when false, writes
+    // reads equipped_flashlight and calls addPropToPlayer when false, writes
     // saveSlot.battery = 100 (the scale is 0-100, not 0-1) and
     // saveSlot.flashlightBattery = prop_batts_C, and logs the state before and
     // after.

@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "ue_wrap/core/types.h"
+
 #include <cstdint>
 
 namespace ue_wrap::engine {
@@ -13,12 +15,18 @@ namespace ue_wrap::engine {
 // dead. Game thread.
 void* GetMainPlayerLightR(void* mainPlayer);
 
-// A flashlight light's authoritative state, for the wire payload.
+// A flashlight light's authoritative state, for the wire payload. 0.10.0 sets the brightness,
+// the reach and the colour from the equipped flashlight item's own data (the battery ticker's
+// updateFlashlightProperties) and the beam profile from the mode, so a puppet's beam copies all of
+// them. `iesTexture` is the light profile object, null for none.
 struct FlashlightSnapshot {
-    float intensity;
-    float outerConeAngle;
-    float innerConeAngle;
-    bool  visible;
+    float  intensity;
+    float  outerConeAngle;
+    float  innerConeAngle;
+    float  attenuationRadius;
+    FColor color;
+    void*  iesTexture;
+    bool   visible;
 };
 
 // Read the snapshot off a USpotLightComponent; false if `light` is null or dead. Game thread.
@@ -27,10 +35,9 @@ bool ReadFlashlightSnapshot(void* light, FlashlightSnapshot& out);
 // The AmainPlayer_C flashlight bools and mode byte the wire payload mirrors, read in one call. Game
 // thread.
 struct MainPlayerFlashlightState {
-    bool flashlight;       // AmainPlayer_C::flashlight     (canonical on/off)
-    bool hasFlashlight;    // AmainPlayer_C::hasFlashlight  (equipped guard)
-    bool crankFlashlight;  // AmainPlayer_C::crankFlashlight (_c variant marker)
-    uint8_t mode;          // AmainPlayer_C::flashlightMode (focused/spread enum)
+    bool flashlight;       // AmainPlayer_C::flashlight          (the beam's on/off)
+    bool equipped;         // AmainPlayer_C::equipped_flashlight (a flashlight sits in an equipment slot)
+    uint8_t mode;          // AmainPlayer_C::flashlightMode      (the beam profile)
 };
 
 bool ReadMainPlayerFlashlightState(void* mainPlayer, MainPlayerFlashlightState& out);
@@ -51,5 +58,12 @@ bool SetSceneComponentVisibility(void* sceneComponent, bool newVisibility, bool 
 bool SetSpotLightOuterConeAngle(void* spotLight, float newAngle);
 
 bool SetSpotLightInnerConeAngle(void* spotLight, float newAngle);
+
+// ULocalLightComponent::SetAttenuationRadius, ULightComponent::SetLightColor (the sRGB colour the
+// light stores, so a copied colour round-trips exactly) and ULightComponent::SetIESTexture (null
+// clears the profile). Each marks the render state dirty. Game thread.
+bool SetLightAttenuationRadius(void* light, float radius);
+bool SetLightColor(void* light, FColor color);
+bool SetLightIESTexture(void* light, void* textureLightProfile);
 
 }  // namespace ue_wrap::engine

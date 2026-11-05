@@ -1,8 +1,7 @@
 // coop/player/item_activate.cpp -- flashlight sync (the item-activation lane). See
-// coop/player/item_activate.h. Install resolves mainPlayer_C's flashlight UFunctions and registers
-// POST observers (retried every pump tick); the observer is the sender, reading the flashlight
-// state after the BP ran and sending an ItemActivate; ApplyToPuppet is the receiver, called from
-// event_feed's drain with the puppet.
+// coop/player/item_activate.h. The sender is a per-tick poll of the local player's beam (TickConnect),
+// which sends an ItemActivate whenever what a peer would see changes; ApplyToPuppet is the
+// receiver, called from event_feed's drain with the puppet.
 
 #include "coop/player/item_activate.h"
 
@@ -18,14 +17,15 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/core/types.h"
-#include "ue_wrap/facts/function_row.h"
 
 #include <windows.h>
 
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 
 namespace coop::item_activate {
 namespace {
@@ -35,39 +35,18 @@ namespace R = ue_wrap::reflection;
 namespace E = ue_wrap::engine;
 namespace GT = ue_wrap::game_thread;
 
-// The flashlight: `updateFlashlight` is BP-inlined into `Flashlight Update` and never dispatches through
-// ProcessEvent, so a POST observer is registered on both; the outer name has a literal space and the
-// FName lookup matches that exact string. The F input events (_48 press, _49 release; 0.9.0n _13/_14; recook-fragile
-// ordinals) are always dispatched as UFunctions; both are observed and the sender dedups on last-sent
-// state. timerHoldFlashlight fires when F is held long enough to switch the beam mode (spread <->
-// focused); its body mutates `flashlightMode` and light_R's cone and intensity, which a POST observer
-// reads to send the cone shape.
-UE_FACT_FN(kRowUpdateFlashlight, "item_activate", L"mainPlayer_C", L"updateFlashlight", Declared);
-UE_FACT_FN(kRowFlashlightUpdate, "item_activate", L"mainPlayer_C", L"Flashlight Update", Declared);
-UE_FACT_FN(kRowFlashlightPress, "item_activate", L"mainPlayer_C",
-           L"InpActEvt_flashlight_K2Node_InputActionEvent_48", Declared);
-UE_FACT_FN(kRowFlashlightRelease, "item_activate", L"mainPlayer_C",
-           L"InpActEvt_flashlight_K2Node_InputActionEvent_49", Declared);
-UE_FACT_FN(kRowTimerHoldFlashlight, "item_activate", L"mainPlayer_C", L"timerHoldFlashlight", Declared);
+// The beam changes on more routes than a press: the F input, the hold-F mode change, an empty
+// battery (the battery ticker's turnOffFlashlight calls 'Flashlight Update' from its own bytecode),
+// an unequip (updateEquipment clears equipped_flashlight and the next update turns the beam off),
+// and the equipped item's own brightness, reach and colour (updateFlashlightProperties). Most of
+// those are Blueprint-to-Blueprint calls a ProcessEvent observer never sees, so the sender reads the
+// state itself every tick and sends on a change of what a peer would see: a few field reads.
 
-bool g_installed = false;
-
-// The candidate UFunctions of the flashlight chain, resolved once. updateFlashlight is
-// BP-inlined into Flashlight Update and never reaches ProcessEvent, so every candidate gets an
-// observer and whichever the BP dispatches wins; the dedupe below absorbs a double fire.
-// timerHoldFlashlight is the hold-F mode change (spread to focused), whose observer reads the
-// post-mutation mode and cone shape so the receiver mirrors it.
-void* g_updateFlashlightFn = nullptr;
-void* g_flashlightUpdateFn = nullptr;
-void* g_flashlightPressFn = nullptr;
-void* g_flashlightReleaseFn = nullptr;
-void* g_timerHoldFlashlightFn = nullptr;
-
-// The last-sent signature (state, mode, intensity, cone angles): the hold-F mode change keeps
-// state on but changes the mode and cones, so a state-only dedupe would drop it. kNoSendYet
+// The last-sent signature (state, mode and the beam's shape): the hold-F mode change keeps state
+// on but changes the mode and cones, so a state-only dedupe would drop it. kNoSendYet
 // means never sent. One atomic, so the load cannot see a torn flag-plus-signature (a split
 // pair let DebugForceToggle on a worker thread update the flag before the signature and an
-// observer dedupe a fresh packet).
+// poll dedupe a fresh packet).
 inline constexpr uint64_t kNoSendYet = 0xFFFFFFFFFFFFFFFFULL;
 std::atomic<uint64_t> g_lastSentSig{kNoSendYet};
 
@@ -85,7 +64,7 @@ inline constexpr float kIntensityOffDefault = 0.f;  // turn light fully off
 // both toggle the puppet's light_R and share it.
 uint32_t g_flashlightClassHash = 0;
 
-// Atomic: the observer's read races the setter on another thread.
+// Atomic: the sender's read races the setter on another thread.
 std::atomic<coop::net::Session*> g_session{nullptr};
 
 // Pending receiver-side applies per peer slot: the puppet is created on the peer's first
@@ -103,19 +82,43 @@ coop::net::ItemActivatePayload g_pendingApplyPayload[coop::players::kMaxPeers] =
 bool g_peerActivateValid[coop::players::kMaxPeers] = {};
 coop::net::ItemActivatePayload g_peerActivateCache[coop::players::kMaxPeers] = {};
 
+// The state last logged by the sender: a change of on and off is an event, a change of the beam's
+// shape alone is logged only under the flashlight_log flag.
+uint8_t g_lastLoggedState = 0xFF;
+
 // Echo suppression around the receiver's apply, so a UFunction invoked on the puppet cannot
 // bounce back as a wire packet. Atomic, as the session pointer.
 std::atomic<bool> g_echoSuppress{false};
 
 bool ProbeLogEnabled() {
-    // Read once per process: the observer is hot.
+    // Read once per process: the poll is hot.
     static const bool s_enabled = ::coop::config::ResolveFlag(::coop::config_registry::rows::flashlight_log);
     return s_enabled;
 }
 
 // The local player's flashlight state and cone shape as a payload; direct memory reads on the
-// calling thread (the observer on the game thread, DebugForceToggle inside its posted lambda).
+// calling thread (the poll on the game thread, DebugForceToggle inside its posted lambda).
 // False if light_R is dead.
+// The beam profile `ies` is, as an index into the profiles 'Flashlight Update' selects from;
+// kNoIesProfile for none or one this table does not name. The objects are looked up once each.
+uint8_t IesProfileIndex(void* ies) {
+    namespace N = ue_wrap::profile::name;
+    static void* s_profiles[std::size(N::FlashlightIesProfiles)] = {};
+    if (!ies) return coop::net::kNoIesProfile;
+    for (size_t i = 0; i < std::size(N::FlashlightIesProfiles); ++i) {
+        if (!s_profiles[i] || !R::IsLive(s_profiles[i]))
+            s_profiles[i] = R::FindObject(N::FlashlightIesProfiles[i], N::TextureLightProfileClass);
+        if (s_profiles[i] == ies) return static_cast<uint8_t>(i);
+    }
+    return coop::net::kNoIesProfile;
+}
+
+void* IesProfileObject(uint8_t index) {
+    namespace N = ue_wrap::profile::name;
+    if (index >= std::size(N::FlashlightIesProfiles)) return nullptr;
+    return R::FindObject(N::FlashlightIesProfiles[index], N::TextureLightProfileClass);
+}
+
 bool BuildPayloadFromLocal(void* mp, coop::net::ItemActivatePayload& out, coop::net::Session* session) {
     if (!mp || !session) return false;
     void* light_R = ue_wrap::engine::GetMainPlayerLightR(mp);
@@ -136,19 +139,25 @@ bool BuildPayloadFromLocal(void* mp, coop::net::ItemActivatePayload& out, coop::
         out.senderElementId =
             (selfEid == coop::element::kInvalidId) ? 0u : selfEid;
     }
-    out.state           = fl.flashlight ? 1 : 0;
+    // On is the beam the game shows: the bool, and a flashlight in an equipment slot (an unequip
+    // leaves the bool set until the next update clears it).
+    out.state           = (fl.flashlight && fl.equipped) ? 1 : 0;
     out.flags           = 0;  // no actor key
     out.mode            = fl.mode;
     out.actorKeyHash    = 0;
     out.intensity       = snap.intensity;
     out.outerConeAngle  = snap.outerConeAngle;
     out.innerConeAngle  = snap.innerConeAngle;
+    out.attenuationRadius = snap.attenuationRadius;
+    out.colorB = snap.color.B;
+    out.colorG = snap.color.G;
+    out.colorR = snap.color.R;
+    out.colorA = snap.color.A;
+    out.iesProfile = IesProfileIndex(snap.iesTexture);
     return true;
 }
 
-// FNV1a over the mutable fields, to dedupe the observer fires of one logical change (a press
-// fires the input event, Flashlight Update and updateFlashlight in a chain; hold-F fires
-// timerHoldFlashlight and maybe some of the others).
+// FNV1a over the fields a peer sees, so the poll sends a change once.
 uint64_t SignaturePayload(const coop::net::ItemActivatePayload& p) {
     uint64_t h = 0xcbf29ce484222325ULL;
     auto mix = [&](uint64_t v) { h ^= v; h *= 0x100000001b3ULL; };
@@ -157,108 +166,41 @@ uint64_t SignaturePayload(const coop::net::ItemActivatePayload& p) {
     mix(reinterpret_cast<const uint32_t&>(p.intensity));
     mix(reinterpret_cast<const uint32_t&>(p.outerConeAngle));
     mix(reinterpret_cast<const uint32_t&>(p.innerConeAngle));
+    mix(reinterpret_cast<const uint32_t&>(p.attenuationRadius));
+    mix((uint32_t(p.colorB) << 24) | (uint32_t(p.colorG) << 16) | (uint32_t(p.colorR) << 8) | p.colorA);
+    mix(p.iesProfile);
     return h;
 }
 
-void OnUpdateFlashlightPost(void* self, void* function, void* /*params*/) {
-    if (!self) return;
-    // Which hook fired, for the probe log.
-    const char* which =
-        (function == g_flashlightUpdateFn)     ? "Flashlight_Update" :
-        (function == g_updateFlashlightFn)     ? "updateFlashlight"  :
-        (function == g_flashlightPressFn)    ? "InpActEvt_press"   :
-        (function == g_flashlightReleaseFn)    ? "InpActEvt_release" :
-        (function == g_timerHoldFlashlightFn)  ? "timerHoldFlashlight" :
-        "<unknown>";
-
-    // A receiver-applied change must not bounce back as a packet.
+// The sender: the local player's beam as a peer would see it, sent when it differs from the last
+// one sent. Game thread, every tick.
+void PollLocal() {
     if (g_echoSuppress.load(std::memory_order_acquire)) return;
-
-    // Puppets are skipped: a fire on a puppet would send its state back to the peer that authored
-    // it. A controller is the local-versus-puppet discriminator.
-    if (!E::GetController(self)) return;
-
-    // The state after the BP ran: the bools carry the new value. One wrapper read.
-    ue_wrap::engine::MainPlayerFlashlightState fl{};
-    if (!ue_wrap::engine::ReadMainPlayerFlashlightState(self, fl)) return;
-    const bool flashlight = fl.flashlight;
-    const bool hasFlashlight = fl.hasFlashlight;
-    const bool crankFlashlight = fl.crankFlashlight;
-
-    if (ProbeLogEnabled()) {
-        // The probe line: whether the BP early-returned without a flashlight (the bool unchanged)
-        // and whether light_R's visibility tracks the bool; the crank variant is logged separately
-        // since it is not sent.
-        void* light_R = ue_wrap::engine::GetMainPlayerLightR(self);
-        ue_wrap::engine::FlashlightSnapshot snap{};
-        const bool snapOk = ue_wrap::engine::ReadFlashlightSnapshot(light_R, snap);
-        UE_LOGI("flashlight[POST %s] self=%p flashlight=%d hasFL=%d crankFL=%d "
-                "light_R=%p bVisible=%d Intensity=%.1f", which, self,
-                flashlight ? 1 : 0, hasFlashlight ? 1 : 0,
-                crankFlashlight ? 1 : 0, light_R,
-                snapOk && snap.visible ? 1 : 0,
-                snapOk ? snap.intensity : -1.f);
-    }
-
-    // The crank lantern (_c) toggles its own light components, not the player's light_R; it is not
-    // sent.
-    if (crankFlashlight) {
-        if (ProbeLogEnabled()) {
-            UE_LOGI("flashlight: crank lantern (_c) -- nothing sent");
-        }
-        return;
-    }
-
-    // No send when the BP guard early-returned for no equipped flashlight, or a recook that always
-    // sets the bool on F would ship spurious activations.
-    if (!hasFlashlight) {
-        if (ProbeLogEnabled()) {
-            UE_LOGI("flashlight: hasFlashlight=false -- BP early-returned, no wire send");
-        }
-        return;
-    }
-
-    // The "on" intensity latches the first time it reads clearly above the off sentinel (about 0.2
-    // Unitless); above 1.0 filters the sentinel.
-    if (flashlight) {
-        ue_wrap::engine::FlashlightSnapshot snap{};
-        if (ue_wrap::engine::ReadFlashlightSnapshot(
-                ue_wrap::engine::GetMainPlayerLightR(self), snap)) {
-            if (snap.intensity > 1.f && g_latchedOnIntensity.load(std::memory_order_acquire) == 0.f) {
-                g_latchedOnIntensity.store(snap.intensity, std::memory_order_release);
-                UE_LOGI("flashlight: latched local 'on' intensity = %.2f (will drive puppet)", snap.intensity);
-            }
-        }
-    }
-
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
-
+    void* mp = coop::players::Registry::Get().Local();
+    if (!mp) return;
     coop::net::ItemActivatePayload p{};
-    if (!BuildPayloadFromLocal(self, p, s)) return;
-
-    // Only the first observer of a logical change sends: the signature covers state, mode,
-    // intensity and cones.
+    if (!BuildPayloadFromLocal(mp, p, s)) return;
+    // The "on" intensity latches the first time it reads clearly above the off sentinel (about 0.2
+    // Unitless), for DebugForceToggle's own light.
+    if (p.state && p.intensity > 1.f && g_latchedOnIntensity.load(std::memory_order_acquire) == 0.f)
+        g_latchedOnIntensity.store(p.intensity, std::memory_order_release);
     const uint64_t sig = SignaturePayload(p);
     // A hash equal to kNoSendYet is shifted by one so the sentinel stays unambiguous.
     const uint64_t storeSig = (sig == kNoSendYet) ? (kNoSendYet - 1) : sig;
-    if (g_lastSentSig.load(std::memory_order_acquire) == storeSig) {
-        if (ProbeLogEnabled()) {
-            UE_LOGI("flashlight: payload signature unchanged (sig=%llX) -- no wire send",
-                    static_cast<unsigned long long>(storeSig));
-        }
+    if (g_lastSentSig.load(std::memory_order_acquire) == storeSig) return;
+    if (!s->SendReliable(coop::net::ReliableKind::ItemActivate, &p, sizeof(p))) {
+        UE_LOGW("flashlight: SendReliable failed (channel busy or not connected) -- retried next tick");
         return;
     }
-
-    const bool sent = s->SendReliable(coop::net::ReliableKind::ItemActivate, &p, sizeof(p));
-    if (!sent) {
-        UE_LOGW("flashlight: SendReliable failed (channel busy or not connected) [%s]", which);
-    } else {
-        g_lastSentSig.store(storeSig, std::memory_order_release);
+    g_lastSentSig.store(storeSig, std::memory_order_release);
+    if (ProbeLogEnabled() || g_lastLoggedState != p.state) {
+        g_lastLoggedState = p.state;
         UE_LOGI("flashlight: sent state=%d mode=%u Intensity=%.2f outerCone=%.1f innerCone=%.1f "
-                "(senderElementId=0x%08x, via %s)",
+                "radius=%.0f color=%02X%02X%02X ies=%u (senderElementId=0x%08x)",
                 p.state, p.mode, p.intensity, p.outerConeAngle, p.innerConeAngle,
-                p.senderElementId, which);
+                p.attenuationRadius, p.colorR, p.colorG, p.colorB, p.iesProfile, p.senderElementId);
     }
 }
 
@@ -352,54 +294,8 @@ uint32_t HashClassName(const wchar_t* s) {
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
-    if (g_installed) return;
-
-    void* playerCls = R::FindClass(P::name::MainPlayerClass);
-    if (!playerCls) {
-        // mainPlayer_C is not loaded yet (the menu); retry next pump tick.
-        return;
-    }
-
-    // POST observers on every candidate of the chain (the two input events, Flashlight Update,
-    // updateFlashlight, timerHoldFlashlight): the inner functions are BP-inlined into the input
-    // events, which the engine's input system dispatches through ProcessEvent, and registering all
-    // of them survives a recook that inlines differently. The signature dedupes a double fire.
-    struct Candidate { const ue_wrap::facts::Function* row; void** outPtr; };
-    Candidate cs[] = {
-        { &kRowUpdateFlashlight,    &g_updateFlashlightFn    },
-        { &kRowFlashlightUpdate,    &g_flashlightUpdateFn    },
-        { &kRowFlashlightPress,   &g_flashlightPressFn   },
-        { &kRowFlashlightRelease,   &g_flashlightReleaseFn   },
-        { &kRowTimerHoldFlashlight, &g_timerHoldFlashlightFn },
-    };
-    int registered = 0;
-    for (auto& c : cs) {
-        const ue_wrap::facts::Resolved fn = ue_wrap::facts::Resolve(*c.row);
-        if (!fn) {
-            UE_LOGW("flashlight: UFunction '%ls' not found on %ls", c.row->Name(), c.row->Class());
-            continue;
-        }
-        if (!GT::RegisterPostObserver(fn, &OnUpdateFlashlightPost)) {
-            UE_LOGW("flashlight: RegisterPostObserver(%ls) failed", c.row->Name());
-            continue;
-        }
-        *c.outPtr = fn.Fn();
-        ++registered;
-    }
-    if (registered == 0) {
-        UE_LOGW("flashlight: no candidate observers registered -- aborting install");
-        return;
-    }
-
-    g_flashlightClassHash = HashClassName(L"prop_equipment_flashlight_C");
-    g_installed = true;
-    UE_LOGI("flashlight: %d POST observer(s) installed (updateFlashlight=%p, "
-            "'Flashlight Update'=%p, InpActEvt_press=%p, InpActEvt_release=%p, "
-            "timerHoldFlashlight=%p, classHash=0x%08X, probe_log=%d)",
-            registered, g_updateFlashlightFn, g_flashlightUpdateFn,
-            g_flashlightPressFn, g_flashlightReleaseFn,
-            g_timerHoldFlashlightFn, g_flashlightClassHash,
-            ProbeLogEnabled() ? 1 : 0);
+    if (g_flashlightClassHash == 0)
+        g_flashlightClassHash = HashClassName(ue_wrap::profile::name::FlashlightEquipmentClass);
 }
 
 void ApplyToPuppet(void* puppetActor, const coop::net::ItemActivatePayload& payload,
@@ -448,14 +344,23 @@ void ApplyToPuppet(void* puppetActor, const coop::net::ItemActivatePayload& payl
         UE_LOGW("flashlight: SetLightIntensity failed (UFunction unresolved or light_R dead)");
     }
 
-    // 3) The cone angles (spread versus focused); both mark the render state dirty. Only when on: a
-    // cone on an off light is invisible.
+    // 3) The beam's shape: the cone angles (spread versus focused), the reach, the colour and the
+    // profile. Each setter marks the render state dirty. Only when on: an off light is invisible.
     if (newState) {
         if (payload.outerConeAngle > 0.f) {
             ue_wrap::engine::SetSpotLightOuterConeAngle(light_R, payload.outerConeAngle);
         }
         if (payload.innerConeAngle >= 0.f) {
             ue_wrap::engine::SetSpotLightInnerConeAngle(light_R, payload.innerConeAngle);
+        }
+        if (payload.attenuationRadius >= 0.f) {
+            ue_wrap::engine::SetLightAttenuationRadius(light_R, payload.attenuationRadius);
+        }
+        ue_wrap::engine::SetLightColor(
+            light_R, ue_wrap::FColor{payload.colorB, payload.colorG, payload.colorR, payload.colorA});
+        if (payload.iesProfile != coop::net::kNoIesProfile) {
+            if (void* ies = IesProfileObject(payload.iesProfile))
+                ue_wrap::engine::SetLightIESTexture(light_R, ies);
         }
     }
 
@@ -528,7 +433,7 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
                 peerSlot);
         return;
     }
-    // Off is not sent: the puppet spawns off, and the observer ships a later toggle.
+    // Off is not sent: the puppet spawns off, and the poll ships a later toggle.
     if (p.state == 0) {
         UE_LOGI("flashlight: QueueConnectBroadcastForSlot(slot=%d) local state is OFF -- "
                 "skipping (puppet default is OFF; no replay needed)", peerSlot);
@@ -567,6 +472,7 @@ void ReplayPeerStatesToSlot(int newSlot) {
 }
 
 void TickConnect() {
+    PollLocal();
 
     // The pending applies drain once the registry has a live puppet for the slot.
     for (uint8_t peer = 0; peer < coop::players::kMaxPeers; ++peer) {

@@ -499,7 +499,6 @@ inline constexpr size_t AmainPlayer_light_R         = 0x06B0;  // USpotLightComp
 inline constexpr size_t AmainPlayer_lag_fl          = 0x06A8;  // USpringArmComponent* parenting light_R (mainPlayer.hpp:60)
 inline constexpr size_t AmainPlayer_flashlight     = 0x0890;  // bool -- canonical on/off (mainPlayer.hpp:115)
 inline constexpr size_t AmainPlayer_flashlightMode = 0x0CE9;  // uint8 -- beam mode (mainPlayer.hpp:251)
-inline constexpr size_t AmainPlayer_hasFlashlight  = 0x0CC2;  // bool -- equipped guard (0.9.0n). GONE in 0.10.0 (the flashlight is equipment); read only by a probe log and a dev drill, whose value is then meaningless
 inline constexpr size_t AmainPlayer_crankFlashlight = 0x0D4B;  // bool -- _c variant marker (mainPlayer.hpp:262)
 
 // ULightComponentBase::Intensity (Engine.hpp:13569). The game's flashlight BP toggles Intensity,
