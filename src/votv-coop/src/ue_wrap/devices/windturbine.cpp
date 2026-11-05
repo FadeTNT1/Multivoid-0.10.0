@@ -22,21 +22,15 @@ int32_t g_offAlphaBlades   = -1;    // float alpha_blades
 int32_t g_offBladesMomentum= -1;    // float bladesMomentum
 int32_t g_offMult          = -1;    // float mult
 
-// Alpha 0.9.0-n fallbacks (CXXHeaderDump/windturbine.hpp).
-constexpr int32_t kHeadRotationFallback   = 0x0300;
-constexpr int32_t kTargetRotFallback      = 0x030C;
-constexpr int32_t kRotFallback            = 0x0340;
-constexpr int32_t kAlphaBladesFallback    = 0x02F8;
-constexpr int32_t kBladesMomentumFallback = 0x0334;
-constexpr int32_t kMultFallback           = 0x0328;
+// All six floats are WRITTEN by WriteState, so none has a numeric fallback (the 0.9.0n offsets are another
+// field's bytes on a recooked class). The turbine is read and written only when every one reflects.
+bool g_membersOk = false;
 
-int32_t ResolveOff(void* cls, const wchar_t* name, int32_t fallback) {
-    int32_t off = R::FindPropertyOffset(cls, name);
-    if (off < 0) {
-        UE_LOGW("windturbine: reflected %ls offset not found -- using fallback 0x%04X",
-                name, fallback);
-        off = fallback;
-    }
+int32_t ResolveOff(void* cls, const wchar_t* name) {
+    const int32_t off = R::FindPropertyOffset(cls, name);
+    if (off < 0)
+        UE_LOGW("windturbine: reflected %ls offset not found -- it is WRITTEN, so there is no numeric fallback: "
+                "the turbine state is neither read nor written (this line prints once)", name);
     return off;
 }
 
@@ -54,12 +48,14 @@ bool EnsureResolved() {
     void* cls = R::FindClass(L"windturbine_C");
     if (!cls) return false;  // BP class not loaded yet -- retry
 
-    g_offHeadRotation   = ResolveOff(cls, L"headRotation",   kHeadRotationFallback);
-    g_offTargetRot      = ResolveOff(cls, L"targetRot",      kTargetRotFallback);
-    g_offRot            = ResolveOff(cls, L"rot",            kRotFallback);
-    g_offAlphaBlades    = ResolveOff(cls, L"alpha_blades",   kAlphaBladesFallback);
-    g_offBladesMomentum = ResolveOff(cls, L"bladesMomentum", kBladesMomentumFallback);
-    g_offMult           = ResolveOff(cls, L"mult",           kMultFallback);
+    g_offHeadRotation   = ResolveOff(cls, L"headRotation");
+    g_offTargetRot      = ResolveOff(cls, L"targetRot");
+    g_offRot            = ResolveOff(cls, L"rot");
+    g_offAlphaBlades    = ResolveOff(cls, L"alpha_blades");
+    g_offBladesMomentum = ResolveOff(cls, L"bladesMomentum");
+    g_offMult           = ResolveOff(cls, L"mult");
+    g_membersOk = g_offHeadRotation >= 0 && g_offTargetRot >= 0 && g_offRot >= 0 && g_offAlphaBlades >= 0 &&
+                  g_offBladesMomentum >= 0 && g_offMult >= 0;
     g_cls = cls;
     g_resolved.store(true, std::memory_order_release);
     UE_LOGI("windturbine: resolved windturbine_C=%p headRotation@0x%04X targetRot@0x%04X "
@@ -78,7 +74,7 @@ bool IsTurbine(void* obj) {
 }
 
 bool ReadState(void* turbine, State& out) {
-    if (!turbine || !g_resolved.load(std::memory_order_acquire)) return false;
+    if (!turbine || !g_resolved.load(std::memory_order_acquire) || !g_membersOk) return false;
     out.headRotation   = ReadF(turbine, g_offHeadRotation);
     out.targetRot      = ReadF(turbine, g_offTargetRot);
     out.rot            = ReadF(turbine, g_offRot);
@@ -89,7 +85,7 @@ bool ReadState(void* turbine, State& out) {
 }
 
 bool WriteState(void* turbine, const State& st) {
-    if (!turbine || !g_resolved.load(std::memory_order_acquire)) return false;
+    if (!turbine || !g_resolved.load(std::memory_order_acquire) || !g_membersOk) return false;
     WriteF(turbine, g_offHeadRotation,   st.headRotation);
     WriteF(turbine, g_offTargetRot,      st.targetRot);
     WriteF(turbine, g_offRot,            st.rot);

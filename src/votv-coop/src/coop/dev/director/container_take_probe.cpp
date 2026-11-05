@@ -20,7 +20,7 @@
 #include "coop/props/container_contents_sync.h"   // ContentsDigest
 #include "ue_wrap/actors/inventory.h"      // ResolveSaveSlot
 #include "ue_wrap/actors/prop.h"           // WalksToBase
-#include "ue_wrap/actors/save_record.h"    // ReadArr, kMxStride
+#include "ue_wrap/actors/save_record.h"    // ReadArr, GObjStackView
 #include "ue_wrap/core/call.h"             // ParamFrame, Call
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
@@ -98,22 +98,23 @@ bool IsWorldContainerInv(void* inv) {
 }
 // The container's GObjStack slice (the read container_contents_sync uses): the save's GObjStack[inv.Index] wraps a
 // TArray of save structs. False when unresolvable.
-bool ContainerSliceArr(void* container, SR::Arr& out) {
+bool ContainerSliceArr(void* container, SR::Arr& out, int32_t* recordStride = nullptr) {
     void* inv = InventoryOf(container);
     if (!inv || !IsWorldContainerInv(inv)) return false;
     void* save = INV::ResolveSaveSlot();
     if (!save) return false;
-    static int32_t offStack = -2, offIndex = -2;
-    if (offStack == -2) offStack = R::FindPropertyOffset(R::ClassOf(save), L"GObjStack");
+    static int32_t offIndex = -2;
     if (offIndex == -2) offIndex = R::FindPropertyOffset(R::ClassOf(inv), L"Index");
-    if (offStack < 0 || offIndex < 0) return false;
+    if (offIndex < 0) return false;
     int32_t idx = -1;
     std::memcpy(&idx, reinterpret_cast<const uint8_t*>(inv) + offIndex, sizeof(idx));
     if (idx < 0) return false;
-    const SR::Arr stack = SR::ReadArr(save, offStack);
-    if (idx >= stack.num) return false;
-    const uint8_t* slot = stack.data + static_cast<size_t>(idx) * SR::kMxStride;
+    SR::GObjStackView stack;   // the engine-verified shape: strides are measured, not constants
+    if (!SR::ReadGObjStack(save, stack)) return false;
+    const uint8_t* slot = stack.Slot(idx);
+    if (!slot) return false;
     out = SR::ReadArr(slot, 0);
+    if (recordStride) *recordStride = stack.recordStride;
     return true;
 }
 // The record count, -1 when unresolvable, distinct from 0 (empty).
@@ -124,10 +125,10 @@ int32_t ContainerItemCount(void* container) {
 // The prop name (names[0][0]) of the container's record at `slotIdx`: with the class, what the pocket count matches.
 bool ContainerRecordName(void* container, int32_t slotIdx, std::wstring& name) {
     SR::Arr slice;
-    if (!ContainerSliceArr(container, slice) || slotIdx < 0 || slotIdx >= slice.num) return false;
+    int32_t stride = 0;
+    if (!ContainerSliceArr(container, slice, &stride) || stride <= 0 || slotIdx < 0 || slotIdx >= slice.num) return false;
     SR::SaveRecord rec;
-    if (SR::RecordStride() <= 0) return false;
-    SR::ReadSaveRecord(slice.data + static_cast<size_t>(slotIdx) * static_cast<size_t>(SR::RecordStride()), rec);
+    SR::ReadSaveRecord(slice.data + static_cast<size_t>(slotIdx) * static_cast<size_t>(stride), rec);
     return SR::RecordName(rec, name);
 }
 // The local player's own carried records that are X by class and name (not the container's, not another peer's copy);

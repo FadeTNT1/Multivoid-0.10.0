@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "ue_wrap/core/raw_read.h"          // PlausiblePtr -- the one plausibility test
 #include "ue_wrap/desk/signal_dynamic.h"  // Row -- the signal sub-element (reused, not reinvented)
 
 #include <array>
@@ -65,12 +66,17 @@ struct RecordLayout {
     void*   script = nullptr;  // the UScriptStruct measured
     int32_t span = 0;          // UStruct::PropertiesSize: every field ends inside this many bytes
     int32_t stride = 0;        // the element stride of a TArray of records (span rounded to 16)
+    bool    exact = false;     // stride came off the engine (a parameter's size or an array's ElementSize),
+                               // not the 16-aligned span guess used while prop_C is not loaded
 };
 
 // The running build's record layout (the struct Aprop_C::getData files a prop into, else the struct
 // asset by name). Null while unmeasured; retried at most once a second. Game thread.
 const RecordLayout* Layout();
 // Its stride and span, 0 while unmeasured -- a caller walking an array of records refuses on 0.
+// RecordStride() is 0 too while the stride is only the span-rounded GUESS (the engine's real element
+// size not seen yet), so nothing walks or writes an array at a guessed stride. A caller that walks
+// a real array takes its stride from ReadGObjStack below, which confirms it against the array.
 int32_t RecordStride();
 int32_t RecordSpan();
 // Whether `scriptStruct` is the measured record struct: the check a caller makes before walking an
@@ -87,10 +93,7 @@ inline constexpr int32_t kMaxArr = 200000;
 // A pointer that could plausibly be a live UObject/heap buffer: non-null, above the null page,
 // 8-aligned, inside the Win64 user-address range. Rejects garbage misread as a pointer BEFORE
 // the engine IsLive/NameOf derefs it (a wild pointer faults the whole game-thread tick).
-inline bool PlausibleObjPtr(const void* p) {
-    const uintptr_t v = reinterpret_cast<uintptr_t>(p);
-    return v >= 0x10000 && (v & 0x7) == 0 && v < 0x7FFFFFFFFFFFull;
-}
+inline bool PlausibleObjPtr(const void* p) { return ue_wrap::raw_read::PlausiblePtr(p); }
 
 // A read TArray header, with a garbage header rejected to {nullptr, 0}.
 struct Arr { const uint8_t* data = nullptr; int32_t num = 0; };
@@ -108,6 +111,34 @@ void* AllocZeroed(size_t count, size_t elemSize);
 // FName read/write at a raw field address (empty string <-> NAME_None).
 std::wstring ReadFNameAt(const void* base, int32_t off);
 void WriteFNameField(void* dst, const std::wstring& leaf);
+
+// ---- saveSlot.GObjStack, verified -------------------------------------------------------------
+//
+// GObjStack is a TArray<struct_mObject>, each element a single TArray<Fstruct_save> (`obj`) at +0.
+// Walking or rewriting it with a constant element stride, or a record stride that was a guess, is a
+// raw write at an address the engine never agreed to. So its shape is measured per save class off
+// reflection: the outer array's ElementSize, the element struct's first member being an array at +0
+// whose element struct IS the measured record and whose ElementSize is the record stride. A save
+// class where any of that fails refuses every access below (said once), touching nothing.
+struct GObjStackView {
+    const uint8_t* data = nullptr;  // the outer array's buffer
+    int32_t num = 0;                // its element count
+    int32_t outerStride = 0;        // the outer array's engine ElementSize
+    int32_t recordStride = 0;       // the engine ElementSize of one record in an `obj` array
+    // The struct_mObject element at `i` (the contents TArray header is at +0), null out of range.
+    uint8_t* Slot(int32_t i) const {
+        return i >= 0 && i < num ? const_cast<uint8_t*>(data) + static_cast<size_t>(i) * static_cast<size_t>(outerStride)
+                                 : nullptr;
+    }
+};
+// Fill `out` from `save` (the live saveSlot object). False -- with `out` empty -- while the record
+// layout is unmeasured (retry), or when the save class's GObjStack does not read as described above.
+bool ReadGObjStack(void* save, GObjStackView& out);
+// Internal to the GObjStack measurement (save_stack.cpp): adopt the engine's `obj` ElementSize as the record
+// stride when the layout only had the span-rounded guess, or confirm it equals the stride the engine already
+// gave. False when it disagrees. ResetGObjStackCache drops the per-save-class verdicts (ResetCodecCache's).
+bool ConfirmRecordStride(void* script, int32_t engineStride);
+void ResetGObjStackCache();
 
 // ---- The record codec ------------------------------------------------------------------------
 

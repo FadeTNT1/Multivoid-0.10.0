@@ -23,7 +23,6 @@ namespace SR = ue_wrap::save_record;
 int32_t g_offInvIndex  = -2;  // propInventory_C.Index
 int32_t g_offInvPlayer = -2;  // propInventory_C.Player  -- the world-vs-PERSONAL discriminator
 int32_t g_offInvOwner  = -2;  // propInventory_C.Owner   -- the Aprop_container_C
-int32_t g_offGObjStack = -2;  // saveSlot_C.GObjStack
 int32_t g_offPropInv   = -2;  // prop_container_C.propInventory
 int32_t g_offCurrVol   = -2;  // propInventory_C.currVol
 int32_t g_offMaxVol    = -2;  // propInventory_C.maxVol  -- the capacity addObject's volume check reads
@@ -83,23 +82,28 @@ bool IsWorldInventory(void* inventory) {
 
 namespace {
 
-// GObjStack[idx], the struct_mObject element: null when the save slot, the field or the index does not resolve.
-uint8_t* StackSlotAt(int32_t idx) {
+// GObjStack[idx], the struct_mObject element, at the engine's measured element stride: null when the
+// save slot, the index or the verified GObjStack shape (save_record::ReadGObjStack) does not resolve.
+// `recordStride`, when given, is the engine's element size for one record in the slot's `obj` array.
+uint8_t* StackSlotAt(int32_t idx, int32_t* recordStride = nullptr) {
+    if (recordStride) *recordStride = 0;
     if (idx < 0) return nullptr;
     void* save = ue_wrap::inventory::ResolveSaveSlot();
     if (!save) return nullptr;
-    if (CachedOffset(g_offGObjStack, R::ClassOf(save), L"GObjStack") < 0) return nullptr;
-    const SR::Arr stack = SR::ReadArr(save, g_offGObjStack);
-    if (idx >= stack.num) return nullptr;
-    return const_cast<uint8_t*>(stack.data) + static_cast<size_t>(idx) * SR::kMxStride;
+    SR::GObjStackView stack;
+    if (!SR::ReadGObjStack(save, stack)) return nullptr;
+    uint8_t* slot = stack.Slot(idx);
+    if (slot && recordStride) *recordStride = stack.recordStride;
+    return slot;
 }
 
 }  // namespace
 
-uint8_t* ContentsSlot(void* inventory) {
+uint8_t* ContentsSlot(void* inventory, int32_t* recordStride) {
+    if (recordStride) *recordStride = 0;
     if (!inventory) return nullptr;
     if (CachedOffset(g_offInvIndex, R::ClassOf(inventory), L"Index") < 0) return nullptr;
-    return StackSlotAt(ReadAt<int32_t>(inventory, g_offInvIndex));
+    return StackSlotAt(ReadAt<int32_t>(inventory, g_offInvIndex), recordStride);
 }
 
 bool ReadStackCount(int32_t stackIndex, int32_t& count) {
@@ -179,13 +183,12 @@ bool FilterHolds(void* inventory, void* cls, bool& holds) {
 bool ReadContents(void* inventory, std::vector<SR::SaveRecord>& out, size_t maxRecords,
                   int32_t* countOut) {
     if (countOut) *countOut = -1;
-    uint8_t* slot = ContentsSlot(inventory);
-    if (!slot) return false;
+    int32_t stride = 0;
+    uint8_t* slot = ContentsSlot(inventory, &stride);
+    if (!slot || stride <= 0) return false;
     const SR::Arr objs = SR::ReadArr(slot, 0);  // struct_mObject.obj @ +0
     if (countOut) *countOut = objs.num;
     if (static_cast<size_t>(objs.num) > maxRecords) return false;
-    const int32_t stride = SR::RecordStride();
-    if (stride <= 0) return false;
     out.clear();
     out.reserve(static_cast<size_t>(objs.num));
     for (int32_t i = 0; i < objs.num; ++i) {

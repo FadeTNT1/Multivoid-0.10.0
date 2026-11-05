@@ -25,15 +25,15 @@ namespace E = ue_wrap::engine;
 std::atomic<bool> g_resolved{false};
 
 void*   g_grimeCls       = nullptr;  // grime_C UClass
-int32_t g_processOff     = -1;       // Agrime_C::process    (Alpha 0.9.0-n: 0x0250)
+int32_t g_processOff     = -1;       // Agrime_C::process    (reflected only, written)
 int32_t g_typeOff        = -1;       // Agrime_C::Type       (Alpha 0.9.0-n: 0x024C)
 void*   g_applyMaterialFn = nullptr; // Agrime_C::applyMaterial() -- builds the dynamic material
 int32_t g_dynmatOff      = -1;       // Agrime_C::dynmat (the decal's material instance)
 int32_t g_cleanParamOff  = -1;       // Agrime_C::cleanParameter (the scalar's name; varies by subclass)
 
-// Fallbacks for the current game build, used only if the reflected lookup misses. grime_C is a
-// blueprint class, so it is in no header dump; these came from the live class layout.
-constexpr int32_t kProcessOffFallback = 0x0250;
+// Fallback for the current game build, used only if the reflected lookup misses, and only for the READ-ONLY
+// Type. `process` is WRITTEN (WriteProcessAndApply), so it has no numeric fallback. grime_C is a blueprint
+// class, so it is in no header dump; the value came from the live class layout.
 constexpr int32_t kTypeOffFallback    = 0x024C;
 
 }  // namespace
@@ -44,11 +44,10 @@ bool EnsureResolved() {
     void* grimeCls = R::FindClass(L"grime_C");
     if (!grimeCls) return false;  // BP class not loaded yet -- caller retries
 
-    int32_t processOff = R::FindPropertyOffset(grimeCls, L"process");
-    if (processOff < 0) {
-        UE_LOGW("grime: reflected process offset not found -- using fallback 0x%04X", kProcessOffFallback);
-        processOff = kProcessOffFallback;
-    }
+    const int32_t processOff = R::FindPropertyOffset(grimeCls, L"process");
+    if (processOff < 0)
+        UE_LOGW("grime: reflected process offset not found -- it is WRITTEN, so there is no numeric fallback: "
+                "a mirrored wipe is neither read nor applied (this line prints once)");
     int32_t typeOff = R::FindPropertyOffset(grimeCls, L"Type");
     if (typeOff < 0) {
         UE_LOGW("grime: reflected Type offset not found -- using fallback 0x%04X", kTypeOffFallback);

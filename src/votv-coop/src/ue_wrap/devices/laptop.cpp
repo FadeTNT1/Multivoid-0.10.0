@@ -1,5 +1,6 @@
 // ue_wrap/devices/laptop.cpp -- see ue_wrap/devices/laptop.h. Offsets resolved live via
-// reflection; the Alpha 0.9.0-n fallbacks come from the CXX header dump.
+// reflection; the Alpha 0.9.0-n fallbacks come from the CXX header dump. Only the READ-ONLY offsets
+// keep one: every field this wrapper writes or acts through (the disc quad, Widget) is reflected or refused.
 
 #include "ue_wrap/devices/laptop.h"
 
@@ -41,6 +42,11 @@ int32_t g_offWidget = -1;
 int32_t g_offFloppyBuffer = -1;     // laptop.floppyBuffer (TArray<FString>)
 int32_t g_offFloppyBufUids = -1;    // laptop.floppyBufferUIDs (TArray<int32>)
 int32_t g_offFloppyProcess = -1;   // laptop.floppyProcess (bool): the slot timeline is moving a disc
+bool    g_quadOk = false;          // floppyData, floppyBuffer, floppyBufferUIDs and floppyReadwrites all reflected
+
+// The disc quad is WRITTEN (array headers and an int), so each of its four members is reflected or the
+// quad is not read, written or rebuilt at all -- a guessed offset would land the write in another field.
+bool QuadReady() { return g_quadOk; }
 bool    g_resolved = false;
 uint64_t g_nextResolveTryMs = 0;
 
@@ -72,14 +78,12 @@ bool EnsureResolved() {
     void* cls = R::FindClass(L"laptop_C");
     if (!cls) return false;
 
+    // READ-ONLY members keep their logged 0.9.0n fallback: powered, isOpened and Anim are only read.
     struct Row { const wchar_t* name; int32_t* slot; int32_t fallback; };
     const Row rows[] = {
         { L"powered",          &g_offPowered,     0x42B },
         { L"isOpened",         &g_offIsOpened,    0x418 },
         { L"Anim",             &g_offAnim,        0x42A },
-        { L"floppyReadwrites", &g_offReadWrites,  0x4E8 },
-        { L"floppyData",       &g_offFloppyData,  0x458 },
-        { L"Widget",           &g_offWidget,      0x420 },
     };
     for (const Row& r : rows) {
         *r.slot = R::FindPropertyOffset(cls, r.name);
@@ -88,14 +92,24 @@ bool EnsureResolved() {
             *r.slot = r.fallback;
         }
     }
+    // The quad is written, and Widget is the object whose bufferSlots the rebuild empties and whose verbs it
+    // calls: reflected only (WidgetOf is null while Widget is unresolved).
+    g_offWidget = R::FindPropertyOffset(cls, L"Widget");
+    if (g_offWidget < 0) UE_LOGW("laptop: Widget not found -- no fallback (the widget is acted on); the disc rebuild is off");
+    g_offReadWrites = R::FindPropertyOffset(cls, L"floppyReadwrites");
+    g_offFloppyData = R::FindPropertyOffset(cls, L"floppyData");
     const bool action = R::FindDispatchFunctionCached(cls, L"actionOptionIndex") != nullptr;
     if (!action) UE_LOGW("laptop: actionOptionIndex not found -- power replay disabled");
 
     // The buffer fields.
     g_offFloppyBuffer  = R::FindPropertyOffset(cls, L"floppyBuffer");
     g_offFloppyBufUids = R::FindPropertyOffset(cls, L"floppyBufferUIDs");
-    if (g_offFloppyBuffer < 0)  { UE_LOGW("laptop: floppyBuffer offset -- fallback 0x4B8"); g_offFloppyBuffer = 0x4B8; }
-    if (g_offFloppyBufUids < 0) { UE_LOGW("laptop: floppyBufferUIDs offset -- fallback 0x4D8"); g_offFloppyBufUids = 0x4D8; }
+    g_quadOk = g_offReadWrites >= 0 && g_offFloppyData >= 0 && g_offFloppyBuffer >= 0 && g_offFloppyBufUids >= 0;
+    if (!g_quadOk)
+        UE_LOGW("laptop: the disc quad does not all reflect (floppyReadwrites=%d floppyData=%d floppyBuffer=%d "
+                "floppyBufferUIDs=%d) -- it is written, so there is no numeric fallback: the quad is NOT read, "
+                "written or rebuilt (this line prints once)",
+                g_offReadWrites, g_offFloppyData, g_offFloppyBuffer, g_offFloppyBufUids);
     // No fallback: a busy flag read from a guessed offset would answer for a field it is not.
     g_offFloppyProcess = R::FindPropertyOffset(cls, L"floppyProcess");
     if (g_offFloppyProcess < 0) UE_LOGW("laptop: floppyProcess not found -- the slot reads as never busy");
@@ -179,7 +193,7 @@ bool CallPowerToggle() {
 
 bool ReadQuad(BufferQuad& out) {
     void* l = Instance();
-    if (!l) return false;
+    if (!l || !QuadReady()) return false;
     const uint8_t* p = reinterpret_cast<const uint8_t*>(l);
     out.data       = ReadFStringArrayField(l, g_offFloppyData);
     out.buffer     = ReadFStringArrayField(l, g_offFloppyBuffer);
@@ -190,7 +204,7 @@ bool ReadQuad(BufferQuad& out) {
 
 bool ReadQuadInts(int32_t& fdNum, int32_t& fbNum, int32_t& uidNum, int32_t& rw) {
     void* l = Instance();
-    if (!l) return false;
+    if (!l || !QuadReady()) return false;
     const uint8_t* p = reinterpret_cast<const uint8_t*>(l);
     auto num = [&](int32_t off) -> int32_t {
         if (off < 0) return 0;
@@ -206,7 +220,7 @@ bool ReadQuadInts(int32_t& fdNum, int32_t& fbNum, int32_t& uidNum, int32_t& rw) 
 
 bool WriteQuadAndRebuild(const BufferQuad& in) {
     void* l = Instance();
-    if (!l) return false;
+    if (!l || !QuadReady()) return false;
     uint8_t* p = reinterpret_cast<uint8_t*>(l);
     bool wrote = true;
     wrote &= WriteFStringArrayField(l, g_offFloppyData, in.data);

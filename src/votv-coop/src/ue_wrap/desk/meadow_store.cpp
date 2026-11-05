@@ -124,6 +124,14 @@ TArrayView* Rows() {
         reinterpret_cast<uint8_t*>(slotObj) + g_offSlotSignals);
 }
 
+// The rows array for a BYTE walk or rewrite: Rows(), once the engine's ElementSize for savedSignals_0 has agreed
+// with the measured row stride (signal_dynamic::ArrayHoldsRows says so once on a mismatch). Count and the removal
+// verb never step by the stride, so they keep Rows().
+TArrayView* RowsVerified() {
+    TArrayView* a = Rows();
+    return a && SD::ArrayHoldsRows(R::ClassOf(Database()), L"savedSignals_0") ? a : nullptr;
+}
+
 }  // namespace
 
 bool EnsureResolved() {
@@ -161,7 +169,7 @@ int32_t Count() {
 }
 
 bool ReadRow(int32_t index, SD::Row& out) {
-    TArrayView* a = Rows();
+    TArrayView* a = RowsVerified();
     const int32_t stride = SD::Stride();
     if (!a || index < 0 || index >= a->num || stride <= 0) return false;
     return SD::ReadStruct(a->data + static_cast<size_t>(index) * static_cast<size_t>(stride), out);
@@ -210,7 +218,7 @@ bool ApplyRemoveSignal(int32_t index) {
 }
 
 bool ReorderRows(const int32_t* srcIdx, int32_t n) {
-    TArrayView* a = Rows();
+    TArrayView* a = RowsVerified();
     if (!a || !srcIdx || n != a->num || n <= 0) return false;
     std::vector<bool> seen(static_cast<size_t>(n), false);
     for (int32_t i = 0; i < n; ++i) {

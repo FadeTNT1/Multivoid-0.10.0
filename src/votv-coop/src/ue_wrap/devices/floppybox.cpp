@@ -27,8 +27,14 @@ void ResolveMembers(void* cls) {
     g_cls = cls;
     g_offTypes = R::FindPropertyOffset(cls, L"floppyTypes");
     g_offData  = R::FindPropertyOffset(cls, L"floppyData");
-    if (g_offTypes < 0) { UE_LOGW("floppybox: floppyTypes offset -- fallback 0x3A8"); g_offTypes = 0x3A8; }
-    if (g_offData < 0)  { UE_LOGW("floppybox: floppyData offset -- fallback 0x3B8"); g_offData = 0x3B8; }
+    // Both arrays are WRITTEN (WriteArraysAndGen), so neither has a numeric fallback: a member that does not
+    // reflect takes BOTH out (a box read or written through half its fields is not a box), and every entry
+    // point below refuses on -1.
+    if (g_offTypes < 0 || g_offData < 0) {
+        UE_LOGW("floppybox: floppyTypes=%d floppyData=%d -- written, so no numeric fallback: the box is neither "
+                "read nor written (this line prints once)", g_offTypes, g_offData);
+        g_offTypes = g_offData = -1;
+    }
     g_fnGen = R::FindFunction(cls, L"gen");
     if (!g_fnGen)
         UE_LOGW("floppybox: gen() not found -- visual rebuild disabled");

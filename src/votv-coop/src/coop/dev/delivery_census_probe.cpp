@@ -22,7 +22,7 @@
 #include "ue_wrap/actors/inventory.h"    // ResolveSaveSlot
 #include "ue_wrap/actors/prop.h"         // GetInteractableKeyString
 #include "ue_wrap/engine/engine.h"       // TryGetActorLocation
-#include "ue_wrap/actors/save_record.h"  // Arr / ReadArr / kMxStride
+#include "ue_wrap/actors/save_record.h"  // Arr / ReadArr / GObjStackView
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 
@@ -91,11 +91,10 @@ int32_t ContentsOf(void* inv, int32_t index) {
     if (!inv || index < 0) return -1;
     void* save = ue_wrap::inventory::ResolveSaveSlot();
     if (!save) return -1;
-    const int32_t offStack = Off(R::ClassOf(save), L"GObjStack");
-    if (offStack < 0) return -1;
-    const SR::Arr stack = SR::ReadArr(save, offStack);
-    if (index >= stack.num) return -1;
-    const uint8_t* slot = stack.data + static_cast<size_t>(index) * SR::kMxStride;
+    SR::GObjStackView stack;   // the engine-verified shape (measured outer stride)
+    if (!SR::ReadGObjStack(save, stack)) return -1;
+    const uint8_t* slot = stack.Slot(index);
+    if (!slot) return -1;
     return SR::ReadArr(slot, 0).num;  // struct_mObject.obj @ +0
 }
 
@@ -190,12 +189,11 @@ void Tick(bool isHost) {
     {
         std::vector<int32_t> cur;
         if (void* save = ue_wrap::inventory::ResolveSaveSlot()) {
-            const int32_t offStack = Off(R::ClassOf(save), L"GObjStack");
-            if (offStack >= 0) {
-                const SR::Arr stack = SR::ReadArr(save, offStack);
+            SR::GObjStackView stack;
+            if (SR::ReadGObjStack(save, stack)) {
                 cur.reserve(static_cast<size_t>(stack.num));
                 for (int32_t i = 0; i < stack.num; ++i)
-                    cur.push_back(SR::ReadArr(stack.data + static_cast<size_t>(i) * SR::kMxStride, 0).num);
+                    cur.push_back(SR::ReadArr(stack.Slot(i), 0).num);
             }
         }
         if (!g_prevSlots.empty() || !cur.empty()) {

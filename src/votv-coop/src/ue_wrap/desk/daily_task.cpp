@@ -31,17 +31,44 @@ struct TArrayRaw {
     int32_t max;
 };
 
-int32_t g_offTaskNew = -1;  // saveSlot_C::taskNew (reflected; fallback 0x0CA8)
+int32_t g_offTaskNew = -1;      // saveSlot_C::taskNew (reflected only: the struct is WRITTEN, no fallback)
+int32_t g_taskState = 0;        // 0 = not judged yet, 1 = taskNew reads as the layout below, -1 = refused
+void*   g_taskCls = nullptr;    // the save class the verdict was reached on
+
+// The struct-internal offsets above are the 0.9.0n layout. They are checked against the running struct (every
+// one must be a member of the size it is read and written at) before anything touches taskNew, so a build that
+// moved a member is refused rather than written through the old offsets.
+bool TaskLayoutMatches(void* taskStruct) {
+    struct Expect { int32_t off; int32_t size; };
+    static constexpr Expect kExpect[] = {
+        {kOffActive, 1}, {kOffSigRequired, 16}, {kOffSigCompleted, 16}, {kOffRequiredDishes, 16},
+        {kOffRewardSig, 4}, {kOffRewardSat, 4}, {kOffReelBig, 4}, {kOffReelSmall, 4}};
+    const auto fields = R::EnumerateStructFields(taskStruct);
+    for (const Expect& e : kExpect) {
+        bool found = false;
+        for (const R::StructFieldInfo& f : fields) found |= f.offset == e.off && f.size == e.size;
+        if (!found) return false;
+    }
+    return R::StructSize(taskStruct) >= kOffReelSmall + 4;
+}
 
 uint8_t* TaskNewBase() {
     void* save = ue_wrap::economy::SaveSlotPtr();
     if (!save) return nullptr;
-    if (g_offTaskNew < 0) {
-        g_offTaskNew = R::FindPropertyOffset(R::ClassOf(save), L"taskNew");
-        if (g_offTaskNew < 0) {
-            UE_LOGW("daily_task: taskNew offset not found -- using fallback 0x0CA8");
-            g_offTaskNew = 0x0CA8;
+    void* cls = R::ClassOf(save);
+    if (cls != g_taskCls) { g_taskCls = cls; g_taskState = 0; g_offTaskNew = -1; }
+    if (g_taskState < 0) return nullptr;
+    if (g_taskState == 0) {
+        g_offTaskNew = R::FindPropertyOffset(cls, L"taskNew");
+        void* inner = g_offTaskNew >= 0 ? R::PropertyInnerStruct(cls, L"taskNew") : nullptr;
+        if (g_offTaskNew < 0 || !inner || !TaskLayoutMatches(inner)) {
+            UE_LOGW("daily_task: saveSlot.taskNew does not reflect as the measured task struct (offset %d) -- it "
+                    "is WRITTEN, so there is no numeric fallback: the daily task is neither read nor written "
+                    "(this line prints once)", g_offTaskNew);
+            g_taskState = -1;
+            return nullptr;
         }
+        g_taskState = 1;
     }
     return reinterpret_cast<uint8_t*>(save) + g_offTaskNew;
 }

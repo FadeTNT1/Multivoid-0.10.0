@@ -56,6 +56,14 @@ TArrayView* Rows() {
     return reinterpret_cast<TArrayView*>(reinterpret_cast<uint8_t*>(gm) + g_offSavedSignals);
 }
 
+// The rows array for a BYTE walk: Rows(), once the engine's ElementSize for savedSignals_0 has agreed with the
+// measured row stride (signal_dynamic::ArrayHoldsRows says so once on a mismatch). Count and the delete verb
+// never step by the stride, so they keep Rows().
+TArrayView* RowsVerified() {
+    TArrayView* a = Rows();
+    return a && SD::ArrayHoldsRows(R::ClassOf(world_singleton::Gamemode()), L"savedSignals_0") ? a : nullptr;
+}
+
 }  // namespace
 
 bool EnsureResolved() {
@@ -71,14 +79,14 @@ int32_t Count() {
 }
 
 bool ReadRow(int32_t index, SD::Row& out, bool withImage) {
-    TArrayView* a = Rows();
+    TArrayView* a = RowsVerified();
     const int32_t stride = SD::Stride();
     if (!a || index < 0 || index >= a->num || stride <= 0) return false;
     return SD::ReadStruct(a->data + static_cast<size_t>(index) * static_cast<size_t>(stride), out, withImage);
 }
 
 bool ReadRowKey(int32_t index, RowKey& out) {
-    TArrayView* a = Rows();
+    TArrayView* a = RowsVerified();
     const SD::Layout* L = SD::GetLayout();
     if (!a || !L || index < 0 || index >= a->num) return false;
     const uint8_t* rp = a->data + static_cast<size_t>(index) * static_cast<size_t>(L->stride);

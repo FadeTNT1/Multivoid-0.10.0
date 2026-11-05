@@ -2,7 +2,9 @@
 // world clock (AdaynightCycle_C).
 //
 // Offsets are resolved from the live class via reflection (FindPropertyOffset); the known
-// Alpha 0.9.0-n offsets are a logged fallback if the reflected walk ever fails.
+// Alpha 0.9.0-n offsets are a logged fallback if the reflected walk ever fails -- for the READ-ONLY MaxTime
+// and timeZ only. totalTime, Day and TimeScale are WRITTEN (ApplyClock, WriteTimeScale), so they are
+// reflected or the clock is neither read nor written (said once).
 
 #include "ue_wrap/world/daynightcycle.h"
 
@@ -21,9 +23,9 @@ namespace R = reflection;
 
 std::atomic<bool> g_resolved{false};
 void*   g_cycleCls    = nullptr;  // daynightCycle_C UClass
-int32_t g_totalTimeOff = -1;      // AdaynightCycle_C::totalTime (Alpha 0.9.0-n: 0x02B0)
-int32_t g_dayOff       = -1;      // AdaynightCycle_C::Day       (0x0298)
-int32_t g_timeScaleOff = -1;      // AdaynightCycle_C::TimeScale (0x02B4)
+int32_t g_totalTimeOff = -1;      // AdaynightCycle_C::totalTime (reflected only, written)
+int32_t g_dayOff       = -1;      // AdaynightCycle_C::Day       (reflected only, written)
+int32_t g_timeScaleOff = -1;      // AdaynightCycle_C::TimeScale (reflected only, written)
 int32_t g_maxTimeOff   = -1;      // AdaynightCycle_C::MaxTime   (0x02AC) -- one day's length in totalTime units
 int32_t g_timeZOff     = -1;      // AdaynightCycle_C::timeZ     (0x02D0) -- FIntVector (hour, minute, DAY)
 // The rate inputs, read by instruments only, so no fallback: an unresolved one fails the read.
@@ -32,9 +34,6 @@ int32_t g_diffMultOff  = -1;      // AdaynightCycle_C::diff_mult
 int32_t g_settingMpOff = -1;      // AdaynightCycle_C::settingMultiplayer (the rules' day speed)
 int32_t g_sleepDilOff  = -1;      // AdaynightCycle_C::sleepingTimeDilation
 
-constexpr int32_t kTotalTimeOffFallback = 0x02B0;
-constexpr int32_t kDayOffFallback       = 0x0298;
-constexpr int32_t kTimeScaleOffFallback = 0x02B4;
 constexpr int32_t kMaxTimeOffFallback   = 0x02AC;
 constexpr int32_t kTimeZOffFallback     = 0x02D0;
 
@@ -53,12 +52,17 @@ bool EnsureResolved() {
     void* cls = R::FindClass(L"daynightCycle_C");
     if (!cls) return false;  // not loaded yet -- caller retries
 
+    // The three the clock WRITES: reflected only. One missing takes all three out, since a half-read clock
+    // (a total with someone else's Day) is a wrong time, not a degraded one.
     int32_t totalOff = R::FindPropertyOffset(cls, L"totalTime");
-    if (totalOff < 0) totalOff = kTotalTimeOffFallback;
     int32_t dayOff = R::FindPropertyOffset(cls, L"Day");
-    if (dayOff < 0) dayOff = kDayOffFallback;
     int32_t scaleOff = R::FindPropertyOffset(cls, L"TimeScale");
-    if (scaleOff < 0) scaleOff = kTimeScaleOffFallback;
+    if (totalOff < 0 || dayOff < 0 || scaleOff < 0) {
+        UE_LOGW("daynightcycle: totalTime=%d Day=%d TimeScale=%d -- these are WRITTEN, so there is no numeric "
+                "fallback: the world clock is neither read nor written (this line prints once)",
+                totalOff, dayOff, scaleOff);
+        totalOff = dayOff = scaleOff = -1;
+    }
     int32_t maxOff = R::FindPropertyOffset(cls, L"MaxTime");
     if (maxOff < 0) maxOff = kMaxTimeOffFallback;
     int32_t timeZOff = R::FindPropertyOffset(cls, L"timeZ");
@@ -90,7 +94,7 @@ void* Cycle() {
 }
 
 bool ReadClockOf(void* cycle, float& totalTime, float& day, float& timeScale) {
-    if (!cycle || g_totalTimeOff < 0) return false;
+    if (!cycle || g_totalTimeOff < 0 || g_dayOff < 0 || g_timeScaleOff < 0) return false;
     const char* base = reinterpret_cast<const char*>(cycle);
     totalTime = *reinterpret_cast<const float*>(base + g_totalTimeOff);
     day       = *reinterpret_cast<const float*>(base + g_dayOff);
@@ -111,7 +115,7 @@ bool ReadMaxTimeOf(void* cycle, float& maxTime) {
 bool ReadMaxTime(float& maxTime) { return ReadMaxTimeOf(Cycle(), maxTime); }
 
 void ApplyClockOf(void* cycle, float totalTime, float day) {
-    if (!cycle || g_totalTimeOff < 0) return;
+    if (!cycle || g_totalTimeOff < 0 || g_dayOff < 0) return;
     char* base = reinterpret_cast<char*>(cycle);
     *reinterpret_cast<float*>(base + g_totalTimeOff) = totalTime;
     *reinterpret_cast<float*>(base + g_dayOff)       = day;

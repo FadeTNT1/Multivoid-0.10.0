@@ -1,6 +1,7 @@
 // ue_wrap/world/skysphere.cpp -- see ue_wrap/world/skysphere.h. Engine access for the night-sky
-// actor (Anewsky_C). The two actor offsets are resolved from the live class via reflection,
-// with the Alpha 0.9.0-n values as logged fallbacks; saveSlot.moonPhase is resolved lazily, by
+// actor (Anewsky_C). The two actor offsets are resolved from the live class via reflection;
+// moonPhase_mirror (read-only) keeps the Alpha 0.9.0-n value as a logged fallback, while `sky` is
+// the component ApplySky rotates, so it has none; saveSlot.moonPhase is resolved lazily, by
 // name only, and stays inert if it cannot be found. Mirrors ue_wrap/world/daynightcycle.cpp's cache
 // + resolve shape.
 
@@ -25,12 +26,11 @@ namespace R = reflection;
 namespace E = engine;
 
 std::atomic<bool> g_resolved{false};
-int32_t g_skyCompOff     = -1;       // Anewsky_C::sky (UStaticMeshComponent*)
+int32_t g_skyCompOff     = -1;       // Anewsky_C::sky (UStaticMeshComponent*; reflected only, rotated)
 int32_t g_moonPhaseOff   = -1;       // Anewsky_C::moonPhase_mirror (float)
 int32_t g_saveMoonOff    = -2;       // UsaveSlot_C::moonPhase (float); -2 = not looked at yet, -1 = looked and failed
 void*   g_timerClearedFor = nullptr; // the newsky actor whose setMoonPhase timer we already cleared
 
-constexpr int32_t kSkyCompOffFallback   = 0x0250;
 constexpr int32_t kMoonPhaseOffFallback = 0x02BC;
 
 ue_wrap::CachedObjRef g_skyCache;  // cached singleton; game thread only
@@ -86,11 +86,12 @@ bool EnsureResolved() {
     void* cls = R::FindClass(L"newsky_C");
     if (!cls) return false;  // not loaded yet -- caller retries
 
-    int32_t skyOff = R::FindPropertyOffset(cls, L"sky");
-    if (skyOff < 0) {
-        UE_LOGW("skysphere: reflected sky offset not found -- using fallback 0x%04X", kSkyCompOffFallback);
-        skyOff = kSkyCompOffFallback;
-    }
+    // `sky` is the component ApplySky sets the world rotation of: an offset that is not its own would hand
+    // that write to whatever object the field holds, so it is reflected or the sky is neither read nor rotated.
+    const int32_t skyOff = R::FindPropertyOffset(cls, L"sky");
+    if (skyOff < 0)
+        UE_LOGW("skysphere: reflected sky offset not found -- the component is WRITTEN (rotated), so there is "
+                "no numeric fallback: the star orientation is neither read nor applied (this line prints once)");
     int32_t moonOff = R::FindPropertyOffset(cls, L"moonPhase_mirror");
     if (moonOff < 0) {
         UE_LOGW("skysphere: reflected moonPhase_mirror offset not found -- using fallback 0x%04X", kMoonPhaseOffFallback);

@@ -40,8 +40,11 @@ WriteResult WriteRecords(uint32_t eid, void* inv, const std::vector<SR::SaveReco
                 "Player flag) -- refusing to apply", eid);
         return WriteResult::Refused;                  // resolved; deliberately not applied
     }
-    uint8_t* slot = ci::ContentsSlot(inv);
-    if (!slot) return WriteResult::NotReady;
+    // The slot and the element stride are the engine's, measured off the save class (save_record::
+    // ReadGObjStack); a GObjStack that does not measure as record arrays is not written to.
+    int32_t stride = 0;
+    uint8_t* slot = ci::ContentsSlot(inv, &stride);
+    if (!slot || stride <= 0) return WriteResult::NotReady;
 
     // The allocator pre-flight: without it an empty array would silently replace real contents.
     if (void* probe = R::EngineAlloc(16)) {
@@ -51,9 +54,6 @@ WriteResult WriteRecords(uint32_t eid, void* inv, const std::vector<SR::SaveReco
         return WriteResult::Refused;
     }
 
-    // The element stride is the running record struct's, measured; unmeasured, nothing is written.
-    const int32_t stride = SR::RecordStride();
-    if (stride <= 0) return WriteResult::NotReady;
     const int32_t n = static_cast<int32_t>(recs.size());
     void* buf = SR::AllocZeroed(static_cast<size_t>(n), static_cast<size_t>(stride));
     if (!buf && n > 0) {

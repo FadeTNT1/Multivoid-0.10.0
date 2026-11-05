@@ -8,7 +8,7 @@
 #include "coop/dev/director/dup_verifier.h"
 
 #include "ue_wrap/actors/inventory.h"     // ResolveSaveSlot, ReadAll, PlayerInventory
-#include "ue_wrap/actors/save_record.h"   // SaveRecord, ReadSaveRecord, ReadArr, kMxStride, kSaveStride
+#include "ue_wrap/actors/save_record.h"   // SaveRecord, ReadSaveRecord, ReadArr, GObjStackView
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 
@@ -51,8 +51,9 @@ uint64_t ContentHash(const SR::SaveRecord& r) {
 
 // Read the container's propInventory GObjStack slice base (the TArray<Fstruct_save> for its index).
 // Self-contained: resolves the offsets directly, not via the sync lane. Null if unresolvable.
-const uint8_t* ContainerSliceBase(void* containerActor, int32_t& outNum) {
+const uint8_t* ContainerSliceBase(void* containerActor, int32_t& outNum, int32_t& outStride) {
     outNum = 0;
+    outStride = 0;
     if (!containerActor) return nullptr;
     const int32_t offPropInv = R::FindPropertyOffset(R::ClassOf(containerActor), L"propInventory");
     if (offPropInv < 0) return nullptr;
@@ -61,17 +62,18 @@ const uint8_t* ContainerSliceBase(void* containerActor, int32_t& outNum) {
     if (!inv || !R::IsLive(inv)) return nullptr;
     void* save = INV::ResolveSaveSlot();
     if (!save) return nullptr;
-    const int32_t offStack = R::FindPropertyOffset(R::ClassOf(save), L"GObjStack");
     const int32_t offIndex = R::FindPropertyOffset(R::ClassOf(inv), L"Index");
-    if (offStack < 0 || offIndex < 0) return nullptr;
+    if (offIndex < 0) return nullptr;
     int32_t idx = -1;
     std::memcpy(&idx, reinterpret_cast<const uint8_t*>(inv) + offIndex, sizeof(idx));
     if (idx < 0) return nullptr;
-    const SR::Arr outer = SR::ReadArr(save, offStack);
-    if (idx >= outer.num) return nullptr;
-    const uint8_t* slice = outer.data + static_cast<size_t>(idx) * SR::kMxStride;   // Fstruct_mObject
+    SR::GObjStackView outer;   // the engine-verified shape: element strides are measured, not constants
+    if (!SR::ReadGObjStack(save, outer)) return nullptr;
+    const uint8_t* slice = outer.Slot(idx);   // Fstruct_mObject
+    if (!slice) return nullptr;
     const SR::Arr inner = SR::ReadArr(slice, 0);   // TArray<Fstruct_save> @ +0
     outNum = inner.num;
+    outStride = outer.recordStride;
     return inner.data;
 }
 }  // namespace
@@ -87,11 +89,11 @@ ItemSig SigOf(const SR::SaveRecord& rec) {
 
 ItemSig CaptureContainerSlotSig(void* containerActor, int32_t slotIdx) {
     int32_t num = 0;
-    const uint8_t* base = ContainerSliceBase(containerActor, num);
-    if (!base || slotIdx < 0 || slotIdx >= num) return {};
+    int32_t stride = 0;
+    const uint8_t* base = ContainerSliceBase(containerActor, num, stride);
+    if (!base || stride <= 0 || slotIdx < 0 || slotIdx >= num) return {};
     SR::SaveRecord rec;
-    if (SR::RecordStride() <= 0) return {};
-    SR::ReadSaveRecord(base + static_cast<size_t>(slotIdx) * static_cast<size_t>(SR::RecordStride()), rec);
+    SR::ReadSaveRecord(base + static_cast<size_t>(slotIdx) * static_cast<size_t>(stride), rec);
     const ItemSig s = SigOf(rec);
     UE_LOGI("dup_verifier: captured X from container slot %d -- cls=%ls key=%ls hash=%016llx valid=%d",
             slotIdx, s.className.c_str(), s.key.c_str(), static_cast<unsigned long long>(s.contentHash), s.valid ? 1 : 0);
@@ -108,16 +110,15 @@ int CountItemInstances(const ItemSig& x, bool print) {
     // (1) The WHOLE global GObjStack -- every propInventory index (world containers AND, per
     // lesson_container_contents_live_in_one_global_gobjstack, player inventories carry a `player` flag
     // but live in the SAME store). Walk every outer element's inner TArray<Fstruct_save>.
-    const int32_t offStack = R::FindPropertyOffset(R::ClassOf(save), L"GObjStack");
-    if (offStack >= 0) {
-        const SR::Arr outer = SR::ReadArr(save, offStack);
+    SR::GObjStackView outer;
+    if (SR::ReadGObjStack(save, outer)) {
         for (int32_t i = 0; i < outer.num; ++i) {
-            const uint8_t* slice = outer.data + static_cast<size_t>(i) * SR::kMxStride;
+            const uint8_t* slice = outer.Slot(i);
             const SR::Arr inner = SR::ReadArr(slice, 0);
             if (inner.num > 0) ++scannedSlices;
             for (int32_t j = 0; j < inner.num; ++j) {
                 SR::SaveRecord rec;
-                if (!SR::ReadSaveRecord(inner.data + static_cast<size_t>(j) * static_cast<size_t>(SR::RecordStride()), rec)) break;
+                if (!SR::ReadSaveRecord(inner.data + static_cast<size_t>(j) * static_cast<size_t>(outer.recordStride), rec)) break;
                 ++scannedRows;
                 if (SigOf(rec) == x) {
                     ++gobj;
@@ -127,7 +128,7 @@ int CountItemInstances(const ItemSig& x, bool print) {
             }
         }
     } else {
-        UE_LOGW("dup_verifier: could not resolve saveSlot.GObjStack offset -- GObjStack count is BLIND");
+        UE_LOGW("dup_verifier: saveSlot.GObjStack did not measure (layout unmeasured or refused) -- GObjStack count is BLIND");
     }
 
     // (2) What the player wears and holds (saveSlot.equipment, saveSlot.hold): the two player
