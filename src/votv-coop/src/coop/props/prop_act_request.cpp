@@ -178,13 +178,12 @@ void SendCommit(uint8_t committed) {
 // function that does not resolve, a player or target that is not live), as distinct from a verb that ran and bailed.
 bool RunVerb(void* target, void* local) {
     switch (g_rec.row) {
-    case kPocket: {
-        bool taken = false;
-        return E::CallPutObjectInventory2(local, target, g_rec.noNotify, taken);
-    }
+    case kPocket:
     case kHold: {
-        bool collected = false;
-        return E::CallMainPlayerHoldObject(local, target, collected);
+        // 0.10.0 has one take: the pocket key and the hand take both end in addObjectToInventory (the old
+        // putObjectInventory2 and Hold Object are deprecated stubs), so both rows replay through it.
+        bool taken = false;
+        return E::CallAddObjectToInventory(local, target, taken);
     }
     case kFood:
     case kMre:
@@ -252,13 +251,15 @@ void NoteStale(const coop::net::PropActReplyPayload& p) {
 
 // Every verb that takes a shared prop into a player's hands, pockets or mouth, watched at the entry of its body by
 // name. A Declared row is the class's own body: prop_food_C's is reached too by the descendants that inherit it.
-UE_FACT_FN(kRowPocket, "prop_act", L"mainPlayer_C",      L"putObjectInventory2", Declared);
-UE_FACT_FN(kRowHold,   "prop_act", L"mainPlayer_C",      L"Hold Object",         Declared);
+// 0.10.0: the take of a prop into a player's inventory is mainPlayer_C::addObjectToInventory(object, out success),
+// which the pocket key and the hand take both run. The physical grab (pickupObject(hit), beginHoldingObject) moves
+// no prop out of the world and is the grab lanes', so it is not watched here: a cancel would stop a client's grab.
+UE_FACT_FN(kRowPocket, "prop_act", L"mainPlayer_C",      L"addObjectToInventory", Declared);
 UE_FACT_FN(kRowFood,   "prop_act", L"prop_food_C",       L"actionOptionIndex",   Declared);
 UE_FACT_FN(kRowMre,    "prop_act", L"prop_food_mre_C",   L"actionOptionIndex",   Declared);
 UE_FACT_FN(kRowPills,  "prop_act", L"prop_sleeppills_C", L"actionOptionIndex",   Declared);
 UE_FACT_FN(kRowSoap,   "prop_act", L"prop_food_soap_C",  L"playerUsedOn",        Declared);
-constexpr int kTagPocket = 0x50414331, kTagHold = 0x50414332, kTagFood = 0x50414333,
+constexpr int kTagPocket = 0x50414331, kTagFood = 0x50414333,
               kTagMre = 0x50414334, kTagPills = 0x50414335, kTagSoap = 0x50414336;   // "PAC1".."PAC6"
 
 // The action index of eating, opening a food and taking pills.
@@ -406,8 +407,7 @@ sg::Verdict RunUnreadable(const ue_wrap::facts::Function& row, bool& said) {
 sg::Verdict PrePocket(const sg::Call& c) {
     coop::net::Session* const s = LinkedSession();
     if (!s || !coop::players::Registry::Get().IsLocal(c.object)) return sg::Verdict::Run;
-    static R::ParamOffset sTarget{L"InputPin"};
-    static R::ParamOffset sNoNotify{L"noNotify"};
+    static R::ParamOffset sTarget{L"object"};
     static bool sSaid = false;
     void* target = nullptr;
     const bool readable = ReadParam(sTarget, c, target);
@@ -420,44 +420,7 @@ sg::Verdict PrePocket(const sg::Call& c) {
     p.eid = eid;
     p.row = kPocket;
     p.target.Set(target);
-    uint8_t noNotify = 0;
-    ReadParam(sNoNotify, c, noNotify);
-    p.noNotify = noNotify != 0;
     Ask(p, PropActFamily::Pocket);
-    return sg::Verdict::Cancel;
-}
-
-// The target Hold Object takes, by the body's own rule: `manual`, else the grabbed actor when `useHold`, else the one
-// looked at. `readable` is false when the frame lacks a parameter that decides it.
-void* HoldTarget(const sg::Call& c, bool& readable) {
-    static R::ParamOffset sManual{L"manual"};
-    static R::ParamOffset sUseHold{L"useHold"};
-    void* manual = nullptr;
-    readable = ReadParam(sManual, c, manual);
-    if (manual) return manual;
-    uint8_t useHold = 0;
-    readable = ReadParam(sUseHold, c, useHold) && readable;
-    if (!useHold) return E::ReadMainPlayerLookAtActor(c.object);
-    E::MainPlayerGrabState grab{};
-    return E::ReadMainPlayerGrabState(c.object, grab) ? grab.grabbingActor : nullptr;
-}
-
-sg::Verdict PreHold(const sg::Call& c) {
-    coop::net::Session* const s = LinkedSession();
-    if (!s || !coop::players::Registry::Get().IsLocal(c.object)) return sg::Verdict::Run;
-    static bool sSaid = false;
-    bool readable = true;
-    void* const target = HoldTarget(c, readable);
-    if (s->role() == coop::net::Role::Host) return HostPre(target);
-    if (!readable) return RunUnreadable(kRowHold, sSaid);
-    EL::ElementId eid = EL::kInvalidId;
-    const Gate g = ClientGate(c, target, nullptr, eid);
-    if (g != Gate::Ask) return ToVerdict(g);
-    Pending p;
-    p.eid = eid;
-    p.row = kHold;
-    p.target.Set(target);
-    Ask(p, PropActFamily::Hold);
     return sg::Verdict::Cancel;
 }
 
@@ -519,7 +482,6 @@ struct Watch {
 };
 Watch g_watches[] = {
     {kRowPocket, kTagPocket, &PrePocket, "take", WatchState::Pending},
-    {kRowHold,   kTagHold,   &PreHold,   "take", WatchState::Pending},
     {kRowFood,   kTagFood,   &PreFood,   "use",  WatchState::Pending},
     {kRowMre,    kTagMre,    &PreMre,    "use",  WatchState::Pending},
     {kRowPills,  kTagPills,  &PrePills,  "use",  WatchState::Pending},

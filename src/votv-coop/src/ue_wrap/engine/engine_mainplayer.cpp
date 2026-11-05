@@ -186,6 +186,17 @@ bool CallMainPlayerHoldObject(void* mainPlayer, void* target, bool& collected) {
     return true;
 }
 
+bool CallAddObjectToInventory(void* mainPlayer, void* target, bool& success) {
+    success = false;
+    if (!mainPlayer || !R::IsLive(mainPlayer) || !target) return false;
+    void* fn = R::FindDispatchFunctionCached(R::ClassOf(mainPlayer), L"addObjectToInventory");
+    if (!fn) return false;
+    ParamFrame f(fn);
+    if (!f.valid() || !f.Set<void*>(L"object", target) || !Call(mainPlayer, f)) return false;
+    success = f.Get<bool>(L"success");
+    return true;
+}
+
 bool CallPutObjectInventory2(void* mainPlayer, void* target, bool noNotify, bool& taken) {
     taken = false;
     if (!mainPlayer || !R::IsLive(mainPlayer) || !target) return false;

@@ -88,6 +88,12 @@ bool MainPlayerHasSelectedAction(void* mainPlayer);
 // its refusals. False when the function does not resolve or the call fails. Game thread.
 bool CallMainPlayerHoldObject(void* mainPlayer, void* target, bool& collected);
 
+// mainPlayer_C's addObjectToInventory(object) -> success, the 0.10.0 take of an actor into the player's inventory
+// and hotbar (the pocket key and the hand take both end here; putObjectInventory2 and Hold Object are deprecated
+// stubs there). `success` is its out parameter. False when the call could not run (the player not live, the
+// function unresolved). Game thread.
+bool CallAddObjectToInventory(void* mainPlayer, void* target, bool& success);
+
 // mainPlayer_C's putObjectInventory2(InputPin, noNotify) on `target`; `taken` is its return. False when the call could
 // not run (the player not live, the function unresolved). Game thread.
 bool CallPutObjectInventory2(void* mainPlayer, void* target, bool noNotify, bool& taken);
