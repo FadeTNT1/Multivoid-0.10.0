@@ -42,10 +42,34 @@ The host loads a world as the game's save menu does (`[RD]` `ui_saveSlots_C` app
 `trylaunch`): `LoadGameCompressed` reads the entry's `.sav` and `.meta` and the world's
 `persistent.sav`; `mainGameInstance_C::setSaveSlotObject` registers all three with the entry's
 name and the folder; the metadata's rules are copied over the game instance's `gameRules`, its mode
-over the game mode, the save's day over `startDay`; `loadObjectsFromSlot` is set and `untitled_1`
-opened (`ue_wrap/engine/engine_save`, `LoadWorld`). The rules are also copied over the save's
-`localGameRules`, the copy a joiner's transferred save carries and three blueprints read, so a
-joiner runs under the host's world rules.
+over the game mode, the save's day over `startDay`; `loadObjectsFromSlot` is set, the launch level
+put in force, and `untitled_1` opened (`ue_wrap/engine/engine_save`, `LoadWorld`). The rules are
+also copied over the save's `localGameRules`, the copy a joiner's transferred save carries and
+three blueprints read, so a joiner runs under the host's world rules.
+
+The launch level is what the game's own launch leaves before its travel: `trylaunch` sets
+`mainGameInstance_C.baseLevel` to the metadata's `starterMap` (None reads as `untitled_1`) and calls
+`lib_C::loadLevel(starterMap, ...)`, which sets `currentLevel` to that level on the game instance
+and on the metadata, and to None on its way back to the menu. `[RD]` The new level's
+`mainGamemode_C::loadObjects` restores the save -- the player's transform, every saved object, the
+player's own data through `mainPlayer_C::betterLoadData` (inventory, equipment), the triggers --
+only while `currentLevel` names a level; at None it shows the hint "Cannot load objects: current
+level none" and restores nothing. `[RD]` The boot travels with a console open, which sets none of
+this, so it writes `currentLevel`, `baseLevel` and the metadata's `currentLevel` itself
+(`PutLaunchLevelInForce`); `lib_C::loadLevel` is not called, since it saves the metadata to disk
+and travels through a gamemode that preLoad does not have. Without it, a world loaded after a
+return to the menu (or in a fresh process) kept only its day, which the boot hands over itself,
+and opened with the player at the spawn, an empty inventory and none of the world's changes; the
+next save then wrote that over the folder. The same holds for the flat-slot load a joiner uses and
+for a fresh New Game, so both name the level too. A world whose `starterMap` is another level is
+refused by name: the boot and the session know `untitled_1` only.
+
+A load is complete when the save's restore has run in the new level, not when a pawn stands in it
+(the spawn point is off the origin): `ue_wrap/engine/save_restore_watch` holds the script gate for
+the campaign and watches `loadObjects` (with the `currentLevel` it began under) and the player's
+`betterLoadData`. The boot logs the launch level, the restore and the player data; a restore that
+ran under None is logged as an error, and one not seen 30 s after the pawn appeared is logged and
+let through so the boot never hangs. A gate that cannot see the restore falls back to the pawn.
 
 The save object remembers its own folder (`saveSlot_C.savepath`, stamped at creation), and
 `saveSlot_C::saveToSlot` writes the entry, its screenshot, the persistent object and the
@@ -85,8 +109,11 @@ Two belts sit under the gates: `disableSave` held true on a client's gamemode, w
 (`ue_wrap/engine/save_to_slot_hook`) refusing a flat-slot write of the world container, which one
 trigger blueprint still makes.
 
-The host's `saveToSlot` returning is the moment its world on disk changed: the per-player
-profiles are cut beside it then (`coop/items/player_inventory_sync`, keyed on the world folder),
+The host's `saveToSlot` returning, with its entry file (`<savepath>/<slotName>.sav`) rewritten
+since the call began and not empty, is the moment its world on disk changed; the body's own return
+value is never assigned and the plugin's result is only printed, so the file is what is read. The
+write is logged with its path and size, a call that wrote nothing is logged as an error and counts
+for nothing. The per-player profiles are cut beside it then (`coop/items/player_inventory_sync`, keyed on the world folder),
 and the dedicated server's autosave runs the same `saveSlot_C::save` (`ue_wrap/engine/world_save`).
 
 ## Who owns what
@@ -118,6 +145,8 @@ file, so a joiner who leaves keeps its own worlds exactly as they were.
 | A world-save verb another blueprint overrides in a subclass is not gated; none does in 0.10.0 | `[RD]` the capture lists no override |
 | After a session ends with the mirror still loaded, the verb gates stop with the session's hold of the script gate; `disableSave` and the flat-slot gate stay | `[RD]` `coop/session/subsystems` holds the gate for the session |
 | Folder loading, the client refusal line and Create world are verified by build and by reading the game's bytecode; the in-game run is pending | `[?]` |
+| The launch level (`currentLevel`) and the restore watch are verified by build and by reading the game's bytecode; the in-game run of save, menu, reload is pending | `[?]` |
+| A world whose metadata names a starter map other than `untitled_1` is refused | `[RD]` every boot and session path keys on `untitled_1` |
 
 ## Code map
 
@@ -125,7 +154,7 @@ file, so a joiner who leaves keeps its own worlds exactly as they were.
 |---|---|
 | the world folder and its files | `ue_wrap/engine/world_folder`, `ue_wrap/engine/world_meta` |
 | the world list | `ue_wrap/engine/save_browser`, `ue_wrap/engine/gvas_meta` (legacy rows) |
-| the load | `ue_wrap/engine/engine_save` (`LoadWorld`), `harness/world_boot` |
+| the load | `ue_wrap/engine/engine_save` (`LoadWorld`, `PutLaunchLevelInForce`), `ue_wrap/engine/save_restore_watch`, `harness/world_boot` |
 | the rules copy | `ue_wrap/world/game_rules` (`CopyRules`) |
 | making a world | `ui/host_window_native`, `ui/host_create_world`, `ui/host_save_picker` |
 | only the host saves | `coop/save/save_block`, `ue_wrap/engine/save_to_slot_hook`, `ue_wrap/engine/world_save` |
