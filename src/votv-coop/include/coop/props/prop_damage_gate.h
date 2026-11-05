@@ -8,13 +8,12 @@
 //
 // This client authors the owner when it holds it in a hand grab, threw or swung it (coop/props/prop_throw) or syncs it
 // (coop/props/prop_syncer, a pending claim included): its own copy is then the truth and its damage stands, except a
-// lethal call while only a throw's or a swing's sequence is pending, which waits for the grant (below). A caller's
-// identity is never read: a physics impact carries the struck prop as its actor, and a drill's call nests under our code.
-// A world container's damage is never authored here: coop/props/crate_break says why and where its impact goes.
+// lethal call while only a throw's or a swing's sequence is pending, which waits for the grant (below), and except a
+// world container's, never authored here (coop/props/crate_break). A caller's identity is never read: a physics impact
+// carries the struck prop as its actor, and a drill's call nests under our code.
 
 // The watches fail open: a dead one leaves that verb running on every copy, said in one ERROR line. Other owners (the
-// ATV, the player, the car, the own-graph breakers) are outside it. The damaged and destroyed sounds and particles the
-// component plays inside the cancelled body do not play on a client. Game thread.
+// ATV, the player, the car, the own-graph breakers) are outside it. Game thread.
 
 #pragma once
 
