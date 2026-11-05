@@ -81,6 +81,8 @@ inline constexpr const wchar_t* SaveSlotPrimitivesDataLegacy    = L"primitivesDa
 // the current name first, so a reader resolves it on either build.
 inline constexpr const wchar_t* GamemodeSaveSlotProp       = L"save_slot";
 inline constexpr const wchar_t* GamemodeSaveSlotPropLegacy = L"saveSlot";
+// mainGamemode_C::car: the world's ATV, the one the atvExplode special sets `trap` on.
+inline constexpr const wchar_t* GamemodeCarProp            = L"car";
 
 // The per-item save record struct (a BP UserDefinedStruct): struct_save1 on 0.10.0, struct_save
 // before. Its layout is MEASURED through reflection (ue_wrap/actors/save_record); the names are only

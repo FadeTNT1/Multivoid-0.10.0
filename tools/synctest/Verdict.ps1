@@ -24,6 +24,19 @@ function Get-SyncVerdict($Row, [string]$HostText, [string]$ClientText) {
         }
         $noLane = $ClientText -split "`r?`n" | Where-Object { $_ -match "event_fire: '$escaped' NOT replayed.*(no lane|host-local|per-player teleport)" } | Select-Object -First 1
         if ($noLane) { return Verdict FAIL PolicyGap $noLane }
+        # An overlap-armed row produces nothing until a pawn walks into its box, which this driver never does.
+        $armed = $ClientText -split "`r?`n" | Where-Object { $_ -match "event_fire: '$escaped' NOT replayed.*overlap-armed" } | Select-Object -First 1
+        if ($armed) { return Verdict FAIL Unproven "Overlap-armed (the rig drives no walk-in): $armed" }
+        if ($Row.Name -eq 'atvExplode') {
+            $hs = @([regex]::Matches($HostText, 'synctest: STATE[^\r\n]+') | ForEach-Object Value)
+            $cs = @([regex]::Matches($ClientText, 'synctest: STATE[^\r\n]+') | ForEach-Object Value)
+            if ($hs.Count -and $cs.Count -and $hs[-1] -match '\btrap=1\b' -and $cs[-1] -match '\btrap=1\b') {
+                return Verdict PASS State "Host fire; the gamemode ATV's trap reads 1 on host and client (ATV stamp bit 4)"
+            }
+            $last = if ($cs.Count) { $cs[-1] } else { 'no client STATE' }
+            if ($hs.Count -and $hs[-1] -match '\btrap=1\b') { return Verdict FAIL Desync "Host trap=1, client did not follow: $last" }
+            return Verdict FAIL Unproven "The host's gamemode ATV never read trap=1 in the case window: $last"
+        }
         if ($Row.Name -eq 'starRain' -and $HostText.Contains("event_cue: host broadcast 'starRain' (cue 0)") -and $ClientText.Contains("event_cue: replayed 'starRain' (cue 0)")) {
             return Verdict PASS Mirror 'Host broadcast starRain cue 0; client event_cue: replayed starRain cue 0'
         }
@@ -62,6 +75,24 @@ function Get-SyncVerdict($Row, [string]$HostText, [string]$ClientText) {
             morningGay='morningUfo_C'; borgRozital='rozitBorg_C'; fallbody_0='ufoDropper_body_C'
             fallbody_1='ufoDropper_body_C'; fallcar_0='ufoDropper_car_C'; wisps='wisp_C'; piramid='piramid_C'
             arirFollower='npc_arirFollower_C'; eggvasion=@('superEgger_C','eg_C')
+            graystank=@('ufoDropper_tank_C','ufoDropper_pig_C'); boarwar='npc_ariral_shooter_C'
+        }
+        # Rows whose output is props born on the host: every host prop birth of the row's own classes in the
+        # window must bind on the client by key. Classes are the row's, so a background spawn cannot pass it.
+        $propClasses = @{
+            food='prop_food_\w+'; drive='prop_drive_C'; poisonFood='prop_food_\w*[pP]oison\w*'
+            expDrive='prop_drive_explosive_C'; cookiebox='prop_cookiebox_C'; bombBox='prop_bombbox_C'
+            begos='prop_bego_spikeball_C'; boarwar='grayboar_C'
+            arirBuster='prop_container_crate_C|prop_lamp_blinker_C|prop_notebook_busterSpawner_C'
+        }
+        $propVerdict = $null
+        if ($propClasses.ContainsKey($Row.Name)) {
+            $births = @([regex]::Matches($HostText, "HOST broadcasting SPAWN cls='(?<class>(?:$($propClasses[$Row.Name])))' key='(?<key>[^']+)'"))
+            if (!$births.Count) { return Verdict FAIL Unproven "Host fired '$wireName'; no host prop birth of its classes in the case window" }
+            $lost = @($births | Where-Object { $ClientText -notmatch ("CreateOrAdoptPropMirror:[^\r\n]*bound to actor=[^\r\n]*key='"+[regex]::Escape($_.Groups['key'].Value)+"'") })
+            if ($lost.Count) { return Verdict FAIL Desync "$fire; client never bound prop key '$($lost[0].Groups['key'].Value)' ($($lost[0].Groups['class'].Value)), $($lost.Count) of $($births.Count) missing" }
+            $kinds = ($births | ForEach-Object { $_.Groups['class'].Value } | Sort-Object -Unique) -join ','
+            $propVerdict = "all $($births.Count) host prop births ($kinds) bound on client by key"
         }
         $ids = if ($classes.ContainsKey($Row.Name)) {
             $cls = '(?:'+(@($classes[$Row.Name] | ForEach-Object { [regex]::Escape($_) }) -join '|')+')'
@@ -75,7 +106,14 @@ function Get-SyncVerdict($Row, [string]$HostText, [string]$ClientText) {
             if ($mirror) { $matched += $eid } else { $missing += $eid }
         }
         if ($missing.Count) { return Verdict FAIL Desync "$fire; host spawn: $($ids[0].Value); client missing class '$($classes[$Row.Name])' entity ids: $($missing -join ',')" }
-        if ($matched.Count) { return Verdict PASS Mirror "Host fire; all $($matched.Count) observed '$($classes[$Row.Name])' spawns materialized on client, ids=$($matched -join ',')" }
+        if ($matched.Count) {
+            $alsoProps = if ($propVerdict) { "; $propVerdict" } else { '' }
+            return Verdict PASS Mirror "Host fire; all $($matched.Count) observed '$($classes[$Row.Name])' spawns materialized on client, ids=$($matched -join ',')$alsoProps"
+        }
+        if ($propVerdict -and $classes.ContainsKey($Row.Name)) {
+            return Verdict FAIL Unproven "Host fire; $propVerdict; no '$($classes[$Row.Name] -join '/')' spawn in the case window"
+        }
+        if ($propVerdict) { return Verdict PASS Mirror "Host fire; $propVerdict (prop lane)" }
         return Verdict FAIL Unproven "Host fired '$wireName'; no matching native replay or materialized entity in case window"
     }
     $trigger = if ($Row.Dispatch -eq 'Extra') { "synctest: EXTRA .*name=$name dispatched=1" } else { "event_trigger: ambient .* (?:dispatched \('$name'\)|superFog spawned)" }

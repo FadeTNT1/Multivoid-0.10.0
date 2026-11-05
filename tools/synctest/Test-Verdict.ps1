@@ -42,6 +42,24 @@ $ih="event_fire: host fire #1 runEvent('eggvasion') origin=dev -- broadcasting`n
 $ic="materialized mirror eid=1 class='superEgger_C'`nmaterialized mirror eid=2 class='eg_C'"
 Assert ((Get-SyncVerdict $invasion $ih $ic).Status -eq 'PASS') 'Mixed event actor families must match every identity'
 Assert ((Get-SyncVerdict $invasion $ih ($ic -replace "class='superEgger_C'","class='eg_C'")).Status -eq 'FAIL') 'Matching identity with the wrong event actor class must fail'
+$food=[pscustomobject]@{Name='food';Dispatch='SpecialEvent'}
+$fh="event_fire: host fire #1 runSpecialEvent('food') origin=dev -- broadcasting`nHOST broadcasting SPAWN cls='prop_food_choco_C' key='k1' loc=(0,0,0)`nHOST broadcasting SPAWN cls='prop_food_shrimpburger_C' key='k2' loc=(0,0,0)"
+$fc="sync::CreateOrAdoptPropMirror: eid=1 bound to actor=1 key='k1' cls='prop_food_choco_C'`nsync::CreateOrAdoptPropMirror: eid=2 bound to actor=2 key='k2' cls='prop_food_shrimpburger_C'"
+Assert ((Get-SyncVerdict $food $fh $fc).Status -eq 'PASS') 'Every prop birth of the row bound on the client must pass'
+Assert ((Get-SyncVerdict $food $fh ($fc -replace "key='k2'","key='k3'")).Status -eq 'FAIL') 'One unbound prop birth must fail'
+Assert ((Get-SyncVerdict $food ($fh -replace 'prop_food_','prop_drive_') $fc).Status -eq 'FAIL') 'Another class of birth must not pass the row'
+$boar=[pscustomobject]@{Name='boarwar';Dispatch='RunEvent'}
+$bh="event_fire: host fire #1 runEvent('boarwar') origin=dev -- broadcasting`nHOST broadcasting SPAWN cls='grayboar_C' key='b1' loc=(0,0,0)"
+$bc="sync::CreateOrAdoptPropMirror: eid=1 bound to actor=1 key='b1' cls='grayboar_C'"
+Assert ((Get-SyncVerdict $boar $bh $bc).Status -eq 'FAIL') 'boarwar without its shooter must stay unproven'
+Assert ((Get-SyncVerdict $boar ($bh+"`nnpc-sync[ex-spawn]: enrolled 'npc_ariral_shooter_C' eid=9") ($bc+"`nmaterialized mirror eid=9 class='npc_ariral_shooter_C'")).Status -eq 'PASS') 'boarwar with its props and shooter must pass'
+$armed=[pscustomobject]@{Name='gascans';Dispatch='SpecialEvent'}
+$ah="event_fire: host fire #1 runSpecialEvent('gascans') origin=dev -- broadcasting"
+Assert ((Get-SyncVerdict $armed $ah "event_fire: 'gascans' NOT replayed (prank special (prop lane, overlap-armed: event_funnyGascans_C))").Kind -eq 'Unproven') 'An overlap-armed row is unproven, not a policy gap'
+$trap=[pscustomobject]@{Name='atvExplode';Dispatch='SpecialEvent'}
+$th="event_fire: host fire #1 runSpecialEvent('atvExplode') origin=dev -- broadcasting`nsynctest: STATE id=1 name=atvExplode trap=1"
+Assert ((Get-SyncVerdict $trap $th 'synctest: STATE id=1 name=atvExplode trap=1').Status -eq 'PASS') 'A trap on both peers must pass'
+Assert ((Get-SyncVerdict $trap $th 'synctest: STATE id=1 name=atvExplode trap=0').Status -eq 'FAIL') 'A client without the trap must fail'
 $guardSource = Join-Path $PSScriptRoot 'ProcessGuard.cs'
 if (!('SyncTestProcesses' -as [type])) { Add-Type -Path $guardSource }
 $guard = [SyncTestProcesses]::new()
