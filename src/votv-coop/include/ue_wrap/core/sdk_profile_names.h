@@ -592,6 +592,11 @@ inline constexpr const wchar_t* BattsClass = L"prop_batts_C";
 // The flashlight equipment class (the FName the BP uses to identify the item).
 inline constexpr const wchar_t* FlashlightEquipmentClass = L"prop_equipment_flashlight_C";
 
+// The flashlight's battery ticker: one per world, found by the player's BeginPlay and pointed at
+// that player (ticker.player = self). Its tick drains the equipped flashlight's battery while
+// ticker.player.flashlight is set, so whichever mainPlayer_C began play last owns the drain.
+inline constexpr const wchar_t* TickerPlayerFlashlightClass = L"ticker_playerFlashlight_C";
+
 // The UTimelineComponent BP-callable methods (the autotest forces the `grab` timeline so the
 // timeline observers fire without a real E press); ProcessEvent-dispatched.
 inline constexpr const wchar_t* TimelineComponentClass       = L"TimelineComponent";

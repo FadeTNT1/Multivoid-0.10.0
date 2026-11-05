@@ -70,6 +70,13 @@ int32_t MainPlayer_dead();
 // pointer the enter chain casts; the deny gate nulls that for one InpActEvt_use dispatch.
 int32_t MainPlayer_activeInterface();
 int32_t MainPlayer_HitResult();
+// The flashlight state 0.10.0 keeps on the player. equipped_flashlight is set by updateEquipment
+// when a flashlight item sits in an equipment slot (the old hasFlashlight is gone);
+// ticker_flashlightController is the world's battery ticker that this player's BeginPlay claimed.
+int32_t MainPlayer_equipped_flashlight();
+int32_t MainPlayer_ticker_flashlightController();
+// ticker_playerFlashlight_C.player: the one player whose equipped flashlight the ticker drains.
+int32_t TickerFlashlight_player();
 
 // AnimBlueprint_kerfurOmega_regular_C field accessors (VOTV BP).
 int32_t AnimBP_kerfur_walkSpeed();

@@ -21,7 +21,11 @@ the actor tick and the movement-component tick disabled, because a ticking playe
 run the whole single-player logic and clobber global camera state. The puppet's animation
 Blueprint reads its own movement component's velocity and mode, and every tick the mod writes
 those fields from the streamed pose, exactly what the possessed pawn does for the local player,
-so locomotion and leg IK come from the engine with real floor-trace context. Whether an actor
+so locomotion and leg IK come from the engine with real floor-trace context. Spawning one runs its
+BeginPlay, which claims two world singletons for itself: the game mode's player pointer and the
+flashlight battery ticker's owner, which drains only its owner's equipped flashlight. Both are
+read before the spawn and written back after it, so the local player's battery keeps draining
+(`ue_wrap/actors/puppet_spawn`) `[RD]`. Whether an actor
 has a controller is the local-versus-puppet test everywhere in the code
 (`coop/player/players_registry`).
 
