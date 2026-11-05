@@ -170,6 +170,19 @@ bool Restore(void* player, const std::vector<uint8_t>& bytes) {
     return ok;
 }
 
+std::wstring HeldItemKey(void* holdingProp) {
+    if (!holdingProp || !R::IsLive(holdingProp)) return {};
+    void* propCls = R::FindClass(N::PropClass);
+    if (!propCls || !R::IsDescendantOfAny(R::ClassOf(holdingProp), &propCls, 1)) return {};
+    const int32_t off = R::FindPropertyOffset(propCls, N::PropItemKeyProp);
+    if (off < 0) return {};
+    R::FName n{};
+    std::memcpy(&n, static_cast<const uint8_t*>(holdingProp) + off, sizeof(n));
+    std::wstring s = R::ToString(n);
+    if (s == L"None") s.clear();
+    return s;
+}
+
 Counts CountItems(void* player) {
     Counts c;
     void* comp = Of(player);

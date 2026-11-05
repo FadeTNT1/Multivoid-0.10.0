@@ -114,6 +114,11 @@ inline constexpr const wchar_t* ThingsAndStuffLibClass       = L"ThingsAndStuffL
 inline constexpr const wchar_t* ObjectToBytesFn              = L"ObjectToBytes";
 inline constexpr const wchar_t* BytesIntoObjectFn            = L"BytesIntoObject";
 inline constexpr const wchar_t* MainPlayerUpdateEquipmentFn  = L"updateEquipment";
+// The item key of a prop: prop_C.name, the row name of the game's item tables (list_props,
+// list_weapons) that prop_C::init was built from. On 0.10.0 the hand's actor is the only live trace of
+// the hotbar's selected item that the reflected component exposes by name, so the key the hit judge
+// looks swings up by is read off the held actor.
+inline constexpr const wchar_t* PropItemKeyProp              = L"name";
 inline constexpr const wchar_t* CreateSaveGameObjectFn       = L"CreateSaveGameObject";
 
 // The static mesh prop_C::init sets when its props-table row gives no mesh (and no meshOverride).

@@ -12,6 +12,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace ue_wrap::inventory_component {
@@ -38,6 +39,11 @@ struct Counts {
     int32_t equipment = -1;  // SlotArray_B
 };
 Counts CountItems(void* player);
+
+// The item key of the actor in the player's hand (mainPlayer.holding_actor): the row name of the
+// game's item tables (list_props, list_weapons) that the hit judge keys a swing by. Read-only; empty
+// when `holdingProp` is null, not live, not a prop, or carries no name. Game thread.
+std::wstring HeldItemKey(void* holdingProp);
 
 // The player's updateEquipment: rebuilds the equipped flags, the capacity and the flashlight's
 // properties from the equipment slots, and broadcasts equipmentUpdated. False when unresolved.

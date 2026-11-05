@@ -20,6 +20,7 @@
 #include "ue_wrap/core/hot_path_guard.h"  // UE_ASSERT_GAME_THREAD
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/actors/inventory.h"   // the hold slot's item name
+#include "ue_wrap/actors/inventory_component.h"  // the 0.10.0 held item key
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"  // the prop base's class name (ResolveHandClass)
@@ -398,7 +399,10 @@ void TickOwner(coop::net::Session& session, void* local, void* holdingProp) {
         g_ownHeldIdx = idx;
         const std::wstring cls = R::ClassNameOf(holdingProp);
         const std::wstring name = ReadItemName(holdingProp);
-        const std::wstring item = ue_wrap::inventory::ReadHeldItemName();
+        // 0.9.0n keyed the hand by its hold slot; 0.10.0 has no such slot (the legacy read comes back
+        // empty), so the key is the held prop's own item-table row name.
+        std::wstring item = ue_wrap::inventory::ReadHeldItemName();
+        if (item.empty()) item = ue_wrap::inventory_component::HeldItemKey(holdingProp);
         if (!g_ownHas || cls != g_ownCls || name != g_ownName || item != g_ownItem) {
             g_ownHas = true;
             g_ownCls = cls;
