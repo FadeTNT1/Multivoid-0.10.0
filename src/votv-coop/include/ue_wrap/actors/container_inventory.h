@@ -34,7 +34,10 @@ bool IsWorldInventory(void* inventory);
 // The live TArray<Fstruct_save> holding this inventory's contents inside saveSlot.GObjStack (the
 // struct_mObject element's single field, at +0), or null when the save slot, the offsets or the index
 // do not resolve. An index of -1 is a component never initialised, with nothing to read or write.
-uint8_t* ContentsSlot(void* inventory);
+// The slot is addressed at the engine's measured GObjStack element size; `recordStride`, when given, receives
+// the engine's element size for one record in it (0 when null is returned) -- the stride a walk or a write of
+// that array must use, never a constant.
+uint8_t* ContentsSlot(void* inventory, int32_t* recordStride = nullptr);
 
 // The records the slot holds, read whole. False when the slot does not resolve, or when it holds more
 // than `maxRecords` (nothing is read then: a cut read is a silent lie); `countOut`, when given, is the

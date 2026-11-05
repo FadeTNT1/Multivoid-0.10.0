@@ -53,6 +53,16 @@ const Layout* GetLayout();
 // The measured element stride, 0 while unmeasured: the one number an array walk of rows needs.
 int32_t Stride();
 
+// Whether `owner`.`member` (a UClass* / UScriptStruct* and the TArray property's name on it) is a
+// TArray of THIS struct whose engine ElementSize is the measured stride. The stride is computed from the
+// struct's span, so no walk of a row array may trust it until the engine's own number for that array
+// has agreed: a mismatch walks every row after the first onto its neighbour's bytes, and a write there
+// is heap corruption. False while unmeasured (asked again) and, said once per (owner, member), on a
+// mismatch -- the caller refuses. Cached per pair. Game thread.
+bool ArrayHoldsRows(void* owner, const wchar_t* member);
+// The single-row counterpart: `member` is one struct_signalDataDynamic (the struct the layout was measured on).
+bool MemberIsRow(void* owner, const wchar_t* member);
+
 // Wire-facing view of one row. The photo is read only when asked (ReadStruct's withImage): the lanes that
 // poll rows at a cadence leave it out, and the rack packs sixteen rows into one blob.
 struct Row {

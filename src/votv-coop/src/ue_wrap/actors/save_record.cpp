@@ -66,6 +66,7 @@ constexpr FieldSpec kSpec[F_count] = {
 struct Resolved {
     bool ok = false;
     RecordLayout pub{};
+    bool exact = false;     // `stride` was handed in by the engine, not guessed
     int32_t off[F_count];   // -1 = the running struct has no such member (or it failed its type check)
 };
 
@@ -105,6 +106,7 @@ const Resolved& Measure(void* script, int32_t stride) {
     const int32_t span = R::StructSize(script);
     if (span <= 0 || span > 0x1000) return refuse("implausible PropertiesSize");
     const int32_t aligned = (span + 15) & ~15;
+    r.exact = stride > 0;
     if (stride <= 0) stride = aligned;
     if (stride < span) return refuse("element stride smaller than the struct's span");
 
@@ -126,8 +128,9 @@ const Resolved& Measure(void* script, int32_t stride) {
                 }
                 bool typeOk = false;
                 if (spec.innerElem == kFlat) {
-                    // The signal row codec is the desk layer's; its measured stride must be this one.
-                    typeOk = outer.innerStruct && outer.elementSize == signal_dynamic::Stride();
+                    // The signal row codec is the desk layer's; the array must be ITS row struct at the
+                    // engine ElementSize that layer measured.
+                    typeOk = signal_dynamic::ArrayHoldsRows(script, f.name.c_str());
                 } else if (outer.innerStruct && outer.elementSize == kMxStride) {
                     // struct_mX: a single TArray<X> at +0.
                     const auto mx = R::EnumerateStructFields(outer.innerStruct);
@@ -153,10 +156,12 @@ const Resolved& Measure(void* script, int32_t stride) {
     r.pub.script = script;
     r.pub.span = span;
     r.pub.stride = stride;
+    r.pub.exact = r.exact;
     int carried = 0;
     for (int k = 0; k < F_count; ++k) carried += r.off[k] >= 0;
-    UE_LOGI("save_record: measured struct '%ls' span=0x%X stride=0x%X, %d of %d members carried "
-            "(signals %s)", sname.c_str(), span, stride, carried, static_cast<int>(F_count),
+    UE_LOGI("save_record: measured struct '%ls' span=0x%X stride=0x%X (%s), %d of %d members carried "
+            "(signals %s)", sname.c_str(), span, stride, r.exact ? "engine" : "UNCONFIRMED guess",
+            carried, static_cast<int>(F_count),
             r.off[F_signals] >= 0 ? "present" : "absent");
     return g_layouts[script] = r;
 }
@@ -206,10 +211,7 @@ const Resolved* ParamResolved(void* fn, int32_t& outOff) {
 }
 
 std::wstring ReadFStringAt(const void* base, int32_t off) {
-    R::FString s{};
-    std::memcpy(&s, reinterpret_cast<const uint8_t*>(base) + off, sizeof(s));
-    if (!PlausibleObjPtr(s.Data) || s.Num <= 1 || s.Num > 1000000) return {};
-    return std::wstring(s.Data, static_cast<size_t>(s.Num - 1));  // Num includes the null term
+    return ue_wrap::raw_read::ReadFString(reinterpret_cast<const uint8_t*>(base) + off);
 }
 std::wstring ReadClassNameAt(const void* base, int32_t off) {
     void* cls = nullptr;
@@ -299,12 +301,7 @@ void* AllocZeroed(size_t count, size_t elemSize) {
 }
 
 std::wstring ReadFNameAt(const void* base, int32_t off) {
-    R::FName n{};
-    std::memcpy(&n, reinterpret_cast<const uint8_t*>(base) + off, sizeof(n));
-    // ComparisonIndex 0 is ALWAYS NAME_None (regardless of Number) -- ToString on it can
-    // null-deref the name pool. Also reject an implausibly huge index (garbage at a bad read).
-    if (n.ComparisonIndex == 0 || n.ComparisonIndex > 0x0FFFFFFF) return {};
-    return R::ToString(n);
+    return ue_wrap::raw_read::ReadFName(reinterpret_cast<const uint8_t*>(base) + off);
 }
 
 void WriteFNameField(void* dst, const std::wstring& leaf) {
@@ -404,7 +401,7 @@ const RecordLayout* Layout() {
 
 int32_t RecordStride() {
     const Resolved* r = DefaultResolved();
-    return r ? r->pub.stride : 0;
+    return r && r->exact ? r->pub.stride : 0;
 }
 
 int32_t RecordSpan() {
@@ -415,6 +412,22 @@ int32_t RecordSpan() {
 bool IsRecordStruct(void* scriptStruct) {
     const Resolved* r = DefaultResolved();
     return r && scriptStruct && r->pub.script == scriptStruct;
+}
+
+// The engine's own element size for an array of records is the authority on the stride. A layout
+// measured before prop_C loaded only has the span-rounded guess; the first array that proves the
+// real size replaces it. A layout whose stride the engine already gave must agree exactly.
+bool ConfirmRecordStride(void* script, int32_t engine) {
+    auto it = g_layouts.find(script);
+    if (it == g_layouts.end() || !it->second.ok) return false;
+    Resolved& r = it->second;
+    if (r.exact) return r.pub.stride == engine;
+    if (engine < r.pub.span || engine > 0x1000) return false;
+    UE_LOGI("save_record: record stride confirmed by the engine's array ElementSize: 0x%X (was the "
+            "0x%X span-rounded guess)", engine, r.pub.stride);
+    r.pub.stride = engine;
+    r.exact = true;
+    return true;
 }
 
 bool ReadSaveRecord(const void* base, SaveRecord& rec) {
@@ -762,6 +775,7 @@ void ResetCodecCache() {
     g_baseGetData = nullptr;
     g_nextPropTryMs = 0;
     g_verbs.clear();
+    ResetGObjStackCache();
 }
 
 }  // namespace ue_wrap::save_record

@@ -5,12 +5,15 @@
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/fstring_utils.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/raw_read.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
 
 #include <chrono>
 #include <cstring>
 #include <cwchar>
+#include <map>
+#include <utility>
 
 namespace ue_wrap::signal_dynamic {
 
@@ -42,6 +45,7 @@ constexpr MemberSpec kMembers[] = {
 };
 
 Layout   g_layout;
+void*    g_script = nullptr;   // the UserDefinedStruct the layout was measured on
 bool     g_measured = false;   // a struct was found and judged (ok or not)
 bool     g_ok = false;
 uint64_t g_nextTryMs = 0;
@@ -84,24 +88,16 @@ void Measure() {
         }
     }
     g_layout = L;
+    g_script = script;
     g_ok = true;
     UE_LOGI("signal_dynamic: measured struct_signalDataDynamic span=0x%X stride=0x%X (name@0x%X "
             "signal@0x%X image@0x%X daq@0x%X)", L.span, L.stride, L.name, L.signal, L.image, L.daq);
 }
 
-std::wstring ReadFString(const uint8_t* p) {
-    R::FString s{};
-    std::memcpy(&s, p, sizeof(s));
-    if (!s.Data || s.Num <= 1) return {};
-    return std::wstring(s.Data, static_cast<size_t>(s.Num - 1));
-}
-
-std::wstring ReadFNameLeaf(const uint8_t* p) {
-    R::FName n{};
-    std::memcpy(&n, p, sizeof(n));
-    if (n.ComparisonIndex == 0 && n.Number == 0) return {};  // NAME_None
-    return R::ToString(n);
-}
+// The same guards the record codec reads with (raw_read.h): a Data pointer that is not a pointer, a Num
+// of INT32_MAX, a name index outside the pool all read as empty instead of faulting the tick.
+std::wstring ReadFString(const uint8_t* p) { return ue_wrap::raw_read::ReadFString(p); }
+std::wstring ReadFNameLeaf(const uint8_t* p) { return ue_wrap::raw_read::ReadFName(p); }
 
 // A leaf as the FName the struct stores: NAME_None for an empty leaf, and false for a non-empty one
 // the engine interns to NAME_None ("None" in any case), which no reader could tell from empty.
@@ -135,6 +131,46 @@ int32_t Stride() {
     return L ? L->stride : 0;
 }
 
+namespace {
+
+// (owner, member) -> whether it was proven to be a row array / row member; a verdict is final, so a failure
+// is said once and not re-measured.
+std::map<std::pair<void*, std::wstring>, bool> g_verdicts;
+
+bool Verdict(void* owner, const wchar_t* member, bool array) {
+    const Layout* L = GetLayout();
+    if (!L || !owner || !member) return false;      // unmeasured: not a verdict, asked again
+    const auto key = std::make_pair(owner, std::wstring(array ? L"[]" : L"") + member);
+    const auto it = g_verdicts.find(key);
+    if (it != g_verdicts.end()) return it->second;
+    bool ok = false;
+    const char* why = nullptr;
+    if (array) {
+        R::ArrayInnerInfo inner;
+        if (!R::ArrayPropertyInner(owner, member, inner) || !inner.innerStruct) why = "is not an array of structs";
+        else if (inner.innerStruct != g_script) why = "holds a different struct";
+        else if (inner.elementSize != L->stride) why = "has an engine ElementSize that is not the measured row stride";
+        else ok = true;
+        if (why)
+            UE_LOGE("signal_dynamic: %ls.%ls %s (engine ElementSize %d, measured stride %d) -- every row read "
+                    "and write through it is REFUSED (this line prints once)",
+                    R::ToString(R::NameOf(owner)).c_str(), member, why, inner.elementSize, L->stride);
+    } else {
+        if (R::PropertyInnerStruct(owner, member) == g_script) ok = true;
+        else
+            UE_LOGE("signal_dynamic: %ls.%ls is not a struct_signalDataDynamic member -- every row read and "
+                    "write through it is REFUSED (this line prints once)",
+                    R::ToString(R::NameOf(owner)).c_str(), member);
+    }
+    g_verdicts.emplace(key, ok);
+    return ok;
+}
+
+}  // namespace
+
+bool ArrayHoldsRows(void* owner, const wchar_t* member) { return Verdict(owner, member, true); }
+bool MemberIsRow(void* owner, const wchar_t* member) { return Verdict(owner, member, false); }
+
 bool ReadStruct(const void* base, Row& out, bool withImage) {
     const Layout* L = GetLayout();
     if (!base || !L) return false;
@@ -161,7 +197,9 @@ bool ReadStruct(const void* base, Row& out, bool withImage) {
     if (withImage) {
         ByteArray img{};
         std::memcpy(&img, p + K.image, sizeof(img));
-        if (img.data && img.num > 0 && img.num <= kImageSanity) out.image.assign(img.data, img.data + img.num);
+        // A header that reads as a photo: a plausible buffer, a count inside the capacity and the sanity cap.
+        if (ue_wrap::raw_read::PlausiblePtr(img.data) && img.num > 0 && img.num <= kImageSanity && img.max >= img.num)
+            out.image.assign(img.data, img.data + img.num);
     }
     return true;
 }

@@ -4,7 +4,8 @@
 // All field offsets are resolved from the live class via reflection (FindPropertyOffset)
 // rather than hardcoded, so they stay correct across game builds (version-tagging rule).
 // The known Alpha 0.9.0-n offsets (CXXHeaderDump/killerwisp.hpp) are kept only as a logged
-// fallback if the reflected walk ever fails to find the property.
+// fallback if the reflected walk ever fails to find a READ-ONLY property. `Target` is WRITTEN
+// (WriteTarget), so it has no numeric fallback: unresolved, it is neither read nor written.
 
 #include "ue_wrap/actors/wisp.h"
 
@@ -36,7 +37,7 @@ int32_t g_grabOff       = -1;       // grab          (0x0600, bool)
 int32_t g_killedOff     = -1;       // killed        (0x0618, bool)
 int32_t g_playerDmgOff  = -1;       // playerDamaged (0x0635, bool)
 int32_t g_harmlessOff   = -1;       // harmless      (0x0658, bool)
-int32_t g_targetOff     = -1;       // Target        (0x0610, APawn*)
+int32_t g_targetOff     = -1;       // Target        (APawn*; reflected only, written)
 void*   g_releaseFn     = nullptr;  // releasePlayer() -- the grab-cancel verb
 
 // Documented Alpha 0.9.0-n fallbacks (CXXHeaderDump/killerwisp.hpp).
@@ -45,7 +46,6 @@ constexpr int32_t kGrabFallback      = 0x0600;
 constexpr int32_t kKilledFallback    = 0x0618;
 constexpr int32_t kPlayerDmgFallback = 0x0635;
 constexpr int32_t kHarmlessFallback  = 0x0658;
-constexpr int32_t kTargetFallback    = 0x0610;
 
 int32_t ResolveOff(void* cls, const wchar_t* name, int32_t fallback) {
     int32_t off = R::FindPropertyOffset(cls, name);
@@ -90,7 +90,11 @@ bool ResolveFromClass(void* cls) {
     const int32_t killedOff    = ResolveOff(cls, L"killed",        kKilledFallback);
     const int32_t playerDmgOff = ResolveOff(cls, L"playerDamaged", kPlayerDmgFallback);
     const int32_t harmlessOff  = ResolveOff(cls, L"harmless",      kHarmlessFallback);
-    const int32_t targetOff    = ResolveOff(cls, L"Target",        kTargetFallback);
+    // Written by WriteTarget: reflected only, said once when it is not found.
+    const int32_t targetOff    = R::FindPropertyOffset(cls, L"Target");
+    if (targetOff < 0)
+        UE_LOGW("wisp: reflected Target offset not found -- it is WRITTEN, so there is no numeric fallback: "
+                "Target is not read or written (this line prints once)");
 
     // releasePlayer() -- the grab-cancel verb (RE: entry ubergraph @13289). Tolerated
     // null here (the host neutralization can fall back to destroying the BP wisp), but
@@ -146,7 +150,7 @@ bool ReadState(void* wisp, State& out) {
     out.killed        = ReadAt<bool>(wisp, g_killedOff);
     out.playerDamaged = ReadAt<bool>(wisp, g_playerDmgOff);
     out.harmless      = ReadAt<bool>(wisp, g_harmlessOff);
-    out.target        = ReadAt<void*>(wisp, g_targetOff);
+    out.target        = g_targetOff >= 0 ? ReadAt<void*>(wisp, g_targetOff) : nullptr;
     return true;
 }
 
@@ -173,7 +177,7 @@ float DistanceTo(void* wisp, void* target) {
 }
 
 bool WriteTarget(void* wisp, void* pawnOrNull) {
-    if (!wisp || !EnsureResolved() || !IsKillerWisp(wisp)) return false;
+    if (!wisp || !EnsureResolved() || !IsKillerWisp(wisp) || g_targetOff < 0) return false;
     *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(wisp) + g_targetOff) = pawnOrNull;
     return true;
 }

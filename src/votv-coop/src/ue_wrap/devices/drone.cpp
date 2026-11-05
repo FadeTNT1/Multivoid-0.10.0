@@ -39,7 +39,7 @@ constexpr int32_t kActiveOffFallback = 0x0370;
 // ---- FX mirroring -- resolved lazily (separate from the pose path) ----
 bool    g_fxResolved   = false;
 bool    g_fxTried      = false;  // one attempt once the class is loaded: what it misses stays missing
-int32_t g_canTakeOffOff = -1;  // Adrone_C::canTakeOff @0x0500 (arrival edge)
+int32_t g_canTakeOffOff = -1;  // Adrone_C::canTakeOff (arrival edge; reflected only, written)
 int32_t g_dustOff       = -1;  // Adrone_C::eff_droneDust @0x0278 (UParticleSystemComponent*)
 int32_t g_audioAlarmOff = -1;  // Adrone_C::audio_alarm  @0x0230 (UAudioComponent*)
 void*   g_setActiveFn   = nullptr;  // UActorComponent::SetActive(bool bNewActive, bool bReset)
@@ -52,7 +52,6 @@ void*   g_setVisFn        = nullptr;// USceneComponent::SetVisibility(bool, bool
 void*   g_getCompLocFn    = nullptr;// USceneComponent::K2_GetComponentLocation() -- host dust-anchor read
 void*   g_setWorldLocFn   = nullptr;// USceneComponent::K2_SetWorldLocation(...) -- mirror dust-anchor pin
 R::FName g_dustFName{0, 0};         // the 'dust' particle intensity param name (lazy; needs Kismet up)
-constexpr int32_t kCanTakeOffFallback = 0x0500;
 constexpr int32_t kDustFallback       = 0x0278;
 constexpr int32_t kAudioAlarmFallback = 0x0230;
 constexpr int32_t kLightAlarmFallback = 0x0240;
@@ -64,17 +63,18 @@ constexpr float kDustTraceLen = 2000.f;
 // since the suppressed tick never sets them. canTakeOff@0x0500 IS the gate (true means parked);
 // hasSack@0x0501 gates the action options (open-inv and drop-sack); container@0x04F8 is the
 // inventory actor openPropInv opens, a keyed Aprop_C the prop pipeline already mirrors.
-int32_t g_hasSackOff   = -1;   // Adrone_C::hasSack   @0x0501
-int32_t g_containerOff = -1;   // Adrone_C::container @0x04F8 (Aprop_inventoryContainer_drone_C*)
-constexpr int32_t kHasSackFallback   = 0x0501;
-constexpr int32_t kContainerFallback = 0x04F8;
+int32_t g_hasSackOff   = -1;   // Adrone_C::hasSack   (reflected only, written)
+int32_t g_containerOff = -1;   // Adrone_C::container (Aprop_inventoryContainer_drone_C*; reflected only, written)
 
 bool EnsureFxResolved() {
     if (g_fxResolved) return true;
     if (g_fxTried || !EnsureResolved() || !g_cls) return false;
     g_fxTried = true;
+    // canTakeOff, hasSack and container are WRITTEN (the arrival mirror), so they have no numeric fallback: a
+    // member that does not reflect is left at -1, which every reader and writer below treats as absent.
     g_canTakeOffOff = R::FindPropertyOffset(g_cls, L"canTakeOff");
-    if (g_canTakeOffOff < 0) g_canTakeOffOff = kCanTakeOffFallback;
+    if (g_canTakeOffOff < 0)
+        UE_LOGW("drone: canTakeOff not found -- it is written, so there is no fallback; the arrival gate is not mirrored");
     g_dustOff = R::FindPropertyOffset(g_cls, L"eff_droneDust");
     if (g_dustOff < 0) g_dustOff = kDustFallback;
     g_audioAlarmOff = R::FindPropertyOffset(g_cls, L"audio_alarm");
@@ -82,9 +82,11 @@ bool EnsureFxResolved() {
     g_lightAlarmOff = R::FindPropertyOffset(g_cls, L"light_alarm");
     if (g_lightAlarmOff < 0) g_lightAlarmOff = kLightAlarmFallback;
     g_hasSackOff = R::FindPropertyOffset(g_cls, L"hasSack");
-    if (g_hasSackOff < 0) g_hasSackOff = kHasSackFallback;
+    if (g_hasSackOff < 0)
+        UE_LOGW("drone: hasSack not found -- it is written, so there is no fallback; the cargo flag is not mirrored");
     g_containerOff = R::FindPropertyOffset(g_cls, L"container");
-    if (g_containerOff < 0) g_containerOff = kContainerFallback;
+    if (g_containerOff < 0)
+        UE_LOGW("drone: container not found -- it is written, so there is no fallback; the sack container is not mirrored");
     // SetActive/Activate and bIsActive are declared on UActorComponent (the components' base); resolve
     // them there and dispatch on the concrete component instance (ProcessEvent resolves the impl).
     if (void* acCls = R::FindClass(L"ActorComponent")) {

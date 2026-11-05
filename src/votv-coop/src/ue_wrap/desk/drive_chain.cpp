@@ -208,12 +208,12 @@ void CompleteEjectLatch(void* slotActor, void* driveActor) {
 }
 
 bool ReadDriveRow(void* driveActor, SD::Row& out) {
-    if (!driveActor || g_offDriveData < 0) return false;
+    if (!driveActor || g_offDriveData < 0 || !SD::MemberIsRow(g_driveCls, L"data_0")) return false;
     return SD::ReadStruct(reinterpret_cast<uint8_t*>(driveActor) + g_offDriveData, out);
 }
 
 bool WriteDriveRow(void* driveActor, const SD::Row& in) {
-    if (!driveActor || g_offDriveData < 0) return false;
+    if (!driveActor || g_offDriveData < 0 || !SD::MemberIsRow(g_driveCls, L"data_0")) return false;
     return SD::WriteStructLive(reinterpret_cast<uint8_t*>(driveActor) + g_offDriveData, in);
 }
 
@@ -232,7 +232,7 @@ bool ReadRack(void* rackActor, RackRow out[kRackSlots], int& outNum) {
     uint8_t* has  = ArrayAt(rackActor, offHas, nHas);
     if (!data || !has || nData < 0 || nHas < 0) return false;
     const int32_t stride = SD::Stride();
-    if (stride <= 0) return false;
+    if (stride <= 0 || !SD::ArrayHoldsRows(R::ClassOf(rackActor), L"data")) return false;
     const int n = (nData < nHas ? nData : nHas);
     outNum = n < kRackSlots ? n : kRackSlots;
     for (int i = 0; i < outNum; ++i) {
@@ -251,7 +251,8 @@ bool WriteRackRow(void* rackActor, int idx, const RackRow& in) {
     uint8_t* data = ArrayAt(rackActor, offData, nData);
     uint8_t* has  = ArrayAt(rackActor, offHas, nHas);
     const int32_t stride = SD::Stride();
-    if (!data || !has || idx >= nData || idx >= nHas || stride <= 0) return false;
+    if (!data || !has || idx >= nData || idx >= nHas || stride <= 0 ||
+        !SD::ArrayHoldsRows(R::ClassOf(rackActor), L"data")) return false;
     static const SD::Row kEmpty{};
     if (!SD::WriteStructLive(data + static_cast<size_t>(idx) * static_cast<size_t>(stride),
                              in.has ? in.row : kEmpty))

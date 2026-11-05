@@ -120,7 +120,6 @@ int32_t g_offPlayerContainer  = -2;  // mainGamemode_C.playerContainer  -> Aprop
 int32_t g_offContainerPropInv = -2;  // prop_container_C.propInventory  -> UpropInventory_C*
 int32_t g_offInvPlayer        = -2;  // propInventory_C.Player          -> the personal discriminator
 int32_t g_offInvIndex         = -2;  // propInventory_C.Index           -> the GObjStack slot
-int32_t g_offGObjStack        = -2;  // saveSlot_C.GObjStack
 
 int32_t CachedOffset(int32_t& slot, void* cls, const wchar_t* name) {
     if (slot == -2) {
@@ -132,12 +131,16 @@ int32_t CachedOffset(int32_t& slot, void* cls, const wchar_t* name) {
 }
 
 // The contents TArray header of GObjStack[kPersonalSlot] on `save` (the struct_mObject element's
-// single field, at +0), or null when the save object has no such slot.
-uint8_t* PersonalSlotOf(void* save) {
-    if (CachedOffset(g_offGObjStack, R::ClassOf(save), L"GObjStack") < 0) return nullptr;
-    const SR::Arr stack = SR::ReadArr(save, g_offGObjStack);
-    if (kPersonalSlot >= stack.num) return nullptr;
-    return const_cast<uint8_t*>(stack.data) + static_cast<size_t>(kPersonalSlot) * SR::kMxStride;
+// single field, at +0), or null when the save object has no such slot or its GObjStack does not
+// measure as record arrays (ReadGObjStack says so once). `recordStride` is then the engine's own
+// element size for one record in it.
+uint8_t* PersonalSlotOf(void* save, int32_t& recordStride) {
+    recordStride = 0;
+    SR::GObjStackView stack;
+    if (!SR::ReadGObjStack(save, stack)) return nullptr;
+    uint8_t* slot = stack.Slot(kPersonalSlot);
+    if (slot) recordStride = stack.recordStride;
+    return slot;
 }
 
 template <class T> T ReadAt(const void* base, int32_t off) {
@@ -178,13 +181,14 @@ void BuildAndSwapArray(void* base, int32_t off, int32_t stride,
 
 // The player's contents array, addressed ONLY through the assertions that prove it is the
 // personal store: the container component, its `Player` flag, and its running Index against the
-// baked slot. Returns the slot index and fills `contents`, or -1 having read nothing.
+// baked slot. Returns the slot index and fills `contents` and the engine's record stride, or -1
+// having read nothing.
 //
 // Both readers go through it. The count reader used to address GObjStack[0] directly, which is
 // the same slot on every build measured -- but "the same slot in practice" is what an address
 // assertion exists to stop a reader from relying on, and the count is what the quick-slot edge
 // makes its decision on.
-int32_t ValidatedPersonalSlot(SR::Arr& contents) {
+int32_t ValidatedPersonalSlot(SR::Arr& contents, int32_t* recordStride = nullptr) {
     void* save = ResolveSaveSlot();
     void* gm = world_singleton::Gamemode();
     if (!save || !gm) return -1;
@@ -225,12 +229,14 @@ int32_t ValidatedPersonalSlot(SR::Arr& contents) {
         }
     }
 
-    if (CachedOffset(g_offGObjStack, R::ClassOf(save), L"GObjStack") < 0) return -1;
-    const SR::Arr stack = SR::ReadArr(save, g_offGObjStack);
-    if (idx >= stack.num) return -1;
+    SR::GObjStackView stack;
+    if (!SR::ReadGObjStack(save, stack)) return -1;
+    const uint8_t* slot = stack.Slot(idx);
+    if (!slot) return -1;
 
     // The struct_mObject element's single field is the contents TArray<Fstruct_save> at +0.
-    contents = SR::ReadArr(stack.data + static_cast<size_t>(idx) * SR::kMxStride, 0);
+    contents = SR::ReadArr(slot, 0);
+    if (recordStride) *recordStride = stack.recordStride;
     return idx;
 }
 
@@ -315,11 +321,9 @@ bool ReadLivePersonalStore(LivePersonalStore& out) {
     out.slotIndex = -1;
     out.records.clear();
     SR::Arr contents{};
-    const int32_t idx = ValidatedPersonalSlot(contents);
-    if (idx < 0) return false;
-
-    const int32_t stride = SR::RecordStride();
-    if (stride <= 0) return false;
+    int32_t stride = 0;
+    const int32_t idx = ValidatedPersonalSlot(contents, &stride);
+    if (idx < 0 || stride <= 0) return false;
     out.slotIndex = idx;
     out.records.reserve(static_cast<size_t>(contents.num));
     for (int32_t i = 0; i < contents.num; ++i) {
@@ -339,15 +343,12 @@ bool ApplyToSaveObject(void* saveSlot, const PlayerInventory& inv) {
                 "refusing to write empty inventory over saveSlot %p", saveSlot);
         return false;
     }
-    uint8_t* carried = PersonalSlotOf(saveSlot);
-    if (!carried) {
-        UE_LOGE("inventory: ApplyToSaveObject -- save object %p has no GObjStack[%d]; refusing to "
-                "write a partial inventory", saveSlot, kPersonalSlot);
-        return false;
-    }
-    const int32_t stride = SR::RecordStride();
-    if (stride <= 0) {
-        UE_LOGW("inventory: ApplyToSaveObject -- the record layout is not measured; refusing to write");
+    int32_t stride = 0;
+    uint8_t* carried = PersonalSlotOf(saveSlot, stride);
+    if (!carried || stride <= 0) {
+        UE_LOGE("inventory: ApplyToSaveObject -- save object %p has no verified GObjStack[%d] (absent, "
+                "or its element sizes did not measure); refusing to write a partial inventory",
+                saveSlot, kPersonalSlot);
         return false;
     }
     BuildAndSwapArray(carried, 0, stride, inv.inventory,
