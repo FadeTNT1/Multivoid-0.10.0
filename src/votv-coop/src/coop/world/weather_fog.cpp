@@ -3,6 +3,7 @@
 #include "coop/world/weather_fog.h"
 
 #include "coop/net/protocol.h"
+#include "coop/world/weather_blackfog.h"
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/game_thread.h"
@@ -252,6 +253,11 @@ uint8_t ComputeHostFogBits(void* cycle) {
         f2 |= kSuperFogActive;
     if (*reinterpret_cast<bool*>(b + P::off::AdaynightCycle_permanentFog))
         f2 |= kPermanentFog;
+    // The black fog: presence and its fade edge, so the edge detector re-broadcasts both.
+    if (coop::weather_blackfog::HostHasBlackFog()) {
+        f2 |= kBlackFogActive;
+        if (coop::weather_blackfog::HostFading()) f2 |= kBlackFogFading;
+    }
     return f2;
 }
 
@@ -271,6 +277,7 @@ bool Install(bool isHost) {
     // host without re-registration.
     g_isClient.store(!isHost, std::memory_order_release);
     g_clientSessionActive.store(!isHost, std::memory_order_release);
+    coop::weather_blackfog::Install(isHost);  // the role, and the client's spawnghost refusal
     // The spawnUfo refusal: a name watch, so it holds whenever superFog_C loads. Registered once for
     // both roles (it self-gates at fire time). Not part of the latch: a failed registration only
     // leaves a client mirror able to mint its own UFO, said loudly, never a client without fog sync.
@@ -342,6 +349,8 @@ void ReadHostFogState(void* cycle, coop::net::WeatherStatePayload& out) {
             out.superFogThickness = t;
         }
     }
+    // The black fog's ramp, from the actor ComputeHostFogBits just validated (it re-stamps the bits).
+    coop::weather_blackfog::ReadHostState(out);
 }
 
 void ApplyFromHost(void* cycle, const coop::net::WeatherStatePayload& payload) {
@@ -419,6 +428,9 @@ void ApplyFromHost(void* cycle, const coop::net::WeatherStatePayload& payload) {
         g_superFogMirrorIdx = -1;
     }
 
+    // Black fog: a client copy of the host's, snapped by phase, its eyers refused; or faded out.
+    coop::weather_blackfog::ApplyFromHost(payload);
+
     // The base ambient height-fog density: snap to the host's value unconditionally (also when
     // the host is clear), then push it into the height-fog component. The cycle's clear-weather
     // floor is small but non-zero, and a freshly joined client reads zero until its own tick
@@ -463,7 +475,8 @@ void TickClientReconcile(void* cycle) {
 
 bool MirrorEchoActive() {
     return g_spawnFogEchoSuppress.load(std::memory_order_acquire) ||
-           g_superFogEchoSuppress.load(std::memory_order_acquire);
+           g_superFogEchoSuppress.load(std::memory_order_acquire) ||
+           coop::weather_blackfog::MirrorEchoActive();
 }
 
 bool HostFogStateChanged(void* cycle) {
@@ -483,6 +496,7 @@ void OnDisconnect() {
     g_spawnFogEchoSuppress.store(false, std::memory_order_release);
     g_superFogEchoSuppress.store(false, std::memory_order_release);
     g_clientSessionActive.store(false, std::memory_order_release);
+    coop::weather_blackfog::OnDisconnect();
     g_superFogMirror     = nullptr;  // a live mirror is left to its own tick, which destroys it
     g_superFogMirrorIdx  = -1;
     g_lastSuperSnapLogMs = 0;

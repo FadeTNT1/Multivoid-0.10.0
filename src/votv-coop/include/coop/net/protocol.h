@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 270;
+inline constexpr uint16_t kProtocolVersion = 271;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -3357,8 +3357,15 @@ struct WeatherStatePayload {
     float    superFogAlpha;     // AsuperFog_C::alpha     (0..1 progress; the tick adds dt/duration)
     float    superFogDuration;  // AsuperFog_C::duration  (seconds for alpha 0 -> 1)
     float    superFogThickness; // AsuperFog_C::thickness (the peak thickFog)
+    // The black fog's ramp, so a client mirror renders the host's darkness. AblackFog_C is spawned
+    // at the identity transform by mainGamemode_C::spawnBlackFog and is global, its one state number
+    // is `a` (0..1 ramp-in at 1/spd per second, then a 180 s hold counted down in `a` itself, then a
+    // 1 s fade), so presence (kBlackFogActive), the fade bit and these two reproduce it. Both 0 with
+    // no live host black fog.
+    float    blackFogA;         // AblackFog_C::a   (ramp 0..1, hold seconds left, or fade 1..0)
+    float    blackFogSpd;       // AblackFog_C::spd (seconds of the ramp-in)
 };
-static_assert(sizeof(WeatherStatePayload) == 80, "WeatherStatePayload must be 80 bytes");
+static_assert(sizeof(WeatherStatePayload) == 88, "WeatherStatePayload must be 88 bytes");
 static_assert(sizeof(WeatherStatePayload) <= 256 - 20 - 8,
               "WeatherStatePayload must fit in one reliable datagram");
 
@@ -3962,6 +3969,8 @@ inline constexpr uint8_t kFogActive      = 0x01;  // host has a live rolling-fog
 inline constexpr uint8_t kSuperFogActive = 0x02;  // host has a live AsuperFog_C
 inline constexpr uint8_t kPermanentFog   = 0x04;  // host's permanentFog gamerule (re-arms the scheduler)
 inline constexpr uint8_t kWindValid      = 0x08;  // the wind fields were read from a live host wind actor; the client applies wind only when set
+inline constexpr uint8_t kBlackFogActive = 0x10;  // host has a live AblackFog_C (the ramp in blackFogA / blackFogSpd)
+inline constexpr uint8_t kBlackFogFading = 0x20;  // the host's black fog is past its hold, in its final 1 s fade
 }  // namespace fog_flags2
 
 // The red sky (RedSky): the receiver runs the same gamemode toggle (spawnRedSky) when its sky differs.

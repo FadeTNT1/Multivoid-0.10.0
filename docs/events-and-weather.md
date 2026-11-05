@@ -63,7 +63,15 @@ host's super fog and snaps it to them on every two-second pulse; a joiner gets i
 connect seed `[RD]`. The super fog also brings a UFO that drifts over the map and, once a
 second, may burn and damage things near it: the host runs it, a client's copy of the super fog
 is refused its own UFO, and the host's reaches clients on the world-actor mirror with its attack
-timers refused `[RD]`. A lightning
+timers refused `[RD]`. The black fog is global too: the clock's hour pulse rolls it at 0.05 %
+(and the cheat menu spawns it) at the world origin, and one number carries its life, a ramp in,
+a three-minute hold counted down in that same number, and a one-second fade. The weather state
+carries that number, the ramp's speed and whether the host's is fading; a client spawns its own
+copy of the host's, writes the number on each pulse where both copies are in the same phase, and
+fades its copy out when the host's is gone; a joiner gets it in the seed `[RD]`. Its eyes, the
+stalkers it mints every 40 seconds at full darkness, are the host's: a client's copy is refused
+its own, and the host's reach clients on the owner-entity mirror as parked display copies `[RD]`.
+A lightning
 strike is a transient actor; the host observes its spawn and sends the location
 (`coop/world/weather_lightning`). The red sky is a story event actor that the clock's hour pulse
 toggles at noon on every peer -- a living one ends, else a one-percent roll starts one --
@@ -239,6 +247,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | the base alarm | whoever transitions | polled; the host canonicalises |
 | the Stolas church | the host | its verbs refused on a client; its four save fields polled and mirrored |
 | the UFO flocks | the host | the controllers refused on a client; the ships on the world-actor mirror |
+| the black fog and its eyes | the host | presence, its one number and its fade on `WeatherState`, a client copy written by phase with its eyes refused; the host's eyes on the owner-entity mirror |
 | the super fog and its UFO | the host | presence and ramp on `WeatherState`, a client copy snapped to it with its UFO refused; the host's UFO on the world-actor mirror, its attack refused on a client |
 | emails, the daily task | the host | one reflected append; a change-hash poll |
 
@@ -247,7 +256,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | Kind | Direction | Carries |
 |---|---|---|
 | `ClockPose` (stream), `SkyState` | the host to all | the clock and the day number; the dome, the moon and the eye |
-| `WeatherState`, `LightningStrike`, `RedSky`, `BadSun` | the host to all | the state fields, the fog actors' presence and ramps (the super fog's included); a strike location; the red sky's edge; whether a Bad Sun exists |
+| `WeatherState`, `LightningStrike`, `RedSky`, `BadSun` | the host to all | the state fields, the fog actors' presence and ramps (the super fog's and the black fog's included); a strike location; the red sky's edge; whether a Bad Sun exists |
 | `FireflySpawn` | each peer, relayed | one spawn |
 | `EventFire`, `EventSnapshot`, `EventCue` | the host to all; the host to one joiner; the host to all | a fired row; an in-flight event; an emitter cue |
 | `WorldActorSpawn`, `WorldActorDestroy`, `WorldActorPose` (stream) | the host to all | an event actor's birth with scale and blob; its death; full-rotation poses |
@@ -274,7 +283,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 
 | Limit | Evidence |
 |---|---|
-| A black fog the host rolls has no wire lane yet; the client's own rolls are suppressed | `[V]` `coop/world/weather_event_births` |
+| The black fog's sync has not been seen in a play session yet; the dev event menu's `spawnBlackFog` row spawns one on the host. The host's eyes stalk the host's player only (the eye's brain reads its own machine's player, and a client's display copy is parked), so a client in the black fog is watched but never hunted | `[RD]` `coop/world/weather_blackfog`, `coop/creatures/owner_entity_sync` |
 | The super fog's sync and its UFO's mirror have not been seen in a play session yet; the dev event menu's `superFog` row spawns one on the host (the roll's success arm, without the 5 % roll) | `[RD]` `coop/world/weather_fog`, `coop/dev/event_trigger`; the roll is `daynightCycle_C::superFogEvent` |
 | The flesh rain is rolled by every peer's own hour pulse and is not mirrored (the sky eye and the jellyfish are not: `SkyState` carries the eye, the world-actor lane the host's fish, and a client's own `setEye` and path spawn are refused) | `[RD]` the clock's hour roll; the jellyfish is on the world-actor mirror's list, but its spawn happens inside a Blueprint where the mirror's catch does not see it |
 | A decorated Christmas tree spawns its gifts on each peer whose player sleeps through midnight, and a client's gifts are its own | `[RD]` the tree's own check of the local player's sleep at hour 0 |
@@ -291,7 +300,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | Concept | Files |
 |---|---|
 | the clock and the sky | `coop/world/time_sync`, `coop/world/day_edge`, `coop/world/sky_sync`, `ue_wrap/world/daynightcycle`, `ue_wrap/world/profile`, `ue_wrap/world/event_list`, `ue_wrap/world/skysphere` |
-| weather | `coop/world/weather_sync`, `coop/world/weather_rain`, `coop/world/weather_fog`, `coop/world/weather_lightning`, `coop/world/weather_redsky`, `coop/world/weather_badsun`, `coop/world/weather_event_births`, `ue_wrap/world/directionalwind`, `ue_wrap/world/bad_sun` |
+| weather | `coop/world/weather_sync`, `coop/world/weather_rain`, `coop/world/weather_fog`, `coop/world/weather_lightning`, `coop/world/weather_redsky`, `coop/world/weather_badsun`, `coop/world/weather_blackfog`, `coop/world/weather_event_births`, `ue_wrap/world/directionalwind`, `ue_wrap/world/bad_sun` |
 | fireflies and the spawners | `coop/world/firefly_sync`, `coop/world/spawn_authority` |
 | events | `coop/world/event_fire_sync`, `coop/world/event_active_sync`, `coop/world/creature_event_relay`, `coop/world/event_cue_sync`, `coop/dev/event_trigger` |
 | event actors and the pyramid | `coop/world/world_actor_sync`, `coop/world/world_actor_mirror`, `coop/creatures/piramid_sync` |

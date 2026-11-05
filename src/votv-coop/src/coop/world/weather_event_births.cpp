@@ -68,8 +68,7 @@ void OnFinishSpawnPost(void* /*context*/, void* /*srcObj*/, void* result) {
     if (!s || !s->connected()) return;
     // A wire-commanded mirror birth passes: the fog lane raises its echo flag
     // around its own reflected spawn Call (the rolling fog's spawnFog, the super
-    // fog's SpawnActor). (blackFog_C has no apply lane yet -- every client birth
-    // of it is organic by construction.)
+    // fog's and the black fog's SpawnActor, coop/world/weather_blackfog).
     if (coop::weather_fog::MirrorEchoActive()) return;
     if (!R::IsLive(actor)) return;
     E::DestroyActor(actor);

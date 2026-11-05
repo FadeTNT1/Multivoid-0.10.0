@@ -823,6 +823,14 @@ inline constexpr const wchar_t* MainGamemode_SpawnRedSkyFn      = L"spawnRedSky"
 // The two weather-event birth classes (weather_event_births' client birth catch).
 inline constexpr const wchar_t* WeatherFogControllerClass      = L"weatherFogController_C";
 inline constexpr const wchar_t* BlackFogClass                  = L"blackFog_C";
+// AblackFog_C: mainGamemode_C::spawnBlackFog spawns it at the identity transform (the clock's hour
+// roll at 0.05 %, the cheat menu). Its BeginPlay ramps `a` by dt/spd to 1 (set() clamps it and
+// drives the post-process alpha, the birds and the ambience), then writes a = 180 and counts it down
+// by dt as the hold, then a = 1, destroys its eyes and fades a by dt to 0 and destroys itself. A
+// 40 s timer runs spawnghost while a >= 1: an eyer_C on the navmesh within 20000 uu of the origin,
+// kept in `eyes`. Both properties are reflected (FindPropertyOffset is case-insensitive).
+inline constexpr const wchar_t* BlackFog_AProp                 = L"a";
+inline constexpr const wchar_t* BlackFog_SpdProp               = L"spd";
 // SetCollisionEnabled (UPrimitiveComponent): remote_prop::OnSpawn restores default collision
 // (QueryAndPhysics=3) on wire-converged props whose local copy a natural-spawn pipeline left at
 // NoCollision. The param is `NewType` (ECollisionEnabled::Type).
