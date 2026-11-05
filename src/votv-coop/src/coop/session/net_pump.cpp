@@ -74,6 +74,55 @@ namespace P = ue_wrap::profile;
 // load. A CachedObjRef: probed at ~60 Hz through teardown windows, where a bare IsLive dereference
 // is unsafe.
 ue_wrap::CachedObjRef g_netLocal;
+
+// The join placement, verified: the native save replay that runs as the world comes up can move the
+// pawn after the teleport. For a few seconds after the placement the position is read back, and a
+// pawn that is far from the target is teleported again (a bounded number of times).
+struct PlacementWatch {
+    bool   active = false;
+    float  x = 0, y = 0, z = 0, yaw = 0;
+    int    tries = 0;
+    std::chrono::steady_clock::time_point until{};
+    std::chrono::steady_clock::time_point nextCheck{};
+};
+PlacementWatch g_placeWatch;
+constexpr float kPlacementTolCm   = 300.f;
+constexpr int   kPlacementMaxTries = 3;
+
+void ArmPlacementWatch(float x, float y, float z, float yaw) {
+    const auto now = std::chrono::steady_clock::now();
+    g_placeWatch = {true, x, y, z, yaw, 0, now + std::chrono::seconds(3), now + std::chrono::milliseconds(250)};
+}
+
+void TickPlacementWatch(void* pawn) {
+    if (!g_placeWatch.active) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (!pawn || now >= g_placeWatch.until) {
+        if (pawn) UE_LOGI("net_pump: placement check ended (%d re-teleport(s))", g_placeWatch.tries);
+        g_placeWatch.active = false;
+        return;
+    }
+    if (now < g_placeWatch.nextCheck) return;
+    g_placeWatch.nextCheck = now + std::chrono::milliseconds(250);
+    ue_wrap::FVector at{};
+    if (!ue_wrap::engine::TryGetActorLocation(pawn, at)) return;
+    const double dx = double(at.X) - double(g_placeWatch.x), dy = double(at.Y) - double(g_placeWatch.y),
+                 dz = double(at.Z) - double(g_placeWatch.z);
+    const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (dist <= double(kPlacementTolCm)) return;
+    if (g_placeWatch.tries >= kPlacementMaxTries) {
+        UE_LOGW("net_pump: placement still %.0f cm off its target after %d re-teleports -- giving up",
+                dist, g_placeWatch.tries);
+        g_placeWatch.active = false;
+        return;
+    }
+    ++g_placeWatch.tries;
+    const bool ok = coop::teleport_client::ApplyLocally(
+        {g_placeWatch.x, g_placeWatch.y, g_placeWatch.z, 0.f, g_placeWatch.yaw, 0.f});
+    UE_LOGW("net_pump: placement moved %.0f cm off its target (now %.0f, %.0f, %.0f) -- re-teleport %d/%d (%s)",
+            dist, double(at.X), double(at.Y), double(at.Z), g_placeWatch.tries, kPlacementMaxTries,
+            ok ? "call reported success" : "call reported failure");
+}
 // The cached controller for the same pawn (two dispatches saved per tick); reset with g_netLocal.
 ue_wrap::CachedObjRef g_netLocalController;
 
@@ -542,23 +591,32 @@ void Tick(coop::net::Session& session) {
             float x = 0, y = 0, z = 0, yaw = 0;
             switch (PIS::TakeJoinPlacement(x, y, z, yaw)) {
             case PIS::JoinPlacement::ProfilePose:
-                coop::teleport_client::ApplyLocally({x, y, z, 0.f, yaw, 0.f});
-                UE_LOGI("net_pump: CLIENT spawn -> the profile's pose (%.0f, %.0f, %.0f) yaw=%.0f",
-                        x, y, z, yaw);
+            {
+                const bool ok = coop::teleport_client::ApplyLocally({x, y, z, 0.f, yaw, 0.f});
+                UE_LOGI("net_pump: CLIENT spawn -> the profile's pose (%.0f, %.0f, %.0f) yaw=%.0f "
+                        "(teleport call %s; position is read back)", x, y, z, yaw, ok ? "ok" : "FAILED");
+                ArmPlacementWatch(x, y, z, yaw);
                 break;
+            }
             case PIS::JoinPlacement::AtHost:
                 UE_LOGI("net_pump: CLIENT spawn -> left where the transferred save put it, the host's "
                         "position (join_at_host)");
                 break;
             case PIS::JoinPlacement::StartPoint:
-                coop::teleport_client::ApplyLocally(
+            {
+                const bool ok = coop::teleport_client::ApplyLocally(
                     {ue_wrap::profile::name::kKPPSpawnX, ue_wrap::profile::name::kKPPSpawnY,
                      ue_wrap::profile::name::kKPPSpawnZ, 0.f, 0.f, 0.f});
-                UE_LOGI("net_pump: CLIENT spawn -> KPP start point (join/world appearance)");
+                UE_LOGI("net_pump: CLIENT spawn -> KPP start point (join/world appearance; teleport call %s)",
+                        ok ? "ok" : "FAILED");
+                ArmPlacementWatch(ue_wrap::profile::name::kKPPSpawnX, ue_wrap::profile::name::kKPPSpawnY,
+                                  ue_wrap::profile::name::kKPPSpawnZ, 0.f);
                 break;
+            }
             }
         }
     }
+    TickPlacementWatch(localNow);
     // The !g_localDeathHandled gate: once the death is handled every local send stops, or the
     // ragdoll sender would keep reading the dead player's pelvis ~100 times a second on the way to
     // the menu. Raw() is validated by the block just above, this tick.
