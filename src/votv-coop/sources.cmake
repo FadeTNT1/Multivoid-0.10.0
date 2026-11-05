@@ -600,6 +600,7 @@ set(VOTVCOOP_SOURCES
     src/harness/autotest/autotest_menuspawn.cpp
     src/harness/autotest/autotest_config.cpp
     src/harness/autotest/autotest_dispatch.cpp
+    src/harness/autotest/synctest_err_scenarios.cpp
     src/harness/autotest/autotest_wait.cpp
     src/harness/autotest/autotest_damage.cpp
     src/harness/autotest/autotest_dmghazard.cpp
