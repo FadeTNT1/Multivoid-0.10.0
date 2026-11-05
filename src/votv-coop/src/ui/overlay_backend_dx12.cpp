@@ -572,7 +572,7 @@ void OnResizeRecreate(const FrameTarget& t) {
     if (!g_live || g_disabled) return;
     // Preserve the swapchain-change edge until EnsureTarget re-arms the presenting-queue capture.
     if (sc != g_boundSc) {
-        EnsureTarget(t);
+        (EnsureTarget)(t);  // parenthesised: no ADL pick of overlay_backend::EnsureTarget
         return;
     }
     const UINT oldCount = g_bufferCount;
