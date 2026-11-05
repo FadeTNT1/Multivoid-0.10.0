@@ -13,6 +13,7 @@
 #include "coop/session/rig_ready.h"
 
 #include "harness/autotest.h"
+#include "harness/autotest/synctest.h"
 #include "harness/autotest_dispatch.h"
 #include "coop/config/config.h"
 #include "harness/harness_diag.h"
@@ -238,7 +239,9 @@ DWORD WINAPI TimelineThread(LPVOID param) {
     // No in-game HighResShot: its toast distracts a hands-on tester; autonomous captures use the
     // external window capture.
 
-    if (scenario == "orphan") {
+    if (scenario == "synctest") {
+        harness::autotest::RunSyncTestScenario();
+    } else if (scenario == "orphan") {
         // The orphan derisk: spawn a second mainPlayer_C through our own call path, confirm the
         // count goes from one to two, drive it by absolute teleport, then soak.
         ::Sleep(2000);

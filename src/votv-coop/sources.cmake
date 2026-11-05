@@ -615,6 +615,8 @@ set(VOTVCOOP_SOURCES
     src/harness/autotest/autotest_fog_probe.cpp
     src/harness/autotest/autotest_hud_tint.cpp
     src/harness/autotest/autotest_eventforce.cpp
+    src/harness/autotest/autotest_synctest.cpp
+    src/harness/autotest/synctest_input.cpp
     src/harness/autotest/autotest_alarmforce.cpp
     src/harness/autotest/autotest_piramidforce.cpp
     src/harness/autotest/autotest_wisplane.cpp

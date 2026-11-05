@@ -2,55 +2,72 @@
 
 ## Purpose
 
-How to run the test rig, what it can stage, and the gates a push and a release run. The rig is two
-to four copies of the game on one machine, driven by one launcher and judged by their logs.
+How to run the test rig, what it can stage, and the gates a push and a release run. The local rig
+uses two copies of the game on one machine, driven by one launcher and judged by their logs.
 
 ## How it works
 
-### The rig
+### Local 0.10.0 event sweep
 
-Four copies of the game live beside the repository, each with its own saved games and logs: a
-host, two clients and a fourth kept for development. A deploy step copies the built DLL into every
-copy's mod folder, skipping a copy whose bytes already match; a separate one-time step installs the
-pinned UE4SS loader into a copy, verifying its
-hash. Nothing in a game copy is tracked.
+Run from the repository root in PowerShell 7:
 
-### The launcher
+```powershell
+pwsh -NoProfile -File tools/synctest/Run-SyncTest.ps1
+```
 
-One launcher deploys and launches peers and runs scenarios. `host`, `client`, `client2` and
-`client3` launch one peer each for playing; `kill` stops every game process. Every step
-prints a line as it happens, and the game is launched detached so the launcher never holds its
-pipes.
+The launcher builds Release in `build/synctest` with two build jobs, installs the proxy loader
+and mod into two private game copies, and enumerates the developer event table plus weather
+and sky probes. The source install and its `Mods` are read only. Large cooked content files
+are hardlinked; mutable files and the loader are independent copies. The game copies live
+under the desktop's `VOTV 0.10.0/rig/host` and `rig/client` folders. Their separate
+`synctest_host` and `synctest_client` user-data roots contain only disposable test data. The
+engine's saved directory must pass the scenario's isolation check before a world loads. The
+real SaveGames directory is backed up beside itself before launching either game.
 
-The smoke is the standing regression check. It deploys, launches the host windowed, waits for it to bind its port, launches a client, samples
-every process's memory on an interval, kills everything if a peer crosses the memory threshold,
-tails both logs, kills both peers, and passes only if both were alive at the last sample. Its own
-verdict is liveness and memory; feature verdicts are read from the logs. `smoke4` runs a host and
-three clients with a staggered connect and proves the host relay end to end by finding, in each
-client's log, a puppet spawned for another client.
+The explicit `synctest` harness scenario starts a fresh `synctest_world`, binds its host to
+loopback and connects one client directly. It does not announce a lobby or start signaling.
+The games run hidden and off-screen at 640 by 360, 24 fps, minimum scalability, without sound,
+at BelowNormal priority and with at most four logical cores each. A private Windows job kills
+only the launcher's processes on exit; a watchdog kills the pair above 6 GiB working set per
+game. An exclusive `multivoid-synctest.lock` in the user's local Temp serializes cooperating rigs.
+The rig disables launch mouse capture in its private input configuration. Its explicit
+`MULTIVOID_HARNESS_NO_INPUT_CAPTURE=1` switch installs Win32 guards before the game's entry
+point, blocking cursor clipping, warps, capture and window activation. Windows are minimized
+without activation. The launcher checks `GetClipCursor` against the full virtual desktop
+before launch and throughout the run, killing its pair if the cursor is clipped or a rig
+window becomes foreground. `cursor.log` records the checks.
 
-The other subcommands stage one scenario each:
+Reports live under `local/tests/synctest/<run>/`: `report.md`, CSV/JSON results, the enumerated
+catalog, full peer logs, per-case log excerpts, and memory and CPU samples. `-ReuseBuild` reuses
+this worktree's built DLLs; `-Events solar` selects a case; `-ObserveSeconds 30` extends the
+default twelve-second observation; `earthTp` always receives at least 120 seconds for its
+delayed sky and cue sequence. A two-second receiver grace covers delivery and log buffering.
+`Test-Verdict.ps1` runs missing-evidence, runtime-fault,
+unchanged-state and process-containment controls without starting a game.
 
-| Area | Subcommands |
-|---|---|
-| joins and the world | `joinchurn`, `reloadchurn`, `menutravel`, `wirewindow`, `fogprobe`, `deadmaster`, `gracefulexit`, `authdrill` |
-| players, entities and props | `npctest`, `death`, `ragdollshot`, `ragdollspawn`, `puppetshot`, `walkgrab`, `clumpvis`, `spawnmenutest`, `navprobe` |
-| devices and races | `lightgroup`, `ctakeprobe`, `ctakerace` |
-| screens and captures | `browser`, `nativeui`, `menushot`, `scoreshot`, `hudtint`, `chathistory`, `chatseed` |
-| variants of the smoke | `smoke_phystele`, `smoke_i18n` |
+The sweep uses one cumulative fresh world. A PASS proves the named native replay, matching
+entity identity, or sampled weather/sky state; it does not establish delayed effects, all
+visuals, audibility or late joins. FAIL distinguishes a measured mismatch, an explicitly
+host-local/missing lane, insufficient effect evidence, and a blocked launch. Native events
+that only arm an overlap can therefore be unproven. Firefly ticks retain their native night/RNG
+gates. Flesh-rain and gift rows expose missing deterministic drivers rather than silently claiming
+coverage. The alarm probes assert both broadcast and native replay of each edge. Church and
+UFO-controller internal schedules need separate scenario drivers; the event table covers their
+addressable eventer routes only.
 
-`ctakerace` is the shape a concurrency test takes here: the host and a client both walk to the
-same container and take the same item at one GO barrier (a future-timestamp sentinel file, which
-gives sub-millisecond simultaneity on one machine); each peer counts the item afterwards and the
-launcher sums across peers, so one is correct, two is a duplicate and zero is a loss. Its
-`control` mode, where only the host takes, must sum to one before a race result is trusted.
+### Other harness workers
+
+The DLL contains additional environment-gated workers for joins, reload churn, fog, player and
+prop interactions, devices and screenshots. Their gates and thread entry points are listed in
+`harness/autotest/autotest_dispatch.cpp`. The local event launcher selects only its dedicated
+`synctest` scenario; those workers require their own controllers and assertions.
 
 ### The in-game harness
 
-The harness ships inside the DLL (`harness/`). At load it reads a scenario from a file beside the
-mod or from the environment, and the scenario selects a code path that posts engine actions onto
-the game thread: `play` loads a save and idles, `load:<slot>` loads a named slot, `none` launches
-with no automation. Environment variables override the ini for one launch (role, port, peer,
+The harness ships inside the DLL (`harness/`). At load it reads `VOTVCOOP_SCENARIO` from the
+process environment; an absent value selects the native menu. The scenario posts engine actions
+onto the game thread: `play` loads the configured save, `menu` keeps the native menu, and
+`synctest` starts the isolated event driver. Environment variables override the ini for one launch (role, port, peer,
 nickname, spawn pose), which is how the launcher configures a peer without editing files. Each
 scenario is one file under `harness/autotest/`, armed by its own environment gate. A scenario
 drives the engine through reflected function calls and walks a bot by asking the game for a path
@@ -58,7 +75,7 @@ to a target, never through synthesised input.
 
 ### Logs and assertions
 
-Every copy writes a levelled, timestamped `multivoid.log` beside the mod, and a scenario's verdict
+Every copy writes a levelled, timestamped `multivoid.log` beside its game executable, and a scenario's verdict
 is a line in it. One log assertion checks the pile carry-and-throw loop against thirteen
 invariants across both peers' logs and prints a verdict table; a capture step
 grabs a game window from outside the process for the screenshot scenarios.
@@ -89,12 +106,13 @@ checksum ([release.md](release.md)).
 |---|---|
 | The rig stages what a scenario scripts: a bot walks to a chosen target and performs the scripted action. Nobody plays the game freely, so a mechanic's feel and anything visual are judged by a person | `[V]` `harness/autotest/` |
 | A race is staged only where a scenario provides a barrier; the container take is the one that has it, other concurrent interactions have no scenario yet | `[V]` `harness/autotest/` (the `ctakerace` scenario) |
-| The smoke's own verdict is liveness and memory; a regression that keeps both peers alive passes it unless a feature assertion reads the logs | `[V]` by design |
-| No structured report; a verdict is a line in a log | `[V]` |
+| A PASS covers only the native replay, mirrored identity or sampled state named by the assertion; it does not prove every delayed or visible effect | `[V]` `tools/synctest/Verdict.ps1` |
+| The local event sweep writes structured reports; other scenarios still emit their verdict in a log | `[V]` `tools/synctest/Run-SyncTest.ps1` |
 
 ## Code map
 
 | Concept | Files |
 |---|---|
+| the local event launcher and verdict controls | `tools/synctest/Run-SyncTest.ps1`, `tools/synctest/Verdict.ps1`, `tools/synctest/Test-Verdict.ps1`, `tools/synctest/ProcessGuard.cs` |
 | the in-game harness | `harness/harness`, `harness/session_runtime`, `harness/autotest`, `harness/autotest_dispatch`, `harness/autotest/`, `harness/sdk_check`, `harness/screenshot` |
 | the gates | `.github/ci/abi_gate.py`, `.github/ci/public_prose_gate.py`, `.github/ci/public_leak_gate.py`, `.github/ci/commit_msg_check.py`, `.github/workflows/build-core.yml`, `.github/workflows/repo-gates.yml`, `.github/workflows/release-core.yml` |
