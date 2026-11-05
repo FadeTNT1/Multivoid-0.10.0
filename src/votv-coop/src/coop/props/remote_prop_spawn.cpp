@@ -345,6 +345,9 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
         // The sender's look of this pile, kept per eid: the bound actor takes it now, and an actor
         // bound later -- a pending own-save bind, a re-bind after GC churn -- takes it at the bind.
         coop::pile_look::OnHostLook(payload.elementId, payload.look, senderSlot);
+        // Its root scale, kept the same way: a re-bind after GC churn carries no row and takes it at the bind.
+        coop::pile_look::OnHostRootScale(payload.elementId, payload.scaleX, payload.scaleY, payload.scaleZ,
+                                         ue_wrap::prop::IsClumpClassName(classW, classResolve), senderSlot);
         // If this eid already resolves to a live bound-mirror native, that native IS the mirror:
         // nothing to spawn and nothing to register.
         if (auto* be = coop::element::Registry::Get().Get(payload.elementId)) {

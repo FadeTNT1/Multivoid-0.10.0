@@ -40,7 +40,10 @@ save-loaded pile, bound to the host's id where the host says the pile was at sav
 (`coop/props/pile_spawn_bind`); a pile with no counterpart -- one derived during the join window
 or born in play -- is a rooted runtime pile instead (`coop/props/trash_mirror`), spawned
 with its tick and physics off and its root movable, skinned with the host's chip type, scale and
-rotation. Either way it is bound and marked save-native, so it rides the same machinery: the pose
+rotation. A bound save-loaded pile converges to the row's position, turn and root scale where they
+differ; the host's root scale, like its look, is kept per id in the form it was expressed in
+(`coop/props/pile_look`), so a pile re-bound after GC churn, which carries no row, takes the host's
+size at the bind. Either way it is bound and marked save-native, so it rides the same machinery: the pose
 drive, the position correction, the grab route, the morph hand-off, the sweep exemption and
 retire. A real pile is what the game's look-at trace accepts, so the hover prompt, collision,
 occlusion and rotation are the game's. A rooted native stays live and inert; the earlier belief

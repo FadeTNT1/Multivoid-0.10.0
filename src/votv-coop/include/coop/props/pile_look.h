@@ -30,8 +30,15 @@ coop::net::WirePileLook Capture(void* actor);
 // bound. An absent look is ignored.
 void OnHostLook(uint32_t eid, const coop::net::WirePileLook& look, int senderSlot);
 
-// `actor` was just bound to `eid`. Applies the kept look, if one arrived first. A no-op for an
-// actor that is not a pile, and on the host, where nothing is ever kept.
+// The root scale the host's expression of `eid` carried, in the form it named (`isClump`), kept
+// beside the look and taken by the same rule (the host's word only, an all-zero scale ignored). An
+// actor of that form bound to `eid` later -- a re-bind after GC churn, which carries no row of its
+// own -- takes it at the bind, so a pile keeps the host's size across every bind and re-bind.
+void OnHostRootScale(uint32_t eid, float sx, float sy, float sz, bool isClump, int senderSlot);
+
+// `actor` was just bound to `eid`. Applies the kept look, if one arrived first, and the kept root
+// scale when the actor is of the form it was kept for. A no-op for an actor that is not trash, and
+// on the host, where nothing is ever kept.
 void OnBound(uint32_t eid, void* actor);
 
 // One line with the look READ BACK off `actor`, at a land: the host's says what it sent, a

@@ -5,6 +5,8 @@
 #include "coop/element/element.h"
 #include "coop/element/registry.h"
 #include "ue_wrap/actors/chip_pile.h"
+#include "ue_wrap/actors/prop.h"           // IsGarbageClump: the form a kept root scale is for
+#include "ue_wrap/engine/engine.h"         // GetActorScale3D / SetActorScale3D
 #include "ue_wrap/core/hot_path_guard.h"  // UE_ASSERT_GAME_THREAD
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -24,6 +26,21 @@ constexpr float kScaleSteps = 4096.f;
 
 std::unordered_map<uint32_t, coop::net::WirePileLook> g_looks;   // eid -> the host's look
 int g_applied = 0;                                                // throttles the log
+// eid -> the host's root scale, and the form it was expressed in.
+struct RootScale { float x, y, z; bool isClump; };
+std::unordered_map<uint32_t, RootScale> g_rootScales;
+int g_scaled = 0;                                                 // throttles the log
+
+void ApplyRootScale(uint32_t eid, void* actor, const RootScale& s) {
+    if (ue_wrap::prop::IsGarbageClump(actor) != s.isClump) return;   // the eid's other form: not this scale
+    const ue_wrap::FVector cur = ue_wrap::engine::GetActorScale3D(actor);
+    constexpr float kEps = 0.005f;
+    if (std::fabs(cur.X - s.x) <= kEps && std::fabs(cur.Y - s.y) <= kEps && std::fabs(cur.Z - s.z) <= kEps) return;
+    ue_wrap::engine::SetActorScale3D(actor, ue_wrap::FVector{s.x, s.y, s.z});
+    if (++g_scaled <= 8 || (g_scaled % 500) == 0)
+        UE_LOGI("[PILE] pile_look: #%d eid=%u actor=%p takes the host's root scale (%.3f,%.3f,%.3f) over "
+                "(%.3f,%.3f,%.3f)", g_scaled, eid, actor, s.x, s.y, s.z, cur.X, cur.Y, cur.Z);
+}
 
 int16_t PackAngle(float deg) {
     // Wraps by construction: 360 degrees is 65536 steps, and the cast keeps the low 16 bits.
@@ -86,9 +103,19 @@ void OnHostLook(uint32_t eid, const coop::net::WirePileLook& look, int senderSlo
         Apply(eid, actor, look);   // a clump holding E has no such mesh: the look waits for the pile
 }
 
+void OnHostRootScale(uint32_t eid, float sx, float sy, float sz, bool isClump, int senderSlot) {
+    UE_ASSERT_GAME_THREAD("pile_look::OnHostRootScale");
+    if (senderSlot != 0 || eid == 0 || (sx == 0.f && sy == 0.f && sz == 0.f)) return;
+    g_rootScales[eid] = RootScale{sx, sy, sz, isClump};
+}
+
 void OnBound(uint32_t eid, void* actor) {
     UE_ASSERT_GAME_THREAD("pile_look::OnBound");
-    if (g_looks.empty() || !actor) return;
+    if (!actor) return;
+    if (!g_rootScales.empty()) {
+        if (auto s = g_rootScales.find(eid); s != g_rootScales.end()) ApplyRootScale(eid, actor, s->second);
+    }
+    if (g_looks.empty()) return;
     auto it = g_looks.find(eid);
     if (it == g_looks.end()) return;
     if (!CP::VisibleMesh(actor)) return;   // the eid's clump form: the look waits for the pile
@@ -109,6 +136,7 @@ void LogLandLook(const char* who, uint32_t eid, void* actor) {
 void Forget(uint32_t eid) {
     UE_ASSERT_GAME_THREAD("pile_look::Forget");
     g_looks.erase(eid);
+    g_rootScales.erase(eid);
 }
 
 void OnDisconnect() {
@@ -118,6 +146,8 @@ void OnDisconnect() {
                 g_looks.size(), g_applied);
     g_looks.clear();
     g_applied = 0;
+    g_rootScales.clear();
+    g_scaled = 0;
 }
 
 }  // namespace coop::pile_look

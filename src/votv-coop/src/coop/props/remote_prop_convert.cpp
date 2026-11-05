@@ -112,6 +112,8 @@ void* OnConvert(const coop::net::PropConvertPayload& payload, void* /*localPlaye
         coop::trash_mirror::RepositionBoundNative(cur, payload.chipType, loc, rot, scale);
         // After the re-skin, which re-runs init() and so draws a new look: the host's replaces it.
         coop::pile_look::OnHostLook(E, payload.look, senderSlot);
+        coop::pile_look::OnHostRootScale(E, payload.scaleX, payload.scaleY, payload.scaleZ, /*isClump=*/false,
+                                         senderSlot);
         coop::pile_look::LogLandLook("CLIENT", E, cur);
         ue_wrap::FVector got{};
         const bool gotRead = E::TryGetActorLocation(cur, got);
@@ -133,6 +135,8 @@ void* OnConvert(const coop::net::PropConvertPayload& payload, void* /*localPlaye
     // Kept before the successor exists: Materialize binds E onto it, and the bind applies the look.
     // E's actor right now is the clump, which has no such mesh, so nothing is applied here.
     coop::pile_look::OnHostLook(E, payload.look, senderSlot);
+    // The new form's root scale replaces the kept one, so a later re-bind takes this form's size.
+    coop::pile_look::OnHostRootScale(E, payload.scaleX, payload.scaleY, payload.scaleZ, wantClump, senderSlot);
     if (!wantClump)
         coop::trash_clump_pose_stream::ClearDriveForEid(E);  // the carry ends at the land
     // Host mirrors a client's convert with its world up -> object_index; a client keeps FindClass.

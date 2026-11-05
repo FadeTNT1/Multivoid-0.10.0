@@ -186,14 +186,27 @@ bool ConvergeToRow(void* native, const coop::net::PropSpawnPayload& payload) {
     const bool locAligned = curRead && (ddx * ddx + ddy * ddy + ddz * ddz) <= (kAlignedCm * kAlignedCm);
     const bool rotAligned = rotRead && angAligned(curRot.Pitch, payload.rotPitch) &&
                             angAligned(curRot.Yaw, payload.rotYaw) && angAligned(curRot.Roll, payload.rotRoll);
-    const bool aligned = locAligned && rotAligned;
-    if (!aligned) {
+    const bool poseAligned = locAligned && rotAligned;
+    if (!poseAligned) {
         ue_wrap::engine::SetActorRootMovable(native);
         ue_wrap::engine::SetActorLocation(native, ue_wrap::FVector{payload.locX, payload.locY, payload.locZ});
         ue_wrap::engine::SetActorRotation(native,
             ue_wrap::FRotator{payload.rotPitch, payload.rotYaw, payload.rotRoll});
     }
-    return aligned;
+    // The root scale is part of the row's transform: a pile the host re-made at another size since the
+    // save, or a clump of the host's per-form scale, would otherwise keep the size this peer loaded. A
+    // row with no scale (all zero, an older sender) leaves it alone.
+    bool scaleAligned = true;
+    if (payload.scaleX != 0.f || payload.scaleY != 0.f || payload.scaleZ != 0.f) {
+        const ue_wrap::FVector curScale = ue_wrap::engine::GetActorScale3D(native);
+        constexpr float kScaleEps = 0.005f;
+        scaleAligned = std::fabs(curScale.X - payload.scaleX) <= kScaleEps &&
+                       std::fabs(curScale.Y - payload.scaleY) <= kScaleEps &&
+                       std::fabs(curScale.Z - payload.scaleZ) <= kScaleEps;
+        if (!scaleAligned)
+            ue_wrap::engine::SetActorScale3D(native, ue_wrap::FVector{payload.scaleX, payload.scaleY, payload.scaleZ});
+    }
+    return poseAligned && scaleAligned;
 }
 
 void* BindOwnSavePile(const coop::net::PropSpawnPayload& payload,
