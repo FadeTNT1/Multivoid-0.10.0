@@ -225,6 +225,14 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
                                    // EX_CallMath, so this entry alone does nothing: prop_coingun_C in
                                    // kExSpawnSourceClasses lets the Func-thunk drain reach
                                    // world_actor_sync::HostEnrollExSpawn, which allocates the eid.
+    // The 0.10.0 UFO encounters' products. Each is minted inside its controller's ubergraph
+    // (EX_CallMath), so these entries act only through the source rows in npc_world_enum; a
+    // client's controllers and the children's verbs are refused in coop/world/spawn_authority.
+    L"ufo_knob_C",                 // the knob flock (ufo_knob_controller_C::startEvent)
+    L"ufo_UK_C",                   // the UK flock (ufo_UK_controller_C::beginEvent, ufoClass)
+    L"ufo_UK_enemy_C",             // the enemy UK flock (the enemy controller's ufoClass)
+    // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
+    // base classes are unverified -- a prop-derived wreck would ride the prop lane as well.
 };
 inline constexpr size_t kWorldActorAllowlistSize =
     sizeof(kWorldActorAllowlist) / sizeof(kWorldActorAllowlist[0]);
@@ -684,6 +692,29 @@ inline constexpr const wchar_t* SetCollisionEnabledFn                = L"SetColl
 // (AmushroomSpawner_C::Spawn -> spawnedNaturally()) sets its StaticMesh to NoCollision.
 // mushroom7_C grows into prop_puffballMature_C, a separate species.
 inline constexpr const wchar_t* PropFoodMushroomClass                = L"prop_food_mushroom_C";
+
+// AoutsideChurch_C (0.10.0): the level-placed Stolas church. Its state is four save fields
+// (getData's mbool [broken, angry, striked] and mint [harvests]); updBroken and updEyes are the
+// presentation refreshes loadData runs after writing them (coop/world/church_sync).
+inline constexpr const wchar_t* OutsideChurchClass         = L"outsideChurch_C";
+inline constexpr const wchar_t* OutsideChurch_BrokenProp   = L"broken";
+inline constexpr const wchar_t* OutsideChurch_AngryProp    = L"angry";
+inline constexpr const wchar_t* OutsideChurch_StrikedProp  = L"striked";
+inline constexpr const wchar_t* OutsideChurch_HarvestsProp = L"harvests";
+inline constexpr const wchar_t* OutsideChurch_UpdBrokenFn  = L"updBroken";
+inline constexpr const wchar_t* OutsideChurch_UpdEyesFn    = L"updEyes";
+inline constexpr const wchar_t* OutsideChurch_EndOverlapOtherActorParam = L"OtherActor";
+// The church's and the focus actor's watched verbs are fact rows in coop/world/church_sync.
+
+// The 0.10.0 UFO encounters (main map untitled_1). Each controller is level-placed and mints its
+// flock through a bytecode-internal BeginDeferred; the products ride the world-actor lane
+// (kWorldActorAllowlist), their producers are refused on a client (coop/world/spawn_authority).
+inline constexpr const wchar_t* UfoKnobControllerClass  = L"ufo_knob_controller_C";
+inline constexpr const wchar_t* UfoUkControllerClass    = L"ufo_UK_controller_C";
+inline constexpr const wchar_t* UfoUkControllerEnemyClass = L"ufo_UK_controller_enemy_C";
+inline constexpr const wchar_t* UfoKnobClass            = L"ufo_knob_C";
+inline constexpr const wchar_t* UfoUkClass              = L"ufo_UK_C";
+inline constexpr const wchar_t* UfoUkEnemyClass         = L"ufo_UK_enemy_C";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

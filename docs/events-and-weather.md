@@ -168,6 +168,37 @@ its player pressed stop) sends its transition for the host to canonicalise
 (`coop/world/alarm_sync`). The radar terminal's own beeps are per-viewer by design and have no
 lane.
 
+### The Stolas church
+
+The church (0.10.0) is level-placed on every machine and runs on the host alone. In the rain it grows
+eight herbs; each herb it spawned counts once, picked or wilting when the rain stops, and the eighth
+angers it and registers it in the event count, which holds the host's sleep and save until a player
+leaves the church's lightning trigger and the strike ends it ten seconds later `[RD]`. A rain that
+ends with nobody there angers it as well, so after a storm someone must walk the church; the live
+log shows the eight drops and the begin in one tick with every player at the base `[V]`. A remote
+player's puppet is a player character, so its leaving the trigger strikes the host's church
+natively; that strike's camera turn and slow motion belong to the striking player, so the host
+refuses them for a puppet's strike. A client runs none of the church's verbs that write shared
+state (no herbs of its own, no count, no anger, no strike, no break, no lightning at its player,
+no quartz sweep), so its own event count never holds the church; it writes the four save fields
+the host's once-a-second poll sends and runs the church's own two refreshes, as a load does
+(`coop/world/church_sync`). The strike's flash rides the lightning lane and the debris the prop
+lane. The angry church's lightning targets the host's player only `[RD]` (the game aims at player
+0); its strikes reach every peer as lightning `[?]`.
+
+### The UFO encounters
+
+Three controllers placed in the main map (0.10.0) mint UFO flocks inside their own graphs: the
+knob flock starts a moment after the world loads and re-rolls from its tick, the UK flock starts
+when its controller is flagged to, re-arms itself after a war and picks enemies on a timer, and
+the enemy controller is the same graph with the enemy ship class `[RD]`. The host runs all three;
+a client's controllers are refused at the script-body gate, and the host's ships reach it through
+the source-gated catch onto the world-actor lane, whose mirror drives the pose with the ship's own
+tick off and its body not simulating (`coop/world/spawn_authority`,
+`coop/creatures/npc_world_enum`). A mirror's own timers (the speed change, the enemy pick, the
+shot, the crash) are refused. The calvine saucer, also level-placed, keeps its spline flight on
+every peer; its fall event (the cheat menu's) runs on the host only.
+
 ### Emails and the daily task
 
 Every email producer funnels through one gamemode function into the save's list; the host owns
@@ -198,6 +229,8 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | an event's actors | the host | the world-actor mirror |
 | the pyramid's brain | the host | timers cancelled on the mirror; the gather relayed |
 | the base alarm | whoever transitions | polled; the host canonicalises |
+| the Stolas church | the host | its verbs refused on a client; its four save fields polled and mirrored |
+| the UFO flocks | the host | the controllers refused on a client; the ships on the world-actor mirror |
 | emails, the daily task | the host | one reflected append; a change-hash poll |
 
 ## Wire messages
@@ -211,6 +244,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | `WorldActorSpawn`, `WorldActorDestroy`, `WorldActorPose` (stream) | the host to all | an event actor's birth with scale and blob; its death; full-rotation poses |
 | `PyramidGather` | the host to all | the gather commit |
 | `AlarmState` | either role | the alarm's active flag |
+| `ChurchState` | the host to all | the church's broken, angry and struck flags and its harvest count |
 | `EmailAppend`, `EmailDelete`, `TaskNewState` | the host to all; either role; the host to all | an email; a deletion; the task |
 
 ## Late join
@@ -222,7 +256,8 @@ carries a saved Bad Sun copy, and the seed settles it against the host's state.
 The in-flight events arrive as snapshot entries and replay with the override; the live cues are
 re-sent; every tracked event actor is re-spawned on the joiner; the pyramid's gather in flight
 is re-sent after its mirrors exist; the alarm's current flag is sent unconditionally, and the
-joiner runs the native trigger, which is idempotent against a save that already carried it.
+joiner runs the native trigger, which is idempotent against a save that already carried it; the
+church's state is sent unconditionally; a UFO flock in flight arrives with the tracked event actors.
 Emails are seeded as a delta against the blob instant; the task state is sent at the ready
 edge. A one-shot cue a joiner was not present for is missed, by definition.
 
@@ -237,6 +272,8 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | The deer, hexahive, walking-tree, dirt-hole, beehive, flora and mannequin spawners are not refused on a client, so each peer rolls its own; the host's walking mannequin still crosses to clients as a prop, and the client's copy grows a brain of its own | `[V]` no row of `coop/world/spawn_authority` names them; the table in `docs/npcs-and-kerfur.md`, "Which spawners a client refuses"; the walker's crossing was measured on the rig: one key on both peers, `pawn=1` on both |
 | Rain falls inside the base for a player standing indoors, the host included: the game's own effect, the same in single player. The rain emitter follows the player's camera and spawns its drops around it, below the roof's rain-collision mesh, which stops only drops falling onto it from above | `[V]` `coop/world/weather_rain` never moves the emitter or the camera; `[RD]` the decompiled day-night cycle's emitter move |
 | Trigger-volume fires (a bed event, a scare a player walks into) run per peer, as the single-player design intends | `[V]` by design, not a gap |
+| A client sees no church herbs and cannot pick them (the herbs are spawned inside the church's graph and no lane carries them yet); the striking client gets no camera turn or slow motion of its own | `[RD]` `coop/world/church_sync`; needs a plant lane and a per-striker cue |
+| The UK ships' shots, a crashed ship's wreck and crater, and the calvine saucer's fall are not mirrored: the host's run only | `[RD]` `coop/world/spawn_authority` refuses them on a client; the wreck's and crater's base classes are unverified |
 | Only the pyramid and the alarm have had the one-event-at-a-time pass; every other event rides the generic lanes on the per-row replay policy | `[V]` `coop/world/event_fire_sync`, the replay allowlist |
 
 ## Code map
@@ -248,5 +285,6 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | fireflies and the spawners | `coop/world/firefly_sync`, `coop/world/spawn_authority` |
 | events | `coop/world/event_fire_sync`, `coop/world/event_active_sync`, `coop/world/creature_event_relay`, `coop/world/event_cue_sync`, `coop/dev/event_trigger` |
 | event actors and the pyramid | `coop/world/world_actor_sync`, `coop/world/world_actor_mirror`, `coop/creatures/piramid_sync` |
+| the church | `coop/world/church_sync` |
 | the alarm, emails, the task | `coop/world/alarm_sync`, `coop/world/email_sync`, `coop/world/daily_task_sync`, `ue_wrap/world/email` |
 | tests | `harness/autotest/autotest_weather.cpp`, `autotest_fog_probe.cpp`, `autotest_eventforce.cpp`, `autotest_alarmforce.cpp`, `autotest_piramidforce.cpp`; the event drill, `coop/dev/event_drill`; the world roll drill, `coop/dev/world_roll_drill` |
