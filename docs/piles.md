@@ -135,6 +135,20 @@ both counters reach zero. A client's broom authors none of that, since the host 
 above. The host names a pile to the depletion watch as its `broomed` runs, which is how a pile a
 client's stroke empties far from the host's camera still reads as a depletion.
 
+A client's vacuum is the host's the same way at the pile (`coop/items/vacuum_pile_intent`). The
+vacuum's gather calls the pile's `vacuumed(location)` once per gather that lands on it; a client
+refuses that body at the script-body gate and sends the pile's key and the `location` argument. The
+host queues it (four a second after four at once, twelve waiting at most), checks that its mirror of
+the sender's hand, when it has one, is a vacuum, that the key names a live dispenser pile in the
+sender's reach and that the location lies beside it, and runs `vacuumed` on its own pile. Its own
+watch on the verb then names the pile to the depletion watch and opens the broom's dispense window,
+so the popped item rides the host's spawn expression and streams its fall, the counter drop rides
+`TrashPileState` and the depletion the keyed destroy, to every peer. A keyless dispenser pile cannot
+be named and is refused on the client. The vacuum's pull on loose props and what it gathers into
+itself stay the game's own on each peer. `[?]` the verb's parameter name is read from the cook's
+name table (`K2Node_CustomEvent_location`); a build whose verb has no vector `location` keeps the
+client's own body.
+
 ### The broom
 
 One stroke acts on whatever a 50 uu sphere at its trace's hit point overlaps, in a fixed order: it
@@ -216,6 +230,7 @@ replacement for the position key.
 | `GrabIntent`, `ThrowIntent` | a client to the host | the pile id; the release or a hard throw with its direction |
 | `PackTrashIntent` | a client to the host | the id of the pile or clump a client bagged, and whether the tool was a folded bag or a roll |
 | `BroomStroke` | a client to the host | the segment, heading and velocity a broom stroke read of its holder |
+| `VacuumPileIntent` | a client to the host | the key of the dispenser pile a client's vacuum landed on, and the verb's `location` |
 | `PropConvert` | the host to all | the atomic pile-clump convert: id, form, pose, scale, chip type, context |
 | `TrashCarryPose` (stream) | the host to all | per-id poses for client-grabbed clumps and the clumps a broom sets rolling |
 | `PropPose` (stream) | the host to all | the host's own held clump and its flight |
@@ -258,7 +273,7 @@ second bracket) is claimed for the sweep and converged to the row's pose.
 | A clump has its collision off for its whole life -- carried and in flight -- so a player walks through the ball someone else is holding or has thrown. The pile it lands as has the game's own collision | `[V]` `coop/props/trash_mirror` |
 | Trash dropped into a garbage container updates the container on the host only: every client's container has its brain cancelled, so none of them -- not even the one whose player dropped the trash -- ever learns what is inside it, and the two pickup flags the game writes from those contents stay frozen | `[V]` `coop/interactables/garbage_sync`, and the cancelled Blueprint body read from the cook |
 | Dispenser piles born by an event carry per-process keys and never resolve across peers | `[V]` `coop/props/trash_pile_sync` |
-| A client's vacuum on a dispenser pile spawns its item on that client only: the host runs the broom's stroke, not the vacuum's suction | `[V]` the vacuum verb's bytecode; `coop/items/broom_stroke` refuses the broom's stroke alone |
+| A client's vacuum pops a dispenser pile a round trip late on that client: its own `vacuumed` is refused and the item, the counter drop and the depletion arrive with the host's messages. The vacuum's pull on loose props and what it gathers into itself are each peer's own | `[?]` code: `coop/items/vacuum_pile_intent` refuses the pile's `vacuumed` alone; not run in game |
 | A client's bag is spent whatever the host answers: the tool and the roll's count are per-peer state with no lane, so the client spends its own on the press and a host refusal -- out of reach, a target of another type -- costs it that bag | `[V]` code: `coop/props/pack_trash_intent` sends and spends in the same press, and the host's deny paths answer no one |
 | A bagged pile makes its bag on the host, so a client sees it a round trip late, and the game's own pack sound and hint play on the packing client alone | `[V]` code: `coop/props/pack_trash_intent` refuses the client's body and the bag rides `PropSpawn` |
 | A client's broom stroke acts a round trip late on that client: its swing animates at once, and the clumps, trash and pushes arrive with the host's messages | `[V]` code: `coop/items/broom_stroke` refuses the stroke at its notify, inside the montage the press started |
@@ -276,6 +291,7 @@ second bracket) is claimed for the sweep and converged to the row's pose.
 | the dispenser piles | `coop/props/trash_pile_sync`, `coop/props/trash_collect_sync` |
 | the broom | `coop/items/broom_stroke` (every stroke the host's), `coop/items/broom_push` (what it pushes), `ue_wrap/actors/broom` |
 | bagging a pile | `coop/props/pack_trash_intent`, and the bag family's tests in `ue_wrap/actors/prop` |
+| the vacuum on a dispenser pile | `coop/items/vacuum_pile_intent` (every pop the host's), the verb in `ue_wrap/actors/prop` |
 | garbage containers | `coop/interactables/garbage_sync` |
 | the join | `coop/props/pile_spawn_bind`, `coop/element/quiescence_drain`, `coop/props/save_time_retire_util.h`, `coop/props/save_identity_map`, `coop/props/save_identity_bind` |
 | tests | `harness/autotest/autotest_chippile.cpp`, `harness/autotest/autotest_clump.cpp`, `harness/autotest/autotest_broomstroke.cpp` |

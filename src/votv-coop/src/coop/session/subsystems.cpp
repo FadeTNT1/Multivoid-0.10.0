@@ -134,6 +134,7 @@
 #include "coop/props/trash_collect_sync.h"
 #include "coop/props/trash_native_hold.h"  // the load catch on the join's save spawns
 #include "coop/items/broom_stroke.h"
+#include "coop/items/vacuum_pile_intent.h"
 #include "coop/props/pack_trash_intent.h"
 #include "coop/interactables/verb_lanes.h"  // the interactable lanes on a device's own verbs, at the script gate
 #include "coop/creatures/kerfus_lanes.h"  // the plain kerfur: its brain on the host, its state and drive, its verbs
@@ -307,6 +308,7 @@ void Install(coop::net::Session& session) {
     coop::trash_pile_sync::Install(&session);  // trash pile collect counters
     coop::broom_stroke::Install(&session);  // a client's broom stroke is run by the host, with what the client's stroke read
     coop::pack_trash_intent::Install(&session);  // a client's bagging of a pile is run by the host
+    coop::vacuum_pile_intent::Install(&session);  // a client's vacuum on a dispenser pile is run by the host
     coop::verb_lanes::Install(session);  // drone console, doors, light groups, keypads: each on its own verbs
     coop::broom_push::Install(&session);  // a host's broom push streams what it moves
     coop::trash_collect_sync::Install(&session);  // the chipPile grab observer (the use-press PRE observer, then a PropDestroy by eid)
@@ -548,6 +550,7 @@ DisconnectStats DisconnectAll() {
     coop::trash_pile_sync::OnDisconnect();
     coop::broom_stroke::OnDisconnect();  // with no session the game's broom sweeps as written
     coop::pack_trash_intent::OnDisconnect();  // with no session the game's own bagging stands
+    coop::vacuum_pile_intent::OnDisconnect();  // with no session the game's vacuum pops as written
     coop::verb_lanes::OnDisconnect();  // and each verb lane's counters and summary line (a sender's queue goes with its slot)
     coop::kerfus_lanes::OnDisconnect();  // and the Kerfus lanes' records and waiting states
     coop::served_player::OnDisconnect();  // and every served robot's record: its seams disarm
@@ -713,6 +716,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
       coop::puppet_carry_drive::Tick(session); }  // drive each puppet-held clump to its hand + publish the host-auth carry/flight pose batch (AFTER TickCarry so the latch is current)
     if (isHost) { PP::Scope _s{PP::Bucket::Interactable}; coop::broom_stroke::Tick(session); }  // HOST: run the clients' queued broom strokes, one a tick a client (last: what a stroke spawns, sweeps and pushes is picked up next tick, as for the host's own)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:pack_trash"}; coop::pack_trash_intent::Tick(session); }  // client: spend the tools its presses sent; HOST: run one queued pack a tick a client
+    { PP::Scope _s{PP::Bucket::Interactable}; coop::vacuum_pile_intent::Tick(session); }  // settle the vacuumed watch; HOST: run one queued client vacuum pop a tick a client
     { PP::Scope _s{PP::Bucket::Interactable}; coop::verb_lanes::Tick(session); }  // settle each verb lane's watches; HOST: run their queued intents
     { PP::Scope _s{PP::Bucket::Interactable}; coop::sleepingbag_sync::Tick(session); }  // settle the gates and serve bounded fold/unfold intents
     { PP::Scope _s{PP::Bucket::Interactable}; coop::kerfus_lanes::Tick(session); }  // the Kerfus lanes' watches; CLIENT: waiting states; HOST: queued verbs

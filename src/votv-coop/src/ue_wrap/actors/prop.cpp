@@ -339,6 +339,30 @@ bool WriteTrashPileAmounts(void* actor, int32_t a, int32_t b) {
     return true;
 }
 
+int32_t TrashPileVacuumedLocationOffset(void* function) {
+    if (!function) return -1;
+    // A vector, or nothing: a recook that changed the parameter's type must not be written as one.
+    if (R::FindParamSize(function, P::name::TrashPileVerbLocationParam) !=
+        static_cast<int32_t>(sizeof(ue_wrap::FVector)))
+        return -1;
+    return R::FindParamOffset(function, P::name::TrashPileVerbLocationParam);
+}
+
+bool CallTrashPileVacuumed(void* pile, const ue_wrap::FVector& location) {
+    if (!pile || !R::IsLive(pile) || !IsTrashBitsPile(pile)) return false;
+    void* fn = R::FindDispatchFunctionCached(R::ClassOf(pile), P::name::TrashPileVacuumedFn);
+    if (!fn || TrashPileVacuumedLocationOffset(fn) < 0) return false;
+    ue_wrap::ParamFrame f(fn);
+    return f.valid() && f.Set<ue_wrap::FVector>(P::name::TrashPileVerbLocationParam, location) &&
+           ue_wrap::Call(pile, f);
+}
+
+bool IsVacuum(void* obj) {
+    if (!obj) return false;
+    const std::wstring cls = R::ClassNameOf(obj);
+    return cls.rfind(P::name::VacuumClassPrefix, 0) == 0;
+}
+
 R::FName GetPropName(void* prop) {
     // The lineage gate, as in GetStaticMesh: the Name offset is a stray byte on a non-prop keyed
     // interactable.

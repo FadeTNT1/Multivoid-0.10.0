@@ -106,6 +106,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::HookDestroy:
     case ReliableKind::HookAnchorCommit:
     case ReliableKind::BroomStroke:
+    case ReliableKind::VacuumPileIntent:
     case ReliableKind::LinkProbe:
     case ReliableKind::LinkProbeReply:
     case ReliableKind::PackTrashIntent:

@@ -393,6 +393,16 @@ inline constexpr const wchar_t* BroomNotifyNameParam = L"NotifyName";
 inline constexpr const wchar_t* BroomStrokeNotifyName = L"clean";
 inline constexpr const wchar_t* BroomHolderProp = L"player";
 
+// The vacuum and the dispenser pile's vacuum verb (0.10.0 cook, read from the name tables of
+// /Game/objects/prop_vacuum2 and /Game/objects/trashBitsPile). The vacuum's gather timer traces from
+// its holder's arm, overlaps a sphere at the hit and, for a dispenser pile it lands on, casts to
+// trashBitsPile_C and calls `vacuumed`, a custom event whose one parameter is `location` (the
+// event's K2Node_CustomEvent_location local); the body pops one item. The vacuum's class is
+// prop_vacuum2_C, and the table also names a prop_vacuum_C, so a vacuum is matched by the prefix.
+inline constexpr const wchar_t* VacuumClassPrefix = L"prop_vacuum";
+inline constexpr const wchar_t* TrashPileVacuumedFn = L"vacuumed";
+inline constexpr const wchar_t* TrashPileVerbLocationParam = L"location";
+
 // The fire extinguisher and its wall mount (ue_wrap/actors/fire_extinguisher). The extinguisher's
 // own members are its charge, its hand spray and its runaway thrust; the mount's `fireExt` names
 // the extinguisher its box last snapped onto its attach point.

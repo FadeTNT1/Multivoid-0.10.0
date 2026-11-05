@@ -95,6 +95,18 @@ bool EnsurePropBaseResolved();
 bool ReadTrashPileAmounts(void* actor, int32_t& a, int32_t& b);
 bool WriteTrashPileAmounts(void* actor, int32_t a, int32_t b);
 
+// The dispenser pile's vacuum verb, trashBitsPile_C.vacuumed(location). The offset of its
+// `location` parameter in the frame of `function` (a watch's Stack.Node), or -1 when this build's
+// verb has no such parameter. Game thread.
+int32_t TrashPileVacuumedLocationOffset(void* function);
+// Run `pile`'s vacuumed(location) through ProcessEvent: the body pops one item and decrements the
+// counters, destroying the pile on the last. False when `pile` is not a live dispenser pile, the
+// verb does not resolve on its class, or the verb has no `location` parameter. Game thread.
+bool CallTrashPileVacuumed(void* pile, const ue_wrap::FVector& location);
+// True when `obj`'s class is a vacuum (its name starts with the profile's vacuum prefix). Allocates
+// the class name; for a per-intent test, not a walk. False for null.
+bool IsVacuum(void* obj);
+
 // The per-class Key reader for keyed interactables: an Aprop_C reads its own Key FName, a
 // trashBitsPile the Aactor_save_C one, and a chipPile or clump has no native
 // field and answers only through the BP GetKey UFunction, resolved and cached per class and

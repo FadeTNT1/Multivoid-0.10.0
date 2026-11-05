@@ -26,6 +26,7 @@ set(VOTVCOOP_SOURCES
     src/coop/items/hook_constraint.cpp
     src/coop/items/broom_stroke.cpp
     src/coop/items/broom_push.cpp
+    src/coop/items/vacuum_pile_intent.cpp
     ${VOTVCOOP_SOURCES_UE_WRAP_2}
     src/coop/player/movement_ledger.cpp
     src/coop/player/remote_player.cpp

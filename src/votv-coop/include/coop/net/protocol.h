@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 269;
+inline constexpr uint16_t kProtocolVersion = 270;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1241,6 +1241,15 @@ enum class ReliableKind : uint8_t {
     // cue precedes its PropDestroy on the same lane. Rate-capped on the host. Never relayed; a client's copy is refused
     // at the host's receive edge. Late join: none -- a one-shot cue. PropImpactFxPayload.
     PropImpactFx = 212,
+    // CLIENT->HOST: a client's vacuum landed on a dispenser pile (coop::vacuum_pile_intent). The client
+    // refuses the pile's own `vacuumed` body and sends the pile's key and the verb's `location`
+    // argument; the host re-tests the pile, the sender's held vacuum and the reach, and runs the verb on
+    // its own pile, so the item it pops, the counter drop and the depletion reach every peer on their
+    // own channels. Never relayed; not pre-world. Trust: the key resolves on the host to a live
+    // dispenser pile in the sender's reach, the location lies near it, and a sender's intents run no
+    // faster than a bounded rate from a bounded queue. Late join: nothing to replay, since a vacuum the
+    // host has not run changed nothing. VacuumPileIntentPayload.
+    VacuumPileIntent = 213,
 };
 
 #pragma pack(push, 1)
@@ -2657,6 +2666,16 @@ struct WindowStrokePayload {
 static_assert(sizeof(WindowStrokePayload) == 24, "WindowStrokePayload must be 24 bytes");
 static_assert(sizeof(WindowStrokePayload) <= 256 - 20 - 8,
               "WindowStrokePayload must fit in one reliable datagram");
+
+// A client's vacuum on a dispenser pile (VacuumPileIntent): the pile by its save key and the
+// `location` argument the client's vacuum passed its `vacuumed`, in world units.
+struct VacuumPileIntentPayload {
+    WireKey key;                 // 32 -- Aactor_save_C::Key of the trashBitsPile
+    float   locX, locY, locZ;    // 12 -- the verb's `location` argument
+};
+static_assert(sizeof(VacuumPileIntentPayload) == 44, "VacuumPileIntentPayload must be 44 bytes");
+static_assert(sizeof(VacuumPileIntentPayload) <= 256 - 20 - 8,
+              "VacuumPileIntentPayload must fit in one reliable datagram");
 
 static_assert(sizeof(BroomStrokePayload) == 48, "BroomStrokePayload must be 48 bytes");
 static_assert(sizeof(BroomStrokePayload) <= 256 - 20 - 8,

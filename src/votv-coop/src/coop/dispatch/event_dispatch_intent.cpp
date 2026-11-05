@@ -38,6 +38,7 @@
 #include "coop/props/prop_drop_intent.h"  // CLIENT->HOST client-placed keyed prop
 #include "coop/props/remover_request.h"  // CLIENT->HOST the tool gun's remover; HOST->CLIENT its answer
 #include "coop/items/broom_stroke.h"
+#include "coop/items/vacuum_pile_intent.h"  // CLIENT->HOST a client's vacuum on a dispenser pile
 #include "coop/world/explosion_request.h"  // CLIENT->HOST a shot and an explosion request, strictly checked and queued
 #include "coop/world/salt_rocket_ignite.h"  // CLIENT->HOST a light on a salt rocket, judged and performed on the host
 #include "coop/props/trash_channel.h"
@@ -757,6 +758,34 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::broom_stroke::OnBroomStroke(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::VacuumPileIntent: {
+        // CLIENT->HOST vacuum on a dispenser pile. The client refused the pile's own `vacuumed` and
+        // sent the pile's key and the verb's location; the host re-tests the pile, the held vacuum and
+        // the reach, then runs the verb on its own pile. coop::vacuum_pile_intent::OnVacuumPileIntent.
+        if (session.role() != net::Role::Host) {
+            UE_LOGW("event_feed: VacuumPileIntent received on a client -- dropping");
+            break;
+        }
+        if (msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: VacuumPileIntent from invalid senderPeerSlot=%d -- dropping", msg.senderPeerSlot);
+            break;
+        }
+        if (msg.payloadLen < sizeof(net::VacuumPileIntentPayload)) {
+            UE_LOGW("event_feed: VacuumPileIntent payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::VacuumPileIntentPayload));
+            break;
+        }
+        net::VacuumPileIntentPayload p{};
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (p.key.len == 0 || p.key.len > sizeof(p.key.data) || !std::isfinite(p.locX) ||
+            !std::isfinite(p.locY) || !std::isfinite(p.locZ)) {
+            UE_LOGW("event_feed: VacuumPileIntent with an empty key or a non-finite location from slot=%d -- "
+                    "dropping", msg.senderPeerSlot);
+            break;
+        }
+        coop::vacuum_pile_intent::OnVacuumPileIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::ThrowIntent: {       // CLIENT->HOST throw of a puppet-held clump
