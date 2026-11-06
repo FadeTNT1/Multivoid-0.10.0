@@ -76,15 +76,20 @@ thread_local int t_laneScopeDepth = 0;
 
 constexpr const char* kDropNames[static_cast<int>(DropReason::Count)] = {
     "length", "class", "ignoreKind", "nonfinite", "coord", "scale", "parking", "range", "flags"};
-bool g_dropLogged[static_cast<int>(DropReason::Count)] = {};
+// Each reason's first kDropSaid drops of a session are said with the blast's class and place; the rest are counted,
+// and the session-end line gives every count. A blast a client never shows is then named by its reason in the log.
+constexpr uint32_t kDropSaid = 8;
 
-// Count a drop under its reason and say it once per reason and session. `at` is where it was found.
-void Drop(DropReason reason, const char* at) {
+// Count a drop under its reason and say it while the reason's count is small. `at` is where it was found; `classId`
+// and `loc` are the received blast's, or -1 and null before they could be read.
+void Drop(DropReason reason, const char* at, int classId = -1, const float* loc = nullptr) {
     const int i = static_cast<int>(reason);
-    ++g_counters.dropped[i];
-    if (g_dropLogged[i]) return;
-    g_dropLogged[i] = true;
-    UE_LOGW("[EXPLOSION] spawn dropped reason=%s at=%s", kDropNames[i], at);
+    const uint32_t n = ++g_counters.dropped[i];
+    if (n > kDropSaid) return;
+    char where[96] = "";
+    if (loc) std::snprintf(where, sizeof(where), " loc=(%.0f,%.0f,%.0f)", loc[0], loc[1], loc[2]);
+    UE_LOGW("[EXPLOSION] spawn dropped reason=%s at=%s class=%d%s (#%u%s)", kDropNames[i], at, classId, where, n,
+            n == kDropSaid ? "; the rest of this reason are counted" : "");
 }
 
 bool AllFinite(const float* v, int n) {
@@ -249,7 +254,8 @@ SG::Verdict OnCapturePre(const SG::Call& c) {
             UE_LOGW("[EXPLOSION] host capture send class=%d failed to every world-ready peer; not retried", classId);
         }
     }
-    UE_LOGI("[EXPLOSION] host capture class=%d", classId);
+    UE_LOGI("[EXPLOSION] host capture class=%d loc=(%.0f,%.0f,%.0f) dmg=%.0f force=%.0f", classId, p.loc[0],
+            p.loc[1], p.loc[2], static_cast<double>(p.damage), static_cast<double>(p.force));
     return SG::Verdict::Run;
 }
 
@@ -328,10 +334,16 @@ void OnDisconnect() {
         UE_LOGI("[EXPLOSION] session end: dissolved=%u byName=%u destroyedByTask=%u captured=%u sendFailed=%u "
                 "applied=%u/%u/%u", c.dissolved, c.dissolvedByName, c.destroyedByTask, c.captured, c.sendFailed,
                 c.applied[0], c.applied[1], c.applied[2]);
+    char drops[160] = "";
+    size_t used = 0;
+    for (int i = 0; i < static_cast<int>(DropReason::Count) && used < sizeof(drops); ++i)
+        if (c.dropped[i])
+            used += static_cast<size_t>(std::snprintf(drops + used, sizeof(drops) - used, " %s=%u", kDropNames[i],
+                                                      c.dropped[i]));
+    if (used) UE_LOGI("[EXPLOSION] session end: received blasts dropped by reason:%s", drops);
     X::Reset();
     g_lastWorld = nullptr;
     g_counters  = Counters{};
-    std::memset(g_dropLogged, 0, sizeof(g_dropLogged));
     g_captureReadLogged = false;
     g_sendFailLogged = false;
 }
@@ -350,34 +362,35 @@ bool OnSpawnReceived(const uint8_t* data, size_t len) {
         return false;
     }
     std::memcpy(&p, data, sizeof(p));
+    const int cid = static_cast<int>(p.classId);
     if (p.classId >= static_cast<uint8_t>(X::Cls::Count)) {
-        Drop(DropReason::Class, "receive");
+        Drop(DropReason::Class, "receive", cid);
         return false;
     }
     if (p.ignoreKind > 2) {
-        Drop(DropReason::IgnoreKind, "receive");
+        Drop(DropReason::IgnoreKind, "receive", cid);
         return false;
     }
     if ((p.flags & ~3u) != 0) {
-        Drop(DropReason::Flags, "receive");
+        Drop(DropReason::Flags, "receive", cid);
         return false;
     }
     if (!AllFinite(p.loc, 3) || !AllFinite(p.rot, 3) || !AllFinite(p.scale, 3) || !std::isfinite(p.damage) ||
         !std::isfinite(p.radius) || !std::isfinite(p.force) || !std::isfinite(p.fireStrength) ||
         !std::isfinite(p.fireFuel) || !std::isfinite(p.innerShake) || !std::isfinite(p.outerShake)) {
-        Drop(DropReason::NonFinite, "receive");
+        Drop(DropReason::NonFinite, "receive", cid);
         return false;
     }
     for (const float c : p.loc) {
         if (std::fabs(c) > coop::net::kMaxCoord) {
-            Drop(DropReason::Coord, "receive");
+            Drop(DropReason::Coord, "receive", cid);
             return false;
         }
     }
     // The open bound of SanitizeWireScaleAxis, but a drop and not its fallback to 1.
     for (const float s : p.scale) {
         if (!(s > 0.01f && s < 100.f)) {
-            Drop(DropReason::Scale, "receive");
+            Drop(DropReason::Scale, "receive", cid, p.loc);
             return false;
         }
     }
@@ -385,7 +398,7 @@ bool OnSpawnReceived(const uint8_t* data, size_t len) {
         !InRange(p.outerShake, 0.f, kMaxShake) || !InRange(p.force, -kMaxForce, kMaxForce) ||
         !InRange(p.damage, 0.f, kMaxDamage) || !InRange(p.fireStrength, 0.f, kMaxFire) ||
         !InRange(p.fireFuel, 0.f, kMaxFire)) {
-        Drop(DropReason::Range, "receive");
+        Drop(DropReason::Range, "receive", cid, p.loc);
         return false;
     }
     GT::Post([p] { Apply(p); });
@@ -395,12 +408,16 @@ bool OnSpawnReceived(const uint8_t* data, size_t len) {
 // MTA resolves the position against the client's copy of the origin and warps the victim back by the latency when
 // there is none (CPacketHandler.cpp:4620-4670); here the position is the host's, absolute, with no compensation.
 void Apply(const coop::net::ExplosionSpawnPayload& p) {
-    if (!coop::spawn_authority::IsActiveClientSession() || InLaneSpawnScope()) return;
+    const int cid = static_cast<int>(p.classId);
+    if (!coop::spawn_authority::IsActiveClientSession())
+        return Drop(DropReason::Parking, "apply (not an active client session)", cid, p.loc);
+    if (InLaneSpawnScope()) return Drop(DropReason::Parking, "apply (nested in another apply)", cid, p.loc);
     // Without the birth seam this client's own game runs its explosions too, so the host's copy would be a second.
-    if (!g_hookInstalled) return Drop(DropReason::Parking, "apply (the birth seam is not installed)");
-    if (!coop::explosion_parking::Live()) return Drop(DropReason::Parking, "apply");
+    if (!g_hookInstalled) return Drop(DropReason::Parking, "apply (the birth seam is not installed)", cid, p.loc);
+    if (!coop::explosion_parking::Live())
+        return Drop(DropReason::Parking, "apply (a parking watch is not live)", cid, p.loc);
     const X::Cls cls = static_cast<X::Cls>(p.classId);
-    if (!X::ResolveNow(cls)) return Drop(DropReason::Class, "apply");
+    if (!X::ResolveNow(cls)) return Drop(DropReason::Class, "apply (the class did not resolve)", cid, p.loc);
     const X::Params params{p.damage, p.radius, p.force, p.fireStrength, p.fireFuel, p.innerShake, p.outerShake,
                            static_cast<int32_t>(p.objType), (p.flags & 1u) != 0, (p.flags & 2u) != 0};
     void* actor = nullptr;
@@ -409,15 +426,17 @@ void Apply(const coop::net::ExplosionSpawnPayload& p) {
         actor = X::SpawnDeferred(cls, p.loc, p.rot, p.scale, params, IgnoreActorOf(p));
     }
     if (!actor) {
-        UE_LOGW("[EXPLOSION] apply class=%u spawned nothing", static_cast<unsigned>(p.classId));
+        UE_LOGW("[EXPLOSION] apply class=%u loc=(%.0f,%.0f,%.0f) spawned nothing", static_cast<unsigned>(p.classId),
+                p.loc[0], p.loc[1], p.loc[2]);
         return;
     }
     ++g_counters.applied[p.classId];
     // A monotonic stamp (the log's own has a one-second grain), so a drill can time a blast against the laser that
     // made it: the Octa lane logs the laser's `t=` from the same clock.
     g_counters.lastApplyMs = coop::net::NowMs();
-    UE_LOGI("[EXPLOSION] apply class=%u t=%llu", static_cast<unsigned>(p.classId),
-            static_cast<unsigned long long>(g_counters.lastApplyMs));
+    UE_LOGI("[EXPLOSION] apply class=%u loc=(%.0f,%.0f,%.0f) dmg=%.0f force=%.0f t=%llu",
+            static_cast<unsigned>(p.classId), p.loc[0], p.loc[1], p.loc[2], static_cast<double>(p.damage),
+            static_cast<double>(p.force), static_cast<unsigned long long>(g_counters.lastApplyMs));
 }
 
 }  // namespace coop::explosion_sync

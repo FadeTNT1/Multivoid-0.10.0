@@ -42,8 +42,17 @@ const wchar_t* ClassName(Cls c);
 
 // Narrow an explosion's radial force to pawns: its RadialForce member's own RemoveObjectTypeToAffect, called twice with
 // the enum bytes 1 and 3 (WorldDynamic, PhysicsBody; byte 2, Pawn, stays). The component's array is never written
-// raw: that does not narrow. False when the member or the function does not resolve, or a call fails.
+// raw: that does not narrow. Since 0.10.0 explosion_C fires its blast through OccludedExplosionImpulse, not the
+// component's FireImpulse, so this narrows only a FireImpulse some other path still makes; NarrowObjectTypesToPawn
+// narrows the blast itself. False when the member or the function does not resolve, or a call fails.
 bool NarrowForceToPawn(void* explosion);
+
+// Narrow an object-type list to pawns in place: `array` is the storage of a TArray<TEnumAsByte<EObjectTypeQuery>>
+// (the overlap types explosion_C hands ThingsAndStuffLib::OccludedExplosionImpulse, as lib_obj_C::obj_dynphyspawn
+// returned them), and every entry but byte 2 (Pawn) is removed by shrinking its count, never by reallocating. The
+// number of entries kept, or -1 when the array reads as malformed (a negative count, a count past its capacity, no
+// data with a count). Game thread.
+int NarrowObjectTypesToPawn(uint8_t* array);
 
 // The parameters a blast reads, as the host captured them. objType is explosion_C's Int.
 struct Params {

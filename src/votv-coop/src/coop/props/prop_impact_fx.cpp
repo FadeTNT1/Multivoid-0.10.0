@@ -17,6 +17,7 @@
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/types.h"
 #include "ue_wrap/engine/engine.h"
+#include "ue_wrap/engine/engine_emitter.h"
 #include "ue_wrap/engine/hit_result.h"
 #include "ue_wrap/engine/physical_audio.h"
 #include "ue_wrap/facts/function_row.h"
@@ -62,6 +63,7 @@ uint32_t g_capped = 0;
 int      g_sentSaid = 0;
 int      g_playedSaid = 0;
 bool     g_noActorSaid = false;
+bool     g_emitterFailedSaid = false;
 bool     g_noCueSaid[coop::net::kPropImpactFxCount] = {};
 
 R::ParamOffset g_hitOff{L"hit"};
@@ -193,6 +195,18 @@ void OnFx(const coop::net::PropImpactFxPayload& p) {
     if (!cue && p.kind >= coop::net::kPropImpactFxDamaged)
         cue = ue_wrap::physical_audio::CueFromPropImpactComponent(actor, Cue::kDamaged);
     if (!cue) cue = ue_wrap::physical_audio::CueFromPropImpactComponent(actor, Cue::kImpact);
+    const FVector at{p.loc[0], p.loc[1], p.loc[2]};
+    // A break's particles: the destroy that follows on this lane removes the copy without running its own break, so
+    // the material's destroyed particles are spawned here, from the copy's component while it still stands.
+    if (p.kind == coop::net::kPropImpactFxDestroyed) {
+        void* ps = ue_wrap::physical_audio::ParticleFromPropImpactComponent(actor, Cue::kDestroyed);
+        if (ps && !ue_wrap::engine::SpawnEmitterAtLocation(actor, ps, at, ue_wrap::FRotator{}, FVector{1.f, 1.f, 1.f}) &&
+            !g_emitterFailedSaid) {
+            g_emitterFailedSaid = true;
+            UE_LOGW("[CRATE] client fx: the break particles of %ls did not spawn (said once)",
+                    R::ClassNameOf(actor).c_str());
+        }
+    }
     if (!cue) {
         if (p.kind < coop::net::kPropImpactFxCount && !g_noCueSaid[p.kind]) {
             g_noCueSaid[p.kind] = true;
@@ -201,7 +215,6 @@ void OnFx(const coop::net::PropImpactFxPayload& p) {
         }
         return;
     }
-    const FVector at{p.loc[0], p.loc[1], p.loc[2]};
     coop::prop_sound::PlayMaterialCueAt(actor, cue, at);
     if (g_playedSaid < kMaxSaid) {
         ++g_playedSaid;
@@ -224,6 +237,7 @@ void OnDisconnect() {
     g_sentSaid = 0;
     g_playedSaid = 0;
     g_noActorSaid = false;
+    g_emitterFailedSaid = false;
     for (bool& b : g_noCueSaid) b = false;
 }
 

@@ -17,7 +17,9 @@
 #include "coop/props/prop_throw.h"
 #include "coop/props/remote_prop.h"
 
+#include "ue_wrap/actors/breakable_explosive.h"
 #include "ue_wrap/actors/container_inventory.h"
+#include "ue_wrap/actors/cubicle.h"
 #include "ue_wrap/actors/fire_extinguisher.h"
 #include "ue_wrap/actors/int_objects.h"
 #include "ue_wrap/actors/physics_impact.h"
@@ -76,6 +78,20 @@ float Dist(const FVector& a, const FVector& b) {
 }
 
 bool Finite(const FVector& v) { return std::isfinite(v.X) && std::isfinite(v.Y) && std::isfinite(v.Z); }
+
+// The slack past a prop's colliding bounds a struck point may lie, cm: a hit's trace point and the host's copy of a
+// static prop agree to the surface, and a moving prop trails by the stream's latency.
+constexpr float kBoundsSlackCm = 50.f;
+
+// Does `p` lie on `prop`: within `radius` of its origin (a crate or a barrel), or inside its colliding bounds grown by
+// the slack (a cubicle partition or a vending machine, wider than any radius from its origin). False for a NaN.
+bool PointOnProp(void* prop, const FVector& p, const FVector& origin, float radius) {
+    if (Dist(p, origin) <= radius) return true;
+    FVector c{}, e{};
+    if (!ue_wrap::engine::GetActorBounds(prop, /*onlyColliding=*/true, c, e) || !Finite(c) || !Finite(e)) return false;
+    return std::fabs(p.X - c.X) <= e.X + kBoundsSlackCm && std::fabs(p.Y - c.Y) <= e.Y + kBoundsSlackCm &&
+           std::fabs(p.Z - c.Z) <= e.Z + kBoundsSlackCm;
+}
 
 // A parameter's storage in the call: the caller's, for an out or reference parameter, else the frame's own slot.
 const uint8_t* ParamBytes(const sg::Call& c, int32_t offset) {
@@ -287,7 +303,7 @@ Served Serve(coop::net::Session& s, int slot, const Queued& q) {
     const FVector hit{p.hitLoc[0], p.hitLoc[1], p.hitLoc[2]};
     FVector at{};
     if (!ue_wrap::engine::TryGetActorLocation(target, at)) return done("container unreadable");
-    if (!(Dist(hit, at) <= kContainerRadiusCm)) return done("the contact is off the container");   // NaN fails
+    if (!PointOnProp(target, hit, at, kContainerRadiusCm)) return done("the contact is off the container");
     if (causer) {
         FVector from{};
         if (!ue_wrap::engine::TryGetActorLocation(causer, from)) return done("causer unreadable");
@@ -352,7 +368,14 @@ void SettleWatches() {
 bool IsHostDamaged(void* prop) {
     // A fire extinguisher is host-damaged for the same reason a container is: its burst is a game-side effect (a
     // thrust, a spray, a drained charge) that one peer decides and the record then carries (fire_extinguisher_sync).
-    return prop && (ue_wrap::container_inventory::IsContainer(prop) || ue_wrap::fire_extinguisher::IsExtinguisher(prop));
+    // A breakable explosive (the vending machine, a gas can, a bomb, the explosive crystal or drive) is one because its
+    // break spawns the shared world's explosion and, for the vending machine, spills and lights its stock: a client's
+    // copy that broke would blast and spill a second set, or, with its explosion birth dissolved and no request for a
+    // source of that kind, vanish with no blast anywhere. The host's break and its blast travel the ordinary lanes.
+    // A cubicle partition is one so that a client's swing breaks it at all (a level partition has no syncer for a swing
+    // to elect) and its hit and break cues reach every peer from the one copy that runs them.
+    return prop && (ue_wrap::container_inventory::IsContainer(prop) || ue_wrap::fire_extinguisher::IsExtinguisher(prop) ||
+                    ue_wrap::breakable_explosive::IsBreakableExplosive(prop) || ue_wrap::cubicle::IsCubicle(prop));
 }
 
 void OnClientImpact(const sg::Call& c, void* container) {
@@ -458,7 +481,7 @@ bool HostApplySwing(uint32_t eid, uint8_t slot, const coop::net::HitIntentPayloa
     FVector at{};
     if (!ue_wrap::engine::TryGetActorLocation(prop, at)) return false;
     const FVector hitLoc{judged.hitLoc[0], judged.hitLoc[1], judged.hitLoc[2]};
-    if (!(Dist(hitLoc, at) <= kContainerRadiusCm)) {   // false for a NaN too
+    if (!PointOnProp(prop, hitLoc, at, kContainerRadiusCm)) {
         why = "the struck point is off the container";
         return false;
     }
@@ -534,6 +557,7 @@ void Install(coop::net::Session* session) {
 
 void Tick() {
     SettleWatches();
+    ue_wrap::cubicle::ResolveNames();
     coop::net::Session* s = LoadSession();
     if (!s) return;
     if (s->connected() && s->role() == coop::net::Role::Client) {

@@ -14,6 +14,7 @@
 #include "ue_wrap/engine/engine.h"
 
 #include <cmath>
+#include <cstring>
 
 namespace ue_wrap::explosion {
 namespace {
@@ -261,6 +262,24 @@ bool NarrowForceToPawn(void* explosion) {
         if (!f.Set<uint8_t>(L"ObjectType", type) || !Call(comp, f)) return false;
     }
     return true;
+}
+
+int NarrowObjectTypesToPawn(uint8_t* array) {
+    UE_ASSERT_GAME_THREAD("explosion::NarrowObjectTypesToPawn");
+    if (!array) return -1;
+    // FScriptArray: the data pointer, then the count and the capacity.
+    uint8_t* data = nullptr;
+    int32_t  num = 0, max = 0;
+    std::memcpy(&data, array, sizeof(data));
+    std::memcpy(&num, array + sizeof(void*), sizeof(num));
+    std::memcpy(&max, array + sizeof(void*) + sizeof(int32_t), sizeof(max));
+    if (num < 0 || num > max || (num > 0 && !data)) return -1;
+    constexpr uint8_t kPawn = 2;  // ObjectTypeQuery3
+    int32_t kept = 0;
+    for (int32_t i = 0; i < num; ++i)
+        if (data[i] == kPawn) data[kept++] = kPawn;
+    std::memcpy(array + sizeof(void*), &kept, sizeof(kept));
+    return kept;
 }
 
 void* SpawnDeferred(Cls c, const float loc[3], const float rot[3], const float scale[3], const Params& p,

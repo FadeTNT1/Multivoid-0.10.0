@@ -139,6 +139,8 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/swinger.cpp
     src/ue_wrap/actors/broom.cpp
     src/ue_wrap/actors/fire_extinguisher.cpp
+    src/ue_wrap/actors/breakable_explosive.cpp
+    src/ue_wrap/actors/cubicle.cpp
     src/ue_wrap/actors/food.cpp
     src/ue_wrap/actors/shrimp_tray.cpp
     src/ue_wrap/actors/chip_pile.cpp
