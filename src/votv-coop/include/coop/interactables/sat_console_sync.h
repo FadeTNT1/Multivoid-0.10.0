@@ -1,32 +1,45 @@
 // coop/interactables/sat_console_sync.h -- the SAT console's screen, shared, and its shared commands, run on the host.
 //
-// THE SCREEN. A machine has one terminal, the ui_console every SAT console panel shows, and every peer's shows
-// the same thing: the host's terminal is the canonical screen, and the others are replicas of it. The host
-// owns the input line (the text the sat claim's holder is typing), the printed history (consoleLine, kept to
-// its rightmost 3000 characters by the terminal's own fixLog), the prompt (its name and dish) and the busy
-// flag, and publishes them whole to every ready peer as a Screen revision whenever any moved, at most ten
-// times a second. The holder's input travels on its own, faster and smaller: the holder sends its input line
-// to the host as it types (about twenty times a second, and at once on a submit), the host puts it on its
-// terminal and relays it to the rest. Only the claim's holder may send input or output, the host checks the
-// sender against its claim table, and every packet carries the holder's claim count and a sequence so one
-// that is older than the last taken never overwrites newer typing. A peer whose terminal is not up yet keeps
-// the newest screen and shows it when it is; a peer that joins is sent the whole screen as its world is ready.
-// A replica never calls enterCommand: what it shows, it was told.
+// THE TERMINALS. Every placed SAT panel is a terminal with a screen of its own (ue_wrap/sat_console
+// TerminalBinding): ROOT at the desk, and one per field panel at its dish. The game has one ui_console per machine
+// that every panel shows, and a panel's con() re-points it at that panel's context on a use AND on any player's
+// begin-overlap -- so another player walking past ROOT re-pointed the console a typist at a field panel was using. In
+// a session the lane refuses every con() and native init of that console, and shows on it only the terminal this
+// machine's own player used, committed at or walked into (a switch waits for a command the console runs itself); a
+// panel whose dish is not set is not ready, never ROOT. This is the fallback of a render per panel: the one native
+// widget swaps between per-terminal states, so other panels on the same machine show the same picture meanwhile.
+//
+// THE SCREEN. A terminal's screen is the host's: a hidden terminal of the game's class it keeps per panel (never
+// constructed or shown, so no world alert is bound to it), pointed at the panel's context, owns its printed history
+// (consoleLine, kept to its rightmost 3000 characters by the terminal's own fixLog), its prompt, the holder's input
+// and the busy level, and is published whole to every ready peer as a Screen revision of that terminal whenever any
+// moved, at most ten times a second per terminal. The host's own console is a replica of the terminal it shows, like
+// a client's. A panel is claimed per panel ("sat_<id>"), so two peers type at two terminals at once. The holder's
+// input travels on its own, faster and smaller: the holder sends it to the host as it types (about twenty times a
+// second, and at once on a submit), the host puts it on that terminal and relays it to the rest. Only that panel's
+// claim holder may send input or output for it, its prompt and dish must be the panel's context on the host, and every
+// packet carries the holder's claim count and a sequence so one older than the last taken never overwrites newer
+// typing. Every blob names its terminal; a client keeps the newest screen of every terminal, bound here or not yet,
+// and shows one when its console shows that terminal; a peer that joins is sent every terminal's screen as its world
+// is ready. A replica never calls enterCommand: what it shows, it was told.
 //
 // THE COMMANDS. A client's line whose command rests on the shared world (coop/interactables/sat_console_table)
-// is refused at its terminal's enterCommand while the terminal is not busy, its input consumed as the body's
-// tail does, and sent to the host with the terminal's context: its dish or ROOT, its name, the panel last used.
-// The host keeps a terminal of the game's class for each typist, by the typist's identity, never constructed or
-// shown, and runs the line there, so the command happens once, in the host's world, and its effects cross by
-// their own lanes. Each line that terminal prints is written to the host's own terminal, in order, which puts it
-// on the shared screen; the typist's busy level goes back to the typist alone. A line whose effect is the
-// typist's own (sv.target moves its compass, rd.filter its radar) runs where it was typed, and what it printed
-// is sent to the host in order, so the shared history reads as it did; `clr` is the shared reset. A client's
-// terminal prints nothing of its own outside a command: the world's alerts reach the host's terminal and come
-// back on the screen, so a client's own would only be a second copy. A typist that leaves mid-command while
-// another client keeps the session leaves the command running, and back, is bound to its terminal again as
-// its world is ready; the last client's leave ends the session, and every terminal is discarded, its command
-// stopping there. MTA sends a command the client does not own to the server, which runs it as that player
+// is refused at its console's enterCommand while the console is not busy, its input consumed as the body's
+// tail does, and sent to the host with the terminal it was typed at and the context shown: its dish or ROOT, its name.
+// The host keeps an executor -- a terminal of the game's class, never constructed or shown -- for each typist at each
+// terminal, by the typist's identity and the terminal id, and runs the line there in the host panel's own context, so
+// the command happens once, in the host's world, and its effects cross by their own lanes. Each line an executor
+// prints, now or from a latent continuation, is written to the canonical screen of the terminal it was made for, in
+// order; the typist's busy level goes back to the typist alone, and the terminal's screen is busy while any executor
+// there runs. At the cap of sixteen an idle executor gives way, so a typist can visit any number of panels.
+//
+// A line whose effect is the typist's own (sv.target moves its compass, rd.filter its radar) runs where it was
+// typed, and what it printed is sent to the host in order, so that terminal's history reads as it did; `clr` is the
+// terminal's reset. A client's console prints nothing of its own outside a command: the world's alerts reach the
+// host's console and land on ROOT's screen (a panel's own alert on that panel's), so a client's own would only be a
+// second copy. A typist that leaves mid-command while another client keeps the session leaves the command running,
+// and back, is bound to its executor again as its world is ready; the last client's leave ends the session, and
+// every executor is discarded, its command stopping there. MTA sends a command the client does not own to the server, which runs it as that player
 // (reference/mtasa-blue/Client/mods/deathmatch/ClientCommands.cpp:91,
 // reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:2406); MTA also runs the client's own
 // handlers first (:60), which here would run the one game handler twice, so a line runs on one machine.
@@ -72,6 +85,11 @@ struct Counts {
     uint64_t presentsMerged = 0;  // host: those, written to the screen
 };
 Counts LaneCounts();
+// The executors the host keeps (one per typist and terminal).
 size_t KeptTerminals(void** out, size_t cap);
+// [dev] The terminal this machine's console shows (0: none yet), and a switch of it to the panel of a dish, as a use
+// of that panel would make it. False when no ready panel carries the dish or the console is not up.
+uint32_t ShownTerminal();
+bool ShowTerminalForDish(int32_t dish);
 
 }  // namespace coop::sat_console_sync

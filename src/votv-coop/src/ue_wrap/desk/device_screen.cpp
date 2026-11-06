@@ -13,6 +13,7 @@
 #include "ue_wrap/core/types.h"
 #include "ue_wrap/actors/notebook.h"
 #include "ue_wrap/actors/prop.h"
+#include "ue_wrap/desk/sat_console.h"  // PanelKey, ReadUsed: a SAT panel is a terminal of its own
 
 #include <chrono>
 #include <cmath>
@@ -46,7 +47,7 @@ struct ClassSlot { const wchar_t* name; void* cls; };
 // last two (per-instance widgets -> owner-resolved position keys).
 ClassSlot g_widgets[] = {
     { L"ui_consolesAtlas_C",            nullptr },  // -> "desk"
-    { L"ui_console_C",                  nullptr },  // -> "sat"
+    { L"ui_console_C",                  nullptr },  // -> "sat_<id>" of the panel it was entered from
     { L"ui_radar_C",                    nullptr },  // -> "radar"
     { L"ui_reactor_C",                  nullptr },  // -> "reactor"
     { L"ui_laptop_C",                   nullptr },  // -> "laptop"
@@ -54,12 +55,12 @@ ClassSlot g_widgets[] = {
     { L"ui_arcade_invaders_C",          nullptr },  // -> "arcade:<posKey>"
 };
 const wchar_t* const g_widgetKeys[] = {
-    L"desk", L"sat", L"radar", L"reactor", L"laptop", nullptr, nullptr };
+    L"desk", nullptr, L"radar", L"reactor", L"laptop", nullptr, nullptr };
 
 // Device actor classes (the aim/deny side).
 ClassSlot g_devices[] = {
     { L"analogDScreenTest_C",  nullptr },  // -> "desk"
-    { L"panel_SATconsole_C",   nullptr },  // -> "sat"
+    { L"panel_SATconsole_C",   nullptr },  // -> "sat_<id>" of the panel
     { L"panel_radar_C",        nullptr },  // -> "radar"
     { L"panel_reactor_C",      nullptr },  // -> "reactor"
     { L"laptop_C",             nullptr },  // -> "laptop"
@@ -68,7 +69,7 @@ ClassSlot g_devices[] = {
     { L"prop_arcade_C",        nullptr },  // -> "arcade:<posKey>"
 };
 const wchar_t* const g_deviceKeys[] = {
-    L"desk", L"sat", L"radar", L"reactor", L"laptop", L"laptop", nullptr, nullptr };
+    L"desk", nullptr, L"radar", L"reactor", L"laptop", L"laptop", nullptr, nullptr };
 
 void* g_playerCls = nullptr;
 void* g_setActiveInterfaceFn = nullptr;
@@ -264,8 +265,15 @@ std::wstring ClassifyWidgetClaimKey(void* widget) {
     if (ue_wrap::notebook::IsEditorWidget(widget)) return PropKey(L"note_", ue_wrap::notebook::NotebookOf(widget));
     if (ue_wrap::notebook::IsPaperDrawWidget(widget)) return PropKey(L"draw_", ue_wrap::notebook::PaperOf(widget));
     FillWidgetSlotFromClass(cls);  // beta: resolve this widget's class from its own ClassOf (late-buy safe), inline before the match
+    // The SAT console: one widget every panel shows, but each panel is a terminal with a screen of its own, so the
+    // claim is the panel's. A use writes the panel into the widget's `used` just before the interface opens.
+    if (g_widgets[1].cls && cls == g_widgets[1].cls) {
+        std::wstring key = ue_wrap::sat_console::PanelKey(ue_wrap::sat_console::ReadUsed(widget));
+        if (key.empty()) UE_LOGW("device_screen: SAT console %p entered with no panel in `used` -- no claim", widget);
+        return key;
+    }
     for (size_t i = 0; i < 5; ++i)
-        if (g_widgets[i].cls && cls == g_widgets[i].cls) return g_widgetKeys[i];
+        if (g_widgets[i].cls && cls == g_widgets[i].cls && g_widgetKeys[i]) return g_widgetKeys[i];
     if (g_widgets[5].cls && cls == g_widgets[5].cls) {
         EnsurePerInstanceDevice(6);  // transformer device class + widgetInst offset (no-bypass guarantee)
         if (void* owner = FindOwnerByWidgetField(L"transformerMGPanel_C",
@@ -292,11 +300,19 @@ std::wstring ClassifyDeviceActorClaimKey(void* actor) {
     if (ue_wrap::notebook::IsNotebook(actor)) return PropKey(L"note_", actor);
     if (ue_wrap::notebook::IsDrawablePaper(actor)) return PropKey(L"draw_", actor);
     FillDeviceSlotFromClass(cls);  // beta: resolve this device's class from its own ClassOf (late-buy safe), inline before the match
+    if (g_devices[1].cls && cls == g_devices[1].cls) return ue_wrap::sat_console::PanelKey(actor);
     for (size_t i = 0; i < 6; ++i)
-        if (g_devices[i].cls && cls == g_devices[i].cls) return g_deviceKeys[i];
+        if (g_devices[i].cls && cls == g_devices[i].cls && g_deviceKeys[i]) return g_deviceKeys[i];
     if (g_devices[6].cls && cls == g_devices[6].cls) return PosKey(L"tfm_", actor);
     if (g_devices[7].cls && cls == g_devices[7].cls) return PosKey(L"arc_", actor);
     return {};
+}
+
+bool ClaimKeyMayMove(void* widget) {
+    if (!widget || !R::IsLive(widget)) return false;
+    void* cls = R::ClassOf(widget);
+    FillWidgetSlotFromClass(cls);
+    return g_widgets[1].cls && cls == g_widgets[1].cls;
 }
 
 bool ClearAimForDispatch(void* player) {

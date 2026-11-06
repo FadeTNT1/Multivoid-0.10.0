@@ -179,32 +179,46 @@ selling as "X0001 |Drive| for 1 points" on its own is the ordinary sell and not 
 
 ### The SAT console
 
-A machine has one SAT console terminal, the widget every SAT console panel in the world shows; a
-panel points it at its dish, or at ROOT. The screen is shared: the host's terminal is the canonical
-screen and every peer's shows the same input line, history, prompt and busy state. The host publishes
-the whole screen (the history, kept by the game to its rightmost 3000 characters, the prompt's name and
-dish, the busy level, who holds the console and under which generation) to every peer whose world is
-ready whenever it moved, at most ten times a second, and to a peer as its world becomes ready, so a
-joiner sees the history already there; a peer whose terminal is not up keeps the newest and shows it when
-it is. The input line goes on its own: the peer holding the console (the `sat` claim) sends the line as it
-types, about twenty times a second and at once on a submit, the host puts it on its terminal and relays
-it, and a replica draws it without ever running a command. The host takes input and output only from the
-claim table's holder, newest claim and sequence first, so a stale packet never overwrites newer typing.
+A machine has one SAT console widget, the one every SAT console panel in the world shows, and the
+game re-points it at a panel's dish (or ROOT) on a use and on any player's walk into the panel. In a
+session every placed panel is a terminal with a screen of its own -- ROOT at the desk, one per field
+panel at its dish, each named on the wire by an id hashed from the placed actor's name and claimed as
+`sat_<id>` -- so two peers type at two terminals at once and another player walking past ROOT no longer
+re-points the console of a typist at a field panel. The lane refuses every native `con()` and `init` of
+the console and shows on it only the terminal this machine's own player used, committed at or walked
+into; a switch waits for a command the console runs itself, and a field panel whose dish is not set is
+not ready, never ROOT. This is the fallback of a render target per panel: the one native widget swaps
+between per-terminal states, so the other panels of one machine show the same picture meanwhile. Each
+terminal's screen is the host's: a hidden terminal of the game's class per panel, never constructed or
+shown, holds its input line, history, prompt and busy state; the host's own console is a replica of
+the terminal it shows, like a client's. The host publishes a terminal's whole screen (the history, kept
+by the game to its rightmost 3000 characters, the prompt's name and dish, the busy level, who holds that
+panel and under which generation) to every peer whose world is ready whenever it moved, at most ten
+times a second per terminal, and every terminal's screen to a peer as its world becomes ready, so a
+joiner sees the histories already there; a client keeps the newest screen of every terminal, bound
+there yet or not, and shows one when its console shows that terminal. The input line goes on its own:
+the peer holding a panel sends the line as it types, about twenty times a second and at once on a
+submit, the host puts it on that terminal and relays it, and a replica draws it without ever running a
+command. The host takes input and output for a terminal only from that panel's claim holder, with the
+panel's own prompt and dish, newest claim and sequence first, so a stale packet never overwrites newer
+typing. World alerts land on ROOT's screen; a panel's own alert (its server down) on that panel's.
 A line a client types there whose command rests on the
 shared world -- a dish's calibration, a floppy's export or eject, a gift box, a server's or a
 tower's state, the debug and joke commands that spawn or destroy things -- is refused on the
-client and sent to the host with the terminal's context. The host keeps a terminal of the game's
-own class for each typist, never shown, and runs the line there, so the command happens once, in
-the host's world, and its results cross by their own lanes; every line that terminal prints is
-written to the host's terminal in order, which puts it on the shared screen for every peer, the typist
-included, and the typist alone gets that terminal's busy state. A line runs only once the host's terminal is
-idle and set to the dish, name and panel the line carried; a terminal still running a command
-answers it busy, and a dish or a named panel the host cannot resolve, or an init that fails,
-answers it err rather than running it against another context. A line is never re-run on its own, since a command such as an
+client and sent to the host with the terminal it was typed at and the prompt shown. The host keeps an
+executor of the game's own class for each typist at each terminal, never shown, and runs the line there
+in its own panel's context, so the command happens once, in the host's world, and its results cross by
+their own lanes; every line that executor prints, a latent continuation's included, is written to that
+terminal's screen in order, for every peer, the typist included, and the typist alone gets its busy
+state; the terminal's screen is busy while any executor there runs. A line runs only once its executor
+is idle and set to the panel's dish and name; one still running a command answers it busy, a prompt or
+dish that is not the host panel's, or an init that fails, answers it err rather than running it
+against another context, and a line at a panel another peer holds is dropped. At sixteen executors an
+idle one gives way, so a typist can visit any number of panels. A line is never re-run on its own, since a command such as an
 eject has an effect in the world. A line whose effect is the typist's own -- its
 compass, its terminal, the desk's radar filter and sounds on its machine -- runs where it was typed,
 and what it printed is sent to the host in order, so the shared history reads as the typist saw it;
-`clr` is the shared reset. A client's terminal prints nothing of its own outside a command: the
+`clr` is that terminal's reset. A client's terminal prints nothing of its own outside a command: the
 world's alerts reach the host's terminal and come back on the screen, so a client's would be a second
 copy. A client whose own output is not yet merged keeps a newer screen back for up to two seconds, so
 the line does not vanish and come back. Why a line ran where it was typed is counted by reason, the
@@ -212,8 +226,9 @@ first of each logged and the totals at the session's end; `sat_console_trace=1` 
 revision sent, received and applied and every input packet
 (`coop/interactables/sat_console_sync`, the packets in `coop/interactables/sat_console_wire`, the command table in `coop/interactables/sat_console_table`).
 
-The host's own terminal is the screen everything lands on, so a command is only as good as it is up. A line that
-reaches the host while it is not (the desk's widget chain broken, a world still loading) is kept unrun and in order,
+A terminal's canonical screen is what everything at it lands on, so a command is only as good as it is up. A line
+that reaches the host while it is not (the panel not bound or its dish not set, a world still loading) is kept unrun
+and in order,
 and runs when it is, once; after ten seconds it is answered `The terminal is not ready` -- on the shared screen, and to
 its typist as a screen of its own -- and never run. Prints, resets and the holder's newest input wait the same way
 and are written in their order, their sequence acknowledged only when written, and a screen that could not be
@@ -256,7 +271,7 @@ not built. The ATV's physical modules are on [vehicles.md](vehicles.md).
 | the tape accrual | each peer, host-adjusted | a one-hertz re-snap |
 | the servers | the host | state driven into each box |
 | a SAT console command that rests on the world | the host, on a terminal kept for its typist | the typed line up; the printed lines onto the shared screen, the busy state to the typist |
-| the SAT console's screen (input, history, prompt, busy) | the host's terminal | whole, to every ready peer on a change and on join; the holder's input line up and relayed |
+| a SAT terminal's screen (input, history, prompt, busy), one per placed panel | the host's hidden terminal for that panel | whole, per terminal, to every ready peer on a change and every terminal's on join; the panel holder's input line up and relayed |
 | the upgrade levels | the host's save, once | not mirrored |
 
 ## Wire messages
@@ -297,7 +312,7 @@ joiner's own restore of a saved decode is refused; the desk's two loops are re-s
 truth.
 A joiner never sees a running ping's stage visuals, only its outcome. A SAT console typist that leaves
 mid-command while another client keeps the session leaves the command running on the host and, back,
-is bound to its terminal and its busy state as its world is ready; the last client's leave ends the
+is bound to its executor and its busy state as its world is ready; the last client's leave ends the
 session, and every such terminal is discarded with it, its command stopping there. An eraser press's
 show lasts its 3 s and is not replayed; its wipe arrives as the drive's row. The upgrade levels
 arrive with the save and never again.
@@ -316,7 +331,7 @@ arrive with the save and never again.
 | The red phone's ring is per-peer randomness with no lane | `[V]` no lane exists |
 | A client's own write to a drive whose row is still its class default is neither put back nor sent; no client-side writer of such a drive exists in the game (every writer is a verb the host runs, or a drive the client brings in) | `[RD]` the writer census of `prop_drive_C.data_0`; `coop/interactables/drive_payload_sync` |
 | A SAT console command that spawns or destroys a class no lane carries (the rufus, the thiccfus, the llama's soul, the madness, the centipede, the murder kerfur) acts in the host's world only; its typist does not see it | `[V]` no lane exists for those classes |
-| The SAT console's screen is shared; the shared screen follows the host's terminal, so an alert only a client's world raised is not on it, and a client's `sv.target` or `rd.filter` takes effect on the typist alone though its printed lines are shown to all | `[V]` by design; `coop/interactables/sat_console_sync` |
+| Each SAT panel's screen is shared; it follows the host's terminal for that panel, so an alert only a client's world raised is not on it, and a client's `sv.target` or `rd.filter` takes effect on the typist alone though its printed lines are shown to all. One machine draws one terminal at a time on every panel (the one its player stands at), so a far panel shows that picture, not its own | `[V]` by design (the fallback of a render per panel); `coop/interactables/sat_console_sync` |
 | A client's cheat menu (`uncalib`, `summonvirus`) and a virus its own save starts change only its copy of the dishes' precision, and the copy is put back at its next poll; the virus itself waits on a lane for the desk's `virusEvent` | `[V]` `coop/interactables/dish_calib_sync`; no lane carries `virusEvent` |
 | The fakeGrays event's level trigger (`trigger_fakeLmaos`) breaks its dish's server and zeroes the dish on the machine where an allowed actor enters its volume; on a client the zero is put back and the break stays that client's | `[V]` the chain: the eventer's fakeGrays event arms the volume, whose first object is the trigger; `[?]` whether a client's body on the host's copy fires it |
 

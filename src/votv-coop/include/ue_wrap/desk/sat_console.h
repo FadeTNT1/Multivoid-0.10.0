@@ -3,12 +3,15 @@
 // begins), and terminals of our own made of the same class and never shown. A terminal runs a typed
 // line through enterCommand, prints every line through writeToLog, and is busy while `processing`
 // is set; a panel points it at its dish with init(name, hide, dish) and records itself in `used`.
+// Each placed panel is also a terminal of its own (TerminalBinding below): the co-op lane keeps one
+// screen per panel and shows the one this machine's player stands at on the shared widget.
 // Engine-wrapper layer (principle 7): no network or gameplay logic.
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace ue_wrap::sat_console {
 
@@ -61,6 +64,8 @@ void DiscardTerminal(void* term);
 // writeToLog's text and bracket type (0 an output line, 1 the typed line's echo, 2 bare).
 bool ReadEnterCommandLine(const uint8_t* locals, std::wstring& out);
 bool ReadWriteToLogArgs(const uint8_t* locals, std::wstring& text, uint8_t& bracketsType);
+// init's name and dish, from a watched init's frame (the dish pointer as passed, unchecked).
+bool ReadInitArgs(const uint8_t* locals, std::wstring& name, void*& dish);
 
 // The terminal's state.
 bool  ReadProcessing(void* term, bool& out);
@@ -96,9 +101,43 @@ bool RunCommand(void* term, const std::wstring& line);
 bool CallWriteToLog(void* term, const std::wstring& text, uint8_t bracketsType);
 bool ConsumeInput(void* term);
 
-// The panels, named by the placed actor's name, which the map gives every machine alike: a panel's
-// name, and this machine's panel of that name in the desk's list, or null.
+// A panel's name: the placed actor's name, which the map gives every machine alike.
 std::wstring PanelName(void* panel);
-void* FindPanelByName(const std::wstring& name);
+
+// ---- the terminals: one per placed panel ----
+//
+// Vanilla has one ui_console_C per machine and every panel_SATconsole_C shows it; a panel's con() re-points it at
+// that panel's dish (or ROOT), on a use and on any player's begin-overlap. A TERMINAL here is a placed panel: its id
+// is the FNV-1a 32 of the placed actor's name (the same on every machine; never 0), its key the device claim it is
+// held under ("sat_" + 8 hex digits, inside the 31-char wire key), its context the prompt con() would give it. The
+// root panel's context is ROOT; any other panel's is its dish's name and the dish, and a panel whose dish is not set
+// yet is NOT READY -- never silently ROOT.
+struct TerminalBinding {
+    void*        panel = nullptr;
+    uint32_t     id = 0;
+    std::wstring key;
+    bool         root = false;
+    bool         ready = false;  // the context below is complete
+    void*        dish = nullptr; // null for ROOT
+    std::wstring name;           // the prompt as init receives it (init lowercases it)
+};
+
+bool IsPanel(void* obj);
+// Every live panel of this world (the panel class's instances, not the desk's list: a panel that streamed in after
+// the desk began counts). Returns the count appended.
+size_t EnumeratePanels(std::vector<void*>& out);
+uint32_t PanelId(void* panel);
+std::wstring PanelKey(void* panel);          // empty for a non-panel
+std::wstring KeyForId(uint32_t id);          // "sat_xxxxxxxx", empty for 0
+// A panel's binding; `ready` says the context is whole. Empty (id 0) for a non-panel.
+TerminalBinding TerminalForPanel(void* panel);
+// The binding of a terminal id in this world: false when no live panel carries the id. Cached; a miss walks the
+// panel class's instances at most twice a second.
+bool BindingForTerminal(uint32_t id, TerminalBinding& out);
+// The desk's own panel (the one with `root` set), or null.
+void* RootPanel();
+// The actor a panel's begin-overlap event is running for, read from that event's parameter frame (a watch of the
+// event hands it); null when unresolved.
+void* ReadOverlapActor(const uint8_t* locals);
 
 }  // namespace ue_wrap::sat_console

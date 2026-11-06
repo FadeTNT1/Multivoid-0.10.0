@@ -1036,6 +1036,22 @@ inline constexpr const wchar_t* SatConsoleAtlasClass       = L"ui_consolesAtlas_
 inline constexpr const wchar_t* SatConsoleAtlasTerminalProp = L"umg_console";
 inline constexpr const wchar_t* SatConsoleDeskClass        = L"analogDScreenTest_C";
 inline constexpr const wchar_t* SatConsoleDeskPanelsProp   = L"consoles";
+// The SAT console's panels, panel_SATconsole_C (0.10.0 bytecode capture): every panel shows the one terminal
+// (`Widget`, the atlas's umg_console the desk hands it). con() points that terminal at the panel's dish:
+// init(control_asDish.nameDish, false, control_asDish) when control_asDish is valid, init("ROOT", false, none)
+// otherwise. The `root` flag marks the desk's own panel (its begin makes it gamemode.rootConsole). con() runs on a
+// use (actionOptionIndex) and on any mainPlayer_C's begin-overlap of the panel's trigger (the bound event named
+// below, whose OtherActor is the actor that walked in).
+inline constexpr const wchar_t* SatPanelClass              = L"panel_SATconsole_C";
+inline constexpr const wchar_t* SatPanelRootProp           = L"root";            // bool
+inline constexpr const wchar_t* SatPanelDishProp           = L"control_asDish";  // dish_C*
+inline constexpr const wchar_t* SatPanelWidgetProp         = L"Widget";          // ui_console_C*
+inline constexpr const wchar_t* SatPanelConFn              = L"con";
+inline constexpr const wchar_t* SatPanelOverlapFn          =
+    L"BndEvt__updName_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature";
+inline constexpr const wchar_t* SatPanelOverlapActorParam  = L"OtherActor";
+inline constexpr const wchar_t* DishClass                  = L"dish_C";
+inline constexpr const wchar_t* DishNameProp               = L"nameDish";        // FText: the prompt con() gives
 inline constexpr const wchar_t* EditableTextBoxClass       = L"EditableTextBox";
 inline constexpr const wchar_t* EditableTextBoxSetTextFn   = L"SetText";
 inline constexpr const wchar_t* EditableTextBoxGetTextFn   = L"GetText";

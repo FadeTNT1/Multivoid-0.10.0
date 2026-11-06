@@ -36,7 +36,8 @@ void* ReadActiveInterface(void* player);
 // Classify an ACTIVE INTERFACE widget into its cross-peer claim key:
 //   ui_consolesAtlas_C -> "desk"   (the 4-screen main desk; coords is the
 //                                   only enterable screen of it)
-//   ui_console_C       -> "sat"    (ALL SAT consoles share this one widget)
+//   ui_console_C       -> "sat_<id>" (ALL SAT panels share this one widget, but each panel is a terminal of
+//                                   its own: the key is the panel in the widget's `used`, ue_wrap/sat_console)
 //   ui_radar_C         -> "radar"
 //   ui_reactor_C       -> "reactor"
 //   ui_laptop_C        -> "laptop" (base laptop + every portable PC -- ONE
@@ -51,12 +52,16 @@ std::wstring ClassifyWidgetClaimKey(void* widget);
 
 // Classify an AIMED ACTOR into the claim key its E-press would enter (the
 // deny-gate side): analogDScreenTest_C -> "desk", panel_SATconsole_C ->
-// "sat", panel_radar_C -> "radar", panel_reactor_C -> "reactor", laptop_C /
+// "sat_<id>" of that panel, panel_radar_C -> "radar", panel_reactor_C -> "reactor", laptop_C /
 // prop_portablePc_C -> "laptop", transformerMGPanel_C -> "tfm_<posKey>",
 // prop_arcade_C -> "arc_<posKey>", prop_notebook_C (the torn sheet too) -> "note_<hash>",
 // prop_paper_drawable_C -> "draw_<hash>". Empty for a non-device actor, for a transformer or arcade
 // whose location read failed, and for a notebook or paper with no Key.
 std::wstring ClassifyDeviceActorClaimKey(void* actor);
+
+// Whether the claim key of an interface widget can change while the widget pointer stays the same: the SAT
+// console's, whose key is the panel it was entered from. The occupancy edge re-reads such a key each tick.
+bool ClaimKeyMayMove(void* widget);
 
 // Null the local player's aim fields (lookAtActor + HitResult.Actor weakptr) for the CURRENT
 // InpActEvt_use dispatch, so the native enter chain no-ops on its own icast guards, remembering the
