@@ -798,3 +798,7 @@ CFG_FLAG(key_index_forget_one, "key_index_forget_one", "dev", false, "VOTVCOOP_K
 CFG_FLAG(melee_fx_log, "melee_fx_log", "dev", false, "VOTVCOOP_MELEE_FX_LOG",
     "Developer: log every melee effect this peer sends, judges, refuses and plays (the [MELEE-FX] lines), not only the "
     "first few of each.")
+CFG_FLAG(local_prop_push_log, "local_prop_push_log", "dev", false, "VOTVCOOP_LOCAL_PROP_PUSH_LOG",
+    "Developer: log every event of the local player's prop push (the [LOCAL-PUSH] lines: each read, write and "
+    "restore of the movement values), the client shove scan ([CLIENT-SHOVE]: each prop it sees move and each claim "
+    "it sends or holds back) and every stream-end overlap read, not only the first few of each.")

@@ -165,6 +165,7 @@ set(VOTVCOOP_SOURCES
     src/coop/player/player_damage.cpp
     src/coop/player/player_hit.cpp
     src/coop/player/hit_intent.cpp
+    src/coop/player/local_push.cpp
     src/coop/player/melee_fx.cpp
     src/coop/player/melee_fx_contact.cpp
     src/coop/player/melee_fx_swing.cpp
@@ -252,6 +253,7 @@ set(VOTVCOOP_SOURCES
     src/coop/props/trash_clump_pose_stream.cpp
     src/coop/props/trash_sweep.cpp
     src/coop/props/prop_drive_host.cpp
+    src/coop/props/client_shove.cpp
     src/coop/props/prop_motion_scan.cpp
     src/coop/props/prop_drive_stream.cpp
     src/coop/props/prop_syncer_host.cpp
