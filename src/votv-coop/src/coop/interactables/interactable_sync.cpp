@@ -157,11 +157,16 @@ const Adapter g_garageAdapter = {
     // A garage at rest is brought to the end its Open names even when the flag already matches: a load can
     // leave Open set with the move timeline (and the mesh) at the other end.
     [](void* a, bool on) -> bool {
-        float before = 0.f, after = 0.f;
-        if (ue_wrap::garage::NormalizeOpen(a, on, &before, &after) != ue_wrap::garage::Settled::Snapped)
-            return false;
+        ue_wrap::garage::SettleReadback rb;
+        if (ue_wrap::garage::SettleAtRest(a, on, &rb) != ue_wrap::garage::Settled::Snapped) return false;
         UE_LOGI("garage: '%ls' settled to %s -- Open already matched but its move timeline stood at %.2f s, "
-                "now %.2f s", ue_wrap::garage::GetNameKey(a).c_str(), on ? "OPEN" : "CLOSED", before, after);
+                "now %.2f s", ue_wrap::garage::GetNameKey(a).c_str(), on ? "OPEN" : "CLOSED", rb.timelineBefore,
+                rb.timelineAfter);
+        UE_LOGI("garage: '%ls' settle read-back -- mesh %s, montage %s (%.2f), target the %s section's end",
+                ue_wrap::garage::GetNameKey(a).c_str(),
+                rb.meshReached ? "driven (animation instance live)" : "NOT reached (no animation instance yet)",
+                rb.montageRead ? "position read" : "not readable", rb.montageRead ? rb.montagePos : 0.f,
+                on ? "open" : "close");
         return true;
     },
     nullptr, nullptr,  // the payload is the bool; the seed carries the rest

@@ -64,6 +64,23 @@ enum class Settled : uint8_t {
 // receive the timeline position read before and after. Game thread.
 Settled NormalizeOpen(void* g, bool open, float* before = nullptr, float* after = nullptr);
 
+// What SettleAtRest read back after driving the door, to prove the visible state matches.
+struct SettleReadback {
+    float timelineBefore = 0.f;   // the move timeline's position before the settle
+    float timelineAfter  = 0.f;   // and after
+    bool  meshReached    = false; // the door mesh had an animation instance, so the montage could be driven
+    bool  montageRead    = false; // a swing montage was active afterwards and its position read
+    float montagePos     = 0.f;   // that montage's position, at the end of its open or close section
+};
+
+// NormalizeOpen for a world's load: a door at rest and off the end `open` names is driven all the way as
+// SeedTo drives a joiner's -- the game's settime (the mesh montage), then the montage put at its section's end,
+// the timeline stopped at its end with its update fired, `mov` cleared, the swing sound out, the nav area set --
+// where NormalizeOpen moves the timeline (the collision box) alone and leaves the visible door as the load
+// left it. Falls back to NormalizeOpen when settime or the timeline reads do not resolve. Never touches a
+// swinging door. `rb` (optional) receives the read-back. Game thread.
+Settled SettleAtRest(void* g, bool open, SettleReadback* rb = nullptr);
+
 // The garage's swing as a peer would send it: whether it is mid-swing (`mov` or the timeline playing) and how far
 // along the timeline it stands, 0 (closed end) to 1 (open end). False when the timeline did not resolve or read;
 // the outputs are then untouched. Game thread.
