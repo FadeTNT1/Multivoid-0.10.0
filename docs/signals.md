@@ -203,6 +203,20 @@ first of each logged and the totals at the session's end; `sat_console_trace=1` 
 revision sent, received and applied and every input packet
 (`coop/interactables/sat_console_sync`, the packets in `coop/interactables/sat_console_wire`, the command table in `coop/interactables/sat_console_table`).
 
+The host's own terminal is the screen everything lands on, so a command is only as good as it is up. A line that
+reaches the host while it is not (the desk's widget chain broken, a world still loading) is kept unrun and in order,
+and runs when it is, once; after ten seconds it is answered `The terminal is not ready` -- on the shared screen, and to
+its typist as a screen of its own -- and never run. Prints, resets and the holder's newest input wait the same way
+and are written in their order, their sequence acknowledged only when written, and a screen that could not be
+published stays dirty and is tried again. Where the desk's `Widget` backref or the atlas's `umg_console` is empty
+while the desk's widget component, or the atlas's widget tree, already holds what it should name, the wrapper binds
+the pointer again (no BeginPlay, no use). While a remote typist holds the console, a line waits or a typist's terminal
+runs, the desk's widget component is kept ticking offscreen (`SetTickWhenOffscreen`, when its one-bool signature
+validates and the prior value reads back; restored after). `computer_readiness_trace=1` logs, for the SAT console, a
+client's desk press and the laptop's power replay, one line per event with the reason -- missing actor, missing
+widget, dispatch failed, native no-op, waiting on a latent continuation, output merged -- and the first of each failing
+reason is a warning with the trace off (`coop/interactables/computer_readiness`).
+
 ### Upgrades
 
 The signal upgrades are one persistent struct of eighteen levels that parametrise the download,

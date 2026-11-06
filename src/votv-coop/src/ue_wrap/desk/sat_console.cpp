@@ -7,6 +7,7 @@
 #include "ue_wrap/core/field_io.h"
 #include "ue_wrap/core/ftext_utils.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/reflection_props.h"
 #include "ue_wrap/core/script_gate.h"  // IsBodyActive: is one of the terminal's own bodies running
@@ -60,6 +61,18 @@ bool     g_resolved = false;
 bool     g_latchedOff = false;
 int      g_attempts = 0;
 uint64_t g_nextTryMs = 0;
+uint64_t g_nextRepairMs = 0;  // the widget chain's repair is tried at most once a second
+
+// The tick-offscreen hold: the desk's widget component, and the value it had before the hold set it.
+struct OffscreenHold {
+    void*   comp = nullptr;
+    int32_t idx = -1;
+    bool    changed = false;
+    bool    prior = false;
+};
+OffscreenHold g_hold;
+uint64_t g_nextHoldMs = 0;
+bool     g_saidNoComp = false, g_saidNoTickFn = false, g_saidHeld = false;
 
 bool Complete() {
     return g_offProcessing >= 0 && g_maskProcessing && g_offPanel >= 0 && g_offUsed >= 0 &&
@@ -182,11 +195,250 @@ bool EnsureResolved() {
     return true;
 }
 
+namespace {
+
+// The widget a widget component shows, by the component's reflected reader: GetUserWidgetObject, or GetWidget in a
+// build that names it so. Null when neither resolves or the component shows none.
+void* ComponentWidget(void* comp) {
+    if (!comp || !R::IsLive(comp)) return nullptr;
+    for (const wchar_t* name : {N::WidgetComponentGetWidgetFn, N::WidgetComponentGetWidgetAltFn}) {
+        void* fn = R::FindDispatchFunctionCached(R::ClassOf(comp), name);
+        if (!fn) continue;
+        ParamFrame f(fn);
+        if (!f.valid() || !Call(comp, f)) continue;
+        void* w = f.Get<void*>(L"ReturnValue");
+        if (w && R::IsLive(w)) return w;
+    }
+    return nullptr;
+}
+
+struct CompScan {
+    void*   desk;
+    void*   found[8];
+    int     n;
+};
+
+// The desk's widget component that holds the console's atlas: the desk's own components are the WidgetComponents
+// whose outer it is (found by class and by outer, not by a name this wrapper would have to guess).
+void* FindAtlasComponent(void* desk, void** widgetOut) {
+    if (widgetOut) *widgetOut = nullptr;
+    void* compCls = R::FindClass(N::WidgetComponentClass);
+    void* atlasCls = R::FindClass(N::SatConsoleAtlasClass);
+    if (!desk || !compCls || !atlasCls) return nullptr;
+    CompScan scan{desk, {}, 0};
+    object_index::ForEachInstance(compCls, [](void* ctx, void* obj, int32_t index) {
+        auto* sc = static_cast<CompScan*>(ctx);
+        if (!obj || sc->n >= 8) return;
+        if (R::SlotFlags(index) & (R::slot_flags::Dying | R::slot_flags::NotYetReadable)) return;
+        if (R::OuterOf(obj) == sc->desk) sc->found[sc->n++] = obj;
+    }, &scan);
+    for (int i = 0; i < scan.n; ++i) {
+        void* w = ComponentWidget(scan.found[i]);
+        if (w && R::ClassOf(w) == atlasCls) {
+            if (widgetOut) *widgetOut = w;
+            return scan.found[i];
+        }
+    }
+    return nullptr;
+}
+
+struct TermScan {
+    void* atlas;
+    void* found;
+};
+
+// The terminal the atlas's widget tree holds: an instance of the terminal's class named like the atlas's slot
+// (umg_console) whose outer chain reaches the atlas. The terminals the host makes for its typists have the game
+// instance for an outer and are never this one.
+void* FindAtlasTerminal(void* atlas) {
+    void* cls = TerminalClass();
+    if (!atlas || !cls) return nullptr;
+    TermScan scan{atlas, nullptr};
+    object_index::ForEachInstance(cls, [](void* ctx, void* obj, int32_t index) {
+        auto* sc = static_cast<TermScan*>(ctx);
+        if (sc->found || !obj) return;
+        if (R::SlotFlags(index) & (R::slot_flags::Dying | R::slot_flags::NotYetReadable)) return;
+        if (R::ToString(R::NameOf(obj)) != N::SatConsoleAtlasTerminalProp) return;
+        void* o = R::OuterOf(obj);
+        for (int hop = 0; o && hop < 4; ++hop, o = R::OuterOf(o))
+            if (o == sc->atlas) {
+                sc->found = obj;
+                return;
+            }
+    }, &scan);
+    return IsTerminal(scan.found) ? scan.found : nullptr;
+}
+
+// A missing link rebound from what already holds it. Never BeginPlay, never a use: a pointer written where the
+// desk's own begin would have put the same one.
+void* RepairLocal() {
+    const uint64_t now = NowMs();
+    if (now < g_nextRepairMs) return nullptr;
+    g_nextRepairMs = now + 1000;
+    void* desk = console_desk::Instance();
+    if (!desk) return nullptr;
+    void* atlas = console_desk::AtlasWidget();
+    if (!atlas) {
+        void* w = nullptr;
+        void* comp = FindAtlasComponent(desk, &w);
+        if (!comp || !w || !console_desk::BindAtlasWidget(w)) return nullptr;
+        UE_LOGW("sat_console: the desk's Widget backref was empty while its widget component holds the atlas -- "
+                "bound again (desk %p component %p atlas %p)", desk, comp, w);
+        atlas = w;
+    }
+    void* term = ReadObject(atlas, g_offAtlasTerm);
+    if (IsTerminal(term)) return term;
+    term = FindAtlasTerminal(atlas);
+    if (!term || !WriteObject(atlas, g_offAtlasTerm, term)) return nullptr;
+    UE_LOGW("sat_console: the atlas's umg_console was empty while its widget tree holds the terminal -- bound again "
+            "(atlas %p terminal %p)", atlas, term);
+    return term;
+}
+
+}  // namespace
+
 void* LocalTerminal() {
     if (!EnsureResolved()) return nullptr;
     void* atlas = console_desk::AtlasWidget();
     void* term = ReadObject(atlas, g_offAtlasTerm);
-    return IsTerminal(term) ? term : nullptr;
+    if (IsTerminal(term)) return term;
+    return RepairLocal();
+}
+
+const char* StatusText(ScreenStatus s) {
+    switch (s) {
+    case ScreenStatus::Ready:      return "ready";
+    case ScreenStatus::Unresolved: return "schema unresolved";
+    case ScreenStatus::NoDesk:     return "no desk";
+    case ScreenStatus::NoAtlas:    return "no desk widget";
+    case ScreenStatus::NoTerminal: return "no terminal in the widget";
+    }
+    return "?";
+}
+
+ScreenDiag DiagnoseLocal() {
+    ScreenDiag d;
+    if (!g_resolved) return d;
+    d.desk = console_desk::Instance();
+    if (!d.desk) {
+        d.status = ScreenStatus::NoDesk;
+        return d;
+    }
+    d.atlas = console_desk::AtlasWidget();
+    void* term = d.atlas ? ReadObject(d.atlas, g_offAtlasTerm) : nullptr;
+    if (IsTerminal(term)) {
+        d.terminal = term;
+        d.status = ScreenStatus::Ready;
+        return d;
+    }
+    d.status = d.atlas ? ScreenStatus::NoTerminal : ScreenStatus::NoAtlas;
+    void* w = nullptr;
+    d.widgetComponent = FindAtlasComponent(d.desk, &w);
+    d.componentHoldsAtlas = d.widgetComponent && w;
+    return d;
+}
+
+namespace {
+
+// The name of a function's one input parameter when it is a single byte (a bool) and the function takes nothing
+// else; empty when the signature is anything other than that. A setter whose signature is not what this wrapper was
+// written against is not called.
+std::wstring OneBoolParam(void* fn) {
+    if (!fn) return {};
+    std::wstring name;
+    int inputs = 0;
+    for (const R::ParamInfo& p : R::FunctionParams(fn)) {
+        if (p.flags & profile::cpf::ReturnParm) continue;
+        ++inputs;
+        if (p.size == 1) name = p.name;
+    }
+    return inputs == 1 ? name : std::wstring();
+}
+
+bool ReadTickOffscreen(void* comp, bool& out) {
+    void* cls = R::ClassOf(comp);
+    if (void* getFn = R::FindDispatchFunctionCached(cls, N::WidgetComponentGetTickWhenOffscreenFn)) {
+        ParamFrame f(getFn);
+        uint8_t v = 0;
+        if (f.valid() && Call(comp, f) && f.GetRaw(L"ReturnValue", &v, 1)) {
+            out = v != 0;
+            return true;
+        }
+    }
+    int32_t off = -1;
+    uint8_t mask = 0;
+    if (!R::FindBoolProperty(cls, N::WidgetComponentTickWhenOffscreenProp, off, mask) || off < 0 || !mask) return false;
+    out = (*At<uint8_t>(comp, off) & mask) != 0;
+    return true;
+}
+
+bool SetTickOffscreen(void* comp, bool on) {
+    void* fn = R::FindDispatchFunctionCached(R::ClassOf(comp), N::WidgetComponentSetTickWhenOffscreenFn);
+    const std::wstring param = OneBoolParam(fn);
+    if (param.empty()) return false;
+    ParamFrame f(fn);
+    const uint8_t v = on ? 1 : 0;
+    return f.valid() && f.SetRaw(param.c_str(), &v, 1) && Call(comp, f);
+}
+
+void ReleaseHold() {
+    if (g_hold.comp && g_hold.changed && R::IsLiveByIndex(g_hold.comp, g_hold.idx))
+        SetTickOffscreen(g_hold.comp, g_hold.prior);
+    g_hold = OffscreenHold{};
+}
+
+}  // namespace
+
+bool HoldOffscreenTick(bool hold) {
+    if (!hold) {
+        ReleaseHold();
+        return true;
+    }
+    if (g_hold.comp && R::IsLiveByIndex(g_hold.comp, g_hold.idx)) return true;
+    g_hold = OffscreenHold{};  // a component of a world gone: nothing of ours to put back
+    const uint64_t now = NowMs();
+    if (now < g_nextHoldMs || !EnsureResolved()) return false;
+    g_nextHoldMs = now + 2000;
+    void* desk = console_desk::Instance();
+    if (!desk) return false;
+    void* comp = FindAtlasComponent(desk, nullptr);
+    if (!comp) {
+        if (!g_saidNoComp) {
+            g_saidNoComp = true;
+            UE_LOGW("sat_console: the desk has no widget component that holds the console's atlas -- the terminal is "
+                    "not kept ticking offscreen");
+        }
+        return false;
+    }
+    bool prior = false;
+    if (!ReadTickOffscreen(comp, prior) || OneBoolParam(R::FindDispatchFunctionCached(
+            R::ClassOf(comp), N::WidgetComponentSetTickWhenOffscreenFn)).empty()) {
+        if (!g_saidNoTickFn) {
+            g_saidNoTickFn = true;
+            UE_LOGW("sat_console: the widget component's tick-offscreen switch does not resolve here (setter=%p "
+                    "getter=%p prop=%d SetTickMode=%p) -- the terminal is not kept ticking offscreen; its "
+                    "SetTickMode takes an enum whose values are not reflected, so it is not driven",
+                    R::FindDispatchFunctionCached(R::ClassOf(comp), N::WidgetComponentSetTickWhenOffscreenFn),
+                    R::FindDispatchFunctionCached(R::ClassOf(comp), N::WidgetComponentGetTickWhenOffscreenFn),
+                    R::FindPropertyOffset(R::ClassOf(comp), N::WidgetComponentTickWhenOffscreenProp) >= 0 ? 1 : 0,
+                    R::FindDispatchFunctionCached(R::ClassOf(comp), N::WidgetComponentSetTickModeFn));
+        }
+        return false;
+    }
+    g_hold.comp = comp;
+    g_hold.idx = R::InternalIndexOf(comp);
+    if (prior) return true;  // it ticks offscreen already: nothing to set, nothing to put back
+    if (!SetTickOffscreen(comp, true)) {
+        g_hold = OffscreenHold{};
+        return false;
+    }
+    g_hold.changed = true;
+    g_hold.prior = false;
+    if (!g_saidHeld) {
+        g_saidHeld = true;
+        UE_LOGI("sat_console: the desk's widget component %p ticks offscreen while a remote typist holds the console", comp);
+    }
+    return true;
 }
 
 void* CreateTerminal(void* worldContext) {

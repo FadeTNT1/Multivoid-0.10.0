@@ -2,6 +2,7 @@
 
 #include "coop/interactables/laptop_sync.h"
 
+#include "coop/interactables/computer_readiness.h"
 #include "coop/interactables/portable_pc_lid.h"  // op 6 goes to the portable PC's lid lane
 #include "coop/net/latest_wins.h"
 #include "coop/net/net_clock.h"
@@ -21,6 +22,7 @@ namespace coop::laptop_sync {
 namespace {
 
 namespace L = ue_wrap::laptop;
+namespace CR = coop::computer_readiness;
 
 std::atomic<coop::net::Session*> g_session{nullptr};
 
@@ -78,14 +80,31 @@ void PrimeBaselines() {
 void ApplyPowerTarget() {
     if (!g_wantValid) return;
     L::PowerState ps;
-    if (!L::ReadPower(ps)) return;
-    if (ps.anim) return;               // a chain runs: isOpened is not final until its end -- retry next poll
+    if (!L::ReadPower(ps)) {
+        CR::Report(CR::Site::LaptopPower, CR::Why::MissingActor,
+                   "the laptop %p's power state does not read (target isOpened=%u)", L::Instance(),
+                   static_cast<unsigned>(g_wantOpened));
+        return;
+    }
+    if (ps.anim) {  // a chain runs: isOpened is not final until its end -- retry next poll
+        if (CR::TraceOn())
+            CR::Report(CR::Site::LaptopPower, CR::Why::WaitingContinuation,
+                       "the laptop %p's boot or shutdown chain runs; target isOpened=%u waits", L::Instance(),
+                       static_cast<unsigned>(g_wantOpened));
+        return;
+    }
     if (ps.isOpened == g_wantOpened) { g_wantValid = false; return; }  // reached
     // Our last chain's edge is not judged yet (it ended after the last poll): a new chain now would replace the value
     // that edge is consumed by. The next poll judges it and ends the flag.
     if (g_replayInFlight) return;
     if (!ps.powered && g_wantOpened) return;  // wall power lags the panel's canonical -- retry
-    if (!L::CallPowerToggle()) return;
+    if (!L::CallPowerToggle()) {
+        CR::Report(CR::Site::LaptopPower, CR::Why::DispatchFailed,
+                   "the laptop %p's power toggle did not dispatch (isOpened=%u powered=%u, target %u)", L::Instance(),
+                   static_cast<unsigned>(ps.isOpened), static_cast<unsigned>(ps.powered),
+                   static_cast<unsigned>(g_wantOpened));
+        return;
+    }
     // A call the blueprint's own early returns met starts no chain, so only a chain seen running is ours.
     L::PowerState after;
     if (L::ReadPower(after) && after.anim) {
@@ -93,8 +112,15 @@ void ApplyPowerTarget() {
         g_replayTo = !ps.isOpened;
         g_noChainSaid = false;
         UE_LOGI("laptop_sync: power replay dispatched (target isOpened=%u)", static_cast<unsigned>(g_wantOpened));
+        CR::Report(CR::Site::LaptopPower, CR::Why::WaitingContinuation,
+                   "the laptop %p's power replay started a chain (isOpened=%u anim=0->1, target %u)", L::Instance(),
+                   static_cast<unsigned>(ps.isOpened), static_cast<unsigned>(g_wantOpened));
     } else if (!g_noChainSaid) {
         g_noChainSaid = true;
+        CR::Report(CR::Site::LaptopPower, CR::Why::NativeNoOp,
+                   "the laptop %p's toggle ran and started no chain (isOpened=%u powered=%u, target %u)", L::Instance(),
+                   static_cast<unsigned>(ps.isOpened), static_cast<unsigned>(ps.powered),
+                   static_cast<unsigned>(g_wantOpened));
         UE_LOGW("laptop_sync: the laptop's toggle started no chain (target isOpened=%u) -- retried each poll",
                 static_cast<unsigned>(g_wantOpened));
     }
@@ -171,6 +197,9 @@ void Tick() {
     if (!L::ReadPower(ps)) return;
     if (s->connected() && ps.isOpened != g_prevOpened) {
         if (g_replayInFlight && ps.isOpened == g_replayTo) {
+            CR::Report(CR::Site::LaptopPower, CR::Why::StateChanged,
+                       "the laptop %p's replayed power chain ended (isOpened=%u)", L::Instance(),
+                       static_cast<unsigned>(ps.isOpened));
             g_replayInFlight = false;  // our replay's end: consumed. A press in the gap before this poll went the
                                        // other way, so its own edge is still to come, and goes out.
         } else {
@@ -207,6 +236,9 @@ void OnLaptopState(const coop::net::LaptopStatePayload& p, uint8_t senderSlot) {
         return;
     }
     if (!L::EnsureResolved() || !L::Instance()) {
+        CR::Report(CR::Site::LaptopPower, CR::Why::MissingActor,
+                   "slot %u's laptop power op %u arrived and this machine has no resolved laptop",
+                   static_cast<unsigned>(senderSlot), static_cast<unsigned>(p.op));
         Refuse(senderSlot, "the laptop is unresolved here");
         return;
     }
@@ -306,6 +338,7 @@ void OnDisconnect() {
     g_replayInFlight = false;
     g_noChainSaid = false;
     g_announced = false;
+    CR::ResetSite(CR::Site::LaptopPower);
     g_refusals.Clear();
 }
 

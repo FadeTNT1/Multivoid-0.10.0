@@ -1008,6 +1008,19 @@ inline constexpr const wchar_t* SatConsoleDeskPanelsProp   = L"consoles";
 inline constexpr const wchar_t* EditableTextBoxClass       = L"EditableTextBox";
 inline constexpr const wchar_t* EditableTextBoxSetTextFn   = L"SetText";
 inline constexpr const wchar_t* EditableTextBoxGetTextFn   = L"GetText";
+// The desk's widget chain, as the console repair reads it: analogDScreenTest_C.Widget is the atlas the desk's own
+// WidgetComponent holds (the component is found by class and by the desk being its outer, not by a guessed name), and
+// the atlas's umg_console is the terminal, a child of its widget tree named alike. GetUserWidgetObject is the
+// component's reflected reader of the widget it shows (GetWidget is asked after it, for a build that names it so). The
+// tick-offscreen pair is the component's: the setter is driven only when its one-bool signature validates and the
+// prior value reads back (the function, or bTickWhenOffscreen by reflection), so it can be restored.
+inline constexpr const wchar_t* SatConsoleDeskWidgetProp   = L"Widget";
+inline constexpr const wchar_t* WidgetComponentGetWidgetFn = L"GetUserWidgetObject";
+inline constexpr const wchar_t* WidgetComponentGetWidgetAltFn = L"GetWidget";
+inline constexpr const wchar_t* WidgetComponentSetTickWhenOffscreenFn = L"SetTickWhenOffscreen";
+inline constexpr const wchar_t* WidgetComponentGetTickWhenOffscreenFn = L"GetTickWhenOffscreen";
+inline constexpr const wchar_t* WidgetComponentTickWhenOffscreenProp  = L"bTickWhenOffscreen";
+inline constexpr const wchar_t* WidgetComponentSetTickModeFn          = L"SetTickMode";
 }  // namespace name
 
 }  // namespace ue_wrap::profile
