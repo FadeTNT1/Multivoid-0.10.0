@@ -15,8 +15,8 @@
 
 namespace N = ue_wrap::profile::name;
 
-UE_FACT_FN(kRowRestoreObjects, "save_load", N::GamemodeClass, N::MainGamemodeLoadObjectsFn, Declared);
-UE_FACT_FN(kRowRestorePlayer, "save_load", N::MainPlayerClass, N::MainPlayerBetterLoadDataFn, Declared);
+UE_FACT_FN(kRowRestoreObjects, "save_load", L"mainGamemode_C", L"loadObjects", Declared);
+UE_FACT_FN(kRowRestorePlayer, "save_load", L"mainPlayer_C", L"betterLoadData", Declared);
 
 namespace ue_wrap::save_restore_watch {
 
