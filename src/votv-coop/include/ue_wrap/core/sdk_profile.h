@@ -354,6 +354,7 @@ inline constexpr size_t FField_NamePrivate = 0x28;        // FName
 inline constexpr size_t FSoftObjectPtr_WeakIndex     = 0x00;  // int32
 inline constexpr size_t FSoftObjectPtr_WeakSerial    = 0x04;  // int32
 inline constexpr size_t FSoftObjectPtr_AssetPathName = 0x10;  // FName
+inline constexpr size_t FSoftObjectPtr_SubPathString = 0x18;  // FString
 inline constexpr size_t FSoftObjectPtr_Size          = 0x28;
 // ArrayDim first, then ElementSize (RE-UE4SS MemberVariableLayout_4_27_Template.ini [FProperty]). The two
 // were once named the other way round; every reader multiplied them, so it never showed, until
