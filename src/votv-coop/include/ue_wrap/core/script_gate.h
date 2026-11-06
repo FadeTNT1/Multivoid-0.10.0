@@ -104,10 +104,10 @@ bool WatchName(const facts::Function& row, int tag, PreFn pre, PostFn post);
 // declares no such function, or declares it native, kills the watch, logged.
 void ResolvePendingNames();
 
-// Retire a name watch given its row, tag and callbacks; false when none matches. Its slots stay keyed, so
-// the probe chain stays walkable and they still count against the table's capacity; one retired while its
-// name was pending is re-keyed disabled at the resolve, so watching it again re-enables its slot. Any
-// thread.
+// Retire a name watch given its row, tag and callbacks; false when none matches. Its one slot stays keyed,
+// so the probe chain stays walkable and it still counts against the table's capacity, and watching it
+// again re-enables that slot: a retire/re-watch cycle takes nothing new. One retired while its name was
+// pending moves into the table disabled at the resolve, the same way. Any thread.
 bool UnwatchName(const facts::Function& row, int tag, PreFn pre, PostFn post);
 
 // Is that name watch LIVE -- registered AND its names resolved, so the gate really will intercept?
@@ -115,13 +115,13 @@ bool UnwatchName(const facts::Function& row, int tag, PreFn pre, PostFn post);
 // this instead. Any thread.
 bool NameWatchLive(const facts::Function& row, int tag);
 
-// Has it SETTLED: live, or dead for good because its name resolved into a full table or its class
-// declares no such function (logged by the gate)? A consumer waiting on a watch asks this, so a dead watch
+// Has it SETTLED: live, or dead for good because its class declares no such function, or (logged loudly,
+// never expected) the table had no room? A consumer waiting on a watch asks this, so a dead watch
 // cannot hold it back for ever; NameWatchLive tells the two apart. Any thread.
 bool NameWatchSettled(const facts::Function& row, int tag);
 
 // How many registered name watches still wait for their FName. At 0 every name watch is settled:
-// live, or dead for good because its name resolved into a full table (the gate logs which). A
+// live, or dead for good (the gate logs which). A
 // consumer re-counting its own watches can stop there. Any thread.
 int PendingNameCount();
 
@@ -223,6 +223,17 @@ struct Stats {
     bool installed;
 };
 Stats GetStats();
+
+// The registration tables' load, for a drill or a census: keyed slots per table (retired ones included)
+// against their cap, and the pending list's records (waiting, or dead before they reached the table).
+struct LoadStats {
+    int nameKeyed;
+    int fnKeyed;
+    int keyedCapacity;
+    int pendingRecords;
+    int pendingCapacity;
+};
+LoadStats GetLoadStats();
 void SetPerfCounting(bool on);
 
 }  // namespace ue_wrap::script_gate

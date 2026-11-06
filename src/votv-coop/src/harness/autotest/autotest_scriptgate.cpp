@@ -481,6 +481,52 @@ void RunScriptGateDrill() {
               "undeclared: watching it again leaves it dead, with no name left pending");
     });
 
+    // Capacity and the retire/re-watch cycle: kCapacityWatches more watches on top of every lane's own (a
+    // 0.10.0 peer installs about 420), past the 384 the old table took when each waiting name held a
+    // second slot. Each must go live, take ONE keyed slot, and take nothing new when retired and watched
+    // again. They share the cycle's ReceiveTick (one body, one class), so the run they leave keyed costs
+    // that name's probe for the rest of the process (a dev drill only).
+    constexpr int kCapacityWatches = 400;
+    constexpr int kTagCapacityBase = 1000;
+    OnGameThread([&] {
+        const SG::LoadStats before = SG::GetLoadStats();
+        bool allReg = true;
+        for (int i = 0; i < kCapacityWatches; ++i)
+            allReg = SG::WatchName(kRowTickCycle, kTagCapacityBase + i, nullptr, &PostNothing) && allReg;
+        SG::ResolvePendingNames();
+        bool allLive = true;
+        for (int i = 0; i < kCapacityWatches; ++i)
+            allLive = SG::NameWatchLive(kRowTickCycle, kTagCapacityBase + i) && allLive;
+        const SG::LoadStats grown = SG::GetLoadStats();
+        UE_LOGI("[SCRIPTGATE] capacity: %d more watches -> name table %d -> %d of %d keyed, pending records %d -> %d",
+                kCapacityWatches, before.nameKeyed, grown.nameKeyed, grown.keyedCapacity, before.pendingRecords,
+                grown.pendingRecords);
+        Check(v, allReg && allLive, "capacity: every one of the extra watches registered and went live");
+        Check(v, grown.nameKeyed - before.nameKeyed == kCapacityWatches,
+              "capacity: each name watch holds exactly one keyed slot");
+        Check(v, grown.pendingRecords == before.pendingRecords,
+              "capacity: the resolve freed every pending record it moved into the table");
+
+        // Three retire/re-watch cycles: the same slots each time, nothing pending, nothing new keyed.
+        bool cycled = true;
+        for (int round = 0; round < 3; ++round) {
+            for (int i = 0; i < kCapacityWatches; ++i)
+                cycled = SG::UnwatchName(kRowTickCycle, kTagCapacityBase + i, nullptr, &PostNothing) && cycled;
+            for (int i = 0; i < kCapacityWatches; ++i)
+                cycled = !SG::NameWatchLive(kRowTickCycle, kTagCapacityBase + i) && cycled;
+            for (int i = 0; i < kCapacityWatches; ++i)
+                cycled = SG::WatchName(kRowTickCycle, kTagCapacityBase + i, nullptr, &PostNothing) && cycled;
+            for (int i = 0; i < kCapacityWatches; ++i)
+                cycled = SG::NameWatchLive(kRowTickCycle, kTagCapacityBase + i) && cycled;
+        }
+        const SG::LoadStats cycledStats = SG::GetLoadStats();
+        Check(v, cycled, "capacity: three retire/re-watch rounds, each retired then live at once");
+        Check(v, cycledStats.nameKeyed == grown.nameKeyed && cycledStats.pendingRecords == grown.pendingRecords,
+              "capacity: the retire/re-watch rounds took no new slot and no pending record");
+        for (int i = 0; i < kCapacityWatches; ++i)
+            SG::UnwatchName(kRowTickCycle, kTagCapacityBase + i, nullptr, &PostNothing);
+    });
+
     // The tax base over a five-second window with counting armed.
     SG::SetPerfCounting(true);
     SG::Stats t0 = SG::GetStats();

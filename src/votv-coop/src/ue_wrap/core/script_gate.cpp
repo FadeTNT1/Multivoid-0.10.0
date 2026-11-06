@@ -393,7 +393,9 @@ bool WatchFn(void* ufunction, int tag, PreFn pre, PostFn post) {
     std::lock_guard<std::mutex> lk(g_regMutex);
     const bool ok = Register(g_fnTable, g_fnWatches, g_fnKeyed, reinterpret_cast<std::uintptr_t>(ufunction),
                              tag, pre, post, nullptr, nullptr, 0, /*resolved=*/true);
-    if (!ok) UE_LOGE("script_gate: watch table full (%d keyed slots) -- cannot watch %p", kMaxKeyed, ufunction);
+    if (!ok)
+        UE_LOGE("script_gate: REQUIRED WATCH LOST -- the exact-watch table is full (%d keyed slots) -- cannot watch "
+                "%p; this gate will never fire. Raise kSlotBits in script_gate_detail.h", kMaxKeyed, ufunction);
     return ok;
 }
 
@@ -531,8 +533,8 @@ Stats GetStats() {
     s.offGameThread = g_offGT.load(std::memory_order_relaxed);
     s.faults = g_faults.load(std::memory_order_relaxed);
     s.watches = g_fnWatches.load(std::memory_order_relaxed);
-    // Live name watches: the enabled count less the placeholders still waiting for their name.
-    s.nameWatches = g_nameWatches.load(std::memory_order_relaxed) - g_namesPending.load(std::memory_order_relaxed);
+    // Live name watches: the table's enabled ones (a watch waiting for its name is not in the table).
+    s.nameWatches = g_nameWatches.load(std::memory_order_relaxed);
     s.enabled = g_enabled.load(std::memory_order_relaxed);
     s.installed = g_installed.load(std::memory_order_relaxed);
     return s;
