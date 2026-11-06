@@ -130,6 +130,7 @@
 #include "coop/props/trash_sweep.h"
 #include "coop/props/prop_drive_host.h"    // HOST: the props a hook drags, streamed while they move
 #include "coop/props/prop_motion_scan.h"   // HOST: the props that move with no verb, fed to the driven-prop channel
+#include "coop/props/vent_drive.h"         // HOST: the wall vent the ventCrawler event pulls down, fed to the same channel
 #include "coop/props/client_shove.h"       // CLIENT: a prop this body shoved becomes a prop this client syncs
 #include "coop/props/prop_drive_stream.h"  // park and drive those props (a client's, and the host's copies of a client's)
 #include "coop/props/prop_syncer_host.h"   // HOST: judge a syncing client's rows
@@ -314,6 +315,7 @@ void Install(coop::net::Session& session) {
     coop::pack_trash_intent::Install(&session);  // a client's bagging of a pile is run by the host
     coop::vacuum_pile_intent::Install(&session);  // a client's vacuum on a dispenser pile is run by the host
     coop::verb_lanes::Install(session);  // drone console, doors, light groups, keypads: each on its own verbs
+    coop::vent_drive::Install(&session);  // the ventCrawler break timeline: the host claims the hanging vent on the driven-prop channel while it plays
     coop::broom_push::Install(&session);  // a host's broom push streams what it moves
     coop::trash_collect_sync::Install(&session);  // the chipPile grab observer (the use-press PRE observer, then a PropDestroy by eid)
     coop::garbage_sync::SetSession(&session);
@@ -569,6 +571,7 @@ DisconnectStats DisconnectAll() {
     coop::trash_sweep::OnDisconnect();  // drop the swept clumps still rolling
     coop::trash_clump_pose_stream::OnDisconnect();  // drop all client per-eid carry drives
     coop::prop_motion_scan::OnDisconnect();  // the scan's candidate lists and baselines
+    coop::vent_drive::OnDisconnect();  // the hanging vent's claim
     coop::client_shove::OnDisconnect();  // the client shove scan's lists, baselines and pacing
     coop::local_push::OnDisconnect();  // the local pawn's push values back to the game's own
     coop::prop_drive_host::OnDisconnect();  // drop the host's driven-prop set and the client syncers' table (prop_syncer_host)
@@ -634,6 +637,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:owner_entity"}; coop::owner_entity_sync::Tick(); }  // owner-entity: 4 Hz own-pose stream + keepalive + death-watch + mirror prune
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:hook"}; coop::hook_sync::Tick(); }  // hook: one activeHook read, then a gated 4/20 Hz head poll only while a hook exists
     if (isHost) { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:explosion_coast"}; coop::explosion_parking::Tick(&session); }  // HOST: the props a blast flung, handed to the driven-prop channel (before its tick below; an empty list costs one size check)
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:vent_drive"}; coop::vent_drive::Tick(); }  // settle the ventCrawler break timeline watches; HOST: let go of the hanging vent if the timeline went silent (before the pump below)
     if (isHost) { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:prop_motion_scan"}; coop::prop_motion_scan::Tick(session, isHost); }  // HOST: a budgeted read of its own props; one that moved with no verb's claim (a settle, a knock-on, a shove) coasts on the driven-prop channel below
     if (isConnected) coop::local_push::Tick();  // the local pawn's push on simulated props, held at the configured fraction while a session runs
     if (!isHost) { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:client_shove"}; coop::client_shove::Tick(session, isHost); }  // CLIENT: a prop this body shoved is claimed as this client's to sync (before the pump, whose syncer tick sends the claim's rows)

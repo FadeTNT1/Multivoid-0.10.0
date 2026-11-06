@@ -425,6 +425,7 @@ inline constexpr const wchar_t* SetLifeSpanFn = L"SetLifeSpan";  // AActor::SetL
 inline constexpr const wchar_t* SetActorTickEnabledFn = L"SetActorTickEnabled";
 inline constexpr const wchar_t* SetActorHiddenInGameFn = L"SetActorHiddenInGame";        // AActor::SetActorHiddenInGame(bool bNewHidden) -- visual-only (instant-world deferred-hide)
 inline constexpr const wchar_t* SetActorEnableCollisionFn = L"SetActorEnableCollision";  // AActor::SetActorEnableCollision(bool bNewActorEnableCollision) -- the Off mode of a mirror hide (a parked NPC, a held mirror)
+inline constexpr const wchar_t* ActorHiddenProp = L"bHidden";  // AActor::bHidden, the bool SetActorHiddenInGame writes (read by the vent-cover census)
 inline constexpr const wchar_t* DestroyActorFn = L"K2_DestroyActor";
 inline constexpr const wchar_t* TeleportToFn = L"K2_TeleportTo";  // bool(FVector, FRotator); large-distance teleport that survives Character/CMC constraints
 inline constexpr const wchar_t* GetActorBoundsFn = L"GetActorBounds";   // (bool,FVector&,FVector&,bool); world-space AABB of the actor's mesh
@@ -967,6 +968,14 @@ inline constexpr const wchar_t* CmcStandingDownwardForceScaleProp    = L"Standin
 // (AmushroomSpawner_C::Spawn -> spawnedNaturally()) sets its StaticMesh to NoCollision.
 // mushroom7_C grows into prop_puffballMature_C, a separate species.
 inline constexpr const wchar_t* PropFoodMushroomClass                = L"prop_food_mushroom_C";
+// The wall-vent cover (props-table row vent) and the key of the one the ventCrawler event pulls down.
+inline constexpr const wchar_t* PropVentClass                        = L"prop_vent_C";
+inline constexpr const wchar_t* PropVentHangingKey                   = L"ventHanging";
+// ventCrawler_C: the object variable holding the vent it pulls down (an ObjectProperty, bound in
+// ReceiveBeginPlay from getObjectFromKey('ventHanging')), and the break timeline's two bodies
+// (ventbreakTL: Update sets the vent's transform each frame; Finished runs setPropProps(static false,
+// frozen true, active false, sleep false) on it).
+inline constexpr const wchar_t* VentCrawlerVentProp                  = L"vent";
 
 // AoutsideChurch_C (0.10.0): the level-placed Stolas church. Its state is four save fields
 // (getData's mbool [broken, angry, striked] and mint [harvests]); updBroken and updEyes are the

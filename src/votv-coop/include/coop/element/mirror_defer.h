@@ -66,4 +66,11 @@ void RevealConfirmedAtLift();
 // nothing can stay stuck hidden (a swept ghost is dead -> liveness-gated, skipped).
 void RevealAllSurvivorsAtQuiescence();
 
+// The bound on every reveal above, driven once per client tick. The reveals are driven by messages and
+// latches; if the drive never comes (the handler carrying SnapshotComplete faulted partway, the
+// quiescence latch never landed) the hidden mirrors would stay hidden for good. After 45 s with no lift
+// reveal and no new mirror, the confirmed ones are shown; after 180 s the window is over and every
+// hidden mirror is shown. Each trip logs a warning. A free no-op while the window is closed. Game thread.
+void TickWatchdog();
+
 }  // namespace coop::mirror_defer

@@ -27,6 +27,7 @@
 #include "coop/player/puppet_drive.h"      // the puppet array and its drive
 #include "coop/props/prop_key_index.h"     // Tick before the inbox
 #include "coop/props/registry_reaper.h"    // the reaper and the re-seed engine
+#include "coop/props/vent_census.h"  // Tick: the vent-cover census
 #include "coop/props/remote_prop_spawn.h"  // OnClientWorldReadyResetSweep (deferred prop sweep per-world reset)
 #include "coop/props/join_membership_sweep.h"  // the join claim and the divergence sweep
 #include "coop/session/player_handshake.h"
@@ -685,6 +686,9 @@ void Tick(coop::net::Session& session) {
     if (worldUp) {
         coop::puppet_drive::DriveTick(session,
                                       HasAnnouncedWorldReady());
+
+        // The vent-cover census: one summary when the world is ready, one 30 s on (host and client).
+        coop::vent_census::Tick(isHost, isHost || HasAnnouncedWorldReady());
 
         // The receiver-side held-prop driver: the latest PropPose applied (a Key lookup on first
         // arrival, transform writes after); a stream stop over 500 ms is an implicit release.

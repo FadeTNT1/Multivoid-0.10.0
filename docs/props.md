@@ -227,6 +227,34 @@ produced on this peer (`coop/props/prop_wire_parity`); a fresh mirror starts kin
 is remote-owned. A spawn or destroy the receiver applied is marked so the symmetric observer
 does not broadcast it back (`coop/props/prop_echo_suppress`).
 
+### The wall vent the crawler pulls down
+
+The ventCrawler event animates one wall vent cover, the `prop_vent_C` keyed `ventHanging`, with its
+`ventbreakTL` timeline: each frame sets the cover's transform, and the finish runs
+`setPropProps(static false, frozen true)` on it. The crawler is a host-only actor (a client's
+BeginPlay is refused), the cover is Static, so the motion scan's coasts skip it, and for a while no lane
+carried the animation: the host saw the cover fall and a client's stayed on the wall. The host now
+watches the timeline's two bodies by name (`coop/props/vent_drive`): while it plays it claims the cover
+on the driven-prop channel (an explicit claim, which has no condition on kinematic), and the finish
+releases it. The stream publishes the pose whenever it moved; the end edge carries the final pose and the
+host's flags. A client's copy is moved by the lerp, left kinematic (Static is one of `PhysicsStaysOff`'s
+terms), and its end takes the one release a converge makes from Static, `ConvergeStaticRelease`, which
+runs the game's base `setPropProps` with Static off and the host's frozen and sleep. The release is gated
+to `prop_vent_C`: no other class changes Static through a converge `[RD]`.
+
+### The vent-cover census
+
+Both peers log a `[VENT-CENSUS]` summary of every `prop_vent_C` once when the world is ready (a host: its
+world is up; a client: it has announced) and once 30 s later (`coop/props/vent_census`). The summary line
+is `[VENT-CENSUS] <when> role=<host|client> world-gen=<n> covers=<n> visible=<n> hidden=<n>
+held-by-join=<n> unread=<n>`, then one line per cover (64 at most) with its key, element id, Static and
+Frozen, the actor's `bHidden`, the mesh's `bVisible` and `bHiddenInGame`, the root's collision (0 to 3, -1
+unread), its location, and on a client `join=held` while the join sweep's deferred-hide window still holds
+that mirror hidden. Read host against client: `covers` short on the client is absent (never made, or
+destroyed); `covers` equal with `hidden` above zero is present and hidden, `held-by-join` naming the
+sweep's hold and a zero there pointing at a lost visibility flag; equal and visible with locations apart
+is displaced; a `?` is a flag this build could not read. Diagnostic only.
+
 ### Standing and walking on props
 
 A player's body pushes a simulated prop it walks into, and presses down on the one it stands on: the movement
@@ -579,6 +607,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a body's push on props | `coop/player/local_push` (the local pawn's push and standing force, held down in a session), `ue_wrap/actors/character_push` (the movement component's values by reflection), `coop/props/client_shove` (a client's shove becomes a claim) |
 | a client's intents | `coop/props/prop_drop_intent`; a thrown prop: `coop/props/prop_throw`, `coop/net/throw_bounds` |
 | the stick | `coop/props/prop_stick_sync` |
+| the wall vent the ventCrawler pulls down; the vent census | `coop/props/vent_drive` (the host's feeder), `coop/props/prop_wire_parity` (`ConvergeStaticRelease`), `ue_wrap/actors/vent_crawler`; `coop/props/vent_census`, `ue_wrap/actors/prop` (`ReadPropVisibility`) |
 | a prop under a hook's drive or a broom's push | `coop/props/prop_drive_host` (the host's set and stream), `coop/props/prop_drive_stream` (the receiver), `coop/items/hook_prop_claim` (the hook lane feeding it), `coop/items/hook_constraint` (the tie itself, host-only), `coop/items/broom_push` (the broom's push feeding it) |
 | containers | `coop/props/container_contents_sync`, `coop/items/save_record_wire`, `coop/interactables/interactable_sync` |
 | a held prop's knock and break effects | `coop/player/melee_fx_contact`, `coop/player/melee_fx` |

@@ -562,6 +562,7 @@ void TickClientReconcile() {
     // pending-work bool, a 250 ms debounce); it walks the array only when a save pile moved after a
     // twin was armed. Below it is the join one-shot, zero cost when disarmed.
     coop::element::quiescence_drain::OnTick();
+    coop::mirror_defer::TickWatchdog();  // the bound on a reveal whose drive never came
     // The one probe owner, also driven from net_pump for the announce gate; double-driving is
     // throttled inside.
     const bool quiesced = coop::world_load_episode::TickQuiesceProbe();

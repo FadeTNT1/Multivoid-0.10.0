@@ -55,6 +55,15 @@ uint8_t FrozenSleepBitsOf(void* actor);
 // Game thread.
 void ConvergeFrozenSleep(void* actor, uint8_t physFlags);
 
+// The one place a flag converge takes a prop OUT of Static: a wall vent (prop_vent_C) the ventCrawler
+// event has pulled down. The host's break timeline ends in setPropProps(static false, frozen true), so the
+// end of the vent's drive (coop/props/vent_drive) carries Static cleared; this copy, born Static and
+// moved kinematically by the stream, takes the same release through prop_C's own setter (frozen and sleep
+// as the flags say). Narrow on purpose: no other class changes Static through a converge, and a flag
+// read off a spawn's default (no kLiveState) never counts. Only on a difference. Returns true when it
+// wrote. Game thread.
+bool ConvergeStaticRelease(void* actor, uint8_t physFlags);
+
 // SP-parity simulate state from the wire identity flags. Aprop_C::init() computes
 // SetSimulatePhysics(NOT(static || frozen || sleep)), so a settled prop is simulate-ENABLED but
 // asleep, which is what the game's PhysicsHandle grab requires -- force-kinematic mirrors were

@@ -417,8 +417,11 @@ void Update(net::Session& session, void* localPlayer) {
             // held tail (save-time-keyed forms whose local twin is still visible) stays hidden
             // until the sweep armed below resolves the duplicates and the quiescence backstop
             // reveals it.
-            coop::join_curtain::BeginDismiss();
+            // The reveal goes first: BeginDismiss is the cover's fade, which an engine fault in a
+            // reveal's way must not be allowed to skip it for, and nothing past this point may be
+            // what stands between a confirmed mirror and the joiner's eye.
             coop::mirror_defer::RevealConfirmedAtLift();
+            coop::join_curtain::BeginDismiss();
             // Every host prop has claimed its client actor; the unclaimed divergent locals (the
             // client's own fresh-game litter, or stale blob objects the live snapshot does not
             // claim) are swept, but not inline: a save-loaded prop gets its key restored on a late
