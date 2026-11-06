@@ -2,6 +2,7 @@
 
 #include "coop/items/poster_sync.h"
 
+#include "coop/items/poster_put_ledger.h"
 #include "poster_sync_detail.h"  // co-located private header (src tree, not include/)
 
 #include "coop/element/intent_authority.h"
@@ -11,6 +12,7 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/net/wire_key_util.h"
+#include "coop/player/hand_item.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
@@ -48,6 +50,7 @@ namespace {
 namespace EL = coop::element;
 namespace E  = ue_wrap::engine;
 namespace OP = coop::net::poster_intent_ops;
+namespace OF = coop::net::poster_intent_flags;
 namespace SO = coop::net::poster_state_ops;
 namespace SF = coop::net::poster_state_flags;
 namespace P  = ue_wrap::profile;
@@ -94,6 +97,9 @@ constexpr coop::net::IntentBudget kBudget{4.0f, 4.0f};
 constexpr size_t   kMaxPending = 8;
 constexpr uint64_t kSayMs = 10000;
 constexpr uint64_t kParkMs = 30000;
+constexpr uint64_t kHeldWaitMs = 3000;   // how long the host waits for a sender's hand mirror to show the poster
+constexpr uint64_t kPutWaitMs = coop::poster_put::ClientPending::kExpiryMs;
+constexpr int32_t  kMaxLookType = 1023;
 constexpr size_t   kMaxPlaced = 512;
 
 std::atomic<coop::net::Session*> g_session{nullptr};
@@ -287,6 +293,10 @@ struct Slot {
     coop::net::IntentQueue<coop::net::PosterIntentPayload> queue;
     bool     waitSaid = false;
     uint64_t nextSayMs = 0;
+    coop::poster_put::HostLast last;   // the put last answered: a repeat is answered again, an abort takes it back
+    ue_wrap::CachedObjRef      lastPlaced;
+    bool     heldWaiting = false;      // a put waits for the sender's hand mirror to show a rolled poster
+    uint64_t heldSinceMs = 0;
 };
 coop::roster_ledger::PerSlotState<Slot> g_slots;
 
@@ -295,6 +305,7 @@ const char* OpName(uint8_t op) {
         case OP::kPut: return "put";
         case OP::kTakeDown: return "take-down";
         case OP::kPicture: return "picture";
+        case OP::kPutAbort: return "put-abort";
         default: return "?";
     }
 }
@@ -325,12 +336,163 @@ void* SenderBody(uint8_t slot) {
     return (rp && rp->valid()) ? rp->GetActor() : nullptr;
 }
 
+void SendPutResult(coop::net::Session& s, uint8_t slot, uint16_t requestId, bool ok, const std::wstring& key,
+                   bool consumed) {
+    coop::net::PosterStatePayload r{};
+    r.op = ok ? SO::kPutAccepted : SO::kPutRefused;
+    r.flags = (ok && consumed) ? SF::kConsumed : 0;
+    r.requestId = requestId;
+    if (ok) coop::net::WireKeyFromString(key, r.key);
+    if (s.SendReliableToSlot(slot, coop::net::ReliableKind::PosterState, &r, sizeof(r)))
+        UE_LOGI("[POSTER] host: answered slot %u's put #%u -- %s key='%ls'", static_cast<unsigned>(slot),
+                static_cast<unsigned>(requestId), ok ? "ACCEPTED" : "refused", ok ? key.c_str() : L"");
+    else
+        UE_LOGW("[POSTER] host: slot %u's put #%u answer was not sent", static_cast<unsigned>(slot),
+                static_cast<unsigned>(requestId));
+}
+
+// One put answered: kept for a repeat and for an abort, told to the sender, a refusal said.
+void FinishPut(coop::net::Session& s, uint8_t slot, const coop::net::PosterIntentPayload& p, bool ok,
+               const std::wstring& placedKey, bool consumed, const char* why) {
+    Slot& sl = g_slots[slot];
+    sl.last.Record(p.requestId, ok, consumed, placedKey);
+    sl.heldWaiting = false;
+    if (!ok) {
+        // A put refusal is always said: the Deny line is rate-limited, and a refused put is what a test looks for.
+        UE_LOGI("[POSTER] host: REFUSED slot %u's put #%u -- %s", static_cast<unsigned>(slot),
+                static_cast<unsigned>(p.requestId), why ? why : "?");
+        Deny(slot, p.op, coop::net::StringFromWireKey(p.key), why);
+    }
+    SendPutResult(s, slot, p.requestId, ok, placedKey, consumed);
+}
+
+// A client's put. Two routes to the rolled poster it means: a rolled world prop its key names in the host's key index
+// (a prop on the floor), else the poster in the sender's hand, which no key index holds (a hand is never the world
+// prop a key names, and the world prop died at the pickup) and which the host knows by that slot's hand mirror. The
+// held poster's look is the intent's: the hand mirror carries none. True when done (run or refused), false to wait
+// for the sender's body or hand.
+bool ExecutePut(coop::net::Session& s, const coop::net::PosterIntentPayload& p, uint8_t slot) {
+    Slot& sl = g_slots[slot];
+    if (sl.last.Matches(p.requestId)) {   // a repeat of a request already answered
+        SendPutResult(s, slot, p.requestId, sl.last.ok, sl.last.key, sl.last.consumed);
+        return true;
+    }
+    const std::wstring key = coop::net::StringFromWireKey(p.key);
+    if (coop::players::Registry::Get().LifeOf(slot) != coop::players::PuppetLife::Alive) {
+        FinishPut(s, slot, p, false, {}, false, "the sender's player is not alive");
+        return true;
+    }
+    const EL::IntentTarget reach = EL::IntentTarget::ForClientIntent(s, slot, kReachUU);
+    if (!reach.HasBody()) {
+        if (!sl.waitSaid) {
+            sl.waitSaid = true;
+            UE_LOGI("[POSTER] host: slot %u's poster verbs wait: the host has no body for it yet",
+                    static_cast<unsigned>(slot));
+        }
+        return false;
+    }
+    PO::Placement at;
+    at.location = {p.locX, p.locY, p.locZ};
+    at.rotation = {p.pitch, p.yaw, p.roll};
+    at.scale = {p.scaleX, p.scaleY, p.scaleZ};
+    if (!reach.AuthorizeSegment(at.location, at.location)) {
+        FinishPut(s, slot, p, false, {}, false, "the placement is out of the sender's reach");
+        return true;
+    }
+
+    void* worldProp = key.empty() ? nullptr : coop::prop_key_index::Find(key);
+    const bool world = PO::IsRolled(worldProp);
+    void* cls = nullptr;
+    PO::Look look;
+    if (world) {
+        const EL::IntentSubject subject = reach.Authorize(worldProp);
+        if (!subject) {
+            FinishPut(s, slot, p, false, {}, false, EL::OutcomeName(subject.outcome));
+            return true;
+        }
+        if (const coop::prop_hold::Holder h = coop::prop_hold::WhoHolds(worldProp, slot);
+            h != coop::prop_hold::Holder::None) {
+            FinishPut(s, slot, p, false, {}, false, coop::prop_hold::HolderWhy(h));
+            return true;
+        }
+        cls = PO::PosterClassOf(worldProp);
+        if (!PO::IsPlacedClass(cls) || !PO::ReadLook(worldProp, look)) {
+            FinishPut(s, slot, p, false, {}, false, "the rolled poster names no placed class or its look did not read");
+            return true;
+        }
+    } else {
+        void* held = coop::hand_item::MirrorActorForSlot(slot);
+        if (!PO::IsRolled(held)) {
+            const uint64_t now = NowMs();
+            if (!sl.heldWaiting) {
+                sl.heldWaiting = true;
+                sl.heldSinceMs = now;
+            }
+            if (now - sl.heldSinceMs < kHeldWaitMs) return false;   // the hand state may still be on its way
+            FinishPut(s, slot, p, false, {}, false, "the sender's hand shows no rolled poster here");
+            return true;
+        }
+        cls = PO::PosterClassOf(held);
+        if (!PO::IsPlacedClass(cls)) {
+            FinishPut(s, slot, p, false, {}, false, "the held poster names no placed class");
+            return true;
+        }
+        look.type = p.type;
+        look.custom = (p.flags & OF::kCustom) != 0;
+        if (!FileNameFromWire(p.fileName, look.fileName) || (look.custom && look.fileName == L"None")) {
+            FinishPut(s, slot, p, false, {}, false, "the held poster's look is not well-formed");
+            return true;
+        }
+    }
+    const std::wstring placedKey = coop::prop_synth_key::RandomKeyString();
+    void* w = PO::SpawnPlaced(cls, at, look, false, placedKey);
+    if (!w) {
+        FinishPut(s, slot, p, false, {}, false, "the placed poster did not spawn");
+        return true;
+    }
+    if (world) E::DestroyActor(worldProp);   // the prop lane carries its destroy
+    NoteHost(w);
+    sl.lastPlaced.Set(w);
+    FinishPut(s, slot, p, true, placedKey, world, nullptr);
+    ++g_ran;
+    UE_LOGI("[POSTER] host: put slot %u's %s poster on the wall as %ls key='%ls' type=%d file='%ls'%s (#%llu, req %u)",
+            static_cast<unsigned>(slot), world ? "rolled world" : "held", R::ClassNameOf(w).c_str(), placedKey.c_str(),
+            look.type, look.fileName.c_str(), look.custom ? " custom" : "", static_cast<unsigned long long>(g_ran),
+            static_cast<unsigned>(p.requestId));
+    return true;
+}
+
+// A client could not finish its own put: the placed poster that put made goes back, once.
+bool ExecutePutAbort(coop::net::Session& s, const coop::net::PosterIntentPayload& p, uint8_t slot) {
+    Slot& sl = g_slots[slot];
+    if (!sl.last.TakeBack(p.requestId)) {
+        Deny(slot, p.op, coop::net::StringFromWireKey(p.key), "no put of that request is there to give back");
+        return true;
+    }
+    void* w = sl.lastPlaced.Get();
+    const std::wstring key = sl.last.key;
+    if (w && PO::IsPlaced(w)) {
+        for (size_t i = 0; i < g_host.size(); ++i)
+            if (g_host[i].actor.Is(w)) {
+                g_host.erase(g_host.begin() + static_cast<std::ptrdiff_t>(i));
+                break;
+            }
+        E::DestroyActor(w);
+    }
+    SendRemoved(s, key);
+    UE_LOGI("[POSTER] host: slot %u gave put #%u back -- key='%ls' is off the wall", static_cast<unsigned>(slot),
+            static_cast<unsigned>(p.requestId), key.c_str());
+    return true;
+}
+
 // The intent's verdict: true when done (run or refused), false to wait for the sender's body.
 bool Execute(coop::net::Session& s, const coop::net::PosterIntentPayload& p, uint8_t slot) {
+    if (p.op == OP::kPut) return ExecutePut(s, p, slot);
+    if (p.op == OP::kPutAbort) return ExecutePutAbort(s, p, slot);
     const std::wstring key = coop::net::StringFromWireKey(p.key);
-    void* target = p.op == OP::kPut ? coop::prop_key_index::Find(key) : PlacedByKey(key);
-    if (p.op == OP::kPut ? !PO::IsRolled(target) : !PO::IsPlaced(target)) {
-        Deny(slot, p.op, key, p.op == OP::kPut ? "no rolled poster holds the key" : "no placed poster holds the key");
+    void* target = PlacedByKey(key);
+    if (!PO::IsPlaced(target)) {
+        Deny(slot, p.op, key, "no placed poster holds the key");
         return true;
     }
     if (coop::players::Registry::Get().LifeOf(slot) != coop::players::PuppetLife::Alive) {
@@ -349,41 +511,6 @@ bool Execute(coop::net::Session& s, const coop::net::PosterIntentPayload& p, uin
     }
     if (!subject) {
         Deny(slot, p.op, key, EL::OutcomeName(subject.outcome));
-        return true;
-    }
-
-    if (p.op == OP::kPut) {
-        if (const coop::prop_hold::Holder h = coop::prop_hold::WhoHolds(target, slot);
-            h != coop::prop_hold::Holder::None) {
-            Deny(slot, p.op, key, coop::prop_hold::HolderWhy(h));
-            return true;
-        }
-        PO::Placement at;
-        at.location = {p.locX, p.locY, p.locZ};
-        at.rotation = {p.pitch, p.yaw, p.roll};
-        at.scale = {p.scaleX, p.scaleY, p.scaleZ};
-        const EL::IntentSubject place = reach.AuthorizeSegment(at.location, at.location);
-        if (!place) {
-            Deny(slot, p.op, key, "the placement is out of the sender's reach");
-            return true;
-        }
-        void* cls = PO::PosterClassOf(target);
-        PO::Look look;
-        if (!PO::IsPlacedClass(cls) || !PO::ReadLook(target, look)) {
-            Deny(slot, p.op, key, "the rolled poster names no placed class or its look did not read");
-            return true;
-        }
-        void* w = PO::SpawnPlaced(cls, at, look, false, coop::prop_synth_key::RandomKeyString());
-        if (!w) {
-            Deny(slot, p.op, key, "the placed poster did not spawn");
-            return true;
-        }
-        E::DestroyActor(target);   // the rolled prop: the prop lane carries its destroy, the sender's hand included
-        NoteHost(w);
-        ++g_ran;
-        UE_LOGI("[POSTER] host: put slot %u's rolled poster key='%ls' on the wall as %ls (#%llu)",
-                static_cast<unsigned>(slot), key.c_str(), R::ClassNameOf(w).c_str(),
-                static_cast<unsigned long long>(g_ran));
         return true;
     }
 
@@ -475,32 +602,72 @@ bool SendIntent(coop::net::Session* s, const coop::net::PosterIntentPayload& p, 
         return false;
     }
     ++g_sent;
-    UE_LOGI("[POSTER] client: sent %s on key='%ls' (#%llu)", OpName(p.op), key.c_str(),
-            static_cast<unsigned long long>(g_sent));
+    UE_LOGI("[POSTER] client: sent %s on key='%ls' (#%llu, req %u, type %d)", OpName(p.op), key.c_str(),
+            static_cast<unsigned long long>(g_sent), static_cast<unsigned>(p.requestId), p.type);
     return true;
+}
+
+// ---- the client's put -----------------------------------------------------------------------------------------------
+// The put waits for the host's verdict: while it does, the held poster stays in the hand and a second click is
+// swallowed. An accepted put is then finished here by the game's own put() (which places the wall poster and consumes
+// the held one, the hand and the inventory both), once; the wall poster it placed takes the host's canonical key. A put
+// the hand can no longer finish is given back, and the host takes the poster off the wall.
+struct HeldPut {
+    ue_wrap::CachedObjRef held;
+    PO::Look              look;
+    PO::Placement         at;
+};
+coop::poster_put::ClientPending g_putPending;
+HeldPut g_putHeld;
+bool g_replaying = false;   // our own put() runs: its watch lets it through
+
+void SendPutAbort(coop::net::Session* s, uint16_t requestId, const std::wstring& key) {
+    coop::net::PosterIntentPayload p{};
+    p.op = OP::kPutAbort;
+    p.requestId = requestId;
+    if (KeyFits(key)) coop::net::WireKeyFromString(key, p.key);
+    s->SendReliable(coop::net::ReliableKind::PosterIntent, &p, sizeof(p));
+    UE_LOGI("[POSTER] client: gave put #%u back to the host", static_cast<unsigned>(requestId));
 }
 
 // A client's put of a rolled poster it holds. put() itself places nothing without a blocking hit or on a simulating
 // body, so those two run as written (they return).
 sg::Verdict OnPutPre(const sg::Call& c) {
     coop::net::Session* s = g_session.load(std::memory_order_acquire);
-    if (!IsClient(s) || !c.object) return sg::Verdict::Run;
+    if (g_replaying || !IsClient(s) || !c.object) return sg::Verdict::Run;
     void* holder = PO::HoldingPlayer(c.object);
     if (!holder || !coop::players::Registry::Get().IsLocal(holder)) return sg::Verdict::Run;
     void* hitComp = E::ReadMainPlayerHitComponent(holder);
-    if (!hitComp || E::IsComponentSimulatingPhysics(hitComp)) return sg::Verdict::Run;
-    const std::wstring key = ue_wrap::prop::GetInteractableKeyString(c.object);
+    if (!hitComp || E::IsComponentSimulatingPhysics(hitComp)) {
+        UE_LOGI("[POSTER] client: put() with %s -- it places nothing, runs as written",
+                hitComp ? "its aim on a simulating body" : "no blocking hit");
+        return sg::Verdict::Run;
+    }
+    const uint64_t now = NowMs();
+    if (g_putPending.Open(now)) {
+        UE_LOGI("[POSTER] client: put() while put #%u waits for the host -- swallowed",
+                static_cast<unsigned>(g_putPending.Id()));
+        return sg::Verdict::Cancel;   // one put at a time: this click waits with the first
+    }
     PO::Placement at;
-    if (!KeyFits(key) || !PO::ReadPlacement(c.object, at)) {
+    PO::Look look;
+    coop::net::PosterIntentPayload p{};
+    if (!PO::ReadPlacement(c.object, at) || !PO::ReadLook(c.object, look) || look.type < 0 ||
+        !FileNameToWire(look.fileName, p.fileName)) {
         if (!g_placeSaid) {
             g_placeSaid = true;
-            UE_LOGW("[POSTER] client: a put had no key or no readable placement -- it runs here alone (said once)");
+            UE_LOGW("[POSTER] client: a put had no readable placement or look -- it runs here alone (said once)");
         }
         return sg::Verdict::Run;
     }
-    coop::net::PosterIntentPayload p{};
+    std::wstring key = ue_wrap::prop::GetInteractableKeyString(c.object);
+    if (!KeyFits(key)) key.clear();   // a held poster may carry none: the host knows it by the sender's hand
+    const uint16_t id = g_putPending.Begin(now);
     p.op = OP::kPut;
-    coop::net::WireKeyFromString(key, p.key);
+    p.flags = look.custom ? OF::kCustom : 0;
+    p.requestId = id;
+    p.type = look.type;
+    if (!key.empty()) coop::net::WireKeyFromString(key, p.key);
     p.locX = at.location.X;
     p.locY = at.location.Y;
     p.locZ = at.location.Z;
@@ -510,7 +677,99 @@ sg::Verdict OnPutPre(const sg::Call& c) {
     p.scaleX = at.scale.X;
     p.scaleY = at.scale.Y;
     p.scaleZ = at.scale.Z;
-    return SendIntent(s, p, key) ? sg::Verdict::Cancel : sg::Verdict::Run;
+    if (!SendIntent(s, p, key)) {
+        g_putPending.Reset();
+        return sg::Verdict::Run;
+    }
+    g_putHeld.held.Set(c.object);
+    g_putHeld.look = look;
+    g_putHeld.at = at;
+    return sg::Verdict::Cancel;
+}
+
+// The poster the client's own put() just placed: the new placed poster nearest `at`, one not in `before`.
+void* NewPlacedNear(const std::vector<void*>& before, const ue_wrap::FVector& at) {
+    void* best = nullptr;
+    double bestD = 0;
+    for (void* w : PO::AllPlaced()) {
+        bool old = false;
+        for (void* b : before)
+            if (b == w) {
+                old = true;
+                break;
+            }
+        if (old) continue;
+        PO::Placement t;
+        if (!PO::ReadTransform(w, t)) continue;
+        const double dx = t.location.X - at.X, dy = t.location.Y - at.Y, dz = t.location.Z - at.Z;
+        const double d = dx * dx + dy * dy + dz * dz;
+        if (!best || d < bestD) {
+            best = w;
+            bestD = d;
+        }
+    }
+    return best;
+}
+
+// The host's verdict on this client's put. Taken once: a stale or repeated answer finds nothing waiting.
+void OnPutResult(coop::net::Session* s, const coop::net::PosterStatePayload& r) {
+    UE_LOGI("[POSTER] client: the host %s put #%u key='%ls'", r.op == SO::kPutAccepted ? "ACCEPTED" : "refused",
+            static_cast<unsigned>(r.requestId), coop::net::StringFromWireKey(r.key).c_str());
+    if (!g_putPending.Take(r.requestId)) {
+        UE_LOGI("[POSTER] client: put answer #%u matches no waiting put -- ignored", static_cast<unsigned>(r.requestId));
+        return;
+    }
+    const HeldPut put = g_putHeld;
+    g_putHeld = HeldPut{};
+    if (r.op == SO::kPutRefused) {
+        UE_LOGI("[POSTER] client: the host refused put #%u -- the poster stays in the hand",
+                static_cast<unsigned>(r.requestId));
+        return;
+    }
+    const std::wstring key = coop::net::StringFromWireKey(r.key);
+    if (r.flags & SF::kConsumed) {   // the host consumed the rolled world prop: its placed state does the rest
+        UE_LOGI("[POSTER] client: put #%u placed key='%ls' by the host", static_cast<unsigned>(r.requestId),
+                key.c_str());
+        return;
+    }
+    // Still the same poster in the same hand, with the look the host placed?
+    void* held = put.held.Get();
+    PO::Look now;
+    void* holder = held ? PO::HoldingPlayer(held) : nullptr;
+    if (!held || !PO::IsRolled(held) || !holder || !coop::players::Registry::Get().IsLocal(holder) ||
+        !coop::hand_item::IsLocalHandViewActor(held) || !PO::ReadLook(held, now) || now != put.look) {
+        UE_LOGW("[POSTER] client: the held poster changed while put #%u waited -- giving it back",
+                static_cast<unsigned>(r.requestId));
+        SendPutAbort(s, r.requestId, key);
+        return;
+    }
+    const std::vector<void*> before = PO::AllPlaced();
+    g_replaying = true;
+    const bool ran = PO::CallPut(held);
+    g_replaying = false;
+    void* mine = ran ? NewPlacedNear(before, put.at.location) : nullptr;
+    if (!mine) {
+        UE_LOGW("[POSTER] client: the put could not finish here -- giving put #%u back", static_cast<unsigned>(r.requestId));
+        SendPutAbort(s, r.requestId, key);
+        return;
+    }
+    if (void* canon = detail::MirrorPlaced(key); canon && canon != mine) {
+        E::DestroyActor(mine);   // the host's state got here first and stands already
+    } else if (!detail::MirrorAdopt(key, mine)) {
+        UE_LOGW("[POSTER] client: put #%u's wall poster could not take key='%ls'", static_cast<unsigned>(r.requestId),
+                key.c_str());
+        return;
+    }
+    UE_LOGI("[POSTER] client: put #%u finished here -- the wall poster is key='%ls'", static_cast<unsigned>(r.requestId),
+            key.c_str());
+}
+
+void ExpirePut() {
+    if (g_putPending.Expire(NowMs())) {
+        g_putHeld = HeldPut{};
+        UE_LOGW("[POSTER] client: no answer to a put in %llu s -- it is dropped here (a late answer is ignored)",
+                static_cast<unsigned long long>(kPutWaitMs / 1000));
+    }
 }
 
 // A picture picked on a rolled poster: its record goes out (a client's as an intent the host re-publishes).
@@ -677,6 +936,7 @@ void Tick(coop::net::Session& session) {
         PumpHost(session);
     } else {
         detail::MirrorTick();
+        ExpirePut();
     }
 }
 
@@ -703,19 +963,37 @@ void OnPeerWorldReady(int slot) {
 void OnIntent(coop::net::Session& session, const coop::net::PosterIntentPayload& p, uint8_t senderSlot) {
     if (session.role() != coop::net::Role::Host || senderSlot < 1 || senderSlot >= coop::net::kMaxPeers) return;
     Slot& sl = g_slots[senderSlot];
+    if (p.op == OP::kPut || p.op == OP::kPutAbort)
+        UE_LOGI("[POSTER] host: received slot %u's %s #%u key='%ls' type=%d at (%.0f,%.0f,%.0f)",
+                static_cast<unsigned>(senderSlot), OpName(p.op), static_cast<unsigned>(p.requestId),
+                coop::net::StringFromWireKey(p.key).c_str(), p.type, static_cast<double>(p.locX),
+                static_cast<double>(p.locY), static_cast<double>(p.locZ));
     auto copy = p;
-    if (!sl.queue.Push(std::move(copy), kMaxPending))
+    if (!sl.queue.Push(std::move(copy), kMaxPending)) {
         Deny(senderSlot, p.op, coop::net::StringFromWireKey(p.key), "queue full");
+        if (p.op == OP::kPut) SendPutResult(session, senderSlot, p.requestId, false, {}, false);   // it need not wait
+    }
 }
 
 void OnState(const coop::net::PosterStatePayload& p) {
-    if (!IsClient(g_session.load(std::memory_order_acquire))) return;
+    coop::net::Session* s = g_session.load(std::memory_order_acquire);
+    if (!IsClient(s)) return;
+    if (p.op == SO::kPutAccepted || p.op == SO::kPutRefused) {
+        OnPutResult(s, p);
+        return;
+    }
     detail::MirrorState(p);
 }
 
 bool WellFormed(const coop::net::PosterIntentPayload& p) {
-    if (p.reserved[0] || p.reserved[1] || p.reserved[2]) return false;
-    if (p.key.len == 0 || p.key.len > sizeof(p.key.data) || p.fileName.len > sizeof(p.fileName.data)) return false;
+    if ((p.flags & ~OF::kKnown) != 0) return false;
+    if (p.key.len > sizeof(p.key.data) || p.fileName.len > sizeof(p.fileName.data)) return false;
+    // Only a put and its abort carry a request id, and only a put carries a look; a put's key may be empty (a held
+    // poster may have none), every other verb names a placed poster by its key.
+    const bool asksPut = p.op == OP::kPut || p.op == OP::kPutAbort;
+    if (asksPut != coop::poster_put::ValidRequestId(p.requestId)) return false;
+    if (!asksPut && p.key.len == 0) return false;
+    if (p.op != OP::kPut && (p.flags != 0 || p.type != 0)) return false;
     switch (p.op) {
         case OP::kPut: {
             const float f[] = {p.locX, p.locY, p.locZ, p.pitch, p.yaw, p.roll, p.scaleX, p.scaleY, p.scaleZ};
@@ -724,19 +1002,26 @@ bool WellFormed(const coop::net::PosterIntentPayload& p) {
             const float sc[] = {p.scaleX, p.scaleY, p.scaleZ};
             for (float v : sc)
                 if (v <= 0.f || v > kMaxScale) return false;
-            return p.fileName.len == 0;
+            if (p.type < 0 || p.type > kMaxLookType) return false;
+            return (p.flags & OF::kCustom) ? p.fileName.len > 0 : true;
         }
         case OP::kTakeDown: return p.fileName.len == 0;
         case OP::kPicture: return p.fileName.len > 0;
+        case OP::kPutAbort: return p.fileName.len == 0;
         default: return false;
     }
 }
 
 bool WellFormed(const coop::net::PosterStatePayload& p) {
-    if (p.reserved[0] || p.reserved[1] || (p.flags & ~SF::kKnown) != 0) return false;
+    if ((p.flags & ~SF::kKnown) != 0) return false;
     if (p.key.len > sizeof(p.key.data) || p.cls.len > sizeof(p.cls.data) || p.fileName.len > sizeof(p.fileName.data))
         return false;
+    const bool answersPut = p.op == SO::kPutAccepted || p.op == SO::kPutRefused;
+    if (answersPut != coop::poster_put::ValidRequestId(p.requestId)) return false;
+    if ((p.flags & SF::kConsumed) && p.op != SO::kPutAccepted) return false;
     switch (p.op) {
+        case SO::kPutAccepted: return p.key.len > 0;
+        case SO::kPutRefused: return true;
         case SO::kPlaced: {
             if (p.key.len == 0 || p.cls.len == 0) return false;
             const float f[] = {p.locX, p.locY, p.locZ, p.pitch, p.yaw, p.roll, p.scaleX, p.scaleY, p.scaleZ};
@@ -770,6 +1055,8 @@ void OnDisconnect() {
                 static_cast<unsigned long long>(g_fellBack));
     g_host.clear();
     g_scanned = false;
+    g_putPending.Reset();
+    g_putHeld = HeldPut{};
     detail::MirrorReset();
     g_sent = g_ran = g_denied = g_dropped = g_published = g_removed = 0;
     g_fellBack = g_records = 0;

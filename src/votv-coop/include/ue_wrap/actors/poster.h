@@ -61,6 +61,11 @@ struct Placement {
 };
 bool ReadPlacement(void* rolled, Placement& out);
 
+// Run the rolled poster's own put() (the game's native placement and consumption of the held poster). False for
+// anything but a rolled poster, or when the function did not resolve or the call failed; whether it placed anything is
+// the caller's to see (it places nothing without a blocking hit). Game thread.
+bool CallPut(void* rolled);
+
 // A placed poster's transform: its actor location, rotation and root scale. False on a failed read.
 bool ReadTransform(void* placed, Placement& out);
 

@@ -53,6 +53,9 @@ jobs:
       - name: Join sweep population regression
         run: python3 .github/ci/join_sweep_tally_drill.py
 
+      - name: Poster put request ledger regression
+        run: python3 .github/ci/poster_put_ledger_drill.py
+
       - name: Drive box row sidecar regression
         run: python3 .github/ci/drive_bank_rows_drill.py
 

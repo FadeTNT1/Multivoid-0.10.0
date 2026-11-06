@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 288;
+inline constexpr uint16_t kProtocolVersion = 289;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1321,17 +1321,19 @@ enum class ReliableKind : uint8_t {
     BucketFillState = 222,
 
     // CLIENT->HOST: a client's verb on a poster (coop::poster_sync): op 1 put a rolled poster it holds on the wall,
-    // by the rolled prop's key, at the placement its own aim made; op 2 take a placed poster down, by its key; op 3
-    // a placed poster's new custom picture, by its key, with the picked file name. The client cancels its own verb;
-    // the host refuses a sender that is not alive or out of reach and runs it on its own copy. Never relayed; not
-    // pre-world. Late join: nothing to replay. PosterIntentPayload.
+    // under a request id, with the held poster's look and the placement its own aim made; op 4 give a put back (the
+    // client could not finish it); op 2 take a placed poster down, by its key; op 3 a placed poster's new custom
+    // picture, by its key, with the picked file name. The client cancels its own verb; the host refuses a sender that
+    // is not alive or out of reach and runs it on its own copy. Never relayed; not pre-world. Late join: nothing to
+    // replay. PosterIntentPayload.
     PosterIntent = 223,
 
     // HOST->ALL: a placed poster (poster_C, an actor_save_C the prop lane does not carry) by its actor_save key
     // (coop::poster_sync): op 1 it stands, with its class, transform and look (create or update), op 2 it is gone,
-    // op 3 the end of a joiner's snapshot (a client's placed poster the snapshot did not name is destroyed). Sent
-    // on every change the host's setPoster or liveness watch sees. Never relayed; a client's copy is refused at the
-    // host's receive edge. Late join: every placed poster to the joiner at its ready edge, then op 3.
+    // op 3 the end of a joiner's snapshot (a client's placed poster the snapshot did not name is destroyed), op 4 / 5
+    // a put accepted (with the placed poster's canonical key) or refused, to the asking client alone. Sent on every
+    // change the host's setPoster or liveness watch sees. Never relayed; a client's copy is refused at the host's
+    // receive edge. Late join: every placed poster to the joiner at its ready edge, then op 3.
     // PosterStatePayload.
     PosterState = 224,
     // CLIENT->HOST: a client's own tool action on a shared target (coop::tool_action): a crowbar stuck in a pryable,
@@ -2559,42 +2561,61 @@ struct PosterFileName {
 };
 static_assert(sizeof(PosterFileName) == 96, "PosterFileName must be 96 bytes");
 
-// A client's verb on a poster (PosterIntent). Put: `key` is the rolled prop's, the placement is where the client's
-// put would spawn the placed poster (the rolled poster's `turn` component, scale included), `fileName` empty. Take
-// down: `key` is the placed poster's, the rest zero. Picture: `key` is the placed poster's and `fileName` the pick.
+// A client's verb on a poster (PosterIntent). Put: the client's own put of a rolled poster, cancelled there and
+// asked of the host under `requestId` (never 0); `key` is the held actor's item key, advisory and empty when it has
+// none (a rolled poster on the world's floor, which the host's key index names, is put by that key instead), the
+// placement is where the client's put would spawn the placed poster (the rolled poster's `turn` component, scale
+// included), and the look is the held poster's own `type`, its `fileName` ("None" is len 0) and kCustom: the hand
+// mirror carries none of them. The placed form's `index` is not sent, for the game's own put does not copy it. Put
+// abort: the same `requestId`; the client could not finish its own put, so the host takes the placed poster back.
+// Take down: `key` is the placed poster's, the rest zero. Picture: `key` is the placed poster's and `fileName` the
+// pick. Only a put and its abort carry a `requestId`.
 namespace poster_intent_ops {
 constexpr uint8_t kPut      = 1;
 constexpr uint8_t kTakeDown = 2;
 constexpr uint8_t kPicture  = 3;
+constexpr uint8_t kPutAbort = 4;
 }  // namespace poster_intent_ops
+namespace poster_intent_flags {
+constexpr uint8_t kCustom = 1u << 0;   // a put: the held poster draws `fileName`, not its preset `type`
+constexpr uint8_t kKnown  = kCustom;
+}  // namespace poster_intent_flags
 struct PosterIntentPayload {
     uint8_t        op;           // 1 -- poster_intent_ops
-    uint8_t        reserved[3];  // 3 -- zero
+    uint8_t        flags;        // 1 -- poster_intent_flags
+    uint16_t       requestId;    // 2 -- a put and its abort; 0 otherwise
+    int32_t        type;         // 4 -- a put: the held poster's preset picture; 0 otherwise
     WireKey        key;          // 32
     float          locX, locY, locZ;            // 12 -- world cm
     float          pitch, yaw, roll;            // 12 -- degrees
     float          scaleX, scaleY, scaleZ;      // 12
     PosterFileName fileName;     // 96
 };
-static_assert(sizeof(PosterIntentPayload) == 168, "PosterIntentPayload must be 168 bytes");
+static_assert(sizeof(PosterIntentPayload) == 172, "PosterIntentPayload must be 172 bytes");
 static_assert(sizeof(PosterIntentPayload) <= 256 - 20 - 8, "PosterIntentPayload must fit one datagram");
 
 // A placed poster's state (PosterState), by its actor_save key. Placed: every field. Removed: `key` alone. Snapshot
-// end: nothing (`key` empty).
+// end: nothing (`key` empty). Put accepted / refused: the host's answer to one client's put, sent to that client
+// alone under its `requestId`; accepted names the placed poster's canonical `key` in `key`, and kConsumed says the
+// host also destroyed the rolled world prop the put named (the client then has nothing left to finish); a refused
+// put carries nothing else.
 namespace poster_state_ops {
 constexpr uint8_t kPlaced      = 1;
 constexpr uint8_t kRemoved     = 2;
 constexpr uint8_t kSnapshotEnd = 3;
+constexpr uint8_t kPutAccepted = 4;
+constexpr uint8_t kPutRefused  = 5;
 }  // namespace poster_state_ops
 namespace poster_state_flags {
 constexpr uint8_t kCustom   = 1u << 0;   // the poster draws `fileName`, not its preset `type`
 constexpr uint8_t kSnapshot = 1u << 1;   // a row of a joiner's snapshot
-constexpr uint8_t kKnown    = kCustom | kSnapshot;
+constexpr uint8_t kConsumed = 1u << 2;   // a put accepted: the host consumed the rolled world prop itself
+constexpr uint8_t kKnown    = kCustom | kSnapshot | kConsumed;
 }  // namespace poster_state_flags
 struct PosterStatePayload {
     uint8_t        op;           // 1 -- poster_state_ops
     uint8_t        flags;        // 1 -- poster_state_flags
-    uint8_t        reserved[2];  // 2 -- zero
+    uint16_t       requestId;    // 2 -- a put accepted / refused: the put's; 0 otherwise
     int32_t        type;         // 4 -- the preset picture
     int32_t        index;        // 4
     WireKey        key;          // 32 -- the actor_save key

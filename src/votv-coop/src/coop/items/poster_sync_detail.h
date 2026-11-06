@@ -25,6 +25,10 @@ void SayFallback(const std::wstring& key, const std::wstring& file);
 // loaded yet; the counts; the session-end reset. Game thread.
 void MirrorState(const coop::net::PosterStatePayload& p);
 void MirrorTick();
+// CLIENT: the placed poster here that `key` names (null when none), and the adoption of `w`, a poster this peer's own
+// put placed, under the host's canonical `key`: its key is written and the mirror then updates it in place.
+void* MirrorPlaced(const std::wstring& key);
+bool MirrorAdopt(const std::wstring& key, void* w);
 struct MirrorCounts {
     uint64_t applied = 0, spawned = 0, destroyed = 0, dropped = 0;
 };

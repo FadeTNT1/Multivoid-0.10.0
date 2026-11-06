@@ -678,11 +678,23 @@ placement, load and picture change ends in, and each noted poster's liveness, an
 client's put, take-down and custom picture are cancelled at the script-body gate and sent as
 `PosterIntent`. The host refuses a sender that is not alive, out of reach of the poster or of the
 placement, or a rolled poster another peer holds, and otherwise runs the verb on its own copy: it
-spawns the placed poster from the rolled one's class and look at the client's placement and destroys
-the rolled prop, whose destroy the prop lane carries to the hand that held it; or it spawns the
-rolled form at the sender's puppet and destroys the placed one; or it writes the picture and
-redraws. A client creates, updates and destroys its placed posters from `PosterState`, adopting a
-save-loaded one by its key. A verb the client cannot send runs on its own copy, logged.
+spawns the placed poster at the client's placement and takes a take-down's placed poster off the wall,
+spawning the rolled form at the sender's puppet; or it writes the picture and redraws. A client creates,
+updates and destroys its placed posters from `PosterState`, adopting a save-loaded one by its key. A verb
+the client cannot send runs on its own copy, logged.
+
+A put is asked, answered and finished once. The client cancels its own put() and sends it under a request
+id with the held poster's look (the preset `type`, the custom `fileName`) and the placement, because the
+poster in a hand is no world prop: its key is in no key index, its world copy died at the pickup, and the
+hand mirror carries no look. The host takes the rolled poster from the rolled world prop the key names, if
+the key index holds one, else from the sender's hand mirror, spawns the placed poster from the held
+poster's own placed class, and answers that client alone with `PosterState` op 4 (accepted, with the
+placed poster's canonical key) or op 5 (refused), under the same request id; a repeated request is
+answered again, not run again. On an accept the client runs the game's own put() once, which places its
+wall poster and consumes the held one, then gives that poster the canonical key, so the host's state
+updates it in place and does not add a second. A hand that changed in the meantime, or a put() that places
+nothing now, is given back (`PosterIntent` op 4) and the host takes the placed poster off the wall. A
+refusal leaves the poster in the hand. `coop/items/poster_put_ledger` holds the request bookkeeping.
 
 A custom picture is a file name: the image is a file in each player's own posters folder and does
 not cross. A peer without the file draws the poster's preset picture instead (`custom` is cleared
@@ -730,8 +742,8 @@ two-peer run reads the `[POSTER]` lines.
 | `FoodState` | the host to all | a world food's temperature, freshness and its count, bites left, `ignoreRotting`, spoiled, frozen and `cookProgress`, by key |
 | `FoodBiteIntent` | a client to the host | a bite of a shared food that did not finish it, with the bites left |
 | `ShrimpDispenseIntent` | a client to the host | a press on a shared shrimp tray, by key: its action 4 or its hand use |
-| `PosterIntent` | a client to the host | a put of a rolled poster (its key and the placement its aim made, scale included), a take-down or a custom picture of a placed one (its key, the picked file name) |
-| `PosterState` | the host to all | a placed poster stands (key, class, transform, type, index, file name, custom), is gone (key), or a joiner's snapshot ended |
+| `PosterIntent` | a client to the host | a put of a held rolled poster (a request id, its look, and the placement its aim made, scale included) or the give-back of one, a take-down or a custom picture of a placed one (its key, the picked file name) |
+| `PosterState` | the host to all; to one client | a placed poster stands (key, class, transform, type, index, file name, custom), is gone (key), or a joiner's snapshot ended; to the asking client alone, a put accepted (with the placed poster's key) or refused, by request id |
 
 ## Late join
 
@@ -794,7 +806,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
-| posters, rolled and placed | `coop/items/poster_sync`, `coop/items/poster_mirror` (a client's placed posters), `ue_wrap/actors/poster`, `coop/props/prop_record_gates` (the rolled form's applier) |
+| posters, rolled and placed | `coop/items/poster_sync`, `coop/items/poster_mirror` (a client's placed posters), `coop/items/poster_put_ledger`, `ue_wrap/actors/poster`, `coop/props/prop_record_gates` (the rolled form's applier) |
 | a shrimp tray's portions | `coop/props/shrimp_tray_sync`, `ue_wrap/actors/shrimp_tray`, `coop/props/prop_food_state` (the count's carrier) |
 | the drive box's signal rows | `ue_wrap/actors/drive_bank` (the live arrays), `ue_wrap/actors/drive_bank_rows.h` (pack, judge, plan), `ue_wrap/actors/save_record` (the hooks), `coop/items/save_record_wire` (the sidecar) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |
