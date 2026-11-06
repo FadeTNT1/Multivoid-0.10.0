@@ -64,6 +64,7 @@ leaving one leaves nothing to restore.
 |---|---|---|
 | insomniac, fossilhound | tick refused | the host mirrors the product |
 | cockroach master and summoner | tick, summon and timers refused | its tick also drains and destroys shared food props; `coop/creatures/roach_sync` drives the client's population |
+| shrimp eater | `eat` refused | its timer rolls reputation and RNG against the local player's distance and swaps a shrimp for a `shrimp_e` prop; the host's swap crosses as the ordinary prop birth and destroy |
 | mushroom master and spawner | spawn refused | they spawn at their own world transform |
 | yellow wisp spawner | tick refused | anchors on a random navmesh point; the product is host-mirrored |
 | sky wisp spawner | tick refused | absolute map coordinates, not player-anchored |

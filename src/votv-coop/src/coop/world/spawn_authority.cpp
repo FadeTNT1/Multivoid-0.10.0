@@ -11,7 +11,8 @@
 // refusing the tick stops the roll and the product, and the products are host-mirrored; the roach
 // master's tick drives roach movement, the food-eat mutation and crush traces, which a client running
 // it would diverge, so it and its summoner are refused while the roach sync drives the client
-// population. The jellyfish path's spawn makes seven fish inside its graph, and the host's are
+// population. The shrimp eater's eat picks a shrimp by reputation and RNG and swaps it for a
+// shrimp_e prop, which the host's run replaces over the prop lifecycle. The jellyfish path's spawn makes seven fish inside its graph, and the host's are
 // mirrored through the source-gated catch, so a client's own, its 18:00 roll's, is refused.
 
 #include "coop/world/spawn_authority.h"
@@ -46,6 +47,7 @@ UE_FACT_FN(kRowSpawnNestTimerCockroachMaster, "spawn_authority", L"cockroachMast
 UE_FACT_FN(kRowCustomEventCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"CustomEvent", Declared);
 UE_FACT_FN(kRowReceiveTickTickerInsomniacSpawner, "spawn_authority", L"ticker_insomniacSpawner_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveTickTickerFossilhoundSpawner, "spawn_authority", L"ticker_fossilhoundSpawner_C", L"ReceiveTick", Declared);
+UE_FACT_FN(kRowEatShrimpEaterMaster, "spawn_authority", L"shrimpeatermaster_C", L"eat", Declared);
 UE_FACT_FN(kRowReceiveTickCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveTickTickerRoachSummoner, "spawn_authority", L"ticker_roachSummoner_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveBeginPlayVentCrawler, "spawn_authority", L"ventCrawler_C", L"ReceiveBeginPlay", Declared);
@@ -132,6 +134,12 @@ constexpr Row kRows[] = {
     {&kRowReceiveTickTickerInsomniacSpawner,   "insomniacSpawner.ReceiveTick"},
     {&kRowReceiveTickTickerFossilhoundSpawner, "fossilhoundSpawner.ReceiveTick"},
     {&kRowReceiveTickCockroachMaster,     "cockroachMaster.ReceiveTick"},
+    // The shrimp eater: a looping timer delegate runs eat, which rolls on the ariral reputation and
+    // an RNG, gates on the LOCAL player 0's distance, the day and the shrimp's temperature, then
+    // spawns the prop named shrimp_e in a shrimp's place and destroys the shrimp. Run on each peer it
+    // picked a different shrimp and made a second, divergent replacement; the host's run crosses as
+    // the ordinary prop birth and destroy.
+    {&kRowEatShrimpEaterMaster,           "shrimpEaterMaster.eat"},
     {&kRowReceiveTickTickerRoachSummoner, "roachSummoner.ReceiveTick"},
 
     // The story-event creatures: on a client every instance is a host mirror -- the local spawn

@@ -42,6 +42,11 @@ $ih="event_fire: host fire #1 runEvent('eggvasion') origin=dev -- broadcasting`n
 $ic="materialized mirror eid=1 class='superEgger_C'`nmaterialized mirror eid=2 class='eg_C'"
 Assert ((Get-SyncVerdict $invasion $ih $ic).Status -eq 'PASS') 'Mixed event actor families must match every identity'
 Assert ((Get-SyncVerdict $invasion $ih ($ic -replace "class='superEgger_C'","class='eg_C'")).Status -eq 'FAIL') 'Matching identity with the wrong event actor class must fail'
+$pyr=[pscustomobject]@{Name='piramid';Dispatch='RunEvent'}
+$yh="event_fire: host fire #1 runEvent('piramid') origin=dev -- broadcasting`nworld-actor[host]: tracked WorldActorSpawn class='piramid2_C' eid=77 loc=(0,0,0)"
+$yc="materialized mirror eid=77 class='piramid2_C'"
+Assert ((Get-SyncVerdict $pyr $yh $yc).Status -eq 'PASS') 'A piramid2_C world actor materialized by id must pass'
+Assert ((Get-SyncVerdict $pyr $yh ($yc -replace 'piramid2_C','piramid_C')).Status -eq 'FAIL') 'The retired piramid_C class name must not satisfy the piramid row'
 $food=[pscustomobject]@{Name='food';Dispatch='SpecialEvent'}
 $fh="event_fire: host fire #1 runSpecialEvent('food') origin=dev -- broadcasting`nHOST broadcasting SPAWN cls='prop_food_choco_C' key='k1' loc=(0,0,0)`nHOST broadcasting SPAWN cls='prop_food_shrimpburger_C' key='k2' loc=(0,0,0)"
 $fc="sync::CreateOrAdoptPropMirror: eid=1 bound to actor=1 key='k1' cls='prop_food_choco_C'`nsync::CreateOrAdoptPropMirror: eid=2 bound to actor=2 key='k2' cls='prop_food_shrimpburger_C'"
