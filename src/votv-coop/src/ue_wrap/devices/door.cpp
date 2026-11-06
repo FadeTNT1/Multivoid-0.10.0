@@ -44,6 +44,12 @@ int32_t g_dirOff       = -1;       // Adoor_C::dir
 // apply leaves a stale local jam where it is.
 int32_t g_jammedOff    = -1;
 uint8_t g_jammedMask   = 0;
+// Adoor_C::superclosed and ::cantclose: the two flags a bypassed doorOpen / doorClose returns on without moving the
+// door. Optional: unresolved, the lane cannot name or clear them, and the no-op fallback below still converges.
+int32_t g_superClosedOff  = -1;
+uint8_t g_superClosedMask = 0;
+int32_t g_cantCloseOff    = -1;
+uint8_t g_cantCloseMask   = 0;
 // Adoor_C::ignoreBlackout: the panel's blackout and the press's blackout clause both skip such a door.
 int32_t g_ignoreBlackoutOff  = -1;
 uint8_t g_ignoreBlackoutMask = 0;
@@ -92,11 +98,22 @@ void* DoorClass() {
 // The smart-apply verify list: a door we just tried to animate; if it has not reached the
 // target by the deadline (the swing froze, beyond tick range) it is force-snapped. Game
 // thread only, bounded (entries clear within a second), drained by the tick.
+//
+// Two phases. Before it lands the entry waits for isOpened to reach the target (deadline), and force-snaps
+// the door when it has not. After it lands the entry stays as a watch (holdUntil, past the door's own five
+// second autoclose delay): this copy's door moves only by the authority, so a settled door found off the
+// target in that window was moved by something the lane did not see (a swing that did not take, a stale
+// flag), and is brought back with the same force-snap, said once with the swing's fields.
 struct VerifyEntry {
     bool target;
     std::chrono::steady_clock::time_point deadline;
     ue_wrap::CachedObjRef ref;  // the slot-validated door (the map key is compare-only)
+    bool landed = false;
+    std::chrono::steady_clock::time_point holdUntil{};
+    int corrections = 0;        // drift corrections made in the hold; capped so a loop cannot run forever
 };
+constexpr auto kVerifyHold = std::chrono::seconds(8);
+constexpr int  kMaxDriftCorrections = 3;
 std::unordered_map<void*, VerifyEntry> g_verify;
 
 // Whether the door's move timeline -- its swing, not the jam shake's -- is playing: the flag its
@@ -195,6 +212,10 @@ bool EnsureResolved() {
     uint8_t ignoreBlackoutMask = 0;
     if (!R::FindBoolProperty(doorCls, L"ignoreBlackout", ignoreBlackoutOff, ignoreBlackoutMask))
         ignoreBlackoutOff = -1;
+    int32_t superClosedOff = -1, cantCloseOff = -1;
+    uint8_t superClosedMask = 0, cantCloseMask = 0;
+    if (!R::FindBoolProperty(doorCls, N::DoorSuperClosedProp, superClosedOff, superClosedMask)) superClosedOff = -1;
+    if (!R::FindBoolProperty(doorCls, N::DoorCantCloseProp, cantCloseOff, cantCloseMask)) cantCloseOff = -1;
     const int32_t moveOff = R::FindPropertyOffset(doorCls, L"move");
     const int32_t rRootOff = R::FindPropertyOffset(doorCls, N::DoorRightRootProp);
     const int32_t lRootOff = R::FindPropertyOffset(doorCls, N::DoorLeftRootProp);
@@ -239,6 +260,10 @@ bool EnsureResolved() {
     g_isMovingOff  = isMovingOff;
     g_jammedOff    = jammedOff;
     g_jammedMask   = jammedMask;
+    g_superClosedOff  = superClosedOff;
+    g_superClosedMask = superClosedMask;
+    g_cantCloseOff    = cantCloseOff;
+    g_cantCloseMask   = cantCloseMask;
     g_ignoreBlackoutOff  = ignoreBlackoutOff;
     g_ignoreBlackoutMask = ignoreBlackoutMask;
     g_dirOff       = dirOff;
@@ -489,11 +514,45 @@ void DescribeSwing(void* door, char* out, size_t n) {
                   flag(g_isMovingOff), dir, play, jammed, alpha);
 }
 
+static bool ReadBit(void* door, int32_t off, uint8_t mask) {
+    return off >= 0 && (*(reinterpret_cast<const uint8_t*>(door) + off) & mask) != 0;
+}
+
+static void ClearBit(void* door, int32_t off, uint8_t mask) {
+    if (off < 0) return;
+    uint8_t& b = *(reinterpret_cast<uint8_t*>(door) + off);
+    b = static_cast<uint8_t>(b & ~mask);
+}
+
+// The flag, if any, that makes a bypassed verb to `open` return without moving the door: doorOpen(bypass) goes to
+// the jam shake on `jammed` and returns on `superclosed`; doorClose(bypass) returns on `cantclose`. Everything
+// else the verb's graph reads (active, isMoving, isOpened) only gates the non-bypass path. Null when none is set.
+static const char* BlockingGuard(void* door, bool open) {
+    if (open) {
+        if (ReadBit(door, g_jammedOff, g_jammedMask)) return "jammed";
+        if (ReadBit(door, g_superClosedOff, g_superClosedMask)) return "superclosed";
+        return nullptr;
+    }
+    return ReadBit(door, g_cantCloseOff, g_cantCloseMask) ? "cantclose" : nullptr;
+}
+
+// Whether the leaves stand at the open place: both roots at least nine tenths of the way along (an additive open
+// on a cracked door goes past one). A closed door is not asked: a crack leaves it off its rest place legitimately.
+// True when the pose cannot be read, so an unresolved crack lane never reads as a failure.
+static bool LeavesAtOpen(void* door) {
+    LeafPose pose;
+    if (!TryReadLeafPose(door, pose)) return true;
+    return pose.left >= 0.9f && pose.right >= 0.9f;
+}
+
 // Snap a door fully to a state, mesh and flag, proximity-independent: set the timeline alpha
 // to the end and the direction, call the update function (which lerps the mesh from the
 // alpha, the visual snap; the finished function only sets the flag and stops the timeline,
-// never moving the mesh), then the finished function for the state.
-static void ForceTo(void* door, bool open) {
+// never moving the mesh), then the finished function for the state. `seedLerpa` first puts the swing's start
+// places at where the roots stand, which doorOpen does in its own body: for a snap of a door whose verb never
+// ran, so the update lerps from the door's place and not from whatever the last swing left. True when the open
+// flag reads `open` afterwards.
+static bool ForceTo(void* door, bool open, bool seedLerpa = false) {
     // Idempotent: if the opened flag already matches, do nothing. The finished function re-fires
     // the open or close sound and the opened delegate, so a second force on an already-open door
     // double-sounds; two callers can reach the same open door in adjacent ticks (the keypad
@@ -501,12 +560,24 @@ static void ForceTo(void* door, bool open) {
     // guard makes both safe.
     if (g_isOpenedOff >= 0 &&
         *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open)
-        return;
-    if (g_moveAlphaOff < 0 || g_moveDirOff < 0) return;
+        return true;
+    if (g_moveAlphaOff < 0 || g_moveDirOff < 0) return false;
+    if (seedLerpa && open && g_lerpaROff >= 0 && g_lerpaLOff >= 0) {
+        void* const r = RootAt(door, g_rRootOff);
+        void* const l = RootAt(door, g_lRootOff);
+        if (r && l) {
+            *reinterpret_cast<FVector*>(reinterpret_cast<char*>(door) + g_lerpaROff) =
+                ue_wrap::engine::GetComponentRelativeLocation(r);
+            *reinterpret_cast<FVector*>(reinterpret_cast<char*>(door) + g_lerpaLOff) =
+                ue_wrap::engine::GetComponentRelativeLocation(l);
+        }
+    }
     *reinterpret_cast<float*>(reinterpret_cast<char*>(door) + g_moveAlphaOff) = open ? 1.0f : 0.0f;
     *reinterpret_cast<uint8_t*>(reinterpret_cast<char*>(door) + g_moveDirOff)  = open ? 0 : 1;  // Forward/Backward
     if (void* fn = EntryVerb(door, L"move__UpdateFunc")) { ParamFrame u(fn); if (u.valid()) Call(door, u); }  // the MESH
     if (void* fn = EntryVerb(door, L"move__FinishedFunc")) { ParamFrame f(fn); if (f.valid()) Call(door, f); }  // isOpened
+    return g_isOpenedOff < 0 ||
+           *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open;
 }
 
 void ForceOpen(void* door)  { if (door) ForceTo(door, true); }
@@ -514,6 +585,9 @@ void ForceClose(void* door) { if (door) ForceTo(door, false); }
 
 void SmartApply(void* door, bool open) {
     if (!door) return;
+    // A watch left from an earlier apply toward the other end must not fight this one: the authority's newest
+    // state is the target.
+    if (auto it = g_verify.find(door); it != g_verify.end() && it->second.target != open) g_verify.erase(it);
     // If the door is already swinging toward this target, do nothing: re-triggering the swing, or
     // registering a verify that later force-snaps it, plays its sound a second time. Let the swing
     // finish.
@@ -531,15 +605,42 @@ void SmartApply(void* door, bool open) {
     if (!moving && g_isOpenedOff >= 0 &&
         *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open)
         return;
-    // A door the authority opened is not jammed there, so a jam this copy still holds is stale: a
-    // joiner loads `jammed` from the save and runs its own unjam timer from its own load, and a
-    // jammed copy's doorOpen would play the jam shake instead of opening.
-    if (open && g_jammedOff >= 0) {
-        uint8_t& jammed = *reinterpret_cast<uint8_t*>(reinterpret_cast<char*>(door) + g_jammedOff);
-        jammed = static_cast<uint8_t>(jammed & ~g_jammedMask);
+    // A door the authority moved has no flag that stops the move there, so one this copy still holds is stale: a
+    // joiner loads `jammed` from the save and runs its own unjam timer from its own load, and a jammed copy's
+    // doorOpen would play the jam shake instead of opening; `superclosed` (open) and `cantclose` (close) make the
+    // bypassed verb return. Said, so a log names the flag that was in the way.
+    const char* cleared = BlockingGuard(door, open);
+    if (cleared) {
+        if (open) {
+            ClearBit(door, g_jammedOff, g_jammedMask);
+            ClearBit(door, g_superClosedOff, g_superClosedMask);
+        } else {
+            ClearBit(door, g_cantCloseOff, g_cantCloseMask);
+        }
     }
     // Play the native animated swing (smooth wherever the door ticks, no magic radius).
-    if (open) CallDoorOpen(door, true); else CallDoorClose(door, true);
+    const bool ran = open ? CallDoorOpen(door, true) : CallDoorClose(door, true);
+    // The verb is synchronous: a body that took the command has set isMoving (the swing) or, on a door that
+    // finished at once, the opened flag. Neither means it returned without moving the door -- a flag the clears
+    // above did not know, or a verb that did not dispatch -- and the state is brought to the target at once
+    // rather than left to the verify's deadline, which would find the same stuck door.
+    bool nowMoving = false, nowOpened = !open;
+    TryReadMoving(door, nowMoving);
+    TryReadOpen(door, nowOpened);
+    const bool took = ran && (nowMoving || nowOpened == open);
+    const std::wstring key = GetKeyString(door);
+    if (took) {
+        UE_LOGI("door: applied %s key='%ls' via %s%s%s", open ? "ON" : "OFF", key.c_str(),
+                open ? "doorOpen" : "doorClose", cleared ? " after clearing stale " : "", cleared ? cleared : "");
+    } else {
+        char desc[160] = "";
+        DescribeSwing(door, desc, sizeof desc);
+        const bool snapped = ForceTo(door, open, true);
+        UE_LOGW("door: applied %s key='%ls' via fallback(%s) -- %s returned without moving the door%s%s [%s]; "
+                "force-snap %s", open ? "ON" : "OFF", key.c_str(), ran ? "unknown" : "verb-not-dispatched",
+                open ? "doorOpen" : "doorClose", cleared ? ", after clearing stale " : "", cleared ? cleared : "",
+                desc, snapped ? "reached the target" : "FAILED (timeline fields unresolved)");
+    }
     // A copy that does not tick freezes mid-swing. Verify shortly: a ticking door reaches the
     // target before the deadline (removed, no snap); a frozen one is force-snapped so its state
     // stays correct. The deadline exceeds the longest swing, so a slow but completing animation
@@ -553,16 +654,66 @@ void TickSmartApply() {
     if (g_verify.empty()) return;
     const auto now = std::chrono::steady_clock::now();
     for (auto it = g_verify.begin(); it != g_verify.end();) {
-        void* door = it->second.ref.Get();  // slot-validated (the key is compare-only)
+        VerifyEntry& e = it->second;
+        void* door = e.ref.Get();  // slot-validated (the key is compare-only)
         if (!door || g_isOpenedOff < 0) { it = g_verify.erase(it); continue; }
         const bool cur = *reinterpret_cast<bool*>(reinterpret_cast<char*>(door) + g_isOpenedOff);
-        if (cur == it->second.target) { it = g_verify.erase(it); continue; }  // animation completed -> smooth, no snap
-        if (now >= it->second.deadline) {                                     // froze (far) -> guarantee the state
-            if (it->second.target) ForceOpen(door); else ForceClose(door);
-            it = g_verify.erase(it);
-        } else {
+        const bool moving = g_isMovingOff >= 0 &&
+            *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isMovingOff);
+        if (!e.landed) {
+            // Arrived: the flag is at the target (and an open door's leaves stand open). The animation completed
+            // -> smooth, no snap. Kept as a watch from here.
+            const bool leavesWrong = e.target && cur && !moving && !LeavesAtOpen(door);
+            if (cur == e.target && !leavesWrong) {
+                e.landed = true;
+                e.holdUntil = now + kVerifyHold;
+                ++it;
+                continue;
+            }
+            if (now >= e.deadline) {
+                // Froze, or the verb never took, or flagged open with the leaves still shut: guarantee the state.
+                char desc[160] = "";
+                DescribeSwing(door, desc, sizeof desc);
+                if (leavesWrong) {
+                    // The flag says open and the leaves stand shut: put the leaves where an open door has them.
+                    if (g_moveAlphaOff >= 0 && g_moveDirOff >= 0) {
+                        *reinterpret_cast<float*>(reinterpret_cast<char*>(door) + g_moveAlphaOff) = 1.0f;
+                        *reinterpret_cast<uint8_t*>(reinterpret_cast<char*>(door) + g_moveDirOff) = 0;
+                        if (void* fn = EntryVerb(door, L"move__UpdateFunc")) {
+                            ParamFrame u(fn);
+                            if (u.valid()) Call(door, u);
+                        }
+                    }
+                } else if (e.target) {
+                    ForceTo(door, true, true);
+                } else {
+                    ForceTo(door, false);
+                }
+                UE_LOGW("door: key='%ls' did not reach %s by the verify deadline [%s] -- force-snapped%s",
+                        GetKeyString(door).c_str(), e.target ? "OPEN" : "SHUT", desc,
+                        leavesWrong ? " (leaves only)" : "");
+                e.landed = true;
+                e.holdUntil = now + kVerifyHold;
+            }
             ++it;
+            continue;
         }
+        // Landed: a settled door found off the target within the hold was moved by something not seen.
+        if (!moving && cur != e.target) {
+            if (e.corrections >= kMaxDriftCorrections) {
+                UE_LOGW("door: key='%ls' keeps leaving %s after %d corrections -- the watch gives up",
+                        GetKeyString(door).c_str(), e.target ? "OPEN" : "SHUT", e.corrections);
+                it = g_verify.erase(it);
+                continue;
+            }
+            ++e.corrections;
+            char desc[160] = "";
+            DescribeSwing(door, desc, sizeof desc);
+            ForceTo(door, e.target, e.target);
+            UE_LOGW("door: key='%ls' drifted off %s after its apply landed [%s] -- converged again (correction %d)",
+                    GetKeyString(door).c_str(), e.target ? "OPEN" : "SHUT", desc, e.corrections);
+        }
+        if (now >= e.holdUntil) it = g_verify.erase(it); else ++it;
     }
 }
 

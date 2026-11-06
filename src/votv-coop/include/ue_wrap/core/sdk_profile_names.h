@@ -992,6 +992,11 @@ inline constexpr const wchar_t* DoorLeftRootProp             = L"door_l_root";
 inline constexpr const wchar_t* DoorOpenOffsetProp           = L"openDoor";
 inline constexpr const wchar_t* DoorLerpaRightProp           = L"lerpa_r";
 inline constexpr const wchar_t* DoorLerpaLeftProp            = L"lerpa_l";
+// door_C's two flags that make a bypassed verb return without moving the door: doorOpen(bypass) returns on
+// `superclosed` (and plays the jam shake on `jammed`), doorClose(bypass) returns on `cantclose`. Both are read
+// by the graph; only the save's load writes `superclosed`, and nothing in the captured graphs writes `cantclose`.
+inline constexpr const wchar_t* DoorSuperClosedProp          = L"superclosed";
+inline constexpr const wchar_t* DoorCantCloseProp            = L"cantclose";
 inline constexpr const wchar_t* GarageMoveTimelineProp       = L"move";
 inline constexpr const wchar_t* GarageMovingProp             = L"mov";
 // garage_C's door mesh (the skeletal mesh the swing montage plays on), its looping swing sound and its nav
