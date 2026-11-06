@@ -708,6 +708,14 @@ updates it in place and does not add a second. A hand that changed in the meanti
 nothing now, is given back (`PosterIntent` op 4) and the host takes the placed poster off the wall. A
 refusal leaves the poster in the hand. `coop/items/poster_put_ledger` holds the request bookkeeping.
 
+A poster is the local player's if its `holdingPlayer` is the registry's local pawn **or** the hand lane's
+`IsLocalHandViewActor` names it; once it is, the client's native put never runs. A failed read, a put the
+host's own judge (`IntentWhy`, one helper for both ends) would drop, or a failed send cancels the put with a
+`[POSTER] client: put #N cancelled -- <why>` line and the poster stays in the hand. A custom look with no
+file name goes as a preset. The host says a malformed intent (`[POSTER] host: slot N's put req R is malformed
+-- <why>`, rate-limited) and answers a put it can decode with a refusal (op 5) so the client does not wait out
+its 15 s timeout. Every put() on a client logs `[POSTER] client: put() seen (holder=.. local=.. handView=..)`.
+
 A custom picture is a file name: the image is a file in each player's own posters folder and does
 not cross. A peer without the file draws the poster's preset picture instead (`custom` is cleared
 for the redraw and put back, so the state is untouched), logged once as `[POSTER]`. `[?]` until a

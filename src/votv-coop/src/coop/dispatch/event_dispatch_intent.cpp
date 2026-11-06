@@ -512,12 +512,12 @@ bool HandleIntentEvent(net::Session& session,
         }
         net::PosterIntentPayload p{};
         if (msg.payloadLen != sizeof(p)) {
-            coop::poster_sync::CountDropped();
+            coop::poster_sync::OnBadIntentSize(static_cast<uint8_t>(msg.senderPeerSlot), msg.payloadLen);
             break;
         }
         std::memcpy(&p, msg.payload, sizeof(p));
         if (!coop::poster_sync::WellFormed(p)) {
-            coop::poster_sync::CountDropped();
+            coop::poster_sync::OnMalformedIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
             break;
         }
         coop::poster_sync::OnIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
