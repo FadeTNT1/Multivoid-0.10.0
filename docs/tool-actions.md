@@ -1,9 +1,10 @@
-# Tool actions: the crowbar's pry and the hacksaw's cut
+# Tool actions: the crowbar's pry, the hacksaw's cut and the repair kit's mend
 
 ## Purpose
 
-Two tools work on a shared target for as long as the player keeps at it: a crowbar stuck in a pryable and bent with
-the mouse, and a hacksaw held on a heavy prop until it falls apart into scrap. Both are driven by one player's input
+Three tools work on a shared target for as long as the player keeps at it: a crowbar stuck in a pryable and bent with
+the mouse, a hacksaw held on a heavy prop until it falls apart into scrap, and a repair kit held on a burst water pipe
+until it is mended. All are driven by one player's input
 on one machine and both end in a change of the world. This lane shows the work on every peer while it lasts and runs
 its end once, on the host.
 
@@ -69,13 +70,34 @@ and runs the end once on its mirror of the sender's saw (`hand_item::MirrorActor
 measured amount, and one tick of the game's own. The scraps, the spill and the destroy are host births and a host
 death. Every peer that does not make the cut plays the saw's sound at the prop every 0.8 s while it lasts.
 
+### The mend `[RD]`
+
+`prop_toolbox_C::playerHandUse_LMB` takes the looked-at actor as `fixingActor` when its `toolboxCanFix` answers true
+(a burst `burstWaterPipe_C`, an ATV wheel), reads the actor's `toolboxFixTime` into `time` (3 s for a pipe; the power
+tool in the other hand divides it by 5), and starts a tick and a 0.8 s `fixAudio` timer. The tick adds delta / `time`
+to `complete`; at 1 it calls the actor's `toolboxFix(kit)`, which on a damaged pipe runs `state(false)` and answers
+true. On true the kit takes one of its `fixes`, runs `completeSaw()` (the reset), says the uses left and, with none
+left, destroys itself. The release and a lost aim also end in `completeSaw()`.
+
+The lane (`coop/interactables/toolbox_sync`): the owner's hand use (its post) sends a begin whose target is the pipe's
+portable wire key (a pipe has no prop key), the kit's `time` and its `fixes`; `complete` goes four times a second;
+`completeSaw` ends it. On a client the tick that would finish the mend is cancelled and the bar held at 99.9 %, and the
+end goes to the host. The host checks the pipe resolves and is still burst, the sender's hand holds a repair kit, the
+reach, the sender has a use left, nobody else is mending the pipe, and the claimed time lies between a fifth of the
+pipe's own and 110 % of it (the power tool); an end sooner than three quarters of the time is refused. It sends the
+sender's end first, then commits the pipe's `toolboxFix` once; `coop/world/basement_pipe_sync` sends the pipe's flag,
+so the inflow stops on every peer. The sender's kit runs its own end on its own pipe (the use taken, the reset, the
+message, the destroy when none are left), so a kit's uses stay in the sender's inventory record and a last use destroys
+the kit once. A second finisher of the same pipe is refused as already mended and its kit resets. Every peer that does
+not make the mend plays the kit's `fixAudio` at the pipe every 0.8 s while it lasts.
+
 ## Who owns what
 
 | State | Owner |
 |---|---|
-| the pry's bend, the cut's progress, the owner's screen | the acting peer |
-| who may begin on a target | the host: one session per pry target, one cut per prop |
-| the pryable's `crowbarOpen`, the crowbar given back to the world, the snap, the cut's end | the host, run once |
+| the pry's bend, the cut's progress, the mend's progress, the owner's screen | the acting peer |
+| who may begin on a target | the host: one session per pry target, one cut per prop, one mend per pipe |
+| the pryable's `crowbarOpen`, the crowbar given back to the world, the snap, the cut's end, the pipe's mend | the host, run once |
 | the crowbar taken back into a hand | the taker |
 
 ## Wire messages
@@ -85,9 +107,9 @@ death. Every peer that does not make the cut plays the saw's sound at the prop e
 | `ToolActionIntent` (225) | client -> host | a client's own begin, progress or end |
 | `ToolActionState` (226) | host -> all | every accepted session's begin, progress and end; a refusal to its sender |
 
-One payload, `ToolActionPayload` (68 bytes): the kind (pry, saw), the op (begin, progress, end, refuse), the owner's
+One payload, `ToolActionPayload` (68 bytes): the kind (pry, saw, toolbox), the op (begin, progress, end, refuse), the owner's
 slot, the end's result (taken back, done, snapped, dropped), the target's key, a pry's pivot, `alpha`, strain, pitch,
-angle, lives and its strain and spark bits; a cut's begin carries its time and its scrap count. The host judges a pry's
+angle, lives and its strain and spark bits; a cut's or a mend's begin carries its time and its scrap count or uses. The host judges a pry's
 begin by its target (resolved, no crowbar in it), the lives (1..3), the sender's hand having held a crowbar last, and
 its reach; a cut's begin by its prop (keyed, live, not a child, sawable), the hacksaw in the sender's hand, nobody
 else cutting it, and its reach. A pry's done needs `alpha` at 0.95 or more and 250 ms since its begin, a snap a strain
@@ -96,7 +118,8 @@ of 0.95 or more; an end the host does not believe drops the crowbar to the floor
 ## Late join
 
 The host sends a joiner every running session at its ready edge as a begin with its current state: every stuck
-crowbar, bent as it is, and every running cut. What a finished pry or cut changed is already in the world the joiner
+crowbar, bent as it is, every running cut and every running mend (the pipe's burst flag comes with the pipe state, see
+[events-and-weather.md](events-and-weather.md)). What a finished pry or cut changed is already in the world the joiner
 loaded or arrives as the host's births and deaths.
 
 ## Known limits
@@ -108,6 +131,10 @@ loaded or arrives as the host's births and deaths.
   when either cannot be read it takes the sender's time and leaves one scrap, and says so. `[?]`
 - The heavy and simulating checks of the cut are the sender's own; the host checks the prop's identity, its
   `isNotSawable` and the reach. `[RD]`
+- The ATV wheel's mend (`prop_atvwheel_c`) is not carried: it runs on the screen of whoever holds the kit. `[RD]`
+- A held kit is not a world prop, so its `fixes` ride the owner's inventory record, not `PropSaveData`; the host takes
+  the sender's claimed uses and cannot read them on its mirror. `[?]`
+- A client's own hit on a pipe (`addDamage`) is refused at home and not yet sent to the host. `[RD]`
 - No two-peer run has measured this lane yet. `[?]`
 
 ## Code map
@@ -117,5 +144,8 @@ loaded or arrives as the host's births and deaths.
 | `coop/interactables/tool_action` | the two kinds' format, their routing, the shared sends, the late-join and leave entries |
 | `coop/interactables/pry_sync` | the pry: the owner's watches, the host's judge and end, a receiver's copy |
 | `coop/interactables/saw_sync` | the cut: the owner's watches, the host's measure and end, the sound at the cut |
+| `coop/interactables/toolbox_sync` | the mend: the owner's watches, the host's judge and commit, the sound at the pipe |
+| `coop/world/basement_pipe_sync` | the pipe's burst flag: the host's, a client's writers parked, a joiner seeded |
 | `ue_wrap/devices/pryable` | `pryingCrowbar_C`: its state, a shown copy, its end and snap |
+| `ue_wrap/actors/toolbox` | `prop_toolbox_C` and `burstWaterPipe_C`: the kit's mend, the pipe's flag, state and fix |
 | `ue_wrap/actors/hacksaw` | `prop_hacksaw_C`: its cut, its reset, the game's measure, its end run for a sender |

@@ -18,7 +18,9 @@
 #include "coop/dev/spawn_npc.h"
 #include "coop/permissions/grants_core.h"
 #include "coop/session/local_grants.h"
+#include "coop/commands/command_sync.h"
 #include "coop/player/anti_noclip_rescue.h"
+#include "coop/player/roster.h"
 #include "coop/session/teleport_client.h"
 #include "ui/scale.h"
 
@@ -68,6 +70,42 @@ void RenderForceAntiNoclip() {
     if (ImGui::Button("Force the anti-noclip check")) coop::anti_noclip_rescue::DevForce();
     ImGui::SameLine();
     ImGui::TextDisabled("(in a session: relocated to the last safe place, never the backrooms)");
+}
+
+void RenderRestoreInventory() {
+    // The host's restore of a lost inventory (coop/items/inventory_restore): the same command a chat line runs, for the
+    // player's proved id, logged under [RESTORE] with the rollback copy's path.
+    if (!coop::dev_gate::Allowed()) {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+        return;
+    }
+    static char backup[160] = "";
+    ImGui::SetNextItemWidth(S(300.f));
+    ImGui::InputTextWithHint("##restore_backup", "backup: good, good.1, good.2 or a path in the world's profile folder", backup,
+                             sizeof(backup));
+    coop::roster::Snapshot rs;
+    coop::roster::GetSnapshot(rs);
+    int shown = 0;
+    for (int i = 0; i < rs.count; ++i) {
+        const coop::roster::Row& r = rs.rows[i];
+        if (!r.connected) continue;
+        ++shown;
+        ImGui::PushID(r.slot);
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("%s%s", r.nick[0] ? r.nick : "Player", r.isLocal ? " (you)" : "");
+        ImGui::SameLine();
+        const bool hasId = r.isLocal || r.playerId[0] != '\0';
+        if (!hasId) ImGui::BeginDisabled();
+        if (ImGui::SmallButton("Restore inventory")) {
+            std::string line = std::string("restoreinventory ") + (r.playerId[0] ? r.playerId : "@s");
+            if (backup[0]) line += std::string(" ") + backup;
+            coop::command_sync::Submit(line);
+        }
+        if (!hasId) ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+    if (!shown) ImGui::TextDisabled("Nobody is connected.");
+    ImGui::TextDisabled("The client keeps a rollback copy first; the answer is in the log under [RESTORE].");
 }
 
 void RenderFreecam() {

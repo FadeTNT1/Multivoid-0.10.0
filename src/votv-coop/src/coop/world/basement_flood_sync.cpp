@@ -8,6 +8,7 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
+#include "ue_wrap/devices/power_control.h"
 #include "ue_wrap/facts/function_row.h"
 #include "ue_wrap/world/basement_flood.h"
 
@@ -76,9 +77,11 @@ void Settle() {
 
 // ---- host ------------------------------------------------------------------------------------------------------
 struct Sent {
-    bool  have = false;
-    float level = 0.f;
-    bool  moveTo = false;
+    bool    have = false;
+    float   level = 0.f;
+    bool    moveTo = false;
+    uint8_t flags = 0;
+    float   blockage = 0.f;
 };
 Sent  g_sent;
 float g_prevLevel = 0.f;   // what the last pump saw, to tell a stopped level from a moving one
@@ -91,6 +94,14 @@ coop::net::BasementFloodStatePayload Build(const BF::State& st) {
     p.level = st.level < 0.f ? 0.f : (st.level > cap ? cap : st.level);
     p.height = st.height < 0.f ? 0.f : (st.height > cap ? cap : st.height);
     p.flags = st.moveTo ? coop::net::basement_flood_flags::kMoveTo : 0;
+    // The drain's blockage and the panel's waterlogged flag, as the host has them: the drain's own timers derive both
+    // from the level and the props around it, and the host's word is the one a client lands.
+    float blockage = 0.f;
+    if (BF::ReadBlockage(blockage) && std::isfinite(blockage)) p.blockage = blockage < 0.f ? 0.f : (blockage > 1.f ? 1.f : blockage);
+    bool waterlogged = false;
+    ue_wrap::power_control::EnsureResolved();
+    if (ue_wrap::power_control::ReadWaterlogged(ue_wrap::power_control::Panel(), waterlogged) && waterlogged)
+        p.flags |= coop::net::basement_flood_flags::kWaterlogged;
     return p;
 }
 
@@ -106,14 +117,16 @@ void PumpHost(coop::net::Session& s) {
     g_havePrev = true;
     const bool anyone = s.connected() && s.AnyWorldReadyPeer();
     const float delta = g_sent.have ? std::fabs(st.level - g_sent.level) : 0.f;
+    const coop::net::BasementFloodStatePayload now_ = Build(st);
     const bool moved = !g_sent.have || delta >= kStepUu || (still && delta >= kSettleEps) ||
-                       st.moveTo != g_sent.moveTo;
+                       st.moveTo != g_sent.moveTo || now_.flags != g_sent.flags ||
+                       std::fabs(now_.blockage - g_sent.blockage) > 0.05f;
     if (!moved) return;
+    const coop::net::BasementFloodStatePayload p = now_;
     if (!anyone) {   // nobody to tell: the seed at a joiner's ready edge is the other half
-        g_sent = Sent{true, st.level, st.moveTo};
+        g_sent = Sent{true, st.level, st.moveTo, p.flags, p.blockage};
         return;
     }
-    const coop::net::BasementFloodStatePayload p = Build(st);
     if (!s.SendReliable(coop::net::ReliableKind::BasementFloodState, &p, sizeof(p))) return;   // next pump
     ++g_published;
     if (g_publishSaid < kMaxSaid) {
@@ -122,7 +135,7 @@ void PumpHost(coop::net::Session& s) {
                 static_cast<double>(g_sent.have ? g_sent.level : 0.f), static_cast<double>(p.level),
                 static_cast<double>(p.height), st.moveTo ? ", moveTo" : "", static_cast<unsigned long long>(g_published));
     }
-    g_sent = Sent{true, st.level, st.moveTo};
+    g_sent = Sent{true, st.level, st.moveTo, p.flags, p.blockage};
 }
 
 // ---- client: the level lands --------------------------------------------------------------------------------
@@ -138,6 +151,23 @@ void TryApply() {
     g_havePending = false;
     const bool wantMoveTo = (g_pending.flags & coop::net::basement_flood_flags::kMoveTo) != 0;
     if (wantMoveTo != cur.moveTo) BF::ApplyMoveTo(flood, wantMoveTo);
+    // The drain's blockage and the panel's waterlogged flag take the host's value; each peer's own timer derives them
+    // again from the same level and props, so a difference is logged, not fought.
+    float ownBlockage = 0.f;
+    if (BF::ReadBlockage(ownBlockage) && std::fabs(ownBlockage - g_pending.blockage) > 0.1f) {
+        UE_LOGI("[FLOOD] client: the drain's blockage %.2f differs from the host's %.2f -- the host's is taken",
+                static_cast<double>(ownBlockage), static_cast<double>(g_pending.blockage));
+        BF::WriteBlockage(g_pending.blockage);
+    }
+    ue_wrap::power_control::EnsureResolved();
+    void* panel = ue_wrap::power_control::Panel();
+    bool ownLogged = false;
+    const bool wantLogged = (g_pending.flags & coop::net::basement_flood_flags::kWaterlogged) != 0;
+    if (ue_wrap::power_control::ReadWaterlogged(panel, ownLogged) && ownLogged != wantLogged) {
+        UE_LOGI("[FLOOD] client: the panel's waterlogged is %d, the host's is %d -- the host's is taken", ownLogged ? 1 : 0,
+                wantLogged ? 1 : 0);
+        ue_wrap::power_control::WriteWaterlogged(panel, wantLogged);
+    }
     if (std::fabs(cur.level - g_pending.level) < kApplyEps) return;
     if (!BF::ApplyLevel(flood, g_pending.level)) {
         UE_LOGW("[FLOOD] client: the host's level %.2f could not be placed", static_cast<double>(g_pending.level));
@@ -204,7 +234,7 @@ bool WellFormed(const coop::net::BasementFloodStatePayload& p) {
         return false;
     const float cap = coop::net::kBasementFloodMaxLevel;
     return std::isfinite(p.level) && p.level >= 0.f && p.level <= cap && std::isfinite(p.height) && p.height >= 0.f &&
-           p.height <= cap;
+           p.height <= cap && std::isfinite(p.blockage) && p.blockage >= 0.f && p.blockage <= 1.f;
 }
 
 void CountDropped() { ++g_dropped; }

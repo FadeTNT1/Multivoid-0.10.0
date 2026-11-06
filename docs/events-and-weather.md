@@ -220,8 +220,17 @@ count and particles and the pipe's spray still run). The host sends `BasementFlo
 the cheat's `moveTo`) about twice a second while the level moves, once when it settles, and to a joiner at its ready
 edge. A client places the water with the actor's own `setLevel` and refreshes the water's data with the parent's
 `updateWaterData`, so the surface, the depth, the buoyancy boxes and the depths the player and the props track follow
-it (`coop/world/basement_flood_sync`, `ue_wrap/world/basement_flood`). The power panel's `waterlogged` is not sent: the
-drain's own two-second timer derives it from the level on every peer. The bodies that float in the water are the
+it (`coop/world/basement_flood_sync`, `ue_wrap/world/basement_flood`). The payload also carries the drain's `blockage` and the panel's
+`waterlogged`, which a client takes from the host (a difference is logged: each peer's own timers derive both again from the
+same level and props).
+
+The burst pipes' flags are the host's too. A pipe's `damaged` (set by `state(true)`, reached from `addDamage`: the
+drain's random burst, a hit; cleared by a repair kit's `toolboxFix`) feeds the inflow, the spray and the hiss. On a
+client a pipe's `state` and `addDamage` bodies are refused for the game's own callers; the host's `state` is sent as
+`BasementPipeState` (the pipe's portable wire key and the flag), every pipe goes to a joiner at its ready edge, and a
+client lands one with the pipe's own `state`, buffering a flag whose pipe has not streamed in
+(`coop/world/basement_pipe_sync`, `ue_wrap/actors/toolbox`). The repair kit's mend is
+[tool-actions.md](tool-actions.md). The bodies that float in the water are the
 host's too: see "Props floating in water" in [props.md](props.md).
 
 ### The base alarm
@@ -296,7 +305,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | an event's actors | the host | the world-actor mirror |
 | the pyramid's brain | the host | timers cancelled on the mirror; the gather relayed |
 | the base alarm | whoever transitions | polled; the host canonicalises |
-| the basement flood | the host | the drain's, a pipe's and the cheat's writers refused on a client; the level on `BasementFloodState` |
+| the basement flood | the host | the drain's, a pipe's and the cheat's writers refused on a client; the level and blockage on `BasementFloodState`, each pipe's flag on `BasementPipeState` |
 | the Stolas church | the host | its verbs refused on a client; its four save fields polled and mirrored |
 | the UFO flocks | the host | the controllers refused on a client; the ships on the world-actor mirror |
 | the black fog and its eyes | the host | presence, its one number and its fade on `WeatherState`, a client copy written by phase with its eyes refused; the host's eyes on the owner-entity mirror |
@@ -314,7 +323,8 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | `WorldActorSpawn`, `WorldActorDestroy`, `WorldActorPose` (stream) | the host to all | an event actor's birth with scale and blob; its death; full-rotation poses |
 | `PyramidGather` | the host to all | the gather commit |
 | `AlarmState` | either role | the alarm's active flag |
-| `BasementFloodState` | the host to all | the basement water's level, its full height and the cheat's `moveTo` |
+| `BasementFloodState` | the host to all | the basement water's level, its full height, the cheat's `moveTo`, the drain's blockage and the panel's waterlogged |
+| `BasementPipeState` | the host to all | one burst water pipe's portable key and its `damaged` flag |
 | `ChurchState` | the host to all | the church's broken, angry and struck flags and its harvest count |
 | `EmailAppend`, `EmailDelete`, `TaskNewState` | the host to all; either role; the host to all | an email; a deletion; the task |
 
@@ -390,6 +400,6 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | event actors and the pyramid | `coop/world/world_actor_sync`, `coop/world/world_actor_mirror`, `coop/creatures/piramid_sync` |
 | the story scenes | `coop/world/event_scene_sync`, `coop/world/event_scene_refuse`, `coop/world/event_scene_agrav`, `coop/world/event_scene_crawler`, `coop/world/event_sound_relay`, `ue_wrap/actors/event_scenes` |
 | the church | `coop/world/church_sync` |
-| the basement flood | `coop/world/basement_flood_sync`, `ue_wrap/world/basement_flood` |
+| the basement flood | `coop/world/basement_flood_sync`, `coop/world/basement_pipe_sync`, `ue_wrap/world/basement_flood`, `ue_wrap/actors/toolbox` |
 | the alarm, emails, the task | `coop/world/alarm_sync`, `coop/world/email_sync`, `coop/world/daily_task_sync`, `ue_wrap/world/email` |
 | tests | `harness/autotest/autotest_weather.cpp`, `autotest_fog_probe.cpp`, `autotest_eventforce.cpp`, `autotest_alarmforce.cpp`, `autotest_piramidforce.cpp`; the event drill, `coop/dev/event_drill`; the world roll drill, `coop/dev/world_roll_drill` |

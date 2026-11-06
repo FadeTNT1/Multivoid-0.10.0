@@ -21,8 +21,9 @@ namespace coop::basement_flood_sync {
 // The host sends the level (BasementFloodState) about twice a second while it moves, once when it settles, and to a
 // joiner at its ready edge (a level that arrives before the water volume has streamed in waits for it). A client
 // places the water with the actor's own setLevel and refreshes its data with the parent's updateWaterData, so the
-// surface, the depth, the buoyancy boxes and the depths the player and the props track follow it. The power panel's
-// `waterlogged` is not sent: the drain's own timer derives it from the level on every peer. Game thread.
+// surface, the depth, the buoyancy boxes and the depths the player and the props track follow it. The drain's blockage
+// and the power panel's waterlogged flag ride the same message; the drain's own timers derive both again on every
+// peer, so a difference from the host's is logged and the host's taken. Game thread.
 
 // Cache the session and register the two script-gate watches (idempotent; every net-pump tick).
 void Install(coop::net::Session* session);

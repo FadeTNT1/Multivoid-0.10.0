@@ -117,6 +117,11 @@ bool HoldCollapsedProfile(void* pawn) {
     return hold;
 }
 
+void RequestResample() {
+    g_sample = Sample{};
+    g_lastSampleMs = 0;
+}
+
 void OnDisconnect() {
     g_sample = Sample{};
     g_windowMs = 0;

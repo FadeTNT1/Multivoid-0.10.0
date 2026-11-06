@@ -4,6 +4,7 @@
 
 #include "coop/interactables/pry_sync.h"
 #include "coop/interactables/saw_sync.h"
+#include "coop/interactables/toolbox_sync.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 
@@ -28,15 +29,17 @@ void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
     coop::pry_sync::Install(session);
     coop::saw_sync::Install(session);
+    coop::toolbox_sync::Install(session);
 }
 
 void Tick(coop::net::Session& session) {
     coop::pry_sync::Tick(session);
     coop::saw_sync::Tick(session);
+    coop::toolbox_sync::Tick(session);
 }
 
 bool WellFormed(const coop::net::ToolActionPayload& p) {
-    if (p.kind != T::kPry && p.kind != T::kSaw) return false;
+    if (p.kind != T::kPry && p.kind != T::kSaw && p.kind != T::kToolbox) return false;
     if (p.op < T::kBegin || p.op > T::kRefuse) return false;
     if (p.result > T::kLastResult || (p.op != T::kEnd && p.result != 0)) return false;
     if ((p.flags & ~T::kKnownFlags) != 0 || p.reserved[0] != 0 || p.reserved[1] != 0) return false;
@@ -45,8 +48,8 @@ bool WellFormed(const coop::net::ToolActionPayload& p) {
         if (!InRange(v, -1.0e7f, 1.0e7f)) return false;
     if (!InRange(p.alpha, -0.5f, 1.5f) || !InRange(p.pitch, -360.f, 360.f) || !InRange(p.angle, -360.f, 360.f))
         return false;
-    // A saw's begin carries its cut's whole time in `stress`; everything else is the strain, 0..1.5.
-    const float stressHi = (p.kind == T::kSaw && p.op == T::kBegin) ? 36000.f : 1.5f;
+    // A saw's or repair kit's begin carries the whole time in `stress`; everything else is the strain, 0..1.5.
+    const float stressHi = (p.kind != T::kPry && p.op == T::kBegin) ? 36000.f : 1.5f;
     if (!InRange(p.stress, -0.5f, stressHi)) return false;
     return true;
 }
@@ -56,13 +59,15 @@ void CountDropped() { ++g_dropped; }
 void OnIntent(coop::net::Session& session, const coop::net::ToolActionPayload& p, uint8_t senderSlot) {
     if (session.role() != coop::net::Role::Host || senderSlot < 1 || senderSlot >= coop::net::kMaxPeers) return;
     if (p.kind == T::kPry) coop::pry_sync::OnIntent(session, p, senderSlot);
-    else coop::saw_sync::OnIntent(session, p, senderSlot);
+    else if (p.kind == T::kSaw) coop::saw_sync::OnIntent(session, p, senderSlot);
+    else coop::toolbox_sync::OnIntent(session, p, senderSlot);
 }
 
 void OnState(coop::net::Session& session, const coop::net::ToolActionPayload& p) {
     if (session.role() != coop::net::Role::Client) return;
     if (p.kind == T::kPry) coop::pry_sync::OnState(session, p);
-    else coop::saw_sync::OnState(session, p);
+    else if (p.kind == T::kSaw) coop::saw_sync::OnState(session, p);
+    else coop::toolbox_sync::OnState(session, p);
 }
 
 void ConnectReplayForSlot(int slot) {
@@ -70,6 +75,7 @@ void ConnectReplayForSlot(int slot) {
     if (!s || !s->running() || s->role() != coop::net::Role::Host) return;
     coop::pry_sync::ConnectReplayForSlot(*s, slot);
     coop::saw_sync::ConnectReplayForSlot(*s, slot);
+    coop::toolbox_sync::ConnectReplayForSlot(*s, slot);
 }
 
 void OnPeerLeft(uint8_t slot) {
@@ -77,11 +83,13 @@ void OnPeerLeft(uint8_t slot) {
     if (!s || s->role() != coop::net::Role::Host) return;
     coop::pry_sync::OnPeerLeft(*s, slot);
     coop::saw_sync::OnPeerLeft(*s, slot);
+    coop::toolbox_sync::OnPeerLeft(*s, slot);
 }
 
 void OnDisconnect() {
     coop::pry_sync::OnDisconnect();
     coop::saw_sync::OnDisconnect();
+    coop::toolbox_sync::OnDisconnect();
     if (g_dropped) UE_LOGI("[TOOL] session end -- %llu ill-formed tool actions dropped", static_cast<unsigned long long>(g_dropped));
     g_dropped = 0;
 }

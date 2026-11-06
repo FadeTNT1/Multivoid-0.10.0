@@ -36,6 +36,10 @@ void OnReviveEnd(void* pawn);
 // window, so the stream should not send it (the host keeps the last profile it has). Game thread.
 bool HoldCollapsedProfile(void* pawn);
 
+// A restore put an inventory on the player (coop/items/inventory_restore): the next tick samples the new one afresh,
+// so a window's collapse test is not made against what the player held before.
+void RequestResample();
+
 // Session teardown: the sample and the window go.
 void OnDisconnect();
 

@@ -82,6 +82,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/devices/surface_clean.cpp
     src/ue_wrap/devices/water_container.cpp
     src/ue_wrap/world/basement_flood.cpp
+    src/ue_wrap/actors/toolbox.cpp
     src/ue_wrap/world/water_float_master.cpp
     src/ue_wrap/actors/anti_noclip.cpp
     src/ue_wrap/devices/window_canvas.cpp

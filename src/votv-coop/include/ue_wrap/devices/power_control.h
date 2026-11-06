@@ -38,6 +38,7 @@ bool WritePress(void* p, uint8_t mask);
 bool ReadDisabled(void* p, bool& disabled);
 bool WriteDisabled(void* p, bool disabled);
 bool ReadWaterlogged(void* p, bool& waterlogged);
+bool WriteWaterlogged(void* p, bool waterlogged);
 
 // The lever component of breaker `bit` (the mask's order), which a player's trace takes and E presses, or null.
 // Game thread.

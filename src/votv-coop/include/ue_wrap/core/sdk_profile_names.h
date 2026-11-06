@@ -1371,6 +1371,36 @@ inline constexpr const wchar_t* GetViewTargetFn = L"GetViewTarget";
 // The collision channel the anti-noclip check reads the capsule's response on (ECollisionChannel 16, game channel 10).
 inline constexpr int AntiNoclipCapsuleChannel = 16;
 
+// The basement's burst water pipes (burstWaterPipe_C) and the toolbox that repairs them. A pipe holds `damaged`; its
+// state(damaged) sets the flag and the tick, the spray and the sound; addDamage(...) is state(true); and its toolbox
+// interface answers toolboxCanFix (damaged), toolboxFixTime (3 s) and toolboxFix(toolbox), which is state(false) and
+// true only while damaged. While damaged its tick calls the flooder's addWater(dt, 1). The kit (prop_toolbox_C), held,
+// takes the looked-at actor as `fixingActor` on playerHandUse_LMB when that actor can be fixed, reads its fix time into
+// `time` (a prop_powertool_C in the offhand divides it by 5), raises `complete` on its tick, and at 1 calls the target's
+// toolboxFix and, when it returns true, takes one of `fixes` and ends (completeSaw, usesMessage, a destroy when
+// `destroyOnUse` and none are left). `fixAudio` is its repair sound, played every 0.8 s while the aim holds. The drain
+// (basementDrain_C) holds `blockage`, the share of its sample points a prop clogs.
+inline constexpr const wchar_t* BurstPipeClass = L"burstWaterPipe_C";
+inline constexpr const wchar_t* BurstPipeStateFn = L"state";
+inline constexpr const wchar_t* BurstPipeStateParam = L"damaged";
+inline constexpr const wchar_t* BurstPipeAddDamageFn = L"addDamage";
+inline constexpr const wchar_t* BurstPipeDamagedProp = L"damaged";
+inline constexpr const wchar_t* BurstPipeFixFn = L"toolboxFix";
+inline constexpr const wchar_t* BurstPipeFixTimeFn = L"toolboxFixTime";
+inline constexpr const wchar_t* BurstPipeToolboxParam = L"toolbox";
+inline constexpr const wchar_t* ToolboxClass = L"prop_toolbox_C";
+inline constexpr const wchar_t* PowerToolClass = L"prop_powertool_C";
+inline constexpr const wchar_t* ToolboxFixingActorProp = L"fixingActor";
+inline constexpr const wchar_t* ToolboxFixesProp = L"fixes";
+inline constexpr const wchar_t* ToolboxTimeProp = L"time";
+inline constexpr const wchar_t* ToolboxCompleteProp = L"complete";
+inline constexpr const wchar_t* ToolboxFixAudioProp = L"fixAudio";
+inline constexpr const wchar_t* ToolboxCompleteSawFn = L"completeSaw";
+inline constexpr float ToolboxFixSoundPeriodSec = 0.8f;
+inline constexpr float ToolboxPowerToolDivisor = 5.0f;
+inline constexpr const wchar_t* BasementDrainClass = L"basementDrain_C";
+inline constexpr const wchar_t* BasementDrainBlockageProp = L"blockage";
+
 // The buoyancy master (waterFloatMaster_C): one per world, holding in `actorsInWater` every body a water volume has
 // reported inside it, which its tick pushes toward the surface.
 inline constexpr const wchar_t* WaterFloatMasterClass = L"waterFloatMaster_C";

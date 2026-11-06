@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
+#include <cwchar>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -594,6 +596,125 @@ size_t CutToDisk(const std::wstring& writtenSlot) {
         else ++it;
     }
     return written;
+}
+
+namespace {
+
+// A relative path a host's admin typed to name a backup: no drive, no root, no `.` or `..` component, no characters a
+// path cannot hold, and a .json file. It is joined under the world's own profile folder and never trusted beyond it.
+bool SafeRelativeSpec(const std::string& spec) {
+    if (spec.empty() || spec.size() > 200) return false;
+    for (unsigned char c : spec)
+        if (c < 0x20 || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') return false;
+    std::wstring wide;
+    if (!coop::text::FromUtf8Strict(spec.data(), spec.size(), &wide)) return false;
+    const fs::path p(wide);
+    if (p.is_absolute() || p.has_root_name() || p.has_root_directory()) return false;
+    for (const fs::path& part : p)
+        if (part.empty() || part == "." || part == "..") return false;
+    std::wstring ext = p.extension().wstring();
+    for (wchar_t& ch : ext)
+        if (ch >= L'A' && ch <= L'Z') ch = static_cast<wchar_t>(ch - L'A' + L'a');
+    return ext == L".json";
+}
+
+// Is `full` under `base`, component for component, once both are normalised?
+bool UnderDir(const fs::path& base, const fs::path& full) {
+    const fs::path b = base.lexically_normal(), f = full.lexically_normal();
+    auto bi = b.begin(), fi = f.begin();
+    for (; bi != b.end(); ++bi, ++fi) {
+        if (bi->empty()) continue;
+        if (fi == f.end() || *bi != *fi) return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+bool ReadBackup(const std::string& guid, const std::string& specIn, std::vector<uint8_t>& blob, std::string& label,
+                std::string& why) {
+    DropHeldOfAnotherWorld();
+    std::string spec = specIn;
+    for (char& c : spec)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    // The directories a backup of this world may stand in: the one the set is cut to, and the world folder's own (the
+    // main entry's), where a hand-made recovery folder sits.
+    std::vector<fs::path> dirs;
+    if (!g_setSlot.empty()) {
+        const fs::path setDir = SlotDir(g_setSlot);
+        if (!setDir.empty()) dirs.push_back(setDir);
+        std::wstring folder, entry;
+        if (ue_wrap::world_folder::SplitKey(g_setSlot, folder, entry)) {
+            const fs::path folderDir = SlotDir(folder);
+            if (!folderDir.empty() && (dirs.empty() || folderDir != dirs.front())) dirs.push_back(folderDir);
+        }
+    }
+    if (dirs.empty()) {
+        why = "the hosted world has no profile folder yet (it has not been saved)";
+        return false;
+    }
+    int generation = -1;
+    if (spec.empty() || spec == "good") generation = 0;
+    else if (spec.rfind("good.", 0) == 0 && spec.size() == 6 && spec[5] >= '1' && spec[5] < '0' + kGoodGenerations)
+        generation = spec[5] - '0';
+    if (generation >= 0) {
+        if (!coop::player_handshake::IsValidGuid(guid)) {
+            why = "that player has no proved id, so no backup of theirs is on file";
+            return false;
+        }
+        if (generation == 0) {   // the newest full inventory not cut to disk yet is newer than any file
+            const auto it = g_held.find(guid);
+            if (it != g_held.end() && !it->second.lastGood.empty()) {
+                blob = it->second.lastGood;
+                label = "the last full profile held in memory";
+                return true;
+            }
+        }
+        for (const fs::path& dir : dirs) {
+            const fs::path file = fs::path(PlayerFilePathIn(dir, guid)).concat(GoodSuffix(generation));
+            if (ParseBlobFile(file, blob)) {
+                label = coop::text::ToUtf8(file.wstring());
+                return true;
+            }
+        }
+        why = "no readable backup '" + (spec.empty() ? std::string("good") : spec) + "' is on file for that player";
+        return false;
+    }
+    if (!SafeRelativeSpec(specIn)) {
+        why = "name a backup as good, good.1, good.2 or a relative path to a .json file in the world's profile folder";
+        return false;
+    }
+    for (const fs::path& dir : dirs) {
+        std::wstring wideSpec;
+        coop::text::FromUtf8Strict(specIn.data(), specIn.size(), &wideSpec);   // SafeRelativeSpec has judged it
+        const fs::path file = (dir / fs::path(wideSpec)).lexically_normal();
+        std::error_code ec;
+        if (!UnderDir(dir, file) || !fs::is_regular_file(file, ec)) continue;
+        if (ParseBlobFile(file, blob)) {
+            label = coop::text::ToUtf8(file.wstring());
+            return true;
+        }
+        why = "'" + specIn + "' is not a readable profile (the magic or the checksum does not match)";
+        return false;
+    }
+    why = "no file '" + specIn + "' is in the world's profile folder";
+    return false;
+}
+
+std::string WriteRollback(const std::string& nickJson, const std::vector<uint8_t>& blob) {
+    const std::wstring base = ue_wrap::paths::ModDataDir();
+    if (base.empty()) return std::string();
+    const fs::path dir = fs::path(base) / L"inventory_rollback";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec) return std::string();
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+    gmtime_s(&utc, &now);
+    wchar_t stamp[48] = {};
+    std::wcsftime(stamp, 48, L"rollback-%Y%m%d-%H%M%S.json", &utc);
+    const fs::path file = dir / stamp;
+    return WriteJson(file, blob, nickJson) ? coop::text::ToUtf8(file.wstring()) : std::string();
 }
 
 }  // namespace coop::player_profile_store

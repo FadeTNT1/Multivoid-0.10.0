@@ -1377,6 +1377,27 @@ enum class ReliableKind : uint8_t {
     // the water's data. Never relayed; a client's copy is refused at the host's receive edge.
     // BasementFloodStatePayload.
     BasementFloodState = 229,
+
+    // HOST->ONE CLIENT: a backed-up inventory the host's admin chose to put back on that player
+    // (coop::inventory_restore, /restoreinventory): the inventory component's bytes as a profile's items half,
+    // chunked, the blob's per-sender id being the request id the answer names. The client keeps a rollback copy
+    // of what it holds, replaces its three item arrays through the game's own restore (vitals and position are
+    // untouched) and answers InventoryRestoreAck. Never relayed; a client's copy is refused at the host's receive
+    // edge; not pre-world. BlobChunkPayload.
+    InventoryRestoreBlob = 230,
+
+    // CLIENT->HOST: the answer to an InventoryRestoreBlob: whether it was applied, and the item counts of the
+    // three arrays before and after. Judged against the request the host has pending for that slot; never relayed.
+    // InventoryRestoreAckPayload.
+    InventoryRestoreAck = 231,
+
+    // HOST->ALL: one burst water pipe's `damaged` flag (coop::basement_pipe_sync), by the pipe's portable identity. The
+    // pipe's damage is the host's: the random bursts of the basement drain and any hit on it are refused on a client,
+    // and the host sends the flag as the pipe's own state() sets it (a burst, a repair, a save load) and for every pipe
+    // to a joiner at its ready edge. A receiver calls the pipe's own state(), so its spray, sound and tick follow; one
+    // whose pipe has not streamed in waits for it. Never relayed; a client's copy is refused at the host's receive
+    // edge. BasementPipeStatePayload.
+    BasementPipeState = 232,
 };
 
 #pragma pack(push, 1)
@@ -2982,6 +3003,7 @@ static_assert(sizeof(BucketFillStatePayload) <= 256 - 20 - 8, "BucketFillStatePa
 namespace tool_action {
 constexpr uint8_t kPry = 1;
 constexpr uint8_t kSaw = 2;
+constexpr uint8_t kToolbox = 3;   // a toolbox's repair of a burst water pipe; the target is the pipe's portable key
 // op
 constexpr uint8_t kBegin = 1;     // a pry's crowbar went in / a cut started; carries the whole state (a joiner's seed too)
 constexpr uint8_t kProgress = 2;  // the bend or the cut moved
@@ -3000,17 +3022,17 @@ constexpr uint8_t kSparked = 1u << 2;
 constexpr uint8_t kKnownFlags = kStraining | kStrainSound | kSparked;
 }  // namespace tool_action
 struct ToolActionPayload {
-    uint8_t  kind;       // 1  -- tool_action::kPry / kSaw
+    uint8_t  kind;       // 1  -- tool_action::kPry / kSaw / kToolbox
     uint8_t  op;         // 1  -- tool_action::kBegin..kRefuse
     uint8_t  owner;      // 1  -- the acting player's slot (the host writes it; a client's own is ignored)
     uint8_t  result;     // 1  -- a kEnd's tool_action result, zero otherwise
     WireKey  target;     // 32 -- the prying crowbar's portable key, or the sawn prop's key
     float    pivot[3];   // 12 -- a pry's sk_pivot world location (kBegin), zero for a saw
-    float    alpha;      // 4  -- a pry's alpha, a cut's complete; 0..1.5
-    float    stress;     // 4  -- a pry's snapStress, 0..1.5; a cut's whole time in seconds (kBegin)
+    float    alpha;      // 4  -- a pry's alpha, a cut's or a repair's complete; 0..1.5
+    float    stress;     // 4  -- a pry's snapStress, 0..1.5; a cut's or a repair's whole time in seconds (kBegin)
     float    pitch;      // 4  -- a pry's sk_pivot pitch, degrees
     float    angle;      // 4  -- a pry's bend angle
-    uint8_t  lives;      // 1  -- a pry's crowbar lives (1..3); a cut's scrap count (kBegin)
+    uint8_t  lives;      // 1  -- a pry's crowbar lives (1..3); a cut's scrap count (kBegin); a kit's uses left (kBegin)
     uint8_t  flags;      // 1  -- tool_action flags
     uint8_t  reserved[2];// 2  -- zero
 };
@@ -3019,17 +3041,47 @@ static_assert(sizeof(ToolActionPayload) <= 256 - 20 - 8, "ToolActionPayload must
 
 // The basement flood (BasementFloodState): the water volume's level and its cheat toggle.
 namespace basement_flood_flags {
-constexpr uint8_t kMoveTo = 1u << 0;   // waterVolume_basementFlooder_C::moveTo, as startMoving last set it
-constexpr uint8_t kKnown = kMoveTo;
+constexpr uint8_t kMoveTo = 1u << 0;      // waterVolume_basementFlooder_C::moveTo, as startMoving last set it
+constexpr uint8_t kWaterlogged = 1u << 1; // powerControl_C::waterlogged, which the drain's checkBreaker derives from the level
+constexpr uint8_t kKnown = kMoveTo | kWaterlogged;
 }  // namespace basement_flood_flags
 struct BasementFloodStatePayload {
     float   level;        // 4 -- distance from the dry position, world units; finite, 0..kMaxLevel
     float   height;       // 4 -- the full level (`height`); finite, 0..kMaxLevel
+    float   blockage;     // 4 -- basementDrain_C::blockage, the share of the drain's sample points a prop clogs; 0..1
     uint8_t flags;        // 1 -- basement_flood_flags
     uint8_t reserved[3];  // 3 -- zero
 };
 constexpr float kBasementFloodMaxLevel = 100000.f;   // far past any basement, so a hostile value cannot place the actor
-static_assert(sizeof(BasementFloodStatePayload) == 12, "BasementFloodStatePayload must be 12 bytes");
+static_assert(sizeof(BasementFloodStatePayload) == 16, "BasementFloodStatePayload must be 16 bytes");
+
+// A burst water pipe's damage (BasementPipeState), by the pipe's portable identity.
+struct BasementPipeStatePayload {
+    WireKey key;          // 32 -- coop::element::PortableWireKey of the pipe
+    uint8_t damaged;      // 1  -- burstWaterPipe_C::damaged: 0 or 1
+    uint8_t reserved[3];  // 3  -- zero
+};
+static_assert(sizeof(BasementPipeStatePayload) == 36, "BasementPipeStatePayload must be 36 bytes");
+
+// The client's answer to a restored inventory (InventoryRestoreAck): `before` and `after` are the item counts of
+// the carried grid, the hands and the equipment slots (-1 where an array did not resolve).
+namespace inventory_restore_status {
+constexpr uint8_t kApplied = 0;         // the arrays were replaced
+constexpr uint8_t kRefusedDead = 1;     // the player is dead: nothing touched
+constexpr uint8_t kRefusedBlob = 2;     // the bytes did not parse as a profile's items
+constexpr uint8_t kRestoreFailed = 3;   // the game's restore did not run or an array did not resolve
+constexpr uint8_t kNoPlayer = 4;        // no local player in a world to apply to
+constexpr uint8_t kLast = kNoPlayer;
+}  // namespace inventory_restore_status
+struct InventoryRestoreAckPayload {
+    uint32_t reqId;        // 4 -- the blob's per-sender id
+    uint8_t  status;       // 1 -- inventory_restore_status
+    uint8_t  reserved[3];  // 3 -- zero
+    int16_t  before[3];    // 6 -- carried, hands, equipment
+    int16_t  after[3];     // 6
+    uint32_t itemBytes;    // 4 -- the bytes of inventory applied
+};
+static_assert(sizeof(InventoryRestoreAckPayload) == 24, "InventoryRestoreAckPayload must be 24 bytes");
 
 // A dispenser pile's counters (TrashPileState): the displayed count is their sum. adopt 1 writes as
 // is; 0 applies the per-component minimum, so concurrent collects converge.

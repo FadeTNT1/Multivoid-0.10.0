@@ -12,11 +12,13 @@
 
 #include "coop/commands/command_dispatcher.h"
 #include "coop/commands/command_line.h"
+#include "coop/commands/inventory_commands.h"
 #include "coop/commands/moderation_commands.h"
 #include "coop/commands/mv_commands.h"
 #include "coop/commands/settings_commands.h"
 
 #include "coop/comms/chat_feed.h"
+#include "coop/items/inventory_restore.h"
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
 #include "coop/moderation/ban_list.h"
@@ -155,6 +157,19 @@ coop::commands::moderation::Ports RealModerationPorts() {
     return p;
 }
 
+// The inventory commands' ports: the hosted-session test, the restore of coop/items/inventory_restore and the action log.
+bool RestoreInventoryPort(int slot, const std::string& backup, std::string& reply) {
+    return coop::inventory_restore::Request(slot, backup, reply);
+}
+
+coop::commands::inventory::Ports RealInventoryPorts() {
+    coop::commands::inventory::Ports p;
+    p.hosted = &coop::moderation::HostedSessionRunning;
+    p.restore = &RestoreInventoryPort;
+    p.log = &LogAction;
+    return p;
+}
+
 // The settings commands' ports. A word names a row by its key; only a server-scope row that is not
 // a credential can be set or reset by name, so a local row is never reachable from a command line.
 const coop::config_registry::Row* RowNamed(std::string_view word) {
@@ -223,6 +238,8 @@ struct RegistryHolder {
             UE_LOGE("command_sync: builtin registration refused");
         if (!coop::commands::moderation::Register(registry, RealModerationPorts()))
             UE_LOGE("commands: the moderation commands did not register");
+        if (!coop::commands::inventory::Register(registry, RealInventoryPorts()))
+            UE_LOGE("commands: the inventory commands did not register");
         if (!coop::commands::settings::Register(registry, RealSettingsPorts()))
             UE_LOGE("commands: the settings commands did not register");
         if (!coop::commands::mv::Register(registry, RealMvPorts()))

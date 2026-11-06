@@ -30,6 +30,12 @@ bool Read(void* flood, State& out);
 // not resolve or the call fails.
 bool ApplyLevel(void* flood, float level);
 
+// The basement drain's `blockage` (0..1): how much of its sample points a prop clogs, which sets how fast it drains. The
+// drain recomputes it each second from the props around it; a write is the host's word until the next recompute.
+// False when there is no drain in this world or the field does not resolve.
+bool ReadBlockage(float& out);
+bool WriteBlockage(float value);
+
 // The cheat toggle's value as the host has it: startMoving(moveTo), whose body also enables the actor's tick.
 bool ApplyMoveTo(void* flood, bool moveTo);
 

@@ -97,6 +97,35 @@ bool ApplyLevel(void* flood, float level) {
     return Call(flood, upd);
 }
 
+namespace {
+int32_t DrainBlockageOffset(void* drain) {
+    static void*   sCls = nullptr;
+    static int32_t sOff = -1;
+    void* cls = R::ClassOf(drain);
+    if (cls != sCls) {
+        sCls = cls;
+        sOff = cls ? R::FindPropertyOffset(cls, P::name::BasementDrainBlockageProp) : -1;
+    }
+    return sOff;
+}
+}  // namespace
+
+bool ReadBlockage(float& out) {
+    void* drain = world_singleton::Find(P::name::BasementDrainClass);
+    const int32_t off = drain ? DrainBlockageOffset(drain) : -1;
+    if (off < 0) return false;
+    std::memcpy(&out, reinterpret_cast<const char*>(drain) + off, sizeof(float));
+    return true;
+}
+
+bool WriteBlockage(float value) {
+    void* drain = world_singleton::Find(P::name::BasementDrainClass);
+    const int32_t off = drain ? DrainBlockageOffset(drain) : -1;
+    if (off < 0) return false;
+    std::memcpy(reinterpret_cast<char*>(drain) + off, &value, sizeof(float));
+    return true;
+}
+
 bool ApplyMoveTo(void* flood, bool moveTo) {
     if (!EnsureFor(flood) || !g_r.startMoving) return false;
     ParamFrame f(g_r.startMoving);

@@ -10,6 +10,8 @@
 #include "coop/comms/chat_sync.h"
 #include "coop/commands/command_sync.h"
 #include "coop/world/alarm_sync.h"
+#include "coop/world/basement_flood_sync.h"  // HOST->CLIENT the basement's water level
+#include "coop/world/basement_pipe_sync.h"   // HOST->CLIENT a burst water pipe's damage
 #include "coop/world/church_sync.h"
 #include "coop/interactables/serverbox_sync.h"  // the host-authoritative signal-server state
 #include "coop/interactables/server_upgrade_sync.h"  // the servers' physical upgrades
@@ -188,6 +190,46 @@ bool HandleWorldEvent(const net::Session::ReliableMessage& msg) {
             break;
         }
         coop::event_sound_relay::OnCue(p);
+        break;
+    }
+    case net::ReliableKind::BasementFloodState: {
+        // HOST->CLIENT: the basement's water level (coop::basement_flood_sync). Host-authored only
+        // (client_authorship.h); the module applies it only on an active client session.
+        if (msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: BasementFloodState dropped (sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::BasementFloodStatePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::basement_flood_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::basement_flood_sync::WellFormed(p)) {
+            coop::basement_flood_sync::CountDropped();
+            break;
+        }
+        coop::basement_flood_sync::OnState(p);
+        break;
+    }
+    case net::ReliableKind::BasementPipeState: {
+        // HOST->CLIENT: a burst water pipe's damaged flag (coop::basement_pipe_sync). Host-authored only
+        // (client_authorship.h); the module applies it only on an active client session.
+        if (msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: BasementPipeState dropped (sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::BasementPipeStatePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::basement_pipe_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::basement_pipe_sync::WellFormed(p)) {
+            coop::basement_pipe_sync::CountDropped();
+            break;
+        }
+        coop::basement_pipe_sync::OnState(p);
         break;
     }
     case net::ReliableKind::ChurchState: {

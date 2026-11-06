@@ -11,6 +11,7 @@
 #include "coop/player/sleep_sync.h"
 #include "coop/interactables/device_occupancy.h"
 #include "coop/world/email_sync.h"
+#include "coop/items/inventory_restore.h"  // HOST->CLIENT a backed-up inventory put back; CLIENT->HOST its answer
 #include "coop/items/player_inventory_sync.h"  // the inventory blob receiver
 #include "coop/voice/voice_chat.h"
 #include "coop/interactables/drone_sync.h"
@@ -515,6 +516,31 @@ bool HandleStateEvent(net::Session& session,
                 ? static_cast<uint8_t>(msg.senderPeerSlot)
                 : static_cast<uint8_t>(0xFF);
         coop::player_inventory_sync::OnReliable(ip, islot);
+        break;
+    }
+    case net::ReliableKind::InventoryRestoreBlob: {
+        // HOST->CLIENT: a backed-up inventory to put back (coop::inventory_restore). Host-authored only
+        // (client_authorship.h); the module takes it only from slot 0 on a client.
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
+            UE_LOGW("event_feed: InventoryRestoreBlob payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::BlobChunkPayload));
+            break;
+        }
+        net::BlobChunkPayload rb{};
+        std::memcpy(&rb, msg.payload, sizeof(rb));
+        coop::inventory_restore::OnBlob(rb, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::InventoryRestoreAck: {
+        // CLIENT->HOST: the answer to a restore; judged against the request pending for that slot.
+        net::InventoryRestoreAckPayload ra{};
+        if (msg.payloadLen != sizeof(ra) || msg.senderPeerSlot < 1) {
+            UE_LOGW("event_feed: InventoryRestoreAck dropped (%zu bytes, sender slot %d)",
+                    static_cast<size_t>(msg.payloadLen), msg.senderPeerSlot);
+            break;
+        }
+        std::memcpy(&ra, msg.payload, sizeof(ra));
+        coop::inventory_restore::OnAck(ra, static_cast<uint8_t>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::ContainerContents: {
