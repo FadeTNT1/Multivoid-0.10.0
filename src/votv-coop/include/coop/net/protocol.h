@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 282;
+inline constexpr uint16_t kProtocolVersion = 283;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1318,6 +1318,21 @@ enum class ReliableKind : uint8_t {
     // joiner at its ready edge for every bucket holding water. Never relayed; a client's copy is refused at the host's
     // receive edge. BucketFillStatePayload.
     BucketFillState = 222,
+
+    // CLIENT->HOST: a client's verb on a poster (coop::poster_sync): op 1 put a rolled poster it holds on the wall,
+    // by the rolled prop's key, at the placement its own aim made; op 2 take a placed poster down, by its key; op 3
+    // a placed poster's new custom picture, by its key, with the picked file name. The client cancels its own verb;
+    // the host refuses a sender that is not alive or out of reach and runs it on its own copy. Never relayed; not
+    // pre-world. Late join: nothing to replay. PosterIntentPayload.
+    PosterIntent = 223,
+
+    // HOST->ALL: a placed poster (poster_C, an actor_save_C the prop lane does not carry) by its actor_save key
+    // (coop::poster_sync): op 1 it stands, with its class, transform and look (create or update), op 2 it is gone,
+    // op 3 the end of a joiner's snapshot (a client's placed poster the snapshot did not name is destroyed). Sent
+    // on every change the host's setPoster or liveness watch sees. Never relayed; a client's copy is refused at the
+    // host's receive edge. Late join: every placed poster to the joiner at its ready edge, then op 3.
+    // PosterStatePayload.
+    PosterState = 224,
 };
 
 #pragma pack(push, 1)
@@ -2459,6 +2474,61 @@ struct MicrowaveStatePayload {
 };
 static_assert(sizeof(MicrowaveStatePayload) == 48, "MicrowaveStatePayload must be 48 bytes");
 static_assert(sizeof(MicrowaveStatePayload) <= 256 - 20 - 8, "MicrowaveStatePayload must fit one datagram");
+
+// A poster's custom image file name (an FName), UTF-8, zero past `len`.
+struct PosterFileName {
+    uint8_t len;        // 0..95
+    char    data[95];   // UTF-8
+};
+static_assert(sizeof(PosterFileName) == 96, "PosterFileName must be 96 bytes");
+
+// A client's verb on a poster (PosterIntent). Put: `key` is the rolled prop's, the placement is where the client's
+// put would spawn the placed poster (the rolled poster's `turn` component, scale included), `fileName` empty. Take
+// down: `key` is the placed poster's, the rest zero. Picture: `key` is the placed poster's and `fileName` the pick.
+namespace poster_intent_ops {
+constexpr uint8_t kPut      = 1;
+constexpr uint8_t kTakeDown = 2;
+constexpr uint8_t kPicture  = 3;
+}  // namespace poster_intent_ops
+struct PosterIntentPayload {
+    uint8_t        op;           // 1 -- poster_intent_ops
+    uint8_t        reserved[3];  // 3 -- zero
+    WireKey        key;          // 32
+    float          locX, locY, locZ;            // 12 -- world cm
+    float          pitch, yaw, roll;            // 12 -- degrees
+    float          scaleX, scaleY, scaleZ;      // 12
+    PosterFileName fileName;     // 96
+};
+static_assert(sizeof(PosterIntentPayload) == 168, "PosterIntentPayload must be 168 bytes");
+static_assert(sizeof(PosterIntentPayload) <= 256 - 20 - 8, "PosterIntentPayload must fit one datagram");
+
+// A placed poster's state (PosterState), by its actor_save key. Placed: every field. Removed: `key` alone. Snapshot
+// end: nothing (`key` empty).
+namespace poster_state_ops {
+constexpr uint8_t kPlaced      = 1;
+constexpr uint8_t kRemoved     = 2;
+constexpr uint8_t kSnapshotEnd = 3;
+}  // namespace poster_state_ops
+namespace poster_state_flags {
+constexpr uint8_t kCustom   = 1u << 0;   // the poster draws `fileName`, not its preset `type`
+constexpr uint8_t kSnapshot = 1u << 1;   // a row of a joiner's snapshot
+constexpr uint8_t kKnown    = kCustom | kSnapshot;
+}  // namespace poster_state_flags
+struct PosterStatePayload {
+    uint8_t        op;           // 1 -- poster_state_ops
+    uint8_t        flags;        // 1 -- poster_state_flags
+    uint8_t        reserved[2];  // 2 -- zero
+    int32_t        type;         // 4 -- the preset picture
+    int32_t        index;        // 4
+    WireKey        key;          // 32 -- the actor_save key
+    WireKey        cls;          // 32 -- the placed poster's class, by its short name
+    float          locX, locY, locZ;            // 12 -- world cm
+    float          pitch, yaw, roll;            // 12 -- degrees
+    float          scaleX, scaleY, scaleZ;      // 12
+    PosterFileName fileName;     // 96
+};
+static_assert(sizeof(PosterStatePayload) == 208, "PosterStatePayload must be 208 bytes");
+static_assert(sizeof(PosterStatePayload) <= 256 - 20 - 8, "PosterStatePayload must fit one datagram");
 
 // A client's press of the tool gun's remover (RemoverRequest): the element it hit, the camera point it looked
 // from and the point its shot struck, in world centimetres. The host judges all three; none is trusted.
