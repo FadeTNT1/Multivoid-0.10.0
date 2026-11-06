@@ -226,8 +226,11 @@ void Emit(void* player, bool hit, const ue_wrap::hit_result::Hit& h) {
         if (!soundAtHit && !container)
             if (void* cue = ue_wrap::physical_audio::CueFromPhysicalMaterial(h.physMaterial, player, Cue::kImpact))
                 e.sound = E::SoundName(cue);
-        if (void* ps = ue_wrap::physical_audio::ParticleFromPhysicalMaterial(h.physMaterial, player, Cue::kImpact))
-            e.particle = E::SoundName(ps);
+        // Most surface materials carry no impact particle, only damaged/destroyed ones (metal: eff_metalSpark,
+        // eff_metalBreak); the hitter's own screen shows the damaged one, so fall back to it as the contact path does.
+        void* ps = ue_wrap::physical_audio::ParticleFromPhysicalMaterial(h.physMaterial, player, Cue::kImpact);
+        if (!ps) ps = ue_wrap::physical_audio::ParticleFromPhysicalMaterial(h.physMaterial, player, Cue::kDamaged);
+        if (ps) e.particle = E::SoundName(ps);
     } else if (!g_noMaterialSaid) {
         g_noMaterialSaid = true;
         UE_LOGI("[MELEE-FX] a swing's hit named no physical material -- its surface sound and particles are skipped "
