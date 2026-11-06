@@ -44,6 +44,41 @@ bool TryReadOpen(void* door, bool& open);
 // apply, its snapshot and its shadow poll.
 bool TryReadOpenIntent(void* door, bool& open);
 
+// Where the door's two leaf roots stand, as the door's own hit and swing place them. door_C moves its leaves by moving two
+// scene components under them (door_r_root and door_l_root): a swing lerps each from where it stood to its open place
+// (the right root to -openDoor, the left to +openDoor), a hit at rest nudges each toward that place and stops there, and
+// a hit past the pry threshold begins the swing. Each field is how far that root is along its own path, 0 shut .. 1 at
+// its open place, read from the root's relative location.
+struct LeafPose {
+    float right = 0.f;
+    float left  = 0.f;
+};
+// The roots' place now. False on a null door or when the roots or openDoor did not resolve (the crack lane stays off),
+// and for an openDoor of no length. A field read, no dispatch. Game thread.
+bool TryReadLeafPose(void* door, LeafPose& out);
+// Put the roots at `pose` through K2_SetRelativeLocation, the engine's setter, so the leaves follow. Each fraction is
+// clamped to 0..1. Never replays the hit: the crack is a place, and the place is what this writes. False when a root
+// does not resolve or the setter does not run. Game thread.
+bool WriteLeafPose(void* door, const LeafPose& pose);
+// Whether the door's swing flag is set (a swing, a jam shake, or the finish window of either). False if unresolved.
+bool TryReadMoving(void* door, bool& moving);
+
+// A door's move timeline mid-swing: where it stands in its length (0 shut end .. 1 open end), and the two places the
+// swing lerps from (lerpa_r and lerpa_l: doorOpen writes the roots' place at that moment into them, doorClose zero),
+// in the same units as LeafPose. `toOpen` is the swing's destination (dir 0). True only while the timeline plays and
+// everything resolved: a jam shake, which plays its own timeline, and a settled door read false.
+struct SwingPose {
+    bool  toOpen = false;
+    float position = 0.f;
+    LeafPose anchor;
+};
+bool TryReadSwing(void* door, SwingPose& out);
+// Put a swing that has begun on this copy where `pose` stands: the anchors into lerpa_r and lerpa_l, then the timeline
+// to `pose.position` with SetPlaybackPosition(bFireEvents=false, bFireUpdate=true), which runs the update body once so
+// the roots follow at once, and leaves the timeline playing its own way. The caller started the swing (SmartApply)
+// first. False when a field or the timeline's verbs did not resolve. Game thread.
+bool SeedSwing(void* door, const SwingPose& pose);
+
 // The door's own entry verbs, the ones a player's press, a melee hit and a crowbar's pry run.
 // The host runs them on its copy for a client (coop/interactables/door_verb_intent), so the
 // door's own body decides the whole press or hit once, on the authority. Each dispatches the

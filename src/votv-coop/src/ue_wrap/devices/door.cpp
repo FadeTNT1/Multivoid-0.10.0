@@ -11,10 +11,12 @@
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/engine/engine_component.h"
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <unordered_map>
@@ -23,6 +25,7 @@ namespace ue_wrap::door {
 namespace {
 
 namespace R = reflection;
+namespace N = ue_wrap::profile::name;
 
 // Resolved once at EnsureResolved, then read-only. Published via the resolved flag's release
 // store and acquire load, so any thread that sees it set also sees the fully written caches.
@@ -57,6 +60,13 @@ uint8_t g_playingMask  = 0;
 int32_t g_moveAlphaOff = -1;       // float, 0 closed .. 1 open
 constexpr float kAlphaEps = 1e-3f;  // the timeline's value at an end, as its stop leaves it
 int32_t g_moveDirOff   = -1;       // uint8, 0 forward (open), 1 backward (close)
+// The leaf roots a swing and a hit move (USceneComponent*), the offset they travel by, and the swing's two start
+// places (FVector). Any unresolved leaves the crack lane off, said once.
+int32_t g_rRootOff      = -1;
+int32_t g_lRootOff      = -1;
+int32_t g_openOffsetOff = -1;
+int32_t g_lerpaROff     = -1;
+int32_t g_lerpaLOff     = -1;
 int32_t g_sensorOff    = -1;       // Adoor_C::sensor (UBoxComponent*)
 int32_t g_sensorOverlapsOff = -1;  // Adoor_C::sensorOverlaps (TArray<AActor*>)
 // The door's power flag, which a press gates on first. A keypad's setActive, ventCrawler (the signal room
@@ -97,6 +107,50 @@ bool MoveTimelinePlaying(void* door, bool& playing) {
     if (!move || !R::IsLive(const_cast<char*>(move))) return false;
     playing = (*reinterpret_cast<const uint8_t*>(move + g_playingOff) & g_playingMask) != 0;
     return true;
+}
+
+// The root component at `off`, or null when the offset did not resolve or it is not live.
+void* RootAt(void* door, int32_t off) {
+    if (!door || off < 0) return nullptr;
+    void* c = *reinterpret_cast<void* const*>(reinterpret_cast<const char*>(door) + off);
+    return (c && R::IsLive(c)) ? c : nullptr;
+}
+
+// openDoor, the offset the left root travels to (the right root to its negation), and its squared length.
+bool ReadOpenOffset(void* door, FVector& od, float& len2) {
+    if (!door || g_openOffsetOff < 0) return false;
+    od = *reinterpret_cast<const FVector*>(reinterpret_cast<const char*>(door) + g_openOffsetOff);
+    len2 = od.X * od.X + od.Y * od.Y + od.Z * od.Z;
+    return std::isfinite(len2) && len2 > 1e-4f;
+}
+
+float Along(const FVector& v, const FVector& od, float len2) {
+    return (v.X * od.X + v.Y * od.Y + v.Z * od.Z) / len2;
+}
+
+FVector Scaled(const FVector& od, float f) { return FVector{od.X * f, od.Y * f, od.Z * f}; }
+
+float Clamp01(float v) { return std::fmin(1.f, std::fmax(0.f, v)); }
+
+// The door's move timeline component, or null.
+void* MoveTimeline(void* door) {
+    if (!door || g_moveOff < 0) return nullptr;
+    void* tl = *reinterpret_cast<void* const*>(reinterpret_cast<const char*>(door) + g_moveOff);
+    return (tl && R::IsLive(tl)) ? tl : nullptr;
+}
+
+void* TimelineVerb(void* tl, const wchar_t* name) {
+    void* cls = R::ClassOf(tl);
+    return cls ? R::FindDispatchFunctionCached(cls, name) : nullptr;
+}
+
+bool TimelineFloat(void* tl, const wchar_t* verb, float& out) {
+    void* fn = TimelineVerb(tl, verb);
+    if (!fn) return false;
+    ParamFrame f(fn);
+    if (!f.valid() || !Call(tl, f)) return false;
+    out = f.Get<float>(L"ReturnValue");
+    return std::isfinite(out);
 }
 
 // One of the door's entry verbs on this instance: its class's own override, resolved per class
@@ -142,6 +196,15 @@ bool EnsureResolved() {
     if (!R::FindBoolProperty(doorCls, L"ignoreBlackout", ignoreBlackoutOff, ignoreBlackoutMask))
         ignoreBlackoutOff = -1;
     const int32_t moveOff = R::FindPropertyOffset(doorCls, L"move");
+    const int32_t rRootOff = R::FindPropertyOffset(doorCls, N::DoorRightRootProp);
+    const int32_t lRootOff = R::FindPropertyOffset(doorCls, N::DoorLeftRootProp);
+    const int32_t openOffsetOff = R::FindPropertyOffset(doorCls, N::DoorOpenOffsetProp);
+    const int32_t lerpaROff = R::FindPropertyOffset(doorCls, N::DoorLerpaRightProp);
+    const int32_t lerpaLOff = R::FindPropertyOffset(doorCls, N::DoorLerpaLeftProp);
+    if (rRootOff < 0 || lRootOff < 0 || openOffsetOff < 0 || lerpaROff < 0 || lerpaLOff < 0)
+        UE_LOGW("door: the leaf roots did not resolve (door_r_root=%d door_l_root=%d openDoor=%d lerpa_r=%d "
+                "lerpa_l=%d) -- a cracked door is not carried to the other peers", rRootOff, lRootOff,
+                openOffsetOff, lerpaROff, lerpaLOff);
     int32_t playingOff = -1;
     uint8_t playingMask = 0;
     if (void* tlCls = R::FindClass(L"TimelineComponent")) {
@@ -180,6 +243,11 @@ bool EnsureResolved() {
     g_ignoreBlackoutMask = ignoreBlackoutMask;
     g_dirOff       = dirOff;
     g_moveOff      = moveOff;
+    g_rRootOff      = rRootOff;
+    g_lRootOff      = lRootOff;
+    g_openOffsetOff = openOffsetOff;
+    g_lerpaROff     = lerpaROff;
+    g_lerpaLOff     = lerpaLOff;
     g_playingOff   = playingOff;
     g_playingMask  = playingMask;
     g_sensorOff    = sensorOff;
@@ -264,6 +332,75 @@ bool TryReadOpenIntent(void* door, bool& open) {
     else
         open = isOpened;
     return true;
+}
+
+bool TryReadMoving(void* door, bool& moving) {
+    if (!door || g_isMovingOff < 0) return false;
+    moving = *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isMovingOff);
+    return true;
+}
+
+bool TryReadLeafPose(void* door, LeafPose& out) {
+    if (!door || !g_resolved.load(std::memory_order_acquire)) return false;
+    FVector od;
+    float len2 = 0.f;
+    void* const r = RootAt(door, g_rRootOff);
+    void* const l = RootAt(door, g_lRootOff);
+    if (!r || !l || !ReadOpenOffset(door, od, len2)) return false;
+    out.right = -Along(ue_wrap::engine::GetComponentRelativeLocation(r), od, len2);
+    out.left  =  Along(ue_wrap::engine::GetComponentRelativeLocation(l), od, len2);
+    return std::isfinite(out.right) && std::isfinite(out.left);
+}
+
+bool WriteLeafPose(void* door, const LeafPose& pose) {
+    if (!door || !g_resolved.load(std::memory_order_acquire)) return false;
+    FVector od;
+    float len2 = 0.f;
+    void* const r = RootAt(door, g_rRootOff);
+    void* const l = RootAt(door, g_lRootOff);
+    if (!r || !l || !ReadOpenOffset(door, od, len2)) return false;
+    const bool rOk = ue_wrap::engine::SetComponentRelativeLocation(r, Scaled(od, -Clamp01(pose.right)));
+    const bool lOk = ue_wrap::engine::SetComponentRelativeLocation(l, Scaled(od, Clamp01(pose.left)));
+    return rOk && lOk;
+}
+
+bool TryReadSwing(void* door, SwingPose& out) {
+    if (!door || !g_resolved.load(std::memory_order_acquire) || g_dirOff < 0 || g_lerpaROff < 0 || g_lerpaLOff < 0)
+        return false;
+    bool moving = false, playing = false;
+    if (!TryReadMoving(door, moving) || !moving || !MoveTimelinePlaying(door, playing) || !playing) return false;
+    FVector od;
+    float len2 = 0.f;
+    void* const tl = MoveTimeline(door);
+    float length = 0.f, pos = 0.f;
+    if (!tl || !ReadOpenOffset(door, od, len2) || !TimelineFloat(tl, N::TimelineGetLengthFn, length) ||
+        !TimelineFloat(tl, N::TimelineGetPositionFn, pos) || length <= 0.f)
+        return false;
+    const char* base = reinterpret_cast<const char*>(door);
+    out.toOpen = *reinterpret_cast<const uint8_t*>(base + g_dirOff) == 0;
+    out.position = Clamp01(pos / length);
+    out.anchor.right = -Along(*reinterpret_cast<const FVector*>(base + g_lerpaROff), od, len2);
+    out.anchor.left  =  Along(*reinterpret_cast<const FVector*>(base + g_lerpaLOff), od, len2);
+    return true;
+}
+
+bool SeedSwing(void* door, const SwingPose& pose) {
+    if (!door || !g_resolved.load(std::memory_order_acquire) || g_lerpaROff < 0 || g_lerpaLOff < 0) return false;
+    FVector od;
+    float len2 = 0.f;
+    void* const tl = MoveTimeline(door);
+    float length = 0.f;
+    if (!tl || !ReadOpenOffset(door, od, len2) || !TimelineFloat(tl, N::TimelineGetLengthFn, length) || length <= 0.f)
+        return false;
+    void* const setFn = TimelineVerb(tl, N::TimelineSetPositionFn);
+    if (!setFn) return false;
+    char* base = reinterpret_cast<char*>(door);
+    *reinterpret_cast<FVector*>(base + g_lerpaROff) = Scaled(od, -Clamp01(pose.anchor.right));
+    *reinterpret_cast<FVector*>(base + g_lerpaLOff) = Scaled(od, Clamp01(pose.anchor.left));
+    ParamFrame set(setFn);
+    return set.valid() && set.Set<float>(N::TimelineNewPositionParam, Clamp01(pose.position) * length) &&
+           set.Set<bool>(N::TimelineFireEventsParam, false) && set.Set<bool>(N::TimelineFireUpdateParam, true) &&
+           Call(tl, set);
 }
 
 bool CallPress(void* door, void* player, uint8_t action) {

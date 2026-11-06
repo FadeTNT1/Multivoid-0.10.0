@@ -100,6 +100,10 @@ struct Adapter {
     void (*FillSeed)(void* actor, bool on, coop::net::KeyedTogglePayload& p) = nullptr;
     bool (*IsSeed)(const coop::net::KeyedTogglePayload& p) = nullptr;
     SeedBook::ApplyFn ApplySeed = nullptr;
+    // Optional: a token for what the device holds beyond its bool, which an edge's dedup compares as well, so a change of it
+    // the bool does not show (a door cracked a little further) is still an edge. 0 = nothing more. The channel keeps the last
+    // token it sent per key. Game thread.
+    uint32_t (*DetailOf)(void* actor) = nullptr;
 };
 
 // The engine.
@@ -338,7 +342,8 @@ public:
             if (a_.FillPayload) a_.FillPayload(d.second.actor, d.first, on, p);
             if (a_.FillSeed) a_.FillSeed(d.second.actor, on, p);
             s->SendReliableToSlot(peerSlot, a_.kind, &p, sizeof(p));
-            { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[d.first] = on; }
+            const uint32_t detail = DetailFor(d.second.actor);
+            { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[d.first] = on; if (a_.DetailOf) lastDetail_[d.first] = detail; }
             ++sent;
         }
         UE_LOGI("%s: connect-snapshot -- sent %d full state(s) to slot %d (of %zu indexed)",
@@ -452,10 +457,11 @@ public:
                 continue;
             }
             bool reverted = false;
+            const uint32_t detail = DetailFor(actor);
             {
                 std::lock_guard<std::mutex> lk(stateMutex_);
                 auto it = lastKnown_.find(key);
-                reverted = it != lastKnown_.end() && it->second == cur;
+                reverted = it != lastKnown_.end() && it->second == cur && LastDetailLocked(key) == detail;
             }
             if (reverted) {
                 sendRefused_.erase(key);  // back to what the peers have: nothing to send
@@ -479,6 +485,7 @@ public:
         std::lock_guard<std::mutex> lk(stateMutex_);
         const size_t n = lastKnown_.size();
         lastKnown_.clear();
+        lastDetail_.clear();
         sendRefused_.clear();
         if (n > 0 || nP > 0)
             UE_LOGI("%s: OnDisconnect cleared %zu last-known + %zu pending", a_.name, n, nP);
@@ -732,18 +739,20 @@ private:
     // RetryRefused sends the key again at the next tick. The authority over the key's change, game
     // thread.
     void SendEdge(const std::wstring& key, bool cur, coop::net::Session* s) {
+        void* const actor = ResolveFast(key);
+        const uint32_t detail = DetailFor(actor);
         {
             std::lock_guard<std::mutex> lk(stateMutex_);
             auto it = lastKnown_.find(key);
-            if (it != lastKnown_.end() && it->second == cur) return;
+            if (it != lastKnown_.end() && it->second == cur && LastDetailLocked(key) == detail) return;
         }
         coop::net::KeyedTogglePayload p{};
         WireKeyFromString(key, p.key);
         p.action = cur ? 1 : 0;
-        if (a_.FillPayload) a_.FillPayload(ResolveFast(key), key, cur, p);
+        if (a_.FillPayload) a_.FillPayload(actor, key, cur, p);
         const bool sent = s->SendReliable(a_.kind, &p, sizeof(p));
         if (sent || !s->AnyWorldReadyPeer()) {
-            { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[key] = cur; }
+            { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[key] = cur; if (a_.DetailOf) lastDetail_[key] = detail; }
             sendRefused_.erase(key);
             UE_LOGI("%s: %s %s key='%ls' at the verb", a_.name, sent ? "sent" : "noted (no world-ready peer)",
                     cur ? "ON" : "OFF", key.c_str());
@@ -751,6 +760,14 @@ private:
             UE_LOGW("%s: SendReliable refused key='%ls' at the verb with a world-ready peer -- its "
                     "connection is going; sent again each tick", a_.name, key.c_str());
         }
+    }
+
+    // The adapter's token for what the device holds beyond its bool (0 with no DetailOf), and the last one sent for `key`
+    // (0 before any). The second takes stateMutex_.
+    uint32_t DetailFor(void* actor) const { return (a_.DetailOf && actor) ? a_.DetailOf(actor) : 0u; }
+    uint32_t LastDetailLocked(const std::wstring& key) const {
+        auto it = lastDetail_.find(key);
+        return it == lastDetail_.end() ? 0u : it->second;
     }
 
     const Adapter& a_;
@@ -779,7 +796,8 @@ private:
 
     std::mutex stateMutex_;
     std::unordered_map<std::wstring, bool> lastKnown_;
-    std::unordered_set<std::wstring> sendRefused_;               // GT-only: refused sends, retried each tick
+    std::unordered_map<std::wstring, uint32_t> lastDetail_;      // the adapter's DetailOf token last sent per key (lanes that have one)
+    std::unordered_set<std::wstring> sendRefused_;              // GT-only: refused sends, retried each tick
 
     std::unordered_map<std::wstring, Pending> pending_;            // GT-only
     SeedBook seeds_;                                               // GT-only: the newest seed per key, until its device converges

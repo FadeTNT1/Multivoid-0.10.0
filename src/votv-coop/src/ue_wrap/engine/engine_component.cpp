@@ -329,6 +329,25 @@ bool ClearStaticMesh(void* component) {
     return Call(component, f);
 }
 
+bool SetComponentRelativeLocation(void* component, const FVector& location) {
+    static void* s_fn = nullptr;
+    if (!component) return false;
+    if (!s_fn && SceneCompClass()) s_fn = R::FindFunction(g_sceneCompClass, P::name::SetRelativeLocationFn);
+    if (!s_fn) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGE("engine: SetComponentRelativeLocation unresolved (K2_SetRelativeLocation not found)");
+        }
+        return false;
+    }
+    ParamFrame f(s_fn);
+    if (!f.valid() || !f.Set<FVector>(P::name::SetRelativeLocationParam, location)) return false;
+    f.Set<bool>(L"bSweep", false);
+    f.Set<bool>(L"bTeleport", false);
+    return Call(component, f);
+}
+
 bool SetComponentMobility(void* component, uint8_t mobility) {
     // USceneComponent::SetMobility(NewMobility). Movable (2) re-registers the render state so a
     // runtime SetStaticMesh + SetActorLocation actually apply (a Static component no-ops both).
