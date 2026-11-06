@@ -203,12 +203,14 @@ void ClientTick() {
             return;
         }
         g_dish = d;
-        // The context, as a panel's con() gives it: the dish and its name.
-        if (!SC::CallInit(term, D::TechName(d), false, D::DishByIndex(d))) {
-            Abandon("the terminal's init did not run");
+        // The context, as a use of the dish's panel gives it: the console shows that panel's terminal (the lane
+        // refuses a bare init of the console in a session, and the host runs a line only in its panel's context).
+        if (!SU::ShowTerminalForDish(d)) {
+            Abandon("no ready panel carries the fixture dish, or the console would not show its terminal");
             return;
         }
-        UE_LOGI("[SAT-DRILL] client: the terminal points at dish %d '%ls' at %.2f", d, D::TechName(d).c_str(), cal);
+        UE_LOGI("[SAT-DRILL] client: the console shows terminal %08X, dish %d '%ls' at %.2f", SU::ShownTerminal(), d,
+                D::TechName(d).c_str(), cal);
         Type(term, L"sd.cal", Step::CalWait);
         return;
     }
