@@ -1336,6 +1336,76 @@ inline constexpr const wchar_t* BucketHeightInterpProp = L"height_interp";
 inline constexpr const wchar_t* BucketEmptyProp = L"empty";
 inline constexpr const wchar_t* BucketUpdFn = L"upd";
 
+// The basement flood: waterVolume_basementFlooder_C, the one water volume of the basement, which the game moves up and
+// down between `loc_a` (dry) and `loc_b` (full, `height` above it). Its level is the actor's distance from loc_a in
+// world units: getLevel reads it, setLevel(alpha) places the actor there in one step, and addWater(deltaTime, power)
+// walks it toward loc_b (power > 0, a burst pipe's tick) or loc_a (power < 0, the drain's tick). startMoving(moveTo)
+// is the cheat's toggle (`bflood`): it sets `moveTo` and enables the actor's tick, whose body refreshes the water's
+// data through the parent waterVolume_C's no-arg updateWaterData (surface plane, depth, the buoyancy boxes).
+inline constexpr const wchar_t* BasementFloodClass = L"waterVolume_basementFlooder_C";
+inline constexpr const wchar_t* BasementFloodGetLevelFn = L"getLevel";
+inline constexpr const wchar_t* BasementFloodSetLevelFn = L"setLevel";
+inline constexpr const wchar_t* BasementFloodAddWaterFn = L"addWater";
+inline constexpr const wchar_t* BasementFloodStartMovingFn = L"startMoving";
+inline constexpr const wchar_t* BasementFloodMoveToProp = L"moveTo";
+inline constexpr const wchar_t* BasementFloodHeightProp = L"height";
+// `dist` is set by the actor's BeginPlay (the distance between loc_a and loc_b), so it is zero until the actor has begun
+// play, and loc_a is then still the origin: a level read or placed before that is meaningless.
+inline constexpr const wchar_t* BasementFloodDistProp = L"dist";
+inline constexpr const wchar_t* BasementFloodLevelParam = L"level";
+inline constexpr const wchar_t* BasementFloodAlphaParam = L"alpha";
+inline constexpr const wchar_t* WaterVolumeUpdateDataFn = L"updateWaterData";
+// The anti-noclip check of mainPlayer_C's tick (ue_wrap/actors/anti_noclip.h): `lastLoc`, the camera's place at the end
+// of the last tick; the gamemode's canBackrooms() and its out parameter; the controller's GetViewTarget; and
+// teleportWOBackrooms (newTransform, useRotation, trueRotation, useVelocity, controlRotation), the verb both branches
+// end in, which also writes `lastLoc` and takes the velocity from the transform's scale when useVelocity is set.
+inline constexpr const wchar_t* MainPlayerLastLocProp = L"lastLoc";
+inline constexpr const wchar_t* MainPlayerTeleportFn = L"teleportWOBackrooms";
+inline constexpr const wchar_t* TeleportNewTransformParam = L"newTransform";
+inline constexpr const wchar_t* TeleportUseRotationParam = L"useRotation";
+inline constexpr const wchar_t* TeleportTrueRotationParam = L"trueRotation";
+inline constexpr const wchar_t* TeleportUseVelocityParam = L"useVelocity";
+inline constexpr const wchar_t* TeleportControlRotationParam = L"controlRotation";
+inline constexpr const wchar_t* CanBackroomsReturnParam = L"return";
+inline constexpr const wchar_t* GetViewTargetFn = L"GetViewTarget";
+// The collision channel the anti-noclip check reads the capsule's response on (ECollisionChannel 16, game channel 10).
+inline constexpr int AntiNoclipCapsuleChannel = 16;
+
+// The basement's burst water pipes (burstWaterPipe_C) and the toolbox that repairs them. A pipe holds `damaged`; its
+// state(damaged) sets the flag and the tick, the spray and the sound; addDamage(...) is state(true); and its toolbox
+// interface answers toolboxCanFix (damaged), toolboxFixTime (3 s) and toolboxFix(toolbox), which is state(false) and
+// true only while damaged. While damaged its tick calls the flooder's addWater(dt, 1). The kit (prop_toolbox_C), held,
+// takes the looked-at actor as `fixingActor` on playerHandUse_LMB when that actor can be fixed, reads its fix time into
+// `time` (a prop_powertool_C in the offhand divides it by 5), raises `complete` on its tick, and at 1 calls the target's
+// toolboxFix and, when it returns true, takes one of `fixes` and ends (completeSaw, usesMessage, a destroy when
+// `destroyOnUse` and none are left). `fixAudio` is its repair sound, played every 0.8 s while the aim holds. The drain
+// (basementDrain_C) holds `blockage`, the share of its sample points a prop clogs.
+inline constexpr const wchar_t* BurstPipeClass = L"burstWaterPipe_C";
+inline constexpr const wchar_t* BurstPipeStateFn = L"state";
+inline constexpr const wchar_t* BurstPipeStateParam = L"damaged";
+inline constexpr const wchar_t* BurstPipeAddDamageFn = L"addDamage";
+inline constexpr const wchar_t* BurstPipeDamagedProp = L"damaged";
+inline constexpr const wchar_t* BurstPipeFixFn = L"toolboxFix";
+inline constexpr const wchar_t* BurstPipeFixTimeFn = L"toolboxFixTime";
+inline constexpr const wchar_t* BurstPipeToolboxParam = L"toolbox";
+inline constexpr const wchar_t* ToolboxClass = L"prop_toolbox_C";
+inline constexpr const wchar_t* PowerToolClass = L"prop_powertool_C";
+inline constexpr const wchar_t* ToolboxFixingActorProp = L"fixingActor";
+inline constexpr const wchar_t* ToolboxFixesProp = L"fixes";
+inline constexpr const wchar_t* ToolboxTimeProp = L"time";
+inline constexpr const wchar_t* ToolboxCompleteProp = L"complete";
+inline constexpr const wchar_t* ToolboxFixAudioProp = L"fixAudio";
+inline constexpr const wchar_t* ToolboxCompleteSawFn = L"completeSaw";
+inline constexpr float ToolboxFixSoundPeriodSec = 0.8f;
+inline constexpr float ToolboxPowerToolDivisor = 5.0f;
+inline constexpr const wchar_t* BasementDrainClass = L"basementDrain_C";
+inline constexpr const wchar_t* BasementDrainBlockageProp = L"blockage";
+
+// The buoyancy master (waterFloatMaster_C): one per world, holding in `actorsInWater` every body a water volume has
+// reported inside it, which its tick pushes toward the surface.
+inline constexpr const wchar_t* WaterFloatMasterClass = L"waterFloatMaster_C";
+inline constexpr const wchar_t* WaterFloatMasterActorsProp = L"actorsInWater";
+
 // The poster, in its two forms. Rolled: prop_poster_C, a prop held in the hand; its left-button use calls put(),
 // which (the holder's hitResult blocking, on a body that does not simulate) spawns `posterClass` at the `turn`
 // component's world transform (scale included: the scroll wheel sizes `spawnLoc`, `turn`'s parent), copies `type`,

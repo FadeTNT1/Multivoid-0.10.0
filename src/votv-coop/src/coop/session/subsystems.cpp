@@ -65,6 +65,9 @@
 #include "coop/creatures/wisp_tear_mirror.h"  // Killer Wisp coop: victim kill + tear mirror
 #include "coop/session/pause_guard.h"  // coop no-pause invariant (ESC pause froze clients)
 #include "coop/items/player_inventory_sync.h"  // per-player inventory (host file scaffold)
+#include "coop/items/inventory_death_keep.h"  // a void death keeps the inventory
+#include "coop/items/inventory_restore.h"      // the host puts a backed-up inventory back on a live player
+#include "coop/player/anti_noclip_rescue.h"   // the anti-noclip check answered with a safe place
 #include "coop/player/stat_orders.h"  // an admin's orders to a player's stats: the kept session, the tokens answered Left
 #include "coop/voice/voice_chat.h"
 #include "coop/element/bind_wait.h"  // OnSlotLeft / Clear: the messages held for a deferred bind
@@ -256,6 +259,8 @@ void Install(coop::net::Session& session) {
     coop::event_active_sync::Install(&session);  // the host's setEvent watch: begin/end edges; the join snapshot reads the game's registry
     coop::creature_event_relay::Install(&session);  // a creature's setEvent: the host's count per creature, applied to its mirror on a client
     coop::npc_mirror_brain::Install();  // a parked family's mirrors: the graph watches and the end of a mirror's mark
+    coop::inventory_restore::Install(&session);  // /restoreinventory: the host sends a backup to one client, which keeps a rollback copy and applies it
+    coop::anti_noclip_rescue::Install(&session);  // the game's anti-noclip check relocates a player to a safe place, never to the backrooms
     coop::alarm_sync::Install(&session);  // base radar alarm shared-world toggle (a 1 Hz active poll on both roles)
     coop::church_sync::Install(&session);  // the Stolas church: a client runs none of its verbs, the host's state mirrored
     coop::serverbox_sync::Install(&session);  // the server boxes' break state: the verbs run on the host, a client's repair sent there
@@ -558,6 +563,9 @@ DisconnectStats DisconnectAll() {
     coop::wisp_tear_mirror::OnDisconnect();  // clear any armed victim-death deadline
     coop::wisp_grab_hold::OnDisconnect();  // release a live self-grab (un-strand MOVE_None) and drop the holds
     coop::player_inventory_sync::OnDisconnect();  // client: clear the send-dedup and any pending apply; host: nothing
+    coop::anti_noclip_rescue::OnDisconnect();  // the standing places and the rescue counters
+    coop::inventory_death_keep::OnDisconnect();  // the inventory sample and the void window
+    coop::inventory_restore::OnDisconnect();  // requests waiting for an answer, half-received blobs
     coop::email_sync::OnDisconnect();
     coop::signal_sync::OnDisconnect();
     coop::meadow_db_sync::OnDisconnect();  // shadow + pending + tombstones + seed snapshots
@@ -731,6 +739,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:wisp_attack"}; coop::wisp_attack_sync::Tick(); }  // host detect wisp-grabs-client -> neutralize + relay (host-only, no-op on client)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:wisp_tear"}; coop::wisp_tear_mirror::Tick(); }  // discharge the victim's scheduled ragdoll death (any peer, no-op until armed)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:player_inventory"}; coop::player_inventory_sync::Tick(); }  // the client's profile stream / the host's on-join push (+ the inventory_selftest=1 read-verify)
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:anti_noclip"}; coop::anti_noclip_rescue::Tick(); coop::inventory_death_keep::Tick(); coop::inventory_restore::Tick(); }  // settle the canBackrooms watch + sample the standing place; sample the inventory (1 Hz)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:hotbar_icons"}; coop::hotbar_icon_edge::Tick(); }  // the game publishes its prop-icon tables AFTER its own post-load refresh of the quick-slot bar and tells only the equipment panel -- rebuild the bar once per world when they arrive
     coop::dev::dev_lanes::TickInventory(session);  // [dev] the live store readout and the pickup drill, each in its perf bucket
     // The trash pile collect-counter poll and depletion death-watch; a chipPile re-grab fires from

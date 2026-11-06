@@ -23,6 +23,8 @@ host validates and commits contested writes), `local` (never shared).
 | Voice | Opus frames, 3D positional | peer | state replay | works |
 | Player damage and hazards | vitals as fractions; a zombie or fossil hound hit on a peer delivered to that peer `[RD]` | host delivers, peer computes | none needed | vitals work; the hit delivery is read from the code and not yet run |
 | Death | the native death runs to its end; the level travel is refused and a revive written in its place | peer | none needed | tested |
+| Anti-noclip rescue, void death | the game's "went through a wall" check answered with a validated standing place instead of the backrooms; a void death's emptied inventory put back once; a collapsed profile kept beside the last full one | peer | none needed | built |
+| Live inventory restore | `/restoreinventory`: a backed-up inventory sent to one client, which keeps a rollback copy and applies it; the host's own player restored locally | host | none needed | built |
 | Teleport (dev) | host pushes a placement | host | the join placement | works |
 
 ## The world
@@ -47,6 +49,8 @@ host validates and commits contested writes), `local` (never shared).
 | Drone | the delivery drone's flight and state | host | snapshot | built |
 | Sky and time | sky rotation, moon phase, the sky eye, the clock and the day number (a client's clock never runs on its own: neither its own advance nor its cheat menu's day buttons roll a midnight; at the host's midnight it performs its own share: its profile's days, midnights since load, music flags and achievements) | host | the clock stream from the connect; the sky seeded at connect | built |
 | Weather | rain, snow, fog, wind, lightning, red sky, the event-born weathers | host | snapshot | tested, two known breaks |
+| Basement flood | the basement water's level, the drain's blockage and the panel's waterlogged; the drain's, a pipe's and the cheat's writers refused on a client | host | the level sent at the ready edge | built |
+| Burst pipes and the repair kit | each pipe's burst flag (the host's, random bursts included); a kit's mend judged and committed on the host, the kit's own end run by its holder | host | every pipe's flag and every running mend sent at the ready edge | built |
 | Explosions | every explosion runs on the host and reaches each peer once; a client's own rocket, sticky bomb, held grenade or pipe bomb and pilled burn are requested by the client and performed on the host; a client's light on a salt rocket is performed on the host, and a lit rocket's flight is streamed to every peer; a breakable explosive (the vending machine, a gas can, the bombs, the explosive crystal and drive) is damaged and broken on the host only | host | none (a one-shot act) | built; the other client-triggered sources are known limits with their owners |
 | Fireflies, ambient spawners | cosmetic spawns and the flora and forage spawners (host only) | peer for cosmetics, host for spawners | none; a client's spawners are refused from its session's start | built |
 | Story and scheduled events | host-observed fires replayed on clients by a per-event policy; the active-events registry mirrored for late joiners | host | replay and snapshot | built |

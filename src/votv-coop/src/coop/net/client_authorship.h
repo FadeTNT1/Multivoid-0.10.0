@@ -67,6 +67,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DeskLogLine:
     case ReliableKind::SleepState:
     case ReliableKind::PlayerInventoryBlob:
+    case ReliableKind::InventoryRestoreAck:
     case ReliableKind::KerfurCommand:
     case ReliableKind::GrabIntent:
     case ReliableKind::ThrowIntent:
@@ -181,6 +182,9 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ToolActionState:
     case ReliableKind::EventScenePhase:
     case ReliableKind::EventSoundCue:
+    case ReliableKind::BasementFloodState:
+    case ReliableKind::InventoryRestoreBlob:
+    case ReliableKind::BasementPipeState:
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:

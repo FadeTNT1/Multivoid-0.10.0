@@ -21,6 +21,8 @@
 #include "coop/items/poster_sync.h"
 #include "coop/net/session.h"
 #include "coop/props/water_fill_sync.h"
+#include "coop/world/basement_flood_sync.h"
+#include "coop/world/basement_pipe_sync.h"
 
 #include "ue_wrap/core/walk_timer.h"  // per-lane [WALK-TIME] attribution (diagnostic)
 
@@ -43,6 +45,8 @@ void Install(coop::net::Session& session) {
     coop::microwave_sync::Install(&session);     // a microwave is the host's: a client's press runs there, its run reaches every peer as MicrowaveState
     coop::surface_clean_sync::Install(&session);  // the sink's and the shower's dirt: each peer sends its own wipe, a receiver keeps the cleaner
     coop::water_fill_sync::Install(&session);    // a world bucket's water is the host's: a client's tap-tick fill is cancelled, the host's level reaches every peer
+    coop::basement_pipe_sync::Install(&session);  // a pipe's burst flag is the host's: a client's own writers are parked, the host's flag reaches every peer
+    coop::basement_flood_sync::Install(&session);  // the basement's water level is the host's: a client's drain, pipe and cheat writers are parked, the host's level reaches every peer
     coop::poster_sync::Install(&session);        // a poster is the host's: a client's put, take-down and picture run there, placed posters reach every peer as PosterState
     coop::tool_action::Install(&session);        // a crowbar's pry and a hacksaw's cut: shown on every peer, their end run once on the host
 }
@@ -64,6 +68,8 @@ void Tick(coop::net::Session& session) {
     { ue_wrap::ScopedWalkTimer _w{"sync:microwave"}; coop::microwave_sync::Tick(session); }  // settle its watches; HOST: queued presses, the noted microwaves' states; CLIENT: the running plates
     { ue_wrap::ScopedWalkTimer _w{"sync:surface_clean"}; coop::surface_clean_sync::Tick(); }  // settle the sponge watches; retry the deferred applies
     { ue_wrap::ScopedWalkTimer _w{"sync:water_fill"}; coop::water_fill_sync::Tick(session); }  // settle the tap-tick watches; HOST: the changed buckets' levels
+    { ue_wrap::ScopedWalkTimer _w{"sync:basement_pipe"}; coop::basement_pipe_sync::Tick(session); }
+    { ue_wrap::ScopedWalkTimer _w{"sync:basement_flood"}; coop::basement_flood_sync::Tick(session); }  // settle its watches; HOST: the level when it moved; CLIENT: a level that waited for the water volume
     { ue_wrap::ScopedWalkTimer _w{"sync:poster"}; coop::poster_sync::Tick(session); }  // settle its watches; HOST: queued verbs, the placed posters' changes; CLIENT: parked states
     { ue_wrap::ScopedWalkTimer _w{"sync:tool_action"}; coop::tool_action::Tick(session); }  // settle the pry and saw watches; the owner's progress; HOST: sessions whose target or tool left
 }
@@ -74,6 +80,8 @@ void ConnectReplayForSlot(int slot) {
     coop::cord_sync::QueueConnectBroadcastForSlot(slot);  // HOST: every corded prop's link to the joiner, then the seed's end
     coop::surface_clean_sync::QueueConnectBroadcastForSlot(slot);  // HOST: the sink's and the shower's dirt to the joiner (adopt)
     coop::water_fill_sync::OnPeerWorldReady(slot);  // HOST: every bucket holding water to the joiner
+    coop::basement_pipe_sync::OnPeerWorldReady(slot);  // HOST: every pipe's burst flag to the joiner
+    coop::basement_flood_sync::OnPeerWorldReady(slot);  // HOST: the basement's water level to the joiner
     coop::tool_action::ConnectReplayForSlot(slot);  // HOST: every stuck crowbar and running cut to the joiner
 }
 
@@ -94,6 +102,8 @@ void OnDisconnect() {
     coop::microwave_sync::OnDisconnect();  // a microwave's own press and run stay where they are made
     coop::surface_clean_sync::OnDisconnect();
     coop::water_fill_sync::OnDisconnect();  // a bucket fills from a tap on the peer that holds it
+    coop::basement_pipe_sync::OnDisconnect();
+    coop::basement_flood_sync::OnDisconnect();  // the water stands where it is; the game's own writers run again
     coop::poster_sync::OnDisconnect();     // a poster's own verbs run where they are made
     coop::tool_action::OnDisconnect();      // a pry and a cut run whole where they are made
 }

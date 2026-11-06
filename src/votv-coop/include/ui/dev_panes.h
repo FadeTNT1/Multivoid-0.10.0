@@ -9,6 +9,8 @@ namespace ui::dev_panes {
 
 void RenderSnow();
 void RenderTeleportClients();
+void RenderForceAntiNoclip();
+void RenderRestoreInventory();
 void RenderFreecam();
 void RenderRestoreVitals();
 void RenderSetClock();

@@ -4,6 +4,7 @@
 
 #include "coop/net/blob_chunks.h"
 #include "coop/config/config.h"
+#include "coop/items/inventory_death_keep.h"
 #include "coop/items/inventory_wire.h"
 #include "coop/items/player_profile.h"
 #include "coop/player/player_profile_store.h"
@@ -205,6 +206,8 @@ void ClientStreamTick(coop::net::Session* s) {
     std::vector<uint8_t> items;
     void* const pawn = coop::players::Registry::Get().Local();
     if (!pawn || !ue_wrap::inventory_component::Capture(pawn, items)) return;  // world not up yet
+    // A void death's emptied inventory is not a newer profile: it waits to be put back (inventory_death_keep).
+    if (coop::inventory_death_keep::HoldCollapsedProfile(pawn)) return;
     SampleStandingPose();
     std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(true, items);
     const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);

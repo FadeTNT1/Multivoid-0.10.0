@@ -13,7 +13,9 @@
 // .../<folder>/autosave/<guid>.json for its autosave: one set per entry, cut beside the file written. The blob is
 // opaque here (coop/items/inventory_wire owns its layout); the file wraps it in a magic, an FNV
 // hash, a nick and a last-seen time. A GUID that is not exactly 32 hex characters never becomes a
-// path component. Game thread: the memory half has no lock.
+// path component. A profile that collapses from a populated one is kept as the player's current profile and logged
+// (PROFILE SHRANK); the last full one is kept beside it as <guid>.json.good, .good.1, .good.2, cut with the world save.
+// Game thread: the memory half has no lock.
 
 #pragma once
 
@@ -79,5 +81,18 @@ void MarkWorldGathered();
 // file, held or not, and nothing of what it held before -- and the set stands there from then on.
 // Nothing is removed until every copy has landed, and with no slot known nothing is removed.
 size_t CutToDisk(const std::wstring& writtenSlot);
+
+// The host's restore of a lost inventory (coop/items/inventory_restore) reads a backup profile from the hosted
+// world's profile folder. `spec` is "" or "good" (the newest full profile kept for `guid`: the one held in memory, else
+// the newest .good file), "good.1" or "good.2" (the older ones), or a relative path to a .json profile in the world's
+// folder, such as a hand-made recovery sidecar kept in a subfolder of it; a path may not leave the folder.
+// The file's magic and checksum are verified. On success `blob` is the profile and `label` names where it came from;
+// on failure `why` says. Game thread.
+bool ReadBackup(const std::string& guid, const std::string& spec, std::vector<uint8_t>& blob, std::string& label,
+                std::string& why);
+
+// A client's rollback copy of the inventory it is about to have replaced: a profile file in the mod's data folder
+// (`inventory_rollback/rollback-<UTC stamp>.json`). Returns the path, empty when it could not be written.
+std::string WriteRollback(const std::string& nickJson, const std::vector<uint8_t>& blob);
 
 }  // namespace coop::player_profile_store

@@ -213,6 +213,12 @@ bool WriteDisabled(void* p, bool disabled) {
     return true;
 }
 
+bool WriteWaterlogged(void* p, bool waterlogged) {
+    if (!p || !g_resolved.load(std::memory_order_acquire)) return false;
+    BoolAt(p, g_waterloggedOff) = waterlogged;
+    return true;
+}
+
 bool ReadWaterlogged(void* p, bool& waterlogged) {
     if (!p || !g_resolved.load(std::memory_order_acquire)) return false;
     waterlogged = BoolAt(p, g_waterloggedOff);

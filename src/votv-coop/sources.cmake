@@ -419,8 +419,15 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/tool_action.cpp
     src/coop/interactables/pry_sync.cpp
     src/coop/interactables/saw_sync.cpp
+    src/coop/interactables/toolbox_sync.cpp
     src/coop/interactables/surface_clean_sync.cpp
     src/coop/props/water_fill_sync.cpp
+    src/coop/world/basement_flood_sync.cpp
+    src/coop/world/basement_pipe_sync.cpp
+    src/coop/player/anti_noclip_rescue.cpp
+    src/coop/items/inventory_death_keep.cpp
+    src/coop/items/inventory_restore.cpp
+    src/coop/commands/inventory_commands.cpp
     src/coop/interactables/laptop_sync.cpp
     src/coop/interactables/laptop_tab.cpp
     src/coop/interactables/portable_pc_lid.cpp

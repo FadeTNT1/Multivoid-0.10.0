@@ -177,6 +177,51 @@ used to dispose of -- the damage quadrants, the red overlay and the blood-loss e
 end the session; a revive that fails returns to the menu, and on a host that ends the lobby.
 Other peers see the death through the ragdoll bit.
 
+### Restoring a lost inventory
+
+A backed-up inventory goes back on a live player without closing the world. `/restoreinventory <player> [backup]` (the
+host console's alone; the dev menu's Player > Inventory lists the connected players with a button each) reads the backup
+from the hosted world's profile folder: `good` (the default: the newest full profile kept for that player, in memory or
+the newest `<guid>.json.good`), `good.1`, `good.2`, or a relative path to a profile file in that folder, such as a
+hand-made sidecar (`item-recovery-20261106-005930/Miko-004810.json`; a path may not leave the folder). The file's magic
+and checksum are verified and it must parse as a profile with an inventory in it. For a client the host sends the
+inventory bytes to that one player (`InventoryRestoreBlob`), whose machine writes a rollback copy of what it holds to
+`inventory_rollback/rollback-<UTC>.json` in the mod's data folder, replaces its three item arrays through the game's own
+restore on the game thread (vitals and position are untouched), refreshes the equipment and answers
+`InventoryRestoreAck` with the item counts before and after. The host's own player is restored locally the same way. A
+dead player is refused. The host logs the request, the file read, each answer and the counts under `[RESTORE]`, and the
+action goes in the admin action log. The profile stream then sends the restored inventory to the host as any change.
+(`coop/items/inventory_restore`, `coop/commands/inventory_commands`, `coop/player/player_profile_store`.)
+
+### Anti-noclip and the void
+
+Each tick the game traces from `lastLoc` (the camera's place when the last tick ended) to the camera's place now against
+static geometry, and when it hits, with `canBackrooms()` true, the capsule ignoring collision channel 16 and the view
+target the player, it decides the player went through a wall: it blacks the screen, lifts the player 800 cm and travels
+to a backrooms level, or teleports the player to the save slot's `playerTransform` with no check of what stands there.
+In a session that is wrong both ways: the travel ends the session for the peer that takes it, the saved place is not a
+place of this run, and the check trips on things a single machine never meets (a client walking where the host's world
+differs, a body thrown by physics) (`coop/player/anti_noclip_rescue`, `ue_wrap/actors/anti_noclip`).
+
+`canBackrooms()` is evaluated by the local player's tick on every tick and nowhere else, so a script-gate watch on it
+is a per-tick seam. In a session the watch does the game's own arithmetic (the same trace, the body of
+`canBackrooms()`, the capsule's response, the view target); when the game would have fired it refuses the call's answer,
+so neither branch runs, and relocates the player itself: to the newest place the module saw the player standing (on the
+ground, not falling, not ragdolled, not seated, over a floor; kept every 150 cm or 4 s, eight deep), re-validated now with a floor
+under it and head room over it and the body stood on the floor, else to the base landmark the revive and the join already
+use; a place the last rescue sent the player to that trips again within ten seconds, or a fourth rescue in ten seconds,
+goes to the landmark. The player leaves with no velocity (the verb takes it from the transform's scale), the verb's own
+rewrite of `lastLoc`, and the game's 5 s spawn protection. Everything the check saw is logged under `[NOCLIP]`: the
+actor and component the line hit, its end points, the capsule's response, where the player goes and why. The dev menu's
+Movement pane has a button that stands the line through the world so the rescue can be seen without a wall.
+
+A rescue, or a death far under every sampled standing place, opens a three-minute "void window" for
+`coop/items/inventory_death_keep`: the local inventory is sampled every second while the player is alive and standing, and a
+revive inside the window whose inventory collapsed (nothing, or under a quarter of the sample's items) puts the sample
+back once through the game's own restore, which replaces what is held so nothing is added twice. The profile stream to
+the host holds a collapsed inventory back until then. A death outside the window is the game's own, and an inventory the
+player really emptied is streamed like any other.
+
 ### Sleep
 
 The host sleeps with the game's own sleep: its world runs at the game's speed-up and a client sees the
@@ -220,7 +265,7 @@ world lives, so a rejoin gets back what the player left with, and writes the pro
 only with its own world save (`coop/player/player_profile_store`): a pocketed item has left the
 world and entered the profile, so a stored profile newer than the saved world would hold that
 item twice after a host restart, and an older one would lose it. A host that quits without
-saving takes its players' profiles back to its last save together with its world. The copy that
+saving takes its players' profiles back to its last save together with its world. A profile that shrinks from a populated one (a few KB of items) to under a quarter of it is a collapse: it stands as the player's current profile (a player may really drop everything), it is logged as `PROFILE SHRANK` with both sizes, and the last full one is kept beside the profile files at the world save as `<guid>.json.good`, `.good.1` and `.good.2`, three deep, never rotated out by the collapsed one. To put one back, stop the host and copy it over `<guid>.json`. The copy that
 is written is the one taken when the game gathered the world into its save object, which during
 a game event is not the moment of the save (see [join.md](join.md), the save transfer). The
 profiles are keyed by the file the world is in: they stand under `coop_players/<folder>/` for a world's main entry and
@@ -333,6 +378,7 @@ effect (`[MELEE-FX]`). `[?]` until a two-peer run reads those lines.
 | `SleepState` | a client to the host; the host to all | a rest state with its bed (awake, resting, dreaming); the host's sleeping flag; one peer's rest state relayed |
 | `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |
 | `TeleportClient` | host to one peer | a placement; the administration action, not the join |
+| `InventoryRestoreBlob`, `InventoryRestoreAck` | host to one client; that client to the host | a backed-up inventory's bytes, chunked, to put back on that player; the answer with the item counts before and after |
 
 ## Late join
 
@@ -348,6 +394,9 @@ dead peer through the ragdoll bit of its next pose.
 
 | Limit | Evidence |
 |---|---|
+| The anti-noclip rescue, the inventory keep and the profile backups have been built and read against the 0.10.0 bytecode; the in-game run (the dev button, a thrown body, a void death) is pending | `[?]` `coop/player/anti_noclip_rescue`, `coop/items/inventory_death_keep`, `coop/player/player_profile_store` |
+| A void death's restore replaces the inventory with the last one-second sample, so what the player picked up in the last second is lost; an item the death chain dropped into the world as a prop stays there if it did not fall out of it | `[V]` `coop/items/inventory_death_keep` |
+| The live restore of an inventory has been built and read against the bytecode; the in-game run (a client restored from `.good` and from a sidecar, the host restored, a dead player refused) is pending | `[?]` `coop/items/inventory_restore` |
 | No chat line announces a death | `[V]` `coop/comms/chat_sync` carries no such kind |
 | After a revive the player can drift horizontally from the base gate, metres over seconds; the cause is unmeasured | `[V]` `harness/autotest/death_state_probe.cpp` reads the position back |
 | Damage a puppet takes on another machine is dropped by design; only the victim's own contacts count | `[V]` `coop/player/player_damage` |

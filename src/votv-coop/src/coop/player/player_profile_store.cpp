@@ -3,6 +3,8 @@
 #include "coop/player/player_profile_store.h"
 
 #include "coop/atomic_file/atomic_file.h"
+#include "coop/items/inventory_wire.h"  // a blob's item bytes, for the shrink check
+#include "coop/items/player_profile.h"
 #include "coop/mod_data/legacy_note.h"
 #include "coop/net/blob_chunks.h"  // Fnv64, the file's integrity hash
 #include "coop/save/save_transfer.h"  // HostSlot, the world the profiles belong to
@@ -15,6 +17,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
+#include <cwchar>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -38,7 +42,23 @@ struct Held {
     std::vector<uint8_t> atGather;          // valid while `uncut`
     std::string          nickAtGather;
     bool                 uncut = false;     // gathered, not yet on disk
+    // The newest blob that held a real inventory (kPopulatedItemBytes or more of items). A profile
+    // that later collapses is cut to disk as it is, and this copy goes to the rotating backups beside
+    // it, so a wipe -- a death, a rescue gone wrong, a stream of an emptied world -- never takes the
+    // last full inventory with it. Cut with the world save (CutToDisk), like the profile itself.
+    std::vector<uint8_t> lastGood;
+    std::string          goodNick;
+    bool                 goodUncut = false;
 };
+
+// A profile "holds an inventory" from this many bytes of item data. A starting kit is about this, a
+// played inventory is many times it (a 36 KB profile against a 1 KB empty one in the run that
+// motivated this), and an empty inventory is a short header.
+constexpr size_t kPopulatedItemBytes = 4096;
+// A new profile this many times smaller than the populated one it replaces is a shrink.
+constexpr size_t kShrinkFactor = 4;
+// How many past full inventories are kept per player on disk: <guid>.json.good, .good.1, .good.2.
+constexpr int kGoodGenerations = 3;
 std::unordered_map<std::string, Held> g_held;
 std::unordered_set<std::string> g_quarantined;  // stored profile unreadable: never written over
 
@@ -121,10 +141,22 @@ fs::path PlayerFilePathIn(const fs::path& dir, const std::string& guid) {
 fs::path PlayerFilePath(const std::string& guid) { return PlayerFilePathIn(SlotDir(g_setSlot), guid); }
 fs::path PlayerReadPath(const std::string& guid) { return PlayerFilePathIn(ReadDir(g_setSlot), guid); }
 
-// Is this one of the set's files: <32 hex>.json, or the .bak of one?
+// The name a rotating backup of <guid>.json carries: generation 0 is the newest.
+std::wstring GoodSuffix(int generation) {
+    return generation == 0 ? std::wstring(L".good") : L".good." + std::to_wstring(generation);
+}
+
+// Is this one of the set's files: <32 hex>.json, or the .bak or a .good backup of one?
 bool IsProfileFile(const fs::path& file) {
     std::wstring name = file.filename().wstring();
     if (name.size() > 4 && name.compare(name.size() - 4, 4, L".bak") == 0) name.resize(name.size() - 4);
+    for (int g = 0; g < kGoodGenerations; ++g) {
+        const std::wstring suffix = GoodSuffix(g);
+        if (name.size() > suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            name.resize(name.size() - suffix.size());
+            break;
+        }
+    }
     if (name.size() != 32 + 5 || name.compare(32, 5, L".json") != 0) return false;
     std::string guid;
     for (size_t i = 0; i < 32; ++i) {
@@ -236,13 +268,8 @@ bool ReadFile(const std::string& guid, std::vector<uint8_t>& outBlob) {
     return false;
 }
 
-bool WriteFile(const std::string& guid, const std::vector<uint8_t>& blob, const std::string& nickJson) {
-    const fs::path file = PlayerFilePath(guid);
-    if (file.empty()) return false;
-    std::error_code ec;
-    // Keep the last good file as .bak before overwriting.
-    if (fs::exists(file, ec))
-        fs::copy_file(file, fs::path(file).concat(L".bak"), fs::copy_options::overwrite_existing, ec);
+// One profile file at `file`, atomically; no backup of what it replaces (the callers decide).
+bool WriteJson(const fs::path& file, const std::vector<uint8_t>& blob, const std::string& nickJson) {
     const uint64_t fnv = coop::blob_chunks::Fnv64(blob);
     const long long epoch = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
@@ -265,6 +292,40 @@ bool WriteFile(const std::string& guid, const std::vector<uint8_t>& blob, const 
         return false;
     }
     return true;
+}
+
+bool WriteFile(const std::string& guid, const std::vector<uint8_t>& blob, const std::string& nickJson) {
+    const fs::path file = PlayerFilePath(guid);
+    if (file.empty()) return false;
+    std::error_code ec;
+    // Keep the last good file as .bak before overwriting.
+    if (fs::exists(file, ec))
+        fs::copy_file(file, fs::path(file).concat(L".bak"), fs::copy_options::overwrite_existing, ec);
+    return WriteJson(file, blob, nickJson);
+}
+
+// Put `blob` at the head of the player's rotating backups: what stood at .good moves to .good.1, that
+// to .good.2, and the last one goes. A blob the newest backup already is changes nothing, so a cut
+// that finds the same full inventory again does not push the older ones out. The directory is the
+// profile set's (the caller has made it). False leaves the backups as they were.
+bool RotateGood(const std::string& guid, const std::vector<uint8_t>& blob, const std::string& nickJson) {
+    const fs::path base = PlayerFilePath(guid);
+    if (base.empty()) return false;
+    const auto at = [&](int g) { return fs::path(base).concat(GoodSuffix(g)); };
+    std::vector<uint8_t> newest;
+    if (ParseBlobFile(at(0), newest) && newest == blob) return true;
+    std::error_code ec;
+    for (int g = kGoodGenerations - 1; g >= 1; --g) {
+        if (fs::exists(at(g - 1), ec))
+            fs::copy_file(at(g - 1), at(g), fs::copy_options::overwrite_existing, ec);
+    }
+    return WriteJson(at(0), blob, nickJson);
+}
+
+// The bytes of item data in a profile blob; 0 when it does not parse or holds none.
+size_t ItemBytesOf(const std::vector<uint8_t>& blob) {
+    coop::player_profile::Profile p;
+    return coop::inventory_wire::Deserialize(blob, p) && p.hasItems ? p.items.size() : 0;
 }
 
 // A save of this world was written to `written`, which is not where the set stands: a quicksave
@@ -369,6 +430,38 @@ bool FollowWrittenSlot(const std::wstring& written) {
     return true;
 }
 
+// A new profile arrives for `h`. When it holds an inventory it becomes the player's last full one; when it
+// is a collapse of one the player held (a death, a rescue gone wrong, a stream of an emptied world), that
+// is said loudly and the last full inventory is made sure to reach the backups. Nothing is refused: a
+// player who really dropped everything is as entitled to an empty profile as to any other, so the new
+// profile stands, and the old one is kept beside it.
+void NoteShrinkAndGood(const std::string& guid, Held& h, const std::vector<uint8_t>& incoming,
+                       const std::string& nickJson) {
+    const size_t newItems = ItemBytesOf(incoming);
+    std::vector<uint8_t> fromDisk;
+    const std::vector<uint8_t>* prev = h.blob.empty() ? nullptr : &h.blob;
+    if (!prev && ReadFile(guid, fromDisk)) prev = &fromDisk;
+    const size_t prevItems = prev ? ItemBytesOf(*prev) : 0;
+    if (newItems >= kPopulatedItemBytes) {
+        h.lastGood = incoming;
+        h.goodNick = nickJson;
+        h.goodUncut = true;
+        return;
+    }
+    if (prevItems >= kPopulatedItemBytes && newItems * kShrinkFactor < prevItems) {
+        if (h.lastGood.empty()) {  // the populated one came from disk, not from a Put of this session
+            h.lastGood = *prev;
+            h.goodNick = nickJson;
+            h.goodUncut = true;
+        }
+        UE_LOGW("player_profile: PROFILE SHRANK guid=%s (%s) -- %zu bytes of items down to %zu (profile %zu "
+                "-> %zu bytes). The new profile is kept as the player's current one, and their last full "
+                "inventory is kept beside it as '%s.json%ls' in the world's profile set; to put it back, "
+                "stop the host and copy that file over '%s.json'", guid.c_str(), nickJson.c_str(), prevItems,
+                newItems, prev->size(), incoming.size(), guid.c_str(), GoodSuffix(0).c_str(), guid.c_str());
+    }
+}
+
 }  // namespace
 
 // Encoding is the codec's job; escaping is this site's, because the container is JSON. Raw UTF-8
@@ -390,6 +483,7 @@ bool Put(const std::string& guid, std::vector<uint8_t> blob, const std::string& 
     const uint64_t hash = coop::blob_chunks::Fnv64(blob);
     Held& h = g_held[guid];
     if (h.hash == hash && h.blob == blob) return false;
+    NoteShrinkAndGood(guid, h, blob, nickJson);
     h.blob = std::move(blob);
     h.nick = nickJson;
     h.hash = hash;
@@ -446,7 +540,7 @@ size_t ForgetSlot(const std::wstring& slot) {
 bool AnythingPending() {
     DropHeldOfAnotherWorld();
     for (const auto& [guid, h] : g_held)
-        if (h.changed || h.uncut) return true;
+        if (h.changed || h.uncut || h.goodUncut) return true;
     return false;
 }
 
@@ -487,12 +581,140 @@ size_t CutToDisk(const std::wstring& writtenSlot) {
                 ++written;
             }  // else: stays for the next cut
         }
+        if (h.goodUncut && !h.lastGood.empty()) {  // the last full inventory, beside the profile just cut
+            const fs::path dir = SlotDir(g_setSlot);
+            std::error_code ec;
+            if (!dir.empty()) fs::create_directories(dir, ec);
+            if (!dir.empty() && !ec && RotateGood(it->first, h.lastGood, h.goodNick)) {
+                h.goodUncut = false;
+                h.lastGood = {};
+            }  // else: stays for the next cut
+        }
         // What is on disk and unchanged since is the file's to give back (Get reads it), so it
         // need not be held: a host meets new identities for as long as its world lives.
-        if (!h.uncut && !h.changed) it = g_held.erase(it);
+        if (!h.uncut && !h.changed && !h.goodUncut) it = g_held.erase(it);
         else ++it;
     }
     return written;
+}
+
+namespace {
+
+// A relative path a host's admin typed to name a backup: no drive, no root, no `.` or `..` component, no characters a
+// path cannot hold, and a .json file. It is joined under the world's own profile folder and never trusted beyond it.
+bool SafeRelativeSpec(const std::string& spec) {
+    if (spec.empty() || spec.size() > 200) return false;
+    for (unsigned char c : spec)
+        if (c < 0x20 || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') return false;
+    std::wstring wide;
+    if (!coop::text::FromUtf8Strict(spec.data(), spec.size(), &wide)) return false;
+    const fs::path p(wide);
+    if (p.is_absolute() || p.has_root_name() || p.has_root_directory()) return false;
+    for (const fs::path& part : p)
+        if (part.empty() || part == "." || part == "..") return false;
+    std::wstring ext = p.extension().wstring();
+    for (wchar_t& ch : ext)
+        if (ch >= L'A' && ch <= L'Z') ch = static_cast<wchar_t>(ch - L'A' + L'a');
+    return ext == L".json";
+}
+
+// Is `full` under `base`, component for component, once both are normalised?
+bool UnderDir(const fs::path& base, const fs::path& full) {
+    const fs::path b = base.lexically_normal(), f = full.lexically_normal();
+    auto bi = b.begin(), fi = f.begin();
+    for (; bi != b.end(); ++bi, ++fi) {
+        if (bi->empty()) continue;
+        if (fi == f.end() || *bi != *fi) return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+bool ReadBackup(const std::string& guid, const std::string& specIn, std::vector<uint8_t>& blob, std::string& label,
+                std::string& why) {
+    DropHeldOfAnotherWorld();
+    std::string spec = specIn;
+    for (char& c : spec)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    // The directories a backup of this world may stand in: the one the set is cut to, and the world folder's own (the
+    // main entry's), where a hand-made recovery folder sits.
+    std::vector<fs::path> dirs;
+    if (!g_setSlot.empty()) {
+        const fs::path setDir = SlotDir(g_setSlot);
+        if (!setDir.empty()) dirs.push_back(setDir);
+        std::wstring folder, entry;
+        if (ue_wrap::world_folder::SplitKey(g_setSlot, folder, entry)) {
+            const fs::path folderDir = SlotDir(folder);
+            if (!folderDir.empty() && (dirs.empty() || folderDir != dirs.front())) dirs.push_back(folderDir);
+        }
+    }
+    if (dirs.empty()) {
+        why = "the hosted world has no profile folder yet (it has not been saved)";
+        return false;
+    }
+    int generation = -1;
+    if (spec.empty() || spec == "good") generation = 0;
+    else if (spec.rfind("good.", 0) == 0 && spec.size() == 6 && spec[5] >= '1' && spec[5] < '0' + kGoodGenerations)
+        generation = spec[5] - '0';
+    if (generation >= 0) {
+        if (!coop::player_handshake::IsValidGuid(guid)) {
+            why = "that player has no proved id, so no backup of theirs is on file";
+            return false;
+        }
+        if (generation == 0) {   // the newest full inventory not cut to disk yet is newer than any file
+            const auto it = g_held.find(guid);
+            if (it != g_held.end() && !it->second.lastGood.empty()) {
+                blob = it->second.lastGood;
+                label = "the last full profile held in memory";
+                return true;
+            }
+        }
+        for (const fs::path& dir : dirs) {
+            const fs::path file = fs::path(PlayerFilePathIn(dir, guid)).concat(GoodSuffix(generation));
+            if (ParseBlobFile(file, blob)) {
+                label = coop::text::ToUtf8(file.wstring());
+                return true;
+            }
+        }
+        why = "no readable backup '" + (spec.empty() ? std::string("good") : spec) + "' is on file for that player";
+        return false;
+    }
+    if (!SafeRelativeSpec(specIn)) {
+        why = "name a backup as good, good.1, good.2 or a relative path to a .json file in the world's profile folder";
+        return false;
+    }
+    for (const fs::path& dir : dirs) {
+        std::wstring wideSpec;
+        coop::text::FromUtf8Strict(specIn.data(), specIn.size(), &wideSpec);   // SafeRelativeSpec has judged it
+        const fs::path file = (dir / fs::path(wideSpec)).lexically_normal();
+        std::error_code ec;
+        if (!UnderDir(dir, file) || !fs::is_regular_file(file, ec)) continue;
+        if (ParseBlobFile(file, blob)) {
+            label = coop::text::ToUtf8(file.wstring());
+            return true;
+        }
+        why = "'" + specIn + "' is not a readable profile (the magic or the checksum does not match)";
+        return false;
+    }
+    why = "no file '" + specIn + "' is in the world's profile folder";
+    return false;
+}
+
+std::string WriteRollback(const std::string& nickJson, const std::vector<uint8_t>& blob) {
+    const std::wstring base = ue_wrap::paths::ModDataDir();
+    if (base.empty()) return std::string();
+    const fs::path dir = fs::path(base) / L"inventory_rollback";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec) return std::string();
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+    gmtime_s(&utc, &now);
+    wchar_t stamp[48] = {};
+    std::wcsftime(stamp, 48, L"rollback-%Y%m%d-%H%M%S.json", &utc);
+    const fs::path file = dir / stamp;
+    return WriteJson(file, blob, nickJson) ? coop::text::ToUtf8(file.wstring()) : std::string();
 }
 
 }  // namespace coop::player_profile_store

@@ -212,8 +212,9 @@ void RenderWorldRules() { ui::world_rules_panel::Render(); }
 const std::vector<Cat>& Tree() {
     static const std::vector<Cat> kTree = {
         { "Player", {
-            { "Movement", { { &ui::dev_panes::RenderTeleportClients, true }, { &ui::dev_panes::RenderFreecam, true } }, true },
+            { "Movement", { { &ui::dev_panes::RenderTeleportClients, true }, { &ui::dev_panes::RenderForceAntiNoclip, true }, { &ui::dev_panes::RenderFreecam, true } }, true },
             { "Vitals",   { { &ui::dev_panes::RenderRestoreVitals, true } }, true },
+            { "Inventory", { { &ui::dev_panes::RenderRestoreInventory, true } }, true },
             { "HUD",      { { &ui::dev_panes::RenderPosHud, true }, { &ui::dev_panes::RenderObjectOverlay, true }, { &ui::dev_panes::RenderRagdollBones, true } }, true },
         }, true },
         { L10N_MARK("World"), {

@@ -7,6 +7,7 @@
 #include "coop/config/config.h"
 #include "coop/net/session.h"
 #include "coop/player/revive_protection.h"
+#include "coop/items/inventory_death_keep.h"  // a void death keeps the inventory
 #include "coop/session/net_pump.h"
 #include "coop/session/teleport_client.h"
 #include "ue_wrap/actors/vitals.h"
@@ -436,6 +437,7 @@ bool RunRevive(coop::net::Session& session, void* pawn) {
     //    forceGetUp (a latent delay that re-reads dead) and not wakeup (refuses while dead).
     const bool wokeUp = E::ForceMainPlayerWakeup(pawn);
 
+    coop::inventory_death_keep::OnReviveBegin(pawn);  // the death place, before the teleport, tells a void death
     // 4. Reposition to the KPP, not spawnLocation, which is just the transform at level start and
     //    can be kilometres from the corpse after a long session. The same landmark the client
     //    teleport uses on join.
@@ -445,6 +447,7 @@ bool RunRevive(coop::net::Session& session, void* pawn) {
     // 5. Only now the flag. (The menu-prep restore that used to sit here is gone with the writes
     //    it undid: cancelling the loadLevel body means they are never made.)
     const bool deadCleared = ClearDeadFlag(pawn);
+    if (deadCleared) coop::inventory_death_keep::OnReviveEnd(pawn);  // a void death's emptied inventory is put back once
 
     // The conjunction. The position is readable in the same frame as the write: the game's own
     // teleportWObackrooms reads the location back one statement after setting it.
