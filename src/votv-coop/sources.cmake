@@ -460,6 +460,10 @@ set(VOTVCOOP_SOURCES
     src/coop/props/container_truth.cpp
     src/coop/props/container_view_close.cpp
     src/coop/props/container_writer_watch.cpp
+    src/coop/props/storage_wire.cpp
+    src/coop/props/storage_contents.cpp
+    src/coop/props/storage_act_client.cpp
+    src/coop/props/storage_act_host.cpp
     src/ue_wrap/actors/inventory.cpp
     src/ue_wrap/hotbar/icons.cpp
     src/coop/items/hotbar_icon_edge.cpp

@@ -136,71 +136,13 @@ cameras off until the creature mirror stops running the wisp's world writes `[?]
 
 ### What is inside a container
 
-A container's contents are not on the container. Every one of them reads from a single global
-per-peer array, `saveSlot.GObjStack`, addressed by an index the actor holds alongside a cached
-volume. That array reaches a client once, inside the join save-transfer blob, and never again on
-its own, because every verb that mutates it dispatches internally to the Blueprint, where neither
-hook seam can intercept it and only the script-body gate can watch it
-(`docs/coop-dispatch-visibility.md`). Without a lane of its own, a
-drone delivery landed full on the host and empty on the client.
-
-The seam is a gate on the Blueprint body of the add and take verbs, and it only marks the
-container dirty -- it reads no arguments and takes no action, which is what makes it correct for
-every caller. On the host the next sweep publishes the slice. There is no request the host could
-refuse here: the gate fires at the body's entry, on the presser's own machine, and the item has
-moved there before an answer from anywhere else could arrive. So a client's mirror of a shared
-container is display only: its own add or take runs on the mirror, the watch forgets the applied
-hash, and the host's next publication, or the truth it sends a refused ask, puts the mirror back.
-A change a client really makes to a shared container is an act the host judges
-(`coop/props/container_act_*`). One client slice remains, a thrown container's birth: the host
-built its copy empty from the throw, the contents are the thrower's, and that slice is the one a
-host takes. It spends the author's arrival budget (sixteen a second); past it the slice waits in
-the pen. The host refuses every other client slice after its header, never applies or relays it,
-counts it, says it once per container, and answers the author with its own truth: at most one
-per container every two seconds and one per author every half second, so a forged address buys
-no more than the floor. An accepted birth is relayed to every peer except the author -- echoing a
-peer's own state back would revert its newer local value.
-
-Two things can arrive before they can be judged, and neither is refused for it. A slice whose
-container has not spawned on this machine yet waits in a holding pen -- one entry per container,
-replayed until it lands, and dropped after thirty seconds; while a join is streaming in, that
-clock does not run at all, because contents normally arrive ahead of the props they belong to. And
-a thrown container's first contents that arrive faster than their arrival budget allows wait in
-the same pen rather than being turned down, since they are the thrower's only copy. A client's pen is bounded per
-author; the host's own slices are not bounded, the way nothing of the host's is.
-
-A container that is thrown changes hands without either verb: the game rebinds the thrown actor to
-its old slot of the thrower's own array, and the drop intent carries no contents, so the host's copy
-of a client's throw was born empty and every later client slice for it was refused for its base.
-The host's copy of a client's throw is now a transfer in progress: it is not published, to a joiner
-either, until the thrower's slice lands. The thrower ships its slice once the host's echo binds the
-container, and retries while its own slot is not readable yet; every slice of that author for the
-container is the newest version of the transfer, an edit made while the first one waited included,
-and is taken without a base. Whatever the host put in meanwhile is kept beside it, and the merged
-contents go to every peer, the thrower included; if the two do not fit one slice, the thrower's is
-applied alone and the host's records are dropped, with a warning. A birth slice is taken unjudged
-but not unbounded: it spends its author's arrival budget like an edit, and past that budget it is
-held in the pen and replayed rather than refused, since it is the thrower's only copy and is sent
-once. The pen holds eight per author, so a ninth simultaneous held slice evicts that author's oldest, said. Each author
-has at most 64 transfers in flight, its own oldest given up past that. The wait ends after thirty
-seconds or when the thrower leaves. A peer that joins during a transfer gets the container from the
-fan-out that completes it, not from its seed. A container the host throws publishes its contents at the express, since the
-mirrors are born empty, retrying while its slot is not readable.
-
-Applying a slice raw-writes the receiver's own array slot and then re-derives everything a setter
-owns through the game's own verbs -- the volume and mass recalculation and the display-name
-rebuild -- rather than writing those fields directly. The add verb cannot be the apply verb: it
-takes a live actor and serialises it itself, so it cannot ingest a record off the wire. The
-overflow check is not called on apply either: it ejects contents.
-
-Two boundaries, both fail-closed. Personal inventory is not this lane's business even though it
-is backed by the same global array, so a container whose component is flagged as a player's -- or
-whose flag cannot be resolved at all -- is skipped; writing over another peer's slice would wipe
-that player's inventory. And a nested container's own index into that array never travels: it
-names a slot in the sender's array and would resolve to an unrelated container on the receiver. A
-record whose class descends from the container class carries a sentinel there instead -- written
-when a slice is sent and again when one is applied, since enforcing it only on the way out would
-trust every sender to be this build -- and the nested container arrives empty rather than broken.
+On 0.10.0 every storage a player can open -- a container prop, the drone's sack, the delivery drone itself -- keeps its
+rows on its own `inventoryComponent`, and every one of them is the host's: the host publishes the whole set after each
+change and to a joiner, a client's own game may not write one, and a client's take or put is an intent the host judges
+and applies. The lane is described with the props it mostly serves ([props.md](props.md), Containers). The drone is
+addressed as the singleton it is rather than by an element id; its sack drop (`dropSack` moves its rows into the sack's
+storage) and its sale (which empties it) run on the host only and reach every peer as the next publication of the two
+storages `[?]`.
 
 ### Keypads and locks
 

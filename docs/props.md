@@ -313,37 +313,27 @@ callers' bytecode; `[?]` until a two-peer run reads a client's R tap and hold on
 
 ### Containers
 
-A container's contents are not on the container: every container reads them from one global
-per-peer array in the save object, addressed by an index the container holds, and every mutating
-verb runs inside the Blueprint, below the two dispatch seams a hook can intercept. The
-script-body gate does see it -- that is how this lane learns a container changed -- but it runs on
-the presser's own machine, and no local body can wait for an answer from across the network. So
-the host publishes the contents (`coop/props/container_contents_sync`): one slice of its
-array per live container is sent at a joiner's ready edge and on change, and a client's mirror is
-display only. A client's only slice is a thrown container's birth, bounded by its arrival rate;
-the host refuses every other client slice and answers the author with its own truth
-(`coop/props/container_truth`). A change a client makes to a shared container is an act the host
-judges, and an extraction on a client is a container-extract birth through the intent door above. The game arms a
-container's overlap box (the trigger a thrown prop enters to be filed) when a record leaves the container by a player's
-take, through the container's own `dingus`; the host's raw record edit never runs it, so the host calls `dingus` once a
-client's take is final (`container_act_host`) `[?]`. Whether that box is armed is the host's own physical state: every
-slice the host publishes carries it in a flags byte (`coop/props/container_arming`, `container_slice_wire`), a native hook
-on `SetCollisionEnabled` marks the container for publication when the box changes (a host take, a broken container, a
-roomba's own writes included), and a client's mirror takes its box from the byte and cancels its own `dingus` on a shared
-container, so a mirror's trigger is never armed by a client alone `[?]`. A prop a client drives into an armed box is
-judged by the host at the host's own overlap, with no client message: the host's copy is kinematic there, so the box's
-own body would refuse it, and a PRE on `putObjectIn_overlap` judges it instead (the box is armed, a held or claimed
-driver is within reach, no client holds the container, the body's silent gates pass, the prop fits), ends the driver's
-row or drive so the copy simulates, and lets the game's body file it. Every such put is filed, refused with its reason, or
-dropped and counted. A put that cannot be judged yet waits for the edge it needs: a client's hold ending, the prop's id
-binding, or the container changing (the last two for at most 2 s, then it is refused as unread); the host's own put on a
-held container waits too. A prop still in the box by then with no driver is pre-checked the same way and the game's body
-runs on it, since it fires no second overlap, and the game's own body may still refuse it. A refusal stands while the
-same drive does, until the container changes. A client's own copy of the call on a shared mirror is cancelled when it
-comes from the container's own overlap graph. A joiner needs no replay: the put is one host step, so a joiner seeded
-before it receives the prop's destroy and the container's publication, and one seeded after receives the container with
-the record `[?]`. The open and closed state is a keyed-device channel like a
-door's ([devices.md](devices.md)). The single-slot verbs are reverse-engineered and designed and not built.
+On 0.10.0 a container keeps its contents on itself: its `inventoryComponent` (an `inventoryComponent_C`, the grid
+inventory the delivery drone and the ATV carry too) holds a canvas of rows, each a place, a rotation, an amount and the
+item's own save data. Every such world storage is the host's (`coop/props/storage_contents`, engine side
+`ue_wrap/actors/storage_inventory`). A row is carried by the row's own reflected plan (`ue_wrap/actors/inventory_item_codec`):
+every member's value in plan order, names and paths as text, no pointer and no object reference, every length bounded
+before anything is built. The host marks a storage when its game re-derives one (`calculateVolumes`, run after every add,
+remove and split) or moves rows between two (`transferFromInvToInf`), reads the drone once a second besides, and at the
+next drain publishes the whole set under a rising revision to every world-ready peer `[RD]`. A client applies a set newer
+than the last it applied: the rows are decoded into a scratch component first, the screen's canvas showing the storage is
+unbound (it writes its widgets' places back into the rows), the rows are moved in by the component's own
+`transferFromInvToInf`, and the canvas is bound again `[?]`.
+
+On a client a world storage's verbs are refused at their entry (`coop/props/storage_act`): `beginDrag` of a row the
+storage holds becomes a take asked of the host, an `addItemAdvanced` the inventory screen runs into it (a drop at the end
+of a drag) a put, and every other write -- a remove, a stack split or merge, a hand deposit's add, a transfer -- is
+refused, the item staying where it was. The intent names the storage (a prop's eid, or the drone), the row by its
+fingerprint (what the item is, not where it lies), the amount, the revision seen and, for a put, the row. The host judges
+reach, lock, presence or room, applies its half through the storage's verbs (a take's row comes off at the grant and rides
+the reply; a put's goes in), and the client makes its own half in its player inventory and commits. An abort, a hold past
+30 s or the taker's departure puts a take's row back; a put whose commit never comes stays put. A repeated transaction is
+answered, never run twice `[?]`. The open and closed state is a keyed-device channel like a door's ([devices.md](devices.md)).
 
 A container's damage, break and spill are the host's (`coop/props/crate_break`). A supply crate
 (`prop_container_sbox_C`, the `wbox` row: health 200, resistance 1) takes damage through its physics component's
@@ -616,7 +606,7 @@ the player's spawn intents. `[?]` until a two-peer run reads the `[SHRIMP]` line
 | a thrown prop after release | each peer's physics, from the same velocity | no stream in flight |
 | a prop a hook drags, and one still sliding after the hook lets go | the host | a per-tick stream while it moves; the end edge hands the velocity back |
 | a prop's key | the game, once; the host's copy wins on a mirror | never rewritten on the owner |
-| container contents | the host | slices of its object array; an extraction is an intent |
+| a world storage's contents | the host | whole sets by revision; a client's take or put is an intent the host applies |
 | a container's damage, break and spill | the host | a client's swing and contact are intents the host runs; the cues go to every client |
 | a stuck prop, and its unstick | the peer that sticks or frees it; every peer runs the component's own verb | one reliable message |
 | a self-changing prop's progression | the host | park, corrector or anchor, per prop |
@@ -638,7 +628,8 @@ the player's spawn intents. `[?]` until a two-peer run reads the `[SHRIMP]` line
 | `PropDropIntent`, `ReelEjectIntent` | a client to the host | a place, a throw or an unavoidable birth, for the host to author, with the placed root's velocity and the throw sequence |
 | `PropStickState` | the peer that sticks or frees it, to all | frozen or static, the commit pose and the hold the stick ended; or an unstick, with the pose and velocity |
 | `PropSnapPos` | the host to one joiner | a position correction for a save-authoritative prop moved in the join window, with a keyed prop's frozen and sleep; it carries the host's drive context for the prop (claim generation and open), the client drops one older than a drive END still on its copy, and a prop a hand held after its correction went out gets a follow-up after the release `[?]` |
-| `ContainerState`, `ContainerContents` | the presser; the host | open or closed; one slice of the host's object array |
+| `ContainerState`, `ContainerContents` | the presser; the host | open or closed; one page of a world storage's set: its address, revision, row plan and rows |
+| `ContainerActRequest`, `ContainerActReply`, `ContainerActCommit` | a client to the host; the host to that client; the client to the host | a take or put on a world storage (address, fingerprint, amount, revision, the row of a put); the answer, with a granted take's row; the client's half done or aborted |
 | `PropContactIntent` | a client to the host | a contact on a world container by a prop the client throws, or by the container it threw: the ids, the damage, the speed, the point, the impact |
 | `PropImpactFx` | the host to all | a world container's impact, damaged or destroyed cue, with the point |
 | `MeleeFxRequest`, `MeleeFx` | a client to the host; the host to every other client | the sound and particles of a held prop's damaging knock or its break, found by the maker through the prop's own material and named by asset path; a container's sound is not among them ([players.md](players.md)) |
@@ -657,8 +648,8 @@ prop's frozen and sleep converge with its snapshot row and its correction, and a
 a move gets a correction too, so an extinguisher taken off its mount during the window is loose on
 the joiner; a wall-attach component's owner converges its stuck state there through the component's
 own unstick or force-stick, so a sign pried in the window is off its wall. A stuck prop otherwise
-reaches a joiner through the save, which carries the frozen and static state. Container slices are
-sent per live container at the ready edge. A joiner gets no held-prop or driven-prop pose until its
+reaches a joiner through the save, which carries the frozen and static state. Every world storage's set,
+the empty ones too, is sent at the ready edge. A joiner gets no held-prop or driven-prop pose until its
 world is ready, since the release and the end edge that close them are not sent to a world that is
 not ready either: a prop held at the join resolves on the first pose after it, and at the ready edge
 the host re-sends every driven prop's pose, the resting ones included, which the delta gate would
@@ -698,7 +689,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | the stick | `coop/props/prop_stick_sync` |
 | the wall vent the ventCrawler pulls down; the vent census | `coop/props/vent_drive` (the host's feeder), `coop/props/prop_wire_parity` (`ConvergeStaticRelease`), `ue_wrap/actors/vent_crawler`; `coop/props/vent_census`, `ue_wrap/actors/prop` (`ReadPropVisibility`) |
 | a prop under a hook's drive or a broom's push | `coop/props/prop_drive_host` (the host's set and stream), `coop/props/prop_drive_stream` (the receiver), `coop/items/hook_prop_claim` (the hook lane feeding it), `coop/items/hook_constraint` (the tie itself, host-only), `coop/items/broom_push` (the broom's push feeding it) |
-| containers | `coop/props/container_contents_sync`, `coop/items/save_record_wire`, `coop/interactables/interactable_sync` |
+| containers and the drone's storage | `coop/props/storage_contents`, `coop/props/storage_act`, `coop/props/storage_wire`, `ue_wrap/actors/storage_inventory`, `ue_wrap/actors/inventory_item_codec`, `coop/interactables/interactable_sync` |
 | a held prop's knock and break effects | `coop/player/melee_fx_contact`, `coop/player/melee_fx` |
 | a container's damage, break and cues | `coop/props/crate_break`, `coop/props/prop_impact_fx`, `coop/props/prop_damage_gate`, `coop/props/hit_target_prop`, `ue_wrap/actors/physics_impact` |
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |

@@ -26,7 +26,7 @@
 #include "coop/session/grants_sync.h"  // this machine's local dev grants, from the host
 #include "coop/player/stat_orders.h"  // an admin's orders to a player's stats and effects, and their answers
 #include "coop/session/server_settings_sync.h"  // the host's server-scope rows on a client
-#include "coop/props/container_contents_sync.h"  // the container stack slice lane
+#include "coop/props/storage_contents.h"  // a world storage's contents
 #include "coop/props/trash_pile_sync.h"
 #include "coop/interactables/turbine_sync.h"
 #include "coop/interactables/window_stroke_sync.h"
@@ -518,11 +518,8 @@ bool HandleStateEvent(net::Session& session,
         break;
     }
     case net::ReliableKind::ContainerContents: {
-        // A world container's stack slice. The host publishes it; a client authors only a thrown
-        // container's birth slice, which the host applies and relays to the others, the author
-        // excluded, and refuses every other client slice. So the sender-slot rule is asymmetric and
-        // the module owns it: a client accepts slot 0 only, the host accepts a non-zero slot only.
-        // The module also owns the world-versus-personal boundary; see container_contents_sync.h.
+        // A world storage's contents, one page of a set the host publishes. A client accepts slot 0
+        // only; the module owns that rule and the world-versus-personal boundary (storage_contents.h).
         if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
             UE_LOGW("event_feed: ContainerContents payload too short (%zu < %zu)",
                     static_cast<size_t>(msg.payloadLen), sizeof(net::BlobChunkPayload));
@@ -534,7 +531,7 @@ bool HandleStateEvent(net::Session& session,
             (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
                 ? static_cast<uint8_t>(msg.senderPeerSlot)
                 : static_cast<uint8_t>(0xFF);
-        coop::props::container_contents_sync::OnContentsChunk(cc, ccslot);
+        coop::props::storage_contents::OnContentsChunk(cc, ccslot);
         break;
     }
     case net::ReliableKind::EmailDelete: {

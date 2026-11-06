@@ -43,6 +43,8 @@ set(VOTVCOOP_SOURCES_UE_WRAP_1
     src/ue_wrap/engine/save_restore_watch.cpp
     src/ue_wrap/engine/data_table.cpp
     src/ue_wrap/actors/inventory_component.cpp
+    src/ue_wrap/actors/inventory_item_codec.cpp
+    src/ue_wrap/actors/storage_inventory.cpp
     src/ue_wrap/actors/container_box.cpp
     src/ue_wrap/actors/container_inventory.cpp
     src/ue_wrap/actors/prop_processor.cpp

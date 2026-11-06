@@ -48,7 +48,6 @@
 #include "coop/props/join_membership_sweep.h"  // the claim set and the divergence sweep
 #include "coop/props/bracket_position_wait.h"  // the bracket's wait for a position bind: Begin and the drain at Complete
 #include "coop/props/snapshot_census.h"  // the completeness census tail on SnapshotComplete
-#include "coop/props/container_contents_sync.h"  // park ageing anchored to the snapshot bracket
 #include "coop/save/save_transfer.h"
 #include "coop/moderation/seen_players.h"
 #include "coop/dev/restore_vitals.h"
@@ -349,9 +348,6 @@ void Update(net::Session& session, void* localPlayer) {
             coop::join_membership_sweep::BeginClaimTracking();
             // From here to Complete a position match waits for the bracket's end (a re-sent bracket drops the old wait).
             coop::props::bracket_position_wait::BeginBracket();
-            // While the bracket is open, container-contents parks do not age: their PropSpawns are
-            // still in the Default stream behind us.
-            coop::props::container_contents_sync::NoteJoinSnapshotBracket(true);
             // The bracket's apply window opens: the reconcile window is raised or refreshed (see
             // world_load_episode.h).
             coop::world_load_episode::NoteReconcileBegin();
@@ -409,9 +405,6 @@ void Update(net::Session& session, void* localPlayer) {
             // Every spawn that waited for the bracket's end is matched nearest first and bound here: before the
             // parks re-stamp, the lift and the claim sweep, so a twin it adopts is claimed and never revealed late.
             coop::props::bracket_position_wait::DrainAtComplete(localPlayer);
-            // The bracket closed: every PropSpawn it carried was dispatched above. Parks re-stamp,
-            // and their TTL runs from here as a leak guard.
-            coop::props::container_contents_sync::NoteJoinSnapshotBracket(false);
             // The lift: every host spawn in the snapshot has been applied above, so the curtain
             // fades and the confirmed mirrors are revealed now, about 2 s before quiescence. The
             // held tail (save-time-keyed forms whose local twin is still visible) stays hidden

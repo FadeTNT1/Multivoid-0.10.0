@@ -1,82 +1,77 @@
-// coop/dispatch/event_dispatch_container_act.cpp -- a client's act on a world container: ContainerActRequest and
-// ContainerActCommit (client to host, chunked blobs, handed to coop::props::container_act_host) and ContainerActReply
-// (host to client, the answer, handed to coop::props::container_act_request). Each case validates at the trust
-// boundary. The switch below is the family's membership declaration; nothing re-lists it. Family contract per
-// coop/dispatch/event_dispatch.h: returns true iff msg.kind is in this family.
+// coop/dispatch/event_dispatch_container_act.cpp -- a client's transfer with a world storage: ContainerActRequest and
+// ContainerActCommit (client to host) and ContainerActReply (host to client), each a chunked blob handed to
+// coop::props::storage_act. Each case validates at the trust boundary. The switch below is the family's membership
+// declaration; nothing re-lists it. Family contract per coop/dispatch/event_dispatch.h: returns true iff msg.kind is
+// in this family.
 
 #include "event_dispatch.h"  // co-located private header (src tree, not include/)
 
-#include "coop/props/container_act_host.h"     // the host's judge of a request, and the commit that ends a hold
-#include "coop/props/container_act_request.h"  // the client's reply receiver
+#include "coop/props/storage_act.h"  // the client's gates and answer, the host's judge and holds
 
 #include "ue_wrap/core/log.h"
 
 #include <cstring>
 
 namespace coop::event_feed {
+namespace {
+
+// A chunk from a client slot, or false (said once per kind and reason, never per message: a sender cannot make the
+// router's log the cost).
+bool ClientChunk(const net::Session::ReliableMessage& msg, net::BlobChunkPayload& chunk, uint8_t& slot) {
+    if (msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers || msg.payloadLen < sizeof(chunk)) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGW("event_feed: a container act chunk from slot %d (%zu B) dropped -- bad sender or short payload",
+                    msg.senderPeerSlot, static_cast<size_t>(msg.payloadLen));
+        }
+        return false;
+    }
+    std::memcpy(&chunk, msg.payload, sizeof(chunk));
+    slot = static_cast<uint8_t>(msg.senderPeerSlot);
+    return true;
+}
+
+}  // namespace
 
 bool HandleContainerActEvent(net::Session& session,
                              const net::Session::ReliableMessage& msg) {
     switch (msg.kind) {
     case net::ReliableKind::ContainerActRequest: {
-        // CLIENT->HOST: a client asks to take a record out of a world container, or to put one in. A chunked blob the
-        // host's lane assembles, parses and judges (coop::props::container_act_host). Never relayed.
+        // CLIENT->HOST: a client asks to take a row out of a world storage, or to put one in
+        // (coop::props::storage_act). Never relayed.
         if (session.role() != net::Role::Host) {
             UE_LOGW("event_feed: ContainerActRequest received on a client -- dropping");
             break;
         }
-        const uint8_t senderSlot = (msg.senderPeerSlot >= 1 && msg.senderPeerSlot < net::kMaxPeers)
-                                       ? static_cast<uint8_t>(msg.senderPeerSlot)
-                                       : static_cast<uint8_t>(0xFF);
-        // The refusal is the lane's to say, in its tally: a sender cannot make the router's log the cost.
-        if (senderSlot == 0xFF) {
-            coop::props::container_act_host::NoteBadSender();
-            break;
-        }
-        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
-            coop::props::container_act_host::NoteShortPayload(senderSlot);
-            break;
-        }
         net::BlobChunkPayload chunk{};
-        std::memcpy(&chunk, msg.payload, sizeof(chunk));
-        coop::props::container_act_host::OnRequestChunk(chunk, senderSlot);
+        uint8_t slot = 0;
+        if (ClientChunk(msg, chunk, slot)) coop::props::storage_act::OnRequestChunk(chunk, slot);
         break;
     }
     case net::ReliableKind::ContainerActCommit: {
-        // CLIENT->HOST: the client's verb on a granted record ran or did not; the commit ends the host's hold
-        // (coop::props::container_act_host). Never relayed.
+        // CLIENT->HOST: the client's half of a granted act ran or did not; the commit ends the host's hold. Never
+        // relayed.
         if (session.role() != net::Role::Host) {
             UE_LOGW("event_feed: ContainerActCommit received on a client -- dropping");
             break;
         }
-        const uint8_t senderSlot = (msg.senderPeerSlot >= 1 && msg.senderPeerSlot < net::kMaxPeers)
-                                       ? static_cast<uint8_t>(msg.senderPeerSlot)
-                                       : static_cast<uint8_t>(0xFF);
-        if (senderSlot == 0xFF) {
-            coop::props::container_act_host::NoteBadSender();
-            break;
-        }
-        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
-            coop::props::container_act_host::NoteShortPayload(senderSlot);
-            break;
-        }
         net::BlobChunkPayload chunk{};
-        std::memcpy(&chunk, msg.payload, sizeof(chunk));
-        coop::props::container_act_host::OnCommitChunk(chunk, senderSlot);
+        uint8_t slot = 0;
+        if (ClientChunk(msg, chunk, slot)) coop::props::storage_act::OnCommitChunk(chunk, slot);
         break;
     }
     case net::ReliableKind::ContainerActReply: {
-        // HOST->CLIENT: the host's answer to this client's container act: a grant is answered with the commit that
-        // ends the host's hold, a refusal shows a line (coop::props::container_act_request). Never relayed.
+        // HOST->CLIENT: the host's answer to this client's act; a granted take carries the row. Never relayed.
         if (session.role() != net::Role::Client || msg.senderPeerSlot != 0 ||
-            msg.payloadLen < sizeof(net::ContainerActReplyPayload)) {
+            msg.payloadLen < sizeof(net::BlobChunkPayload)) {
             UE_LOGW("event_feed: ContainerActReply dropped (role, sender slot %d or length %zu)", msg.senderPeerSlot,
                     static_cast<size_t>(msg.payloadLen));
             break;
         }
-        net::ContainerActReplyPayload p{};
-        std::memcpy(&p, msg.payload, sizeof(p));
-        coop::props::container_act_request::OnReply(p);
+        net::BlobChunkPayload chunk{};
+        std::memcpy(&chunk, msg.payload, sizeof(chunk));
+        coop::props::storage_act::OnReplyChunk(chunk, 0);
         break;
     }
     default:

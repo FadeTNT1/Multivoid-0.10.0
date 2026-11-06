@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 281;
+inline constexpr uint16_t kProtocolVersion = 282;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -609,11 +609,9 @@ enum class ReliableKind : uint8_t {
     // peer: a denial. Chunked blob, eid-addressed.
     FloppyBoxState = 117,
 
-    // A world container's contents as state, eid-addressed. The host publishes it; a client authors
-    // one kind only, the birth slice of a container it threw, which the host applies and relays to
-    // everyone but the author. Any other client slice is refused and answered with the host's truth.
-    // Chunked blob; personal inventories are skipped. The blob's header is [u8 op][u32 eid][u16 n][u8 flags]: the
-    // flags byte is the host's reading of the container's overlap arming (bit 0 armed; coop/props/container_arming).
+    // HOST->ALL: a world storage's contents (a container prop by eid, or the delivery drone), one page of a set
+    // the host publishes after every change and to a joiner at its world-ready edge; a client applies a set newer
+    // than the last it applied. Chunked blob, coop::props::storage_wire's contents; no client authors one.
     ContainerContents = 118,
 
     // Host to all, the origin included: one chat line with the host-assigned sequence that orders
@@ -1211,20 +1209,21 @@ enum class ReliableKind : uint8_t {
     // CoffeeActionIntentPayload.
     CoffeeActionIntent = 194,
 
-    // CLIENT->HOST: a client asks to take a record out of a world container, or to put one in, before its own verb runs
-    // (coop::props::container_act_host): a chunked blob, coop::props::container_act_wire's request. Never relayed; not
-    // pre-world; rides the Default lane. Late join: a request before the sender's world is ready waits in the host's
-    // queue. Trust: the host re-judges every field (the family, the container, the record's address, the reach); a
-    // put's record is the client's word, bounded at the host's judge.
+    // CLIENT->HOST: a client asks to take a row out of a world storage, or to put one in, instead of its own verb
+    // (coop::props::storage_act): a chunked blob, coop::props::storage_wire's request. Never relayed; not pre-world;
+    // rides the Default lane. Late join: a request before the sender's world is ready is refused. Trust: the host
+    // re-judges every field (the storage, the row's fingerprint, the amount, the reach, the room); a put's row is the
+    // client's word, decoded under the row codec's bounds.
     ContainerActRequest = 207,
 
-    // HOST->CLIENT: the host's answer to one ContainerActRequest: granted (the host holds the record in escrow, or room
-    // in a reservation, for the sender) or refused with a reason. ContainerActReplyPayload. Never relayed; not pre-world.
+    // HOST->CLIENT: the host's answer to one ContainerActRequest: granted (the host has applied its half and holds it
+    // for the sender; a take's row rides the answer) or refused with a ContainerActReason. A chunked blob,
+    // coop::props::storage_wire's reply. Never relayed; not pre-world.
     ContainerActReply = 208,
 
-    // CLIENT->HOST: the client's verb ran (committed) or did not (aborted), closing the host's hold: a chunked blob,
-    // coop::props::container_act_wire's commit. Never relayed; not pre-world; the same lane as the request, so an act's
-    // end cannot overtake its start.
+    // CLIENT->HOST: the client's half ran (committed) or did not (aborted, and the host undoes its own), closing the
+    // host's hold: a chunked blob, coop::props::storage_wire's commit. Never relayed; not pre-world; the same lane as
+    // the request, so an act's end cannot overtake its start.
     ContainerActCommit = 209,
 
     // HOST->ALL: the Stolas church's shared state (outsideChurch_C: broken, angry, striked, harvests), on each

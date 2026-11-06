@@ -865,7 +865,7 @@ msgstr ""
 msgid "Nobody in the registry yet (players are recorded when they join)."
 msgstr ""
 
-#: src/coop/props/container_act_request.cpp
+#: src/coop/props/container_act_request.cpp src/coop/props/storage_act_client.cpp
 msgid "Not enough space."
 msgstr ""
 
@@ -1210,19 +1210,19 @@ msgstr ""
 msgid "Teleport to me"
 msgstr ""
 
-#: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp
+#: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp src/coop/props/storage_act_client.cpp
 msgid "That can't be done right now."
 msgstr ""
 
-#: src/coop/props/container_act_request.cpp
+#: src/coop/props/container_act_request.cpp src/coop/props/storage_act_client.cpp
 msgid "That can't go in there."
 msgstr ""
 
-#: src/coop/props/container_act_request.cpp
+#: src/coop/props/container_act_request.cpp src/coop/props/storage_act_client.cpp
 msgid "That container is locked."
 msgstr ""
 
-#: src/coop/props/container_act_request.cpp
+#: src/coop/props/container_act_request.cpp src/coop/props/storage_act_client.cpp
 msgid "That container is too far away."
 msgstr ""
 
@@ -1230,7 +1230,7 @@ msgstr ""
 msgid "That is being held"
 msgstr ""
 
-#: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp
+#: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp src/coop/props/storage_act_client.cpp
 msgid "That item is gone."
 msgstr ""
 
@@ -1290,7 +1290,7 @@ msgstr ""
 msgid "The host could not accept the connection."
 msgstr ""
 
-#: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp
+#: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp src/coop/props/storage_act_client.cpp
 msgid "The host could not be asked; try again."
 msgstr ""
 
@@ -1508,7 +1508,7 @@ msgstr ""
 msgid "Tidy up multivoid.ini"
 msgstr ""
 
-#: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp
+#: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp src/coop/props/storage_act_client.cpp
 msgid "Too many actions at once, try again."
 msgstr ""
 

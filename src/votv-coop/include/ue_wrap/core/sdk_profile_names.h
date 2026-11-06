@@ -112,6 +112,54 @@ inline constexpr const wchar_t* DriveBoxUpdFn       = L"upd";
 inline constexpr const wchar_t* ContainerInventoryComponentProp = L"inventoryComponent";
 inline constexpr const wchar_t* InventoryComponentOwnerProp     = L"owner";
 
+// 0.10.0's world storage (ue_wrap/actors/storage_inventory): every actor that stores items for anyone
+// -- a prop_container_C and its subclasses (the drone's sack among them), the delivery drone_C, the
+// ATV_C -- carries an inventoryComponent_C named as above. Its canvas array holds struct_inventoryItem
+// rows (position, rotation, amount, compartment and a struct_betterSave `data`), read and written
+// through the struct's own reflection (ue_wrap/actors/inventory_item_codec), and its own verbs add,
+// remove, move and re-derive them. The player's inventoryComponent_player_C is a subclass of it and is
+// never a world storage.
+inline constexpr const wchar_t* InventoryComponentClass        = L"inventoryComponent_C";
+inline constexpr const wchar_t* PlayerInventoryComponentClass  = L"inventoryComponent_player_C";
+inline constexpr const wchar_t* InventorySlotArrayC            = L"SlotArray_C";
+inline constexpr const wchar_t* InventorySlotArrayD            = L"SlotArray_D";
+inline constexpr const wchar_t* InventoryMaxVolumeProp         = L"maxVolume";
+inline constexpr const wchar_t* InventoryTotalVolumeProp       = L"totalVolume";
+inline constexpr const wchar_t* InventoryInfiniteVolumeProp    = L"infiniteVolume";
+inline constexpr const wchar_t* InventoryActiveCanvasProp      = L"activeDisplayCanvas";
+inline constexpr const wchar_t* InventoryAddItemAdvancedFn     = L"addItemAdvanced";
+inline constexpr const wchar_t* InventoryRemoveItemFn          = L"removeInventoryItem";
+inline constexpr const wchar_t* InventoryTransferFn            = L"transferFromInvToInf";
+inline constexpr const wchar_t* InventoryCalculateVolumesFn    = L"calculateVolumes";
+inline constexpr const wchar_t* InventoryAssignCanvasFn        = L"assignCanvas";
+inline constexpr const wchar_t* ContainerLockedProp            = L"locked";
+inline constexpr const wchar_t* DroneClass                     = L"drone_C";
+// struct_inventoryItem's members by their stable prefix (the GUID tail moves with a recook), and the two
+// of its struct_betterSave `data` the storage lane reads.
+inline constexpr const wchar_t* ItemPositionPrefix = L"position_";
+inline constexpr const wchar_t* ItemRotationPrefix = L"rotation_";
+inline constexpr const wchar_t* ItemAmountPrefix   = L"amount_";
+inline constexpr const wchar_t* ItemDataPrefix     = L"data_";
+inline constexpr const wchar_t* BetterSaveNamePrefix  = L"name_";
+inline constexpr const wchar_t* BetterSaveClassPrefix = L"class_";
+// The inventory screen (mainGamemode_C.ui_fli_inventory, a ui_freeLayoutInventory_C): whether it is
+// open and shows a storage, the storage it shows beside the player's, its drag modifiers, the item
+// widget a drag or a double-click names (a uicomp_FLI_item_C, whose ownerComponent and index name the
+// row it draws), and the canvas verb that unbinds a canvas's item widgets, writing their places back
+// into the rows (despawnCanvas), with the component a canvas is bound to.
+inline constexpr const wchar_t* GamemodeInventoryScreenProp   = L"ui_fli_inventory";
+inline constexpr const wchar_t* InventoryScreenClass          = L"ui_freeLayoutInventory_C";
+inline constexpr const wchar_t* ScreenContainerComponentProp  = L"containerInventoryComponent";
+inline constexpr const wchar_t* ScreenActiveProp              = L"inventoryActive";
+inline constexpr const wchar_t* ScreenInContainerProp         = L"isInContainer";
+inline constexpr const wchar_t* ScreenDragRmbProp             = L"dragRMB";
+inline constexpr const wchar_t* ScreenStackCtrlProp           = L"canStack_ctrl";
+inline constexpr const wchar_t* ScreenDoubleClickObjectProp   = L"doubleClickObject";
+inline constexpr const wchar_t* ItemWidgetOwnerComponentProp  = L"ownerComponent";
+inline constexpr const wchar_t* ItemWidgetIndexProp           = L"index";
+inline constexpr const wchar_t* CanvasDespawnFn               = L"despawnCanvas";
+inline constexpr const wchar_t* CanvasConnectedComponentProp  = L"connectedComponent";
+
 // 0.10.0's player inventory (ue_wrap/actors/inventory_component): mainPlayer_C's own
 // inventoryComponent_player, its three item arrays (the carried grid, the hands and hotbar, the
 // equipment slots), the game's own byte codec of a whole object (the native ThingsAndStuffLib's
