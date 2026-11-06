@@ -1,21 +1,15 @@
 // coop/props/storage_act.h -- a client's transfer between its own inventory and a world storage, asked of the host
 // before either side changes.
 //
-// On a client a world storage is the host's: its game may not add, remove, split or merge a row of one. The verbs
-// that would are refused at their entry (the script gate): beginDrag of a row the storage holds becomes a take
-// intent, an addItemAdvanced the inventory screen runs into a storage becomes a put intent, and every other write
-// (removeInventoryItem, transferFromInvToInf, a widget's takeFromStack or addToStack, a hand deposit's add) is
-// refused outright, so the storage holds what the host last published. A set the host publishes is applied under
-// storage_contents' latch, which the gates let through.
-//
-// The intent names the storage by its address, the row by its fingerprint (what the item is, not where it lies),
-// the amount, the revision the client saw and, for a put, the row itself. The host judges it on its own copy -- the
-// sender's world and reach, the lock, the row's presence or the room, the row plan -- and applies it through the
-// storage's own verbs: a take's row comes off at the grant and rides the reply, a put's row goes in at the grant.
-// The client then makes its own half (the row into, or out of, its player inventory) and closes the act with a
-// commit; an abort, a lapse or the sender's departure undoes the host's half. Every change ends in a storage
-// publication to every peer, the asker included. A transaction id the host has answered is answered again, never
-// run twice; two puts both land, and the last row of a stack goes to the first take. Gameplay layer (principle 7).
+// On a client a world storage is the host's, and the verbs that would write one are refused at their entry (the
+// script gate): beginDrag of a stored row becomes a take intent, an addItemAdvanced the inventory screen runs into a
+// storage a put intent, and every other write (removeInventoryItem, transferFromInvToInf, takeFromStack, addToStack,
+// a double-click's use, a hand deposit's add) is refused outright; storage_contents' apply latch is let through.
+// The intent names the storage by its address and the row by its fingerprint, with the amount, the revision seen and,
+// for a put, the row. The host judges it on its own copy (world, reach, lock, presence or room, row plan) and applies
+// its half through the storage's verbs: a take's row comes off at the grant and rides the reply, a put's goes in.
+// The client makes its own half in its player inventory and commits; an abort, a lapse or the sender's departure
+// undoes a take. A transaction the host answered is answered again, never run twice. Gameplay layer (principle 7).
 // Game thread.
 
 #pragma once
