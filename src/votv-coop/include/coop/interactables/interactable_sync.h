@@ -129,6 +129,10 @@ void OnDoorBoxVerb(void* box);
 // container lane sends the `opened` it left when that changed. Game thread.
 void OnContainerVerb(void* swinger);
 
+// Whether the container lane's own apply is running on `swinger` now: its native Close() is cancelled on a copy
+// another peer drives or owns (coop/interactables/toggle_verbs, swinger_hold), but not that one. Game thread.
+bool ApplyingContainer(void* swinger);
+
 // Any peer: an oven's fix() just ran on `oven` (coop/interactables/toggle_verbs); the oven lane
 // sends the `fixed` it left when that changed. Game thread.
 void OnOvenVerb(void* oven);

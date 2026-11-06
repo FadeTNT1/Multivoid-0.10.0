@@ -7,6 +7,7 @@
 
 #include "coop/interactables/interactable_sync.h"
 #include "coop/interactables/interactable_channel.h"  // the generic engine: Adapter and Channel
+#include "coop/interactables/swinger_hold.h"          // who holds and who owns an open lid, and the host's judge
 #include "coop/interactables/swinger_join_pose.h"     // a joiner's open lids at their host's places
 
 #include "ue_wrap/devices/appliance.h"     // the six-class save-actor toggle family
@@ -35,6 +36,9 @@ namespace {
 // lightgroup_verbs). Game-thread serial.
 void* g_applyingDoor = nullptr;
 void* g_applyingGroup = nullptr;
+// The container lane's own apply, while it runs: the lid's native Close() is cancelled on a copy another peer
+// drives or owns (toggle_verbs), except this one.
+void* g_applyingContainer = nullptr;
 
 struct ApplyMark {
     void*& slot;
@@ -114,13 +118,27 @@ const Adapter g_lightGroupAdapter = {
     },
     nullptr,  // no TickApply: runTrigger lands the state in its own body
 };
+bool ContainerSessionIsHost();   // after g_container, below
 const Adapter g_containerAdapter = {
     "container", coop::net::ReliableKind::ContainerState,
     &ue_wrap::swinger::EnsureResolved,
     &ue_wrap::swinger::IsSwinger,
     &ue_wrap::prop::GetKeyString,  // a swinger is an Aprop_C
     &ue_wrap::swinger::TryReadOpen,
-    [](void* a, bool on) -> bool { return on ? ue_wrap::swinger::CallOpen(a, false) : ue_wrap::swinger::CallClose(a); },
+    [](void* a, bool on) -> bool {
+        ApplyMark mark(g_applyingContainer, a);
+        return on ? ue_wrap::swinger::CallOpen(a, false) : ue_wrap::swinger::CallClose(a);
+    },
+    nullptr, nullptr, nullptr, nullptr, nullptr,  // no per-tick apply, own resolve count, probe describe, portable key or settle
+    // The lid's holder and owner ride the payload (coop/interactables/swinger_hold).
+    [](void* a, const std::wstring& key, bool on, coop::net::KeyedTogglePayload& p) {
+        coop::swinger_hold::FillPayload(a, key, on, p);
+    },
+    // The host's own record is the judge's: a client's claim is read by it, not adopted.
+    [](const std::wstring& key, bool on, const coop::net::KeyedTogglePayload& p) {
+        if (ContainerSessionIsHost()) return;
+        coop::swinger_hold::OnStateReceived(key, on, p);
+    },
 };
 // The garage door (Agarage_C), symmetric: no sensor and no autoclose, so a symmetric poll never
 // oscillates. Its identity is the level-export FName, not the save key: a garage that misses
@@ -255,6 +273,10 @@ Channel g_light{g_lightAdapter};
 // Host-authoritative: the client neither polls nor requests on this kind.
 Channel g_lightGroup{g_lightGroupAdapter, Channel::Mode::HostAuth};
 Channel g_container{g_containerAdapter};
+bool ContainerSessionIsHost() {
+    auto* s = g_container.GetSession();
+    return s && s->connected() && s->role() == coop::net::Role::Host;
+}
 Channel g_garage{g_garageAdapter};  // no auto-revert: symmetric
 Channel g_appliance{g_applianceAdapter};  // no auto-revert: symmetric
 Channel g_doorBox{g_doorBoxAdapter};  // no auto-revert: symmetric
@@ -292,7 +314,44 @@ void Install(coop::net::Session* session) {
     IndexChannels();              // build the key->actor index (edges and the probe name by it; receivers resolve by it)
 }
 
+namespace {
+
+// The host's receive of a client's lid edge: judged against the lid's holder and owner before it is applied, and
+// republished (with the owner named) only when accepted; a refusal tells the sender the lid's real state. The host
+// does not relay this kind (coop/net/session_lanes.h). Anything not from a client, or that names no lid, takes the
+// channel's ordinary receive.
+void OnContainerState(const coop::net::KeyedTogglePayload& payload, uint8_t senderPeerSlot) {
+    auto* s = g_container.GetSession();
+    if (!ContainerSessionIsHost() || senderPeerSlot < 1 || senderPeerSlot >= coop::net::kMaxPeers) {
+        g_container.OnReliable(payload, senderPeerSlot);
+        return;
+    }
+    const std::wstring key = coop::net::StringFromWireKey(payload.key);
+    if (key.empty()) { g_container.OnReliable(payload, senderPeerSlot); return; }
+    const bool on = payload.action != 0;
+    void* const lid = ue_wrap::swinger::EnsureResolved() ? g_container.ActorForKey(key) : nullptr;
+    const coop::swinger_hold::Verdict v =
+        coop::swinger_hold::JudgeAtHost(lid, key, on, senderPeerSlot, payload.holder, payload.holdGen, s);
+    if (!v.accept) {
+        bool open = !on;   // the host's copy was not changed, so it reads what the sender had before
+        if (lid) ue_wrap::swinger::TryReadOpen(lid, open);
+        coop::swinger_hold::SendCorrection(s, senderPeerSlot, key, open, v.republishHolder);
+        return;
+    }
+    g_container.OnReliable(payload, senderPeerSlot);
+    coop::net::KeyedTogglePayload out = payload;
+    out.holder = v.republishHolder;
+    out.holdGen = 0;
+    s->SendReliable(coop::net::ReliableKind::ContainerState, &out, sizeof(out), senderPeerSlot);
+}
+
+}  // namespace
+
 void OnReliable(uint8_t kind, const coop::net::KeyedTogglePayload& payload, uint8_t senderPeerSlot) {
+    if (static_cast<coop::net::ReliableKind>(kind) == coop::net::ReliableKind::ContainerState) {
+        OnContainerState(payload, senderPeerSlot);
+        return;
+    }
     if (Channel* ch = ChannelForKind(static_cast<coop::net::ReliableKind>(kind)))
         ch->OnReliable(payload, senderPeerSlot);
 }
@@ -318,7 +377,21 @@ void OnApplianceVerb(void* appliance) { g_appliance.OnLocalEdge(appliance); }
 
 void OnDoorBoxVerb(void* box) { g_doorBox.OnLocalEdge(box); }
 
-void OnContainerVerb(void* swinger) { g_container.OnLocalEdge(swinger); }
+void OnContainerVerb(void* swinger) {
+    if (!swinger || swinger == g_applyingContainer) return;   // the lane's own apply
+    auto* s = g_container.GetSession();
+    if (!s || !s->connected()) return;
+    // A native edge of a lid another peer drives or owns stays local, and on the host a client-authored edge is
+    // judged as a client's is (coop/interactables/swinger_hold). Only a real change is an edge to judge.
+    const std::wstring key = g_container.KeyForActor(swinger);
+    bool on = false;
+    if (!key.empty() && ue_wrap::swinger::TryReadOpen(swinger, on) && g_container.IsDelta(key, on) &&
+        !coop::swinger_hold::MayPublishNative(swinger, key, on, s))
+        return;
+    g_container.OnLocalEdge(swinger);
+}
+
+bool ApplyingContainer(void* swinger) { return swinger && swinger == g_applyingContainer; }
 
 void OnOvenVerb(void* oven) { g_oven.OnLocalEdge(oven); }
 
@@ -374,6 +447,7 @@ void Tick() {
 
 void OnDisconnect() {
     for (Channel* ch : kChannels) ch->OnDisconnect();
+    coop::swinger_hold::OnDisconnect();
     coop::swinger_join_pose::OnDisconnect();
     ue_wrap::door_box::OnDisconnect();  // drop the mid-swing verify entries
 }

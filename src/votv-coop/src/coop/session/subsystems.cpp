@@ -8,6 +8,7 @@
 #include "coop/element/object_scan_hub.h"  // the shared pass over the object index
 #include "coop/world/balance_sync.h"
 #include "coop/interactables/comp_sync.h"
+#include "coop/interactables/swinger_hold.h"
 #include "coop/interactables/console_state_sync.h"
 #include "coop/interactables/desk_cursor_sync.h"
 #include "coop/interactables/desk_input_sync.h"
@@ -405,6 +406,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::drive_payload_sync::OnPeerLeft(static_cast<uint8_t>(slot));  // and its drive rows in assembly, its brought drives
     coop::wisp_grab_hold::OnPeerLeft(static_cast<uint8_t>(slot));  // drop the leaver's grab-window puppet hold
     coop::remote_prop::OnDisconnectForSlot(slot);
+    coop::swinger_hold::OnSlotGone(slot);  // the lids the leaver owned have no owner
     coop::prop_syncer_host::OnSlotLeft(static_cast<uint8_t>(slot));  // the rows the leaver synced end, with no word to it
     coop::element::bind_wait::OnSlotLeft(slot);  // and the messages it sent that wait for a prop to bind
     coop::item_activate::OnDisconnectForSlot(slot);

@@ -88,6 +88,11 @@ struct Adapter {
     // indexed instance when a world's index first settles. It must leave a device that is mid-swing
     // alone, and it moves no device whose body already agrees. True when it moved something. Game thread.
     bool (*Settle)(void* actor, bool on) = nullptr;
+    // Optional: a lane whose payload carries more than the state (the container lane's holder and owner) fills the
+    // extra fields of a payload the channel is about to send, for `actor` in state `on` under `key`. Game thread.
+    void (*FillPayload)(void* actor, const std::wstring& key, bool on, coop::net::KeyedTogglePayload& p) = nullptr;
+    // Optional: hears every state that arrives for this lane, before it is applied or parked. Game thread.
+    void (*OnStateReceived)(const std::wstring& key, bool on, const coop::net::KeyedTogglePayload& p) = nullptr;
 };
 
 // The engine.
@@ -208,6 +213,7 @@ public:
         std::wstring key = StringFromWireKey(p.key);
         if (key.empty()) { UE_LOGW("%s: OnReliable empty key -- dropping", a_.name); return; }
         const bool want = (p.action != 0);
+        if (a_.OnStateReceived) a_.OnStateReceived(key, want, p);
         const bool resolved = a_.EnsureResolved();
         void* actor = resolved ? ResolveFast(key) : nullptr;
         if (actor) { ApplyResolved(actor, key, want, senderSlot); return; }
@@ -228,6 +234,14 @@ public:
         if (ProbeLog())
             UE_LOGI("%s: '%ls' not present yet -- deferring %s (slot %u)",
                     a_.name, key.c_str(), want ? "ON" : "OFF", senderSlot);
+    }
+
+    // Whether `cur` differs from the state the peers last got for `key` (or none was sent yet): the edge a verb
+    // has to report. Game thread.
+    bool IsDelta(const std::wstring& key, bool cur) {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        auto it = lastKnown_.find(key);
+        return it == lastKnown_.end() || it->second != cur;
     }
 
     // The authority's edge: a watched verb just ran on `actor`, so the state it left is read and sent
@@ -305,6 +319,7 @@ public:
             coop::net::KeyedTogglePayload p{};
             WireKeyFromString(d.first, p.key);
             p.action = on ? 1 : 0;
+            if (a_.FillPayload) a_.FillPayload(d.second.actor, d.first, on, p);
             s->SendReliableToSlot(peerSlot, a_.kind, &p, sizeof(p));
             { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[d.first] = on; }
             ++sent;
@@ -693,6 +708,7 @@ private:
         coop::net::KeyedTogglePayload p{};
         WireKeyFromString(key, p.key);
         p.action = cur ? 1 : 0;
+        if (a_.FillPayload) a_.FillPayload(ResolveFast(key), key, cur, p);
         const bool sent = s->SendReliable(a_.kind, &p, sizeof(p));
         if (sent || !s->AnyWorldReadyPeer()) {
             { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[key] = cur; }

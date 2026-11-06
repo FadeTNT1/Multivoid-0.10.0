@@ -7,6 +7,7 @@
 
 #include "coop/dev/swinger_drill.h"     // NotePropUnresolved
 #include "coop/interactables/interactable_sync.h"  // ContainerActor: a dragged swinger's key to its actor
+#include "coop/interactables/swinger_hold.h"         // NoteRemoteDrive: the dragger owns the open lid
 #include "coop/interactables/swinger_join_pose.h"   // Forget: a stream or release supersedes a parked connect pose
 #include "coop/props/active_drive.h"   // the fixed-delay snapshot interp, shared with the trash carry stream
 #include "coop/props/prop_sound.h"
@@ -282,6 +283,10 @@ void ResolveAndStartDrive(int slot, const coop::net::PropPoseSnapshot& pose) {
     g_drives[slot].mesh  = mesh;
     g_drives[slot].lastKey.assign(pose.key.data, pose.key.len);
     g_drives[slot].lastEid = pose.elementId;
+    if (ue_wrap::swinger::IsSwinger(prop)) {
+        const std::wstring laneKey = coop::interactable_sync::ContainerKey(prop);
+        coop::swinger_hold::NoteRemoteDrive(laneKey.empty() ? keyW : laneKey, slot, pose.holdGen);
+    }
     hold.driveGen = pose.holdGen;
     hold.driveKey = pose.key;
     hold.driveEid = pose.elementId;

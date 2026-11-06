@@ -3,6 +3,7 @@
 #include "coop/interactables/toggle_verbs.h"
 
 #include "coop/interactables/interactable_sync.h"
+#include "coop/interactables/swinger_hold.h"  // a lid's native Close on a copy another peer drives or owns
 #include "coop/net/session.h"
 #include "coop/session/net_pump.h"  // IsInAnnouncedWorld: a client's own world load stays local
 
@@ -53,7 +54,25 @@ struct Row {
     bool (*IsInstance)(void* obj);
     void (*Edge)(void* actor);
     bool lockerLane = false;  // a locker's row: a refusal of it is said once, for the locker sync is under test
+    sg::Verdict (*Pre)(const sg::Call&) = nullptr;  // before the body: may cancel it
 };
+std::atomic<coop::net::Session*> g_session{nullptr};
+
+// A lid's own Close() before its body: on a copy another peer's drag drives or parks, or that another peer owns while
+// this player is not holding it, the game's tick would shut and lock a lid that is not this peer's to close (and the
+// edge would then be published over the owner's open). The lane's own apply of a close runs.
+sg::Verdict OnLidClosePre(const sg::Call& call) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || !call.object) return sg::Verdict::Run;
+    if (!ue_wrap::swinger::IsSwinger(call.object)) return sg::Verdict::Run;
+    if (coop::interactable_sync::ApplyingContainer(call.object)) return sg::Verdict::Run;
+    if (s->role() != coop::net::Role::Host && !coop::net_pump::IsInAnnouncedWorld(call.object))
+        return sg::Verdict::Run;   // a client's own world load is the host's save
+    const std::wstring key = coop::interactable_sync::ContainerKey(call.object);
+    if (key.empty() || coop::swinger_hold::MayRunNativeClose(call.object, key)) return sg::Verdict::Run;
+    return sg::Verdict::Cancel;
+}
+
 const Row kRows[] = {
     { &kRowUse, 0x4C535755 /*'LSWU'*/, "a light switch's use", &ue_wrap::lightswitch::IsLightSwitch,
       &coop::interactable_sync::OnLightSwitchVerb },
@@ -75,7 +94,7 @@ const Row kRows[] = {
     { &kRowOpen, 0x53574F50 /*'SWOP'*/, "a lid's open", &ue_wrap::swinger::IsSwinger,
       &coop::interactable_sync::OnContainerVerb },
     { &kRowClose, 0x5357434C /*'SWCL'*/, "a lid's close", &ue_wrap::swinger::IsSwinger,
-      &coop::interactable_sync::OnContainerVerb },
+      &coop::interactable_sync::OnContainerVerb, false, &OnLidClosePre },
     { &kRowFix, 0x4F564658 /*'OVFX'*/, "an oven's repair", &ue_wrap::appliance::IsOven,
       &coop::interactable_sync::OnOvenVerb },
     // The camera lanes are the host's (HostAuth): the host's edge sends, a client's does nothing here.
@@ -90,7 +109,6 @@ const Row kRows[] = {
 };
 constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
 
-std::atomic<coop::net::Session*> g_session{nullptr};
 // Each watch registers once: a refusal (a full gate table) is final, and said once. The set settles
 // once every watch is live, or once no name is left to resolve and the rest are dead for good.
 enum class Reg : uint8_t { Pending, Registered, Refused };
@@ -160,7 +178,7 @@ void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
     for (int i = 0; i < kRowCount; ++i) {
         if (g_reg[i] != Reg::Pending) continue;
-        if (sg::WatchName(*kRows[i].verb, kRows[i].tag, nullptr, &OnVerbPost)) {
+        if (sg::WatchName(*kRows[i].verb, kRows[i].tag, kRows[i].Pre, &OnVerbPost)) {
             g_reg[i] = Reg::Registered;
             continue;
         }

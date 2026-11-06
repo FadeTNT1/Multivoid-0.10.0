@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 278;
+inline constexpr uint16_t kProtocolVersion = 279;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -180,8 +180,9 @@ enum class ReliableKind : uint8_t {
     // lamps it drives are gated by their group root and ride LightGroupState. KeyedTogglePayload.
     LightState = 10,
 
-    // Any peer, relayed by the host: a swinger lid (cabinet, fridge, safe) open or closed, keyed
-    // by the prop's key. KeyedTogglePayload.
+    // Any peer to the host, which judges it and republishes what it accepted: a swinger lid (cabinet, fridge,
+    // safe) open or closed, keyed by the prop's key. A client's close is accepted only from the lid's holder or
+    // owner (coop/interactables/swinger_hold); the host is not a relay for this kind. KeyedTogglePayload.
     ContainerState = 11,
 
     // Host to all: the weather scheduler's state. The client suppresses its own five scheduler
@@ -2073,10 +2074,18 @@ static_assert(sizeof(PropDestroyPayload) <= 256 - 20 - 8,
 
 // The shared payload of every keyed on/off kind: the instance's key and the state after the edge.
 // One generic channel in coop/interactables drives them.
+//
+// ContainerState alone reads the two fields after `action` (every other kind sends them zero and ignores them):
+// `holder` is the slot of the peer the sender names as the lid's holder, plus one (0 = none named), and `holdGen` is
+// that peer's hold generation of it (0 = unknown). A peer sends itself there while its own player drags the lid. The
+// host judges a client's ContainerState by them against its own view of the lid (coop/interactables/swinger_hold)
+// and republishes what it accepted with the lid's owner (the peer that authored its open) named in `holder`.
 struct KeyedTogglePayload {
     WireKey  key;        // 32 -- the instance's Key FName (string)
     uint8_t  action;     // 1  -- 0 = closed/off, 1 = open/on (the state AFTER the edge)
-    uint8_t  _pad[7];    // 7  -- 8-byte alignment / reserved
+    uint8_t  holder;     // 1  -- ContainerState: a peer slot + 1 (0 = none); other kinds: 0
+    uint16_t holdGen;    // 2  -- ContainerState: that peer's hold generation (0 = unknown); other kinds: 0
+    uint8_t  _pad[4];    // 4  -- 8-byte alignment / reserved
 };
 static_assert(sizeof(KeyedTogglePayload) == 40, "KeyedTogglePayload must be 40 bytes");
 static_assert(sizeof(KeyedTogglePayload) <= 256 - 20 - 8,
