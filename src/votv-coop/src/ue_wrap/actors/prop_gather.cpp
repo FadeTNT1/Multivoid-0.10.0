@@ -349,6 +349,15 @@ bool EnsureLib() {
     return false;
 }
 
+// 0.10.0's Get Volume gained two bool inputs, `getVolume` and `getMesh`; its body answers zero unless
+// `getVolume` is set. A build whose signature lacks them answers the volume unconditionally, so a missing
+// parameter is not an error. A parameter that exists but does not take the write is.
+bool SetVolumeFlags(ParamFrame& f) {
+    if (f.ParamOffset(L"getVolume") >= 0 && !f.Set<bool>(L"getVolume", true)) return false;
+    if (f.ParamOffset(L"getMesh") >= 0 && !f.Set<bool>(L"getMesh", false)) return false;
+    return true;
+}
+
 // The volume the game's Get Volume answers for `mesh`, as addObject asks it (the name left None). A prop with no
 // mesh adds none. The function's `valid` out is ignored, as the game ignores it.
 bool VolumeOfMesh(void* prop, void* mesh, float& volume) {
@@ -358,7 +367,8 @@ bool VolumeOfMesh(void* prop, void* mesh, float& volume) {
     ParamFrame f(g_getVolume.Fn());
     float out = 0.f;
     if (!f.valid() || !f.Set<void*>(L"mesh", mesh) || !f.Set<void*>(L"__WorldContext", prop) ||
-        !Call(g_libCdo.Get(), f) || !f.GetRaw(L"volume", &out, static_cast<int32_t>(sizeof out)))
+        !SetVolumeFlags(f) || !Call(g_libCdo.Get(), f) ||
+        !f.GetRaw(L"volume", &out, static_cast<int32_t>(sizeof out)))
         return false;
     volume = out;
     return true;
