@@ -6,6 +6,7 @@
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
+#include "coop/player/sleep_sync.h"
 #include "coop/session/player_handshake.h"
 #include "coop/voice/voice_chat.h"
 #include "coop/config/config.h"
@@ -144,6 +145,7 @@ void Update() {
         pl.x = screen.X;
         pl.y = screen.Y;
         pl.flash = p->IsHurtFlashing();
+        pl.sleeping = coop::sleep_sync::PeerState(slot) != coop::net::SleepPeerState::Awake;
         const float h = std::clamp(p->GetHealth(), 0.f, 1.f);
         pl.healthPct = static_cast<int>(std::lround(h * 100.f));
         // The ledger, not a per-tick fan-out through RemotePlayer. The old path pushed
