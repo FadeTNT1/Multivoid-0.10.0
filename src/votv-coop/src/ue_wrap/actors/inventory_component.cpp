@@ -4,11 +4,14 @@
 
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/facts/function_row.h"
+#include "ue_wrap/engine/engine_widget.h"   // SpawnUObject
+#include "ue_wrap/world/world_singleton.h"
 
 #include <cstring>
 #include <string>
@@ -118,12 +121,11 @@ void* Of(void* player) {
     return (comp && R::IsLive(comp)) ? comp : nullptr;
 }
 
-bool Capture(void* player, std::vector<uint8_t>& out) {
+bool CaptureComponent(void* comp, std::vector<uint8_t>& out) {
     out.clear();
-    void* comp = Of(player);
     LibFn* fn = nullptr;
     void* lib = LibObject();
-    if (!comp || !lib || !ObjectToBytesFn(fn)) return false;
+    if (!comp || !R::IsLive(comp) || !lib || !ObjectToBytesFn(fn)) return false;
     ParamFrame f(fn->fn);
     const bool flag = false;  // the game's own save passes false
     f.SetRaw(fn->params[0].name.c_str(), &comp, 8);
@@ -146,9 +148,14 @@ bool Capture(void* player, std::vector<uint8_t>& out) {
     return true;
 }
 
-bool Restore(void* player, const std::vector<uint8_t>& bytes) {
+bool Capture(void* player, std::vector<uint8_t>& out) {
+    out.clear();
     void* comp = Of(player);
-    if (!comp) return false;
+    return comp && CaptureComponent(comp, out);
+}
+
+bool LoadComponent(void* comp, const std::vector<uint8_t>& bytes) {
+    if (!comp || !R::IsLive(comp)) return false;
     int32_t offs[3];
     for (int i = 0; i < 3; ++i) {
         offs[i] = ArrayOffset(comp, kItemArrays[i]);
@@ -178,6 +185,19 @@ bool Restore(void* player, const std::vector<uint8_t>& bytes) {
     const bool ok = Call(lib, f);
     R::EngineFree(buf);  // a const reference parameter: the native reads it and keeps nothing
     return ok;
+}
+
+bool Restore(void* player, const std::vector<uint8_t>& bytes) {
+    void* comp = Of(player);
+    return comp && LoadComponent(comp, bytes);
+}
+
+void* NewScratchComponent() {
+    void* const cls = ue_wrap::object_index::ClassByName(N::PlayerInventoryComponentClass);
+    void* const outer = ue_wrap::world_singleton::GameInstance();
+    if (!cls || !outer) return nullptr;
+    void* const s = ue_wrap::engine::SpawnUObject(cls, outer);
+    return (s && R::IsLive(s)) ? s : nullptr;
 }
 
 std::wstring HeldItemKey(void* holdingProp) {

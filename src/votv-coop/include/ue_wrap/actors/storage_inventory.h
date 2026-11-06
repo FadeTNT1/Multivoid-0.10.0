@@ -116,4 +116,43 @@ void* DoubleClickComponent(void* screen);
 // The fingerprint and amount of the canvas row at `index`. False when it is empty or unreadable.
 bool RowInfo(void* component, int32_t index, uint64_t& fingerprint, uint8_t& amount);
 
+// ---- a stored player profile's items as storage rows, and back ----
+// A player's profile carries the game's own bytes of their inventoryComponent_player (ue_wrap/actors/
+// inventory_component). The host's sleepers lay those items out in a world storage for others to loot and write what
+// is left back into the profile. Both directions load the bytes into a scratch player component and read or write
+// its arrays through the row codec; no item layout is written by hand.
+
+// The rows of `items`: the carried grid's in `canvasRows` (each at its own place), the hands', hotbar's and
+// equipment slots' in `slotRows` (their places mean nothing on a grid). A slot array whose element is not a canvas
+// row is left out, said once. False when the bytes do not load or a row does not encode.
+bool ProfileRows(const std::vector<uint8_t>& items, std::vector<std::vector<uint8_t>>& canvasRows,
+                 std::vector<std::vector<uint8_t>>& slotRows);
+
+// `baseItems` with only `rows` (Full encodings, a storage's rows) left in it: a slot item still among the rows stays
+// in its slot, with the amount left of it; a slot item no longer there leaves its slot empty; every other row goes
+// on the carried grid at the place it has in the storage. The new component bytes in `out`. False, `out` empty, when
+// the base does not load, a row does not decode or the capture fails.
+struct RebuildCounts {
+    int32_t slotsKept = 0;
+    int32_t slotsEmptied = 0;
+    int32_t carried = 0;
+};
+// `keepSlots` false puts every row on the carried grid and empties every slot. The split is
+// ue_wrap/actors/sleeper_rebuild_plan's, whose invariant (per kind, kept plus carried equals the crate) is checked
+// before anything is written.
+bool RebuildProfileItems(const std::vector<uint8_t>& baseItems, const std::vector<std::vector<uint8_t>>& rows,
+                         bool keepSlots, std::vector<uint8_t>& out, RebuildCounts& counts);
+
+// Whether `items` (a profile's component bytes) hold exactly what `rows` hold: per item kind (fingerprint), the same
+// total amount, across the carried grid and every slot. The host's check of a rebuild before it is kept. `itemCount`
+// receives how many items (rows) the profile holds. False when they differ or a side does not read.
+bool ItemsMatchRows(const std::vector<uint8_t>& items, const std::vector<std::vector<uint8_t>>& rows, size_t* itemCount);
+
+// The component's infiniteVolume bool: a storage that refuses no put for room. False when it does not resolve.
+bool SetInfiniteVolume(void* component, bool on);
+
+// Open the local player's inventory screen onto `containerActor` (a prop_container_C) through the gamemode's own
+// openPropInv, as the drone and the ATV open theirs. False when the gamemode or the verb does not resolve.
+bool OpenScreenOnto(void* containerActor);
+
 }  // namespace ue_wrap::storage_inventory

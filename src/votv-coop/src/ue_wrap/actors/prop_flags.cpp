@@ -4,7 +4,9 @@
 
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflection_props.h"
 #include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -45,6 +47,18 @@ void WriteStatic(void* prop, bool on) {
 void WriteFrozen(void* prop, bool on) {
     if (!prop) return;
     *reinterpret_cast<bool*>(reinterpret_cast<uint8_t*>(prop) + P::off::Aprop_frozen) = on;
+}
+
+bool WriteIgnoreSav(void* prop, bool on) {
+    if (!prop || !R::IsLive(prop)) return false;
+    int32_t off = -1;
+    uint8_t mask = 0;
+    if (!R::FindBoolProperty(R::ClassOf(prop), ue_wrap::profile::name::PropIgnoreSavProp, off, mask) || off < 0 ||
+        mask == 0)
+        return false;
+    uint8_t& byte = *(reinterpret_cast<uint8_t*>(prop) + off);
+    byte = on ? static_cast<uint8_t>(byte | mask) : static_cast<uint8_t>(byte & ~mask);
+    return true;
 }
 
 bool CallAwakeUnfreeze(void* prop) {

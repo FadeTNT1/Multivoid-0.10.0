@@ -168,6 +168,10 @@ bool TeleportTo(void* actor, const FVector& location, const FRotator& rotation);
 // lowest visible point is Origin.Z - BoxExtent.Z). Game thread.
 bool GetActorBounds(void* actor, bool onlyColliding, FVector& outOrigin, FVector& outBoxExtent);
 
+// UKismetSystemLibrary::GetComponentBounds: one component's world-space box (a skeletal mesh's from its physics
+// asset at the current pose). False when it does not resolve or the box is empty. Game thread.
+bool GetComponentBounds(void* component, FVector& outOrigin, FVector& outBoxExtent);
+
 // The sphere a reach is measured to: the centre of the actor's colliding bounds and half their
 // diagonal, or its location with no radius when it has no colliding component. False when neither
 // can be read, never a point at the world origin. Game thread.

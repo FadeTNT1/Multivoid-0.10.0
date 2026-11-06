@@ -2,17 +2,21 @@
 
 #include "ue_wrap/actors/storage_inventory.h"
 
+#include "ue_wrap/actors/inventory_component.h"
 #include "ue_wrap/actors/inventory_item_codec.h"
+#include "ue_wrap/actors/sleeper_rebuild_plan.h"
 #include "ue_wrap/actors/save_record.h"     // ReadArr, AllocZeroed, WriteArrHeader
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflection_props.h"   // ArrayPropertyInner
 #include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/devices/drone.h"
 #include "ue_wrap/engine/engine_widget.h"   // SpawnUObject
 #include "ue_wrap/world/world_singleton.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace ue_wrap::storage_inventory {
@@ -516,6 +520,186 @@ bool RowInfo(void* component, int32_t index, uint64_t& fingerprint, uint8_t& amo
     fingerprint = IC::Fingerprint(row);
     amount = IC::Amount(row);
     return fingerprint != 0;
+}
+
+}  // namespace ue_wrap::storage_inventory
+
+// ---- a stored profile's items as storage rows, and back (the host's sleepers) ----
+
+namespace ue_wrap::storage_inventory {
+namespace {
+
+// The item arrays of a player component that hold canvas rows: the canvas itself, and each slot array whose
+// element is the canvas's own struct at the canvas's stride. A slot array of another shape is left out, said once.
+struct PlayerArrays {
+    int32_t canvas = -1;
+    int32_t slots[4] = {-1, -1, -1, -1};
+};
+
+bool ResolvePlayerArrays(void* comp, PlayerArrays& out) {
+    out = PlayerArrays{};
+    if (!comp || !IC::Ready()) return false;
+    void* const cls = R::ClassOf(comp);
+    R::ArrayInnerInfo canvasInfo;
+    if (!R::ArrayPropertyInner(cls, N::InventoryCarriedArray, canvasInfo) || canvasInfo.elementSize != IC::RowStride())
+        return false;
+    out.canvas = R::FindPropertyOffset(cls, N::InventoryCarriedArray);
+    if (out.canvas < 0) return false;
+    for (size_t i = 0; i < 4; ++i) {
+        R::ArrayInnerInfo info;
+        if (!R::ArrayPropertyInner(cls, kSlotArrays[i], info)) continue;
+        if (info.innerStruct != canvasInfo.innerStruct || info.elementSize != canvasInfo.elementSize) {
+            static bool s_said[4] = {};
+            if (!s_said[i]) {
+                s_said[i] = true;
+                UE_LOGW("storage_inventory: %ls holds %ls elements of %d B, not canvas rows -- its items stay where "
+                        "they are", kSlotArrays[i], info.innerType.c_str(), info.elementSize);
+            }
+            continue;
+        }
+        out.slots[i] = R::FindPropertyOffset(cls, kSlotArrays[i]);
+    }
+    return true;
+}
+
+bool EncodeArray(void* comp, int32_t off, std::vector<std::vector<uint8_t>>& out) {
+    if (off < 0) return true;
+    const SR::Arr a = SR::ReadArr(comp, off);
+    const int32_t stride = IC::RowStride();
+    for (int32_t i = 0; i < a.num; ++i) {
+        const uint8_t* const row = a.data + static_cast<size_t>(i) * static_cast<size_t>(stride);
+        if (IC::IsEmpty(row)) continue;
+        std::vector<uint8_t> b;
+        if (!IC::Encode(row, b)) return false;
+        out.push_back(std::move(b));
+    }
+    return true;
+}
+
+}  // namespace
+
+bool ProfileRows(const std::vector<uint8_t>& items, std::vector<std::vector<uint8_t>>& canvasRows,
+                 std::vector<std::vector<uint8_t>>& slotRows) {
+    canvasRows.clear();
+    slotRows.clear();
+    void* const scratch = ue_wrap::inventory_component::NewScratchComponent();
+    PlayerArrays arr;
+    if (!scratch || !ue_wrap::inventory_component::LoadComponent(scratch, items) || !ResolvePlayerArrays(scratch, arr))
+        return false;
+    if (!EncodeArray(scratch, arr.canvas, canvasRows)) return false;
+    for (const int32_t off : arr.slots)
+        if (!EncodeArray(scratch, off, slotRows)) return false;
+    return true;
+}
+
+bool RebuildProfileItems(const std::vector<uint8_t>& baseItems, const std::vector<std::vector<uint8_t>>& rows,
+                         bool keepSlots, std::vector<uint8_t>& out, RebuildCounts& counts) {
+    namespace RP = ue_wrap::sleeper_rebuild;
+    out.clear();
+    counts = RebuildCounts{};
+    void* const scratch = ue_wrap::inventory_component::NewScratchComponent();
+    PlayerArrays arr;
+    if (!scratch || !ue_wrap::inventory_component::LoadComponent(scratch, baseItems) ||
+        !ResolvePlayerArrays(scratch, arr))
+        return false;
+    const int32_t stride = IC::RowStride();
+    std::vector<RP::Item> crate;
+    crate.reserve(rows.size());
+    for (const auto& r : rows) {
+        std::wstring name;
+        RP::Item it;
+        if (!PeekRow(r, name, it.amount, it.fingerprint) || it.fingerprint == 0 || it.amount == 0) return false;
+        crate.push_back(it);
+    }
+    // The base's worn and held items, in array order, and where each one lies.
+    std::vector<RP::Item> slots;
+    std::vector<uint8_t*> slotRows;
+    for (const int32_t off : arr.slots) {
+        if (off < 0) continue;
+        const SR::Arr a = SR::ReadArr(scratch, off);
+        for (int32_t i = 0; i < a.num; ++i) {
+            uint8_t* const row = const_cast<uint8_t*>(a.data) + static_cast<size_t>(i) * static_cast<size_t>(stride);
+            if (IC::IsEmpty(row)) continue;
+            slots.push_back(RP::Item{IC::Fingerprint(row), IC::Amount(row)});
+            slotRows.push_back(row);
+        }
+    }
+    const RP::Plan plan = RP::Make(slots, crate, keepSlots);
+    if (!RP::Conserves(slots, crate, plan)) return false;
+    // A worn or held item still in the crate stays in its slot with what the crate has of it; one that was taken
+    // leaves its slot empty (a zeroed element is the cleared row removeInventoryItem leaves).
+    for (size_t i = 0; i < slots.size(); ++i) {
+        if (plan.slotKeep[i] == 0) {
+            std::memset(slotRows[i], 0, static_cast<size_t>(stride));
+            ++counts.slotsEmptied;
+        } else {
+            IC::SetAmount(slotRows[i], plan.slotKeep[i]);
+            ++counts.slotsKept;
+        }
+    }
+    // Everything else lies on the carried grid, at the place it has in the crate.
+    size_t n = 0;
+    for (const uint8_t c : plan.carried) n += c > 0 ? 1 : 0;
+    void* buf = nullptr;
+    if (n > 0) {
+        buf = SR::AllocZeroed(n, static_cast<size_t>(stride));
+        if (!buf) return false;
+    }
+    size_t k = 0;
+    for (size_t r = 0; r < rows.size(); ++r) {
+        if (plan.carried[r] == 0) continue;
+        uint8_t* const row = static_cast<uint8_t*>(buf) + k * static_cast<size_t>(stride);
+        size_t o = 0;
+        if (!IC::Decode(rows[r], o, row) || o != rows[r].size() || IC::IsEmpty(row)) return false;
+        IC::SetAmount(row, plan.carried[r]);
+        ++k;
+    }
+    // The canvas the base load built is orphaned, as Restore orphans what it empties: a bounded few kilobytes.
+    SR::WriteArrHeader(scratch, arr.canvas, buf, static_cast<int32_t>(n));
+    counts.carried = static_cast<int32_t>(n);
+    return ue_wrap::inventory_component::CaptureComponent(scratch, out);
+}
+
+bool ItemsMatchRows(const std::vector<uint8_t>& items, const std::vector<std::vector<uint8_t>>& rows, size_t* itemCount) {
+    std::vector<std::vector<uint8_t>> canvas, slots;
+    if (!ProfileRows(items, canvas, slots)) return false;
+    if (itemCount) *itemCount = canvas.size() + slots.size();
+    std::vector<std::pair<uint64_t, long>> sum;
+    auto add = [&sum](uint64_t fp, long v) {
+        for (auto& e : sum)
+            if (e.first == fp) { e.second += v; return; }
+        sum.emplace_back(fp, v);
+    };
+    auto tally = [&add](const std::vector<std::vector<uint8_t>>& set, long sign) {
+        for (const auto& r : set) {
+            std::wstring name;
+            uint8_t amount = 0;
+            uint64_t fp = 0;
+            if (!PeekRow(r, name, amount, fp)) return false;
+            add(fp, sign * static_cast<long>(amount));
+        }
+        return true;
+    };
+    if (!tally(canvas, 1) || !tally(slots, 1) || !tally(rows, -1)) return false;
+    for (const auto& e : sum)
+        if (e.second != 0) return false;
+    return true;
+}
+
+bool SetInfiniteVolume(void* component, bool on) {
+    static BoolField sInfinite{N::InventoryInfiniteVolumeProp};
+    return component && R::IsLive(component) && sInfinite.Write(component, on);
+}
+
+bool OpenScreenOnto(void* containerActor) {
+    void* const gm = ue_wrap::world_singleton::Gamemode();
+    if (!gm || !containerActor || !R::IsLive(containerActor)) return false;
+    void* const fn = R::FindDispatchFunctionCached(R::ClassOf(gm), N::GamemodeOpenPropInvFn);
+    if (!fn) return false;
+    ParamFrame f(fn);
+    if (!f.valid()) return false;
+    f.Set<void*>(N::GamemodeOpenPropInvParam, containerActor);
+    return Call(gm, f);
 }
 
 }  // namespace ue_wrap::storage_inventory
