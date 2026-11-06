@@ -1370,6 +1370,9 @@ msgstr "[[You can play anyway. This message will not show again for this game ve
 msgid "You can't do that with this item."
 msgstr "[[You can't do that with this item.]]"
 
+msgid "You can't pick that up right now."
+msgstr "[[You can't pick that up right now.]]"
+
 msgid "You can't see that from there"
 msgstr "[[You can't see that from there]]"
 

@@ -44,8 +44,6 @@ H::ActTraits Fitting() {
     t.simulating = true;
     t.canCollect = true;
     t.canHold = true;
-    t.meshRoot = true;
-    t.volumeFits = true;
     t.saveClass = true;
     t.equipRow = true;
     t.offered = true;
@@ -62,17 +60,14 @@ struct Term {
 const Term kPocketTerms[] = {
     {"pocket: an unread fact refuses", [](H::ActTraits& t) { t.read = false; }, Tally::FitUnread},
     {"pocket: a refused collect refuses", [](H::ActTraits& t) { t.collectRefused = true; }, Tally::FitCollectRefused},
+    {"pocket: a prop that ignores the save refuses", [](H::ActTraits& t) { t.ignoreSave = true; },
+     Tally::FitIgnoreSave},
     {"pocket: a child actor refuses", [](H::ActTraits& t) { t.child = true; }, Tally::FitChild},
-    {"pocket: neither frozen, simulating nor driven refuses", [](H::ActTraits& t) { t.simulating = false; },
-     Tally::FitPhysics},
-    {"pocket: a prop the data row does not collect refuses", [](H::ActTraits& t) { t.canCollect = false; },
-     Tally::FitCanCollect},
-    {"pocket: a heavy prop refuses", [](H::ActTraits& t) { t.heavy = true; }, Tally::FitHeavy},
-    {"pocket: a root that is not a static mesh refuses", [](H::ActTraits& t) { t.meshRoot = false; },
-     Tally::FitMeshRoot},
-    {"pocket: a volume past the bound refuses", [](H::ActTraits& t) { t.volumeFits = false; }, Tally::FitVolume},
-    {"pocket: a class that saves nothing refuses", [](H::ActTraits& t) { t.saveClass = false; },
-     Tally::FitSaveClass},
+    {"pocket: a prop attached to an actor refuses", [](H::ActTraits& t) { t.attached = true; }, Tally::FitAttached},
+    {"pocket: a refused collect on a heavy row is named heavy",
+     [](H::ActTraits& t) { t.collectRefused = true; t.heavy = true; }, Tally::FitHeavy},
+    {"pocket: a refused collect on a row that cannot be collected is named so",
+     [](H::ActTraits& t) { t.collectRefused = true; t.canCollect = false; }, Tally::FitCanCollect},
 };
 
 const Term kHoldTerms[] = {
@@ -225,13 +220,14 @@ void RunSelftest() {
         t.simulating = false;
         check(H::HoldFits(t), "fits: a frozen heavy hold that the row does not hold still fits");
         check(!H::FirstRefusal(kHold, t), "refusal: a frozen hold names no term");
-        // A frozen prop is pocketed, but never a heavy one.
+        // The pocket's judge has no physics term: only the game's own refusal (which a frozen or heavy prop trips, read
+        // from the prop's own canBeCollectedOrPickedUp) refuses.
         H::ActTraits p = Fitting();
         p.frozen = true;
         p.simulating = false;
-        check(H::PocketFits(p), "fits: a frozen pocket fits");
-        p.heavy = true;
-        check(!H::PocketFits(p), "fits: a frozen heavy pocket does not fit");
+        check(H::PocketFits(p), "fits: a prop with no physics pockets when the game's predicate allows it");
+        p.collectRefused = true;
+        check(!H::PocketFits(p), "fits: a frozen prop the game's predicate refuses does not pocket");
     }
     {
         // The frozen skip leaves the other terms in force: the game's frozen branch jumps to the ignoreSave test.
@@ -248,13 +244,24 @@ void RunSelftest() {
         p.child = true;
         check(!H::PocketFits(p), "fits: a frozen child actor does not pocket");
         check(H::FirstRefusal(kPocket, p) == Tally::FitChild, "refusal: a frozen child pocket is named child");
+        // The game's order: ignoreSave, then a child actor, then an attach parent, then the prop's own answer.
+        p = Fitting();
+        p.ignoreSave = true;
+        p.child = true;
+        p.attached = true;
+        p.collectRefused = true;
+        check(H::FirstRefusal(kPocket, p) == Tally::FitIgnoreSave, "refusal: ignoreSave is named first");
+        p.ignoreSave = false;
+        check(H::FirstRefusal(kPocket, p) == Tally::FitChild, "refusal: a child actor is named before an attach");
+        p.child = false;
+        check(H::FirstRefusal(kPocket, p) == Tally::FitAttached, "refusal: an attach parent is named before the answer");
     }
     {
         // A prop a peer drags has its host copy parked with physics off: it fits by the drive.
         H::ActTraits p = Fitting();
         p.simulating = false;
         p.driven = true;
-        check(H::PocketFits(p), "fits: a pocket fits only by a peer's drive");
+        check(H::PocketFits(p), "fits: a pocket with no physics fits (no physics term)");
         check(H::HoldFits(p), "fits: a hold fits only by a peer's drive");
     }
     {
@@ -268,18 +275,15 @@ void RunSelftest() {
     {
         H::ActTraits t = Fitting();
         t.heavy = true;
-        check(H::FirstRefusal(kPocket, t) == Tally::FitHeavy, "refusal: a heavy pocket is named heavy");
-        t = Fitting();
-        t.simulating = false;
-        check(H::FirstRefusal(kPocket, t) == Tally::FitPhysics, "refusal: a pocket with no physics is named so");
+        check(H::PocketFits(t), "fits: a row flag alone does not refuse a pocket the game's predicate allows");
         t = Fitting();
         t.read = false;
-        t.heavy = true;
+        t.collectRefused = true;
         check(H::FirstRefusal(kPocket, t) == Tally::FitUnread, "refusal: an unread fact is named before any term");
         t = Fitting();
         t.collectRefused = true;
-        t.heavy = true;
-        check(H::FirstRefusal(kPocket, t) == Tally::FitCollectRefused, "refusal: the first term in order is named");
+        check(H::FirstRefusal(kPocket, t) == Tally::FitCollectRefused,
+              "refusal: a refused collect with no row flag is named so");
     }
     check(!H::KnownFamily(0), "family: 0 is not a verb");
     check(H::KnownFamily(1) && H::KnownFamily(2) && H::KnownFamily(3), "family: 1..3 are verbs");

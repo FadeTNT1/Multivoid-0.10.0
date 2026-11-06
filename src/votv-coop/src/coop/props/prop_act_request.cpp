@@ -24,6 +24,7 @@
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/reflection_props.h"
 #include "ue_wrap/core/script_gate.h"
+#include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/engine/hit_result.h"
 #include "ue_wrap/facts/function_row.h"
@@ -94,7 +95,7 @@ uint32_t g_hostCancels = 0;                // the host's own calls cancelled for
 
 // A line is shown at most once per kind per window (D1's shape, remover_request.cpp).
 enum Line : size_t { kLineGone, kLineWrongFamily, kLineHeld, kLineReach, kLineQueueFull, kLineBadReason,
-                     kLineNotAsked, kLineNotReady, kLineBusy, kLineCount };
+                     kLineNotAsked, kLineNotReady, kLineBusy, kLineReplayFailed, kLineCount };
 constexpr uint64_t kShowEveryMs = 5000;
 uint64_t g_shownAt[kLineCount] = {};
 bool g_shown[kLineCount] = {};
@@ -133,6 +134,9 @@ void ShowBadReason() { Show(kLineBadReason, l10n::T("That can't be done right no
 void ShowNotAsked() { Show(kLineNotAsked, l10n::T("The host could not be asked; try again.")); }
 void ShowNotReady() { Show(kLineNotReady, l10n::T("Not ready yet, try again in a moment.")); }
 void ShowBusy() { Show(kLineBusy, l10n::T("Another player is using that item.")); }
+// The granted take ran on this client and the game refused it (no room, a refusal of its own). The native caller that
+// would have hinted "Cannot collect" was answered success while the host was asked, so the refusal is said here.
+void ShowReplayFailed() { Show(kLineReplayFailed, l10n::T("You can't pick that up right now.")); }
 
 // ---- the record -----------------------------------------------------------------------------------------------
 
@@ -229,6 +233,7 @@ void Replay() {
         coop::remote_prop::UnregisterPropMirror(g_rec.eid);
     } else {
         if (!ran) UE_LOGW("prop_act: the replay of row %u could not run -- aborted", static_cast<unsigned>(g_rec.row));
+        else if (g_rec.row == kPocket || g_rec.row == kHold) ShowReplayFailed();
         SendCommit(0);
     }
     Close();
@@ -403,11 +408,34 @@ sg::Verdict RunUnreadable(const ue_wrap::facts::Function& row, bool& said) {
     return sg::Verdict::Run;
 }
 
+// Answers the cancelled take as a success in the caller's storage. A cancelled body leaves its out parameters as the
+// caller initialised them (false), and the callers of addObjectToInventory -- the R release, the hold timer -- take that
+// for a refusal and show the game's own "Cannot collect" hint at once, before the host has said anything and again on
+// every repeat of a held key. The take is in flight, not refused: a real refusal reaches the player as the host's reason
+// line, or as the replay's own refusal (ShowReplayFailed), so the caller's hint is the one thing silenced. False when the
+// frame carries no `success` storage (the caller's hint then shows as it would without the lane).
+bool AnswerTakeInFlight(const sg::Call& c) {
+    static R::ParamOffset sSuccess{ue_wrap::profile::name::AddObjectToInventorySuccessParam};
+    static bool sSaid = false;
+    const int32_t off = sSuccess.Of(c.function);
+    uint8_t* const success = off >= 0 ? sg::OutParamPtr(c, off) : nullptr;
+    if (!success) {
+        if (!sSaid) {
+            sSaid = true;
+            UE_LOGW("prop_act: addObjectToInventory's success storage is not in the frame -- the caller's \"Cannot "
+                    "collect\" hint will show while a take is pending");
+        }
+        return false;
+    }
+    *success = 1;
+    return true;
+}
+
 // A take by the player's own hands or pocket: a puppet's body, a robot served for a client, runs untouched.
 sg::Verdict PrePocket(const sg::Call& c) {
     coop::net::Session* const s = LinkedSession();
     if (!s || !coop::players::Registry::Get().IsLocal(c.object)) return sg::Verdict::Run;
-    static R::ParamOffset sTarget{L"object"};
+    static R::ParamOffset sTarget{ue_wrap::profile::name::AddObjectToInventoryObjectParam};
     static bool sSaid = false;
     void* target = nullptr;
     const bool readable = ReadParam(sTarget, c, target);
@@ -420,7 +448,10 @@ sg::Verdict PrePocket(const sg::Call& c) {
     p.eid = eid;
     p.row = kPocket;
     p.target.Set(target);
-    Ask(p, PropActFamily::Pocket);
+    // A press while a request is pending is the same take repeated (a held key): cancelled with nothing sent, and
+    // answered like the first so the caller does not hint it either.
+    const bool repeat = g_rec.open;
+    if (Ask(p, PropActFamily::Pocket) || repeat) AnswerTakeInFlight(c);
     return sg::Verdict::Cancel;
 }
 

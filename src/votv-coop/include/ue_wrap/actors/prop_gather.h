@@ -16,14 +16,19 @@ struct PropDataFlags {
     bool canCollect, canHold, heavy;
 };
 
-// What putObjectInventory2 and addObject test. collectRefused is the BP function canBeCollected answering
-// true (a refusal); volumeFits is the prop's volume within the largest container a player can reach.
+// What the game's take of a prop into an inventory tests (0.10.0: mainPlayer_C::addObjectToInventory, which asks the
+// inventory's addItemAsObject): the prop's ignoreSave, a child actor, an attach parent that is valid, and the prop's own
+// canBeCollectedOrPickedUp answering true (collectRefused: heavy, static, frozen, a row that cannot be collected or held,
+// or that ignores interactions). The taker's own room (volume against its maxVolume) is not read: it is the replaying
+// client's. frozen and simulating are read for the diagnostics; canCollect and heavy only when collectRefused is true,
+// to name the row flag that did it (canCollect reads true otherwise).
 struct PocketFacts {
-    bool collectRefused, child, frozen, simulating, canCollect, heavy, meshRoot, volumeFits, saveClass;
+    bool collectRefused, ignoreSave, child, attached, frozen, simulating, canCollect, heavy;
 };
 
-// What Hold Object and updateHold test. pickupRefused is canBePickedUp answering true, ignoreSave is the BP
-// function of that name; equipRow is a row by the prop's name in list_weapons or list_props.
+// What the hold route tests (Hold Object and updateHold, and the hotbar's add-to-free-slot). pickupRefused is the same
+// canBeCollectedOrPickedUp answering true, ignoreSave is the BP function of that name; equipRow is a row by the prop's
+// name in list_weapons or list_props.
 struct HoldFacts {
     bool pickupRefused, ignoreSave, child, frozen, simulating, canHold, heavy, saveClass, equipRow;
 };
@@ -40,7 +45,7 @@ bool ReadHoldFacts(void* prop, HoldFacts& out);
 bool IsGatherable(void* prop);
 
 // The prop's volume (the game's Get Volume on its mesh; zero when it has none) and the largest volume a
-// container a player can reach holds: the two numbers ReadPocketFacts compares.
+// container a player can reach holds. No longer read by ReadPocketFacts (0.10.0's inventory judges volume per taker).
 bool ReadVolumeAndBound(void* prop, float& volume, float& bound);
 
 // The list_props row of a prop NAME (any case), the row the game's own init() resets a frozen prop from. False when

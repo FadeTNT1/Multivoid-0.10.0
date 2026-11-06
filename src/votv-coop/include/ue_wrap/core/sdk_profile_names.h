@@ -123,6 +123,19 @@ inline constexpr const wchar_t* MainPlayerUpdateEquipmentFn  = L"updateEquipment
 inline constexpr const wchar_t* PropItemKeyProp              = L"name";
 inline constexpr const wchar_t* CreateSaveGameObjectFn       = L"CreateSaveGameObject";
 
+// 0.10.0's one take predicate on a prop (the player-interface function the inventory's addItemAsObject and the hotbar
+// route ask, with its `ignore` out param true = refused): heavy, static, frozen, a row that cannot be collected or held,
+// or one that ignores interactions. It replaced prop_C's canBeCollected and canBePickedUp, which 0.10.0 no longer has.
+// ignoreSave is int_save's answer, asked beside it (out param `ignoreSave`). The functions' own names are the literals
+// of the prop_gather fact rows, which the fact-row gate reads from the source.
+inline constexpr const wchar_t* PropRefusedOutParam             = L"ignore";
+inline constexpr const wchar_t* PropIgnoreSaveOutParam          = L"ignoreSave";
+
+// mainPlayer_C::addObjectToInventory(object, out success): the one take of a prop into an inventory in 0.10.0. Its
+// callers (the R release, the hold timer) show the "Cannot collect" hint themselves when `success` stays false.
+inline constexpr const wchar_t* AddObjectToInventoryObjectParam  = L"object";
+inline constexpr const wchar_t* AddObjectToInventorySuccessParam = L"success";
+
 // The static mesh prop_C::init sets when its props-table row gives no mesh (and no meshOverride).
 inline constexpr const wchar_t* PropErrorMesh = L"00000000error";
 
