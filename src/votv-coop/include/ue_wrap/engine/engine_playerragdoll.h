@@ -29,6 +29,12 @@ bool ReadLocalRagdollPelvisPhysics(void* mainPlayer, FVector& outLoc, FRotator& 
 // tracks the sender's flop. Game thread.
 void DriveRagdollBodyPelvisVelocity(void* body, const FVector& linVel, const FVector& angVel);
 
+// True when the body's mesh reports it is simulating physics. When it does not, the sim start
+// (collision + SetAllBodiesSimulatePhysics + SetSimulatePhysics) is issued again and `*rearmed`
+// is set; the return is the state BEFORE the re-arm. A body left frozen at its spawn transform
+// stands upright and rigid, so the spawn and a per-tick watchdog both use this. Game thread.
+bool EnsureRagdollBodySimulating(void* body, bool* rearmed);
+
 // A ragdoll actor's simulating SkeletalMesh; null if dead. Game thread.
 void* GetRagdollBodyMesh(void* ragdollActor);
 
