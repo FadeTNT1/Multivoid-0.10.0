@@ -47,6 +47,7 @@ set(VOTVCOOP_SOURCES
     src/coop/props/remote_prop_destroy.cpp
     src/coop/save/save_guard.cpp
     src/coop/world/balance_sync.cpp
+    src/coop/world/achievement_sync.cpp
     src/coop/world/daily_task_sync.cpp
     src/coop/save/save_block.cpp
     src/coop/save/save_player_filter.cpp

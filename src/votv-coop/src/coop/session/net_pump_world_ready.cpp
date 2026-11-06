@@ -15,6 +15,7 @@
 #include "coop/element/bind_wait.h"  // Clear: the messages held for the old world's binds
 #include "coop/props/bracket_position_wait.h"  // Reset: the wait goes with the world
 #include "coop/world/event_fire_sync.h"  // OnClientWorldReady: the fires queued in the join window
+#include "coop/world/achievement_sync.h"  // OnClientWorldReady: the left world's advancements
 #include "coop/world/daily_task_sync.h"  // OnClientWorldReady: a task kept from the world left behind
 #include "coop/props/prop_key_index.h"     // CanAnswer at the world-ready gate
 #include "coop/props/join_membership_sweep.h"  // OnClientWorldReadyResetSweep
@@ -210,6 +211,7 @@ const char* TickWorldReadyAnnounce(coop::net::Session& session, void* localNow, 
                 coop::props::bracket_position_wait::Reset();  // and the spawns a bracket of the old world kept
                 coop::event_fire_sync::OnClientWorldReady();  // the fires queued in the join window replay now
                 coop::daily_task_sync::OnClientWorldReady();  // a task kept from the world left behind goes
+                coop::achievement_sync::OnClientWorldReady();  // so do its advancements: this world's are the host's
                 // The same reset for the deferred prop divergence sweep: one armed for the prior
                 // world must not fire against this one.
                 coop::join_membership_sweep::OnClientWorldReadyResetSweep();

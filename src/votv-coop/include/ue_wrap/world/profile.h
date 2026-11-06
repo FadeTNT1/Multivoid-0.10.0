@@ -40,8 +40,15 @@ bool AddStat(std::wstring_view name, int32_t n);
 bool KeybindDisplayName(const wchar_t* name, std::wstring& out);
 
 // save_main_C::progressAchievement(name, popup, autosave = false), which lib_C's own entry forwards to:
-// the achievement progresses on this machine's profile, with its popup. False when it does not resolve.
-// Game thread.
-bool ProgressAchievement(const wchar_t* name);
+// the achievement progresses on this machine's profile, with its popup unless `popup` is false. False when it
+// does not resolve. Game thread.
+bool ProgressAchievement(const wchar_t* name, bool popup = true);
+
+// The running world's profile object (a save_main_C), or null while there is no gamemode or profile. Game thread.
+void* Save();
+
+// save_main_C::save(): the profile written to its slot. The profile is the player's own file, not a world save,
+// so it is the one save a client of a session may make. False when it does not resolve. Game thread.
+bool SaveProfile();
 
 }  // namespace ue_wrap::profile

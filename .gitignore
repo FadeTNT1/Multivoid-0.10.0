@@ -244,6 +244,7 @@ docs/THUNDERSTORE.md
 # Publishing a doc is a deliberate act (add its `!docs/<file>` line); writing a working doc is
 # free and safe by default. The files that left the tree stay on disk; history is not rewritten.
 docs/**
+!docs/achievements.md
 !docs/architecture.md
 !docs/bytecode-fingerprint.md
 !docs/code-map.md

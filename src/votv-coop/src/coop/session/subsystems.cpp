@@ -28,6 +28,7 @@
 #include "coop/interactables/download_arm_sync.h"
 #include "coop/interactables/sat_console_sync.h"  // the SAT console's shared commands run on the host
 #include "coop/interactables/tape_caddy_sync.h"
+#include "coop/world/achievement_sync.h"
 #include "coop/world/daily_task_sync.h"
 #include "coop/interactables/device_occupancy.h"
 #include "coop/interactables/notebook_sync.h"
@@ -313,6 +314,7 @@ void Install(coop::net::Session& session) {
     coop::sat_console_sync::Install(&session);  // the SAT console: a client's shared commands run on a terminal the host keeps for it
     coop::tape_caddy_sync::Install(&session);  // caddy reel slots (presser edges) + host accrual corrector (client accrual NOT parked -- corrector-bounded)
     coop::daily_task_sync::Install(&session);  // saveSlot.taskNew host mirror (rollover/sell are host-only live)
+    coop::achievement_sync::Install(&session);  // completed achievements and advancements: the host's union, a client's claims
     coop::email_sync::Install(&session);  // meadow-PC email mirror (watermark -> chunked rows -> addEmail)
     coop::signal_sync::Install(&session);  // desk signal-library mirror (savedSignals_0 shadow/diff)
     coop::meadow_db_sync::Install(&session);  // meadow-DB mirror (content-hash multiset + id-preserving replay)
@@ -394,6 +396,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::dish_hashcode_sync::OnPeerGone(static_cast<uint8_t>(slot));
     coop::sat_console_sync::OnPeerGone(static_cast<uint8_t>(slot));  // its terminal kept, running its command, for its return
     coop::daily_task_sync::OnPeerGone(static_cast<uint8_t>(slot));  // a departed slot is owed no task
+    coop::achievement_sync::OnPeerGone(static_cast<uint8_t>(slot));  // nor the shared set
     coop::props::container_birth::OnPeerGone(static_cast<uint8_t>(slot));  // a container transfer it had in flight
     coop::props::storage_act::OnPeerGone(static_cast<uint8_t>(slot));  // a row it was taking goes back
     coop::prop_act_host::OnPeerGone(static_cast<uint8_t>(slot));  // a take or use it had reserved
@@ -549,6 +552,7 @@ DisconnectStats DisconnectAll() {
     coop::sat_console_sync::OnDisconnect();  // the terminals it keeps, and a busy flag mirrored here
     coop::tape_caddy_sync::OnDisconnect();  // poll baselines + IsRecent stamps + the singleton cache (no suppression -- nothing to restore)
     coop::daily_task_sync::OnDisconnect();  // change-hash baseline
+    coop::achievement_sync::OnDisconnect();  // the shared set, the queues and the baselines
     coop::desk_input_sync::OnDisconnect();
     coop::desk_snd_fx::OnDisconnect();
     coop::deck_play_sync::OnDisconnect();  // gen counters + ring + self-test latch
@@ -681,6 +685,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; coop::dish_hashcode_sync::Tick(); }  // host: the marked codes, a joiner's owed set / client: rows waiting for their dish
     { PP::Scope _s{PP::Bucket::Interactable}; coop::sat_console_sync::Tick(); }  // owed blobs, and a terminal whose world is gone
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:reel"}; coop::tape_caddy_sync::Tick(); }  // 4Hz slot sentinel poll (both peers) + host 1Hz corrector / client exact-snap apply
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:achievement"}; coop::achievement_sync::Tick(); }  // the progress watches until live, a scan on a progress verb, queued applies and sends
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:task"}; coop::daily_task_sync::Tick(); }  // host 1Hz taskNew change-hash poll (fires a few times per game-day)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:desk_input"}; coop::desk_input_sync::Tick(); }  // 250ms input-field poll -> claim-free DeskInput deltas + cooldown charge/scan classification
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:desk_snd"}; coop::desk_snd_fx::Tick(); }  // audio-seam ring flush + lazy hook install + pending loop retry

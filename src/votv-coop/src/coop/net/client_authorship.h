@@ -147,6 +147,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ExplosionRequest:
     case ReliableKind::AtvExplodeRequest:
     case ReliableKind::PropIgniteIntent:
+    case ReliableKind::AchievementClaim:
     case ReliableKind::AtvSeat:
     case ReliableKind::AtvTakeover:
     case ReliableKind::PropActRequest:
@@ -185,6 +186,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::BasementFloodState:
     case ReliableKind::InventoryRestoreBlob:
     case ReliableKind::BasementPipeState:
+    case ReliableKind::AchievementState:
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:

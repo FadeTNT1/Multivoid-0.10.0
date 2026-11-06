@@ -7,6 +7,7 @@
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile.h"
 
 namespace ue_wrap::votv_lib {
 namespace {
@@ -70,6 +71,16 @@ bool AddGloss(const std::wstring& name, int32_t level, void* worldContext) {
     if (fname.ComparisonIndex == 0) return false;
     ue_wrap::ParamFrame f(fn);
     return f.valid() && f.Set<R::FName>(L"name", fname) && f.Set<int32_t>(L"level", level) &&
+           f.Set<void*>(L"__WorldContext", worldContext) && ue_wrap::Call(g_libCdo.Raw(), f);
+}
+
+bool ProgressAdvancement(const std::wstring& name, bool disablePopup, void* worldContext) {
+    void* fn = !name.empty() && worldContext ? Fn(ue_wrap::profile::name::ProgressAdvancementFn) : nullptr;
+    if (!fn) return false;
+    const R::FName fname = ue_wrap::fname_utils::StringToFName(name);
+    if (fname.ComparisonIndex == 0) return false;
+    ue_wrap::ParamFrame f(fn);
+    return f.valid() && f.Set<R::FName>(L"advancement", fname) && f.Set<bool>(L"disablePopup", disablePopup) &&
            f.Set<void*>(L"__WorldContext", worldContext) && ue_wrap::Call(g_libCdo.Raw(), f);
 }
 

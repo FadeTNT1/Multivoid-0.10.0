@@ -9,6 +9,7 @@
 
 #include "coop/comms/chat_sync.h"
 #include "coop/commands/command_sync.h"
+#include "coop/world/achievement_sync.h"  // the shared completed achievements and advancements
 #include "coop/world/alarm_sync.h"
 #include "coop/world/basement_flood_sync.h"  // HOST->CLIENT the basement's water level
 #include "coop/world/basement_pipe_sync.h"   // HOST->CLIENT a burst water pipe's damage
@@ -210,6 +211,46 @@ bool HandleWorldEvent(const net::Session::ReliableMessage& msg) {
             break;
         }
         coop::basement_flood_sync::OnState(p);
+        break;
+    }
+    case net::ReliableKind::AchievementClaim: {
+        // CLIENT->HOST: completions this client's game made (coop::achievement_sync). The host checks each row
+        // against its catalogue and merges it; the module acts only on a host. Never relayed.
+        if (msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: AchievementClaim dropped (sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::AchievementBatchPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::achievement_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::achievement_sync::WellFormed(p)) {
+            coop::achievement_sync::CountDropped();
+            break;
+        }
+        coop::achievement_sync::OnClaim(p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::AchievementState: {
+        // HOST->CLIENT: completed rows of the session's shared set (coop::achievement_sync). Host-authored only
+        // (client_authorship.h).
+        if (msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: AchievementState dropped (sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::AchievementBatchPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::achievement_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::achievement_sync::WellFormed(p)) {
+            coop::achievement_sync::CountDropped();
+            break;
+        }
+        coop::achievement_sync::OnState(p);
         break;
     }
     case net::ReliableKind::BasementPipeState: {
