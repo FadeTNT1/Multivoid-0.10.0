@@ -67,6 +67,9 @@ void OnWorldActorDestroy(const coop::net::EntityDestroyPayload& payload);
 // reverse map. Returns the element id, or 0 if not enrolled. Game thread.
 unsigned int HostEnrollExSpawn(void* actor);
 
+// Host: the element id of the live world actor `actor`, or 0 when this lane does not track it. Any thread.
+unsigned int HostEidOf(void* actor);
+
 // Who is a mirror, and when one is being born. Added for the coin-gun sync, which must decide,
 // inside a component-overlap delegate, whether the coin it is looking at is a host-owned
 // mirror (suppress: a client never credits) or genuine local content (leave native: two

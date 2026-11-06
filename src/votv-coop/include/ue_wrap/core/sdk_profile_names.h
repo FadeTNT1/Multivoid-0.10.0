@@ -255,6 +255,11 @@ inline constexpr const wchar_t* NpcClass_WispBlu      = L"wisp_blu_C";
 // geomOcta_C (AgeomOcta_C : ACharacter): the Geom Octahedron. Host-authored; a client's mirror keeps its presentation
 // and has only its decisions refused (coop/creatures/npc_mirror_brain).
 inline constexpr const wchar_t* NpcClass_GeomOcta     = L"geomOcta_C";
+// kavotia_C (a Character: its graph reads character.charactermovement and mesh): rozitalHole's patrollers, minted
+// in kavotiaPatrolController_C's BeginPlay under EX_CallMath, three rings of them. A package hard-imported by that
+// controller, itself an ObjectConst of event_bottomHoleController_C, an ObjectConst of the eventer's runEvent, so it
+// loads with the level as the other story creatures do.
+inline constexpr const wchar_t* NpcClass_Kavotia      = L"kavotia_C";
 
 // The allowlist array: resolved once at install through R::FindClass and cached. The classes load
 // on the first gameplay-level transition, not at the menu, so the install retries until every
@@ -287,6 +292,7 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_WispP,
     NpcClass_WispBlu,
     NpcClass_GeomOcta,          // the Geom Octahedron; host-authored ACharacter, pose rides EntityPose
+    NpcClass_Kavotia,           // rozitalHole's patrollers; host-authored ACharacter, brain refused on a mirror
 };
 inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcAllowlist[0]);
 
@@ -326,6 +332,10 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     L"ufo_knob_C",                 // the knob flock (ufo_knob_controller_C::startEvent)
     L"ufo_UK_C",                   // the UK flock (ufo_UK_controller_C::beginEvent, ufoClass)
     L"ufo_UK_enemy_C",             // the enemy UK flock (the enemy controller's ufoClass)
+    // The story-event scenes (coop/world/event_scene_sync): each minted under EX_CallMath, so these act only
+    // through their source rows in npc_world_enum.
+    L"obelisk_C",                  // the warning obelisk (trigger_spawnProp_C, the obelisk box's spawner)
+    L"holeBottom_C",               // rozitalHole's room under the far hole (event_bottomHoleController_C)
     L"HoelUfo_C",                  // the super fog's UFO (superFog_C::spawnUfo; the source row in npc_world_enum,
                                    // the client's spawnUfo refused in coop/world/weather_fog)
     // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
@@ -357,6 +367,87 @@ inline constexpr const wchar_t* UfoDropperPigClass  = L"ufoDropper_pig_C";
 // npc_world_enum. The firetanks stay out of that row: a firetank_C mirror's BeginPlay arms five AI timers
 // (update, senseupdate, fire, speak, makehealthnoise) that no row refuses yet.
 inline constexpr const wchar_t* BoarInvasionClass = L"boarInvasion_C";
+// ---- The story-event scenes (coop/world/event_scene_sync, ue_wrap/actors/event_scenes) ----
+// Warning Obelisk: the obelisk box's trigger_spawnProp_C (its runTrigger mints the class its prop row names) mints
+// obelisk_C, an actor_save_C. Its BeginPlay rises the mesh, then plays the fall timeline `a`; the finish
+// (A__FinishedFunc) is all gameplay but its landing presentation: the radial impulse, seventy rock props, the
+// prop_obelisk_C it leaves, getMainPlayer's punch and `fallen` ten seconds on. `obelisk_land` is the landing's audio,
+// StaticMesh the falling body, ParticleSystem the dust.
+inline constexpr const wchar_t* TriggerSpawnPropClass   = L"trigger_spawnProp_C";
+inline constexpr const wchar_t* ObeliskClass            = L"obelisk_C";
+inline constexpr const wchar_t* ObeliskFallenProp       = L"fallen";
+inline constexpr const wchar_t* ObeliskLandAudioProp    = L"obelisk_land";
+inline constexpr const wchar_t* ObeliskMeshProp         = L"StaticMesh";
+inline constexpr const wchar_t* ObeliskDustProp         = L"ParticleSystem";
+inline constexpr const wchar_t* ObeliskLandShakeClass   = L"obeliskLandShake_C";
+// lib_C::setEvent(isEventActive, deactivateAmbientTrack, __WorldContext): the running-event refcount's verb (the
+// obelisk's begin-play adds one its landing would take back).
+inline constexpr const wchar_t* LibClass                = L"lib_C";
+inline constexpr const wchar_t* LibSetEventFn           = L"setEvent";
+inline constexpr const wchar_t* LibSetEventActiveParam  = L"isEventActive";
+inline constexpr const wchar_t* LibWorldContextParam    = L"__WorldContext";
+// Garage Soltomia: the eventer mints soltomiaCleaning_C hidden. A player's overlap of its box shows it (the
+// squeak, the particles, `active`, the talking timer) and moves the ATV and jams three doors; the garage door's
+// dooropened runs `opened`, which plays the montage on `solt`; the montage's `throw` notify mints the sponge.
+inline constexpr const wchar_t* SoltomiaCleaningClass   = L"soltomiaCleaning_C";
+inline constexpr const wchar_t* SoltomiaOpenedFn        = L"opened";
+inline constexpr const wchar_t* SoltomiaTalkingFn       = L"talking";
+inline constexpr const wchar_t* SoltomiaActiveProp      = L"active";
+inline constexpr const wchar_t* SoltomiaSqueakProp      = L"squeak";
+inline constexpr const wchar_t* SoltomiaDustProp        = L"ParticleSystem";
+inline constexpr const wchar_t* SoltomiaSpongeMeshProp  = L"StaticMesh";
+inline constexpr const wchar_t* SoltomiaThrowNotify     = L"throw";
+inline constexpr const wchar_t* SoltomiaNotifyNameParam = L"NotifyName";
+// Hole Repair: the eventer mints event_bottomHoleController_C (an actor_save_C); its box's overlap mints
+// holeBottom_C (the room), holeDevice_C and kavotiaPatrolController_C, whose BeginPlay mints the kavotia_C rings
+// and an igetis_C at the device.
+inline constexpr const wchar_t* BottomHoleControllerClass = L"event_bottomHoleController_C";
+inline constexpr const wchar_t* HoleBottomClass           = L"holeBottom_C";
+inline constexpr const wchar_t* KavotiaPatrolControllerClass = L"kavotiaPatrolController_C";
+inline constexpr const wchar_t* IgetisClass               = L"igetis_C";
+// Gray Invasion's level UFO shader (getActorOfClass from boarInvasion_C's BeginPlay): setActive(bEnabled) shows or
+// hides it and its audio, flyaway() plays its exit timeline, which ends in setActive(false).
+inline constexpr const wchar_t* UfoShieldShaderClass    = L"ufoShieldShader_C";
+inline constexpr const wchar_t* UfoShieldSetActiveFn    = L"setActive";
+inline constexpr const wchar_t* UfoShieldEnabledParam   = L"bEnabled";
+inline constexpr const wchar_t* UfoShieldFlyAwayFn      = L"flyaway";
+inline constexpr const wchar_t* FiretankClass           = L"firetank_C";
+// The anti-gravity prank: the level-placed trigger_agrav_C. runTrigger waits for a pawn in its `bounds`, breaks a
+// generator, cloak(true) (its shimmer timeline), gathers the props within 10000 of player 0's camera (gaher), turns
+// their gravity off one by one, waits 5-7 s, turns it back on and cloak(false). `arirhover_cue` is its hover sound.
+inline constexpr const wchar_t* TriggerAgravClass       = L"trigger_agrav_C";
+inline constexpr const wchar_t* AgravCloakFn            = L"cloak";
+inline constexpr const wchar_t* AgravForwardParam       = L"forward";
+inline constexpr const wchar_t* AgravHoverProp          = L"arirhover_cue";
+inline constexpr float          kAgravGatherRadiusCm    = 10000.f;  // gaher's SphereOverlapActors radius
+// UPrimitiveComponent's gravity verbs (engine_physics).
+inline constexpr const wchar_t* SetEnableGravityFn      = L"SetEnableGravity";
+inline constexpr const wchar_t* IsGravityEnabledFn      = L"IsGravityEnabled";
+// The vent crawler (ventCrawler_C): its `Box`'s begin-overlap starts the crawl (a DoOnce with no actor filter:
+// two vent footsteps, then moveTL, the crawl, whose StepSounds and BreakVent events play its footsteps and the
+// vent's break at its place, as GameplayStatics one-shots).
+inline constexpr const wchar_t* VentCrawlerBoxProp      = L"Box";
+inline constexpr const wchar_t* VentCrawlerBoxOverlapFn =
+    L"BndEvt__ventCrawler_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature";
+inline constexpr const wchar_t* BoxGetScaledExtentFn    = L"GetScaledBoxExtent";
+// The host event actors whose positional one-shots (PlaySoundAtLocation, SpawnEmitterAtLocation) the sound relay
+// carries to every client (coop/world/event_sound_relay). Every entry's client copy must have the bodies that play
+// them refused, so a client never plays its own beside the host's.
+inline constexpr const wchar_t* kPositionalCueSourceClasses[] = {
+    NpcClass_VentCrawler,
+};
+inline constexpr const wchar_t* SpawnEmitterAtLocationFn = L"SpawnEmitterAtLocation";
+inline constexpr const wchar_t* ParticleTemplateProp     = L"Template";
+
+// World-actor classes the joiner's save carries (the two actor_save_C children, and firetank_C, which implements the
+// save interface itself -- docs/join.md): the connect snapshot leaves them out, so a joiner keeps the copy its own
+// load made instead of a second, mirrored one.
+inline constexpr const wchar_t* kWorldActorSaveCarriedClasses[] = {
+    ObeliskClass,
+    HoleBottomClass,
+    FiretankClass,
+};
+
 // The arirFollower event's spawner: runTrigger mints npc_arirFollower_C at its own transform
 // (EX_CallMath), so the npc lane sees it only through a source row.
 inline constexpr const wchar_t* TriggerSpawnFollowingArirClass = L"trigger_spawnFollowingArir_C";

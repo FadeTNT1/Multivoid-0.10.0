@@ -206,6 +206,11 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/owner_entity_sync.cpp
     src/coop/world/world_actor_sync.cpp
     src/coop/world/world_actor_mirror.cpp
+    src/coop/world/event_scene_sync.cpp
+    src/coop/world/event_scene_refuse.cpp
+    src/coop/world/event_scene_agrav.cpp
+    src/coop/world/event_scene_crawler.cpp
+    src/coop/world/event_sound_relay.cpp
     src/coop/props/prop_echo_suppress.cpp
     src/coop/props/pile_look.cpp
     src/coop/props/pile_spawn_bind.cpp

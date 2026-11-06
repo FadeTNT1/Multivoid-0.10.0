@@ -55,6 +55,10 @@ uint8_t FrozenSleepBitsOf(void* actor);
 // Game thread.
 void ConvergeFrozenSleep(void* actor, uint8_t physFlags);
 
+// The copy's body gravity made to match the sender's live state (propspawn_flags::kNoGravity, with kLiveState).
+// ConvergeFrozenSleep runs it first.
+void ConvergeGravity(void* actor, uint8_t physFlags);
+
 // The one place a flag converge takes a prop OUT of Static: a wall vent (prop_vent_C) the ventCrawler
 // event has pulled down. The host's break timeline ends in setPropProps(static false, frozen true), so the
 // end of the vent's drive (coop/props/vent_drive) carries Static cleared; this copy, born Static and

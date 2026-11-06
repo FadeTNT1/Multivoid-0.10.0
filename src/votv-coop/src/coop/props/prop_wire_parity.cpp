@@ -11,6 +11,7 @@
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/engine/engine_attach.h"  // IsActorRootBodyAtRest
+#include "ue_wrap/engine/engine_physics.h"  // the body's gravity, the anti-gravity prank's floating props
 
 namespace coop::prop_wire_parity {
 
@@ -68,7 +69,23 @@ uint8_t PhysFlagsOf(void* actor) {
     if (isStatic) flags |= pf::kStatic;
     if (sleep)    flags |= pf::kSleep;
     if (ue_wrap::prop::ReadRemoveWOrespawn(actor)) flags |= pf::kRemoveWOrespawn;
+    bool gravity = true;
+    if (ue_wrap::engine::ReadComponentGravityEnabled(ue_wrap::prop::GetStaticMesh(actor), gravity) && !gravity)
+        flags |= pf::kNoGravity;
     return flags;
+}
+
+void ConvergeGravity(void* actor, uint8_t physFlags) {
+    namespace pf = coop::net::propspawn_flags;
+    if (!(physFlags & pf::kLiveState) || !actor || !ue_wrap::prop::IsDescendantOfProp(actor)) return;
+    void* mesh = ue_wrap::prop::GetStaticMesh(actor);
+    bool gravity = true;
+    if (!ue_wrap::engine::ReadComponentGravityEnabled(mesh, gravity)) return;
+    const bool want = (physFlags & pf::kNoGravity) == 0;
+    if (gravity == want) return;
+    if (!ue_wrap::engine::SetComponentEnableGravity(mesh, want))
+        UE_LOGW("prop_wire_parity: %p gravity -> %d: the setter did not dispatch; the copy keeps its gravity", actor,
+                want ? 1 : 0);
 }
 
 uint8_t FrozenSleepBitsOf(void* actor) {
@@ -81,6 +98,10 @@ uint8_t FrozenSleepBitsOf(void* actor) {
 void ConvergeFrozenSleep(void* actor, uint8_t physFlags) {
     namespace pf = coop::net::propspawn_flags;
     if (!(physFlags & pf::kLiveState) || !actor || !ue_wrap::prop::IsDescendantOfProp(actor)) return;
+    // Every receiver that converges a copy's frozen and sleep to the sender's live state converges its gravity too:
+    // the anti-gravity prank's floating props come to rest in the air on the host, and a copy left falling would
+    // drop to the floor.
+    ConvergeGravity(actor, physFlags);
     const bool wantFrozen = (physFlags & pf::kFrozen) != 0;
     const bool wantSleep  = (physFlags & pf::kSleep) != 0;
     const bool isFrozen = ue_wrap::prop::IsFrozen(actor);

@@ -145,14 +145,12 @@ constexpr Row kRows[] = {
     // The story-event creatures: on a client every instance is a host mirror -- the local spawn
     // paths are suppressed through the allowlist or refused below -- so their gameplay entries
     // are refused class-wide; the eventer's own verbs are event_fire_sync's. The AnimBP and the
-    // host's pose stream stay; what a refused BeginPlay also set up is lost on the mirror: the
-    // crawler's footsteps, vent break and metal-break emitter, a ball's and a gray's mesh
-    // attach to its spring arm, a ball's ambient loop.
-    // ventCrawler_C: the whole scene is the BeginPlay body -- it binds the prop_vent_C ref,
-    // plays the moveTL timeline (which itself SetActorLocations the crawl), arms the vent-bang
-    // and footstep events, and ends in the door writes, the setEvent flag and K2_DestroyActor
-    // (ventCrawler_C UG @2669). The box overlap is the end-of-crawl contact: a client pawn
-    // touching the mirror must not open the doors locally (@2363).
+    // host's pose stream stay; what a refused BeginPlay also set up is lost on the mirror: a
+    // ball's and a gray's mesh attach to its spring arm, a ball's ambient loop.
+    // ventCrawler_C: its Box begin-overlap STARTS the scene (a DoOnce, no actor filter): vent
+    // footsteps, the signal-room door, then moveTL, the crawl, to the door writes, setEvent and
+    // K2_DestroyActor. A client's mirror must not start a second crawl; a client's player in the
+    // box is the host's to test (event_scene_crawler), its one-shots the sound relay's.
     {&kRowReceiveBeginPlayVentCrawler,    "ventCrawler.ReceiveBeginPlay"},
     {&kRowBoxBeginOverlapVentCrawler,     "ventCrawler.BoxBeginOverlap"},
     // grayTest_C: BeginPlay re-attaches the mesh, waits a second and starts the wander MoveTo

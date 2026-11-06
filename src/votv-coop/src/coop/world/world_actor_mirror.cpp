@@ -8,6 +8,7 @@
 #include "world_actor_detail.h"  // co-located private header (src tree, not include/)
 
 #include "coop/creatures/piramid_sync.h"  // the heading, look and wisp-target consumers
+#include "coop/world/event_scene_sync.h"     // a story scene's phase that arrived before its mirror
 
 #include "coop/element/identity_create.h"  // the single WorldActor mirror create funnel
 #include "coop/items/coingun_sync.h"
@@ -258,6 +259,7 @@ void OnWorldActorSpawn(const coop::net::WorldActorSpawnPayload& payload) {
         UE_LOGI("world-actor[client OnSpawn]: eid=%u '%ls' -- %d simulating component(s) stopped, the pose "
                 "drive moves it", payload.elementId, classW.c_str(), stopped);
     coop::world_actor_sync::NoteMirrorActor(spawned, /*add=*/true);
+    coop::event_scene_sync::OnMirrorMaterialized(payload.elementId, spawned);  // a scene phase that came first
     // The instrument. This line fires once per mirror, keyed by eid, so the birth seam is where
     // host and client can be paired; the host logs its own points and material at its enrol.
     // Both halves read the material because producer and instrument read the points through the

@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 285;
+inline constexpr uint16_t kProtocolVersion = 286;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1348,6 +1348,25 @@ enum class ReliableKind : uint8_t {
     // no begin and no end that changes the world. Late join: every running session to the joiner at its ready edge.
     // ToolActionPayload.
     ToolActionState = 226,
+
+    // HOST->ALL: one phase of a story-event scene the host runs, for a client's presentation of it
+    // (coop::event_scene_sync): the scene (event_scene_ids), the phase it reached, and its target -- a world-actor
+    // mirror by element id, or a level-placed actor by its short name. The host's gameplay stays the host's; a
+    // client's copy of each scene's gameplay bodies is refused, and the phase drives only what the player sees and
+    // hears (a reveal, a montage, a landing, a shader). Sent on each phase edge the host's watches see. Never relayed;
+    // a client's copy is refused at the host's receive edge; not pre-world. Late join: the newest phase of every
+    // live scene to the joiner at its world-ready edge, after its world-actor spawns, flagged kSnapshot so the
+    // joiner lands on the end state instead of replaying the transition. EventScenePhasePayload.
+    EventScenePhase = 227,
+
+    // HOST->ALL: one positional sound or particle burst a host event actor's own graph played
+    // (coop::event_sound_relay): a PlaySoundAtLocation with its sound, place, volume, pitch and attenuation, or a
+    // SpawnEmitterAtLocation with its template and place, each asset by its full name. Captured only from the
+    // source classes the relay lists (the vent crawler's footsteps and vent break), whose client mirrors have the
+    // playing bodies refused, so a client plays each once and never sends one back. Cosmetic, a one-shot: never
+    // relayed; a client's copy is refused at the host's receive edge; not pre-world. Late join: none, a sound that
+    // has played is gone. EventSoundCuePayload.
+    EventSoundCue = 228,
 };
 
 #pragma pack(push, 1)
@@ -2058,6 +2077,9 @@ inline constexpr uint8_t kRemoveWOrespawn = 0x20;  // Aprop_C.removeWOrespawn
 // the sender's live Aprop_C instead (PhysFlagsOf), and only then does a receiver make an existing
 // copy's frozen and sleep match them.
 inline constexpr uint8_t kLiveState       = 0x40;
+// The prop's body has gravity turned off (UPrimitiveComponent::IsGravityEnabled false on its static mesh): the
+// anti-gravity prank's floating props. Read off the live copy with kLiveState; a receiver's copy is made to match it.
+inline constexpr uint8_t kNoGravity       = 0x80;
 }  // namespace propspawn_flags
 
 // A prop death (PropDestroy): the key, and the sender's element id for the mirror binding. The
@@ -2544,6 +2566,68 @@ struct PosterStatePayload {
 };
 static_assert(sizeof(PosterStatePayload) == 208, "PosterStatePayload must be 208 bytes");
 static_assert(sizeof(PosterStatePayload) <= 256 - 20 - 8, "PosterStatePayload must fit one datagram");
+
+// A story-event scene's phase (EventScenePhase). `eid` names a world-actor mirror; 0 names a level-placed actor by
+// `key`, its short object name, the same on every peer that loaded the level.
+namespace event_scene_ids {
+constexpr uint8_t kSoltoClean = 1;   // soltomiaCleaning_C, a world-actor mirror
+constexpr uint8_t kObelisk    = 2;   // obelisk_C, a world-actor mirror
+constexpr uint8_t kBoarShield = 3;   // ufoShieldShader_C, level-placed (boarwar's UFO shader)
+constexpr uint8_t kAgrav      = 4;   // trigger_agrav_C, level-placed (the anti-gravity prank)
+constexpr uint8_t kLast       = kAgrav;
+}  // namespace event_scene_ids
+namespace event_scene_phases {
+// kSoltoClean, monotonic:
+constexpr uint8_t kSoltoRevealed = 1;  // a player's overlap showed the cleaner and started its talk
+constexpr uint8_t kSoltoMontage  = 2;  // the garage door opened: the cleaning montage plays
+constexpr uint8_t kSoltoThrown   = 3;  // the montage's throw notify: the sponge left its hand
+// kObelisk:
+constexpr uint8_t kObeliskLanded = 1;  // the fall's timeline finished: the landing's sound, shakes and swap
+// kBoarShield:
+constexpr uint8_t kShieldShown   = 1;  // setActive(true)
+constexpr uint8_t kShieldHidden  = 2;  // setActive(false)
+constexpr uint8_t kShieldFlyAway = 3;  // flyaway(): the shader's exit timeline, which ends hidden
+// kAgrav:
+constexpr uint8_t kAgravCloakOn  = 1;  // cloak(true): the shimmer and the hover sound
+constexpr uint8_t kAgravCloakOff = 2;  // cloak(false): both end
+constexpr uint8_t kLast          = 3;
+}  // namespace event_scene_phases
+namespace event_scene_flags {
+constexpr uint8_t kSnapshot = 1u << 0;  // a joiner's seed: land on the phase's end state
+constexpr uint8_t kKnown    = kSnapshot;
+}  // namespace event_scene_flags
+struct EventScenePhasePayload {
+    uint8_t  scene;        // 1 -- event_scene_ids
+    uint8_t  phase;        // 1 -- event_scene_phases, per scene
+    uint8_t  flags;        // 1 -- event_scene_flags
+    uint8_t  reserved;     // 1 -- zero
+    uint32_t eid;          // 4 -- the world-actor element, or 0 for a level-placed target
+    WireKey  key;          // 32 -- the level-placed target's short name when eid is 0, else empty
+};
+static_assert(sizeof(EventScenePhasePayload) == 40, "EventScenePhasePayload must be 40 bytes");
+static_assert(sizeof(EventScenePhasePayload) <= 256 - 20 - 8, "EventScenePhasePayload must fit one datagram");
+
+// A positional cue of a host event actor (EventSoundCue). `text` holds the asset's full name (engine::SoundName's
+// form, "SoundCue /Game/..."), then, for a sound, its attenuation's; either length may be zero (no attenuation).
+namespace event_sound_ops {
+constexpr uint8_t kSound   = 1;   // PlaySoundAtLocation: loc, volume, pitch, attenuation
+constexpr uint8_t kEmitter = 2;   // SpawnEmitterAtLocation: loc, rot, scale
+}  // namespace event_sound_ops
+inline constexpr int kEventSoundTextCap = 172;
+struct EventSoundCuePayload {
+    uint8_t op;           // 1 -- event_sound_ops
+    uint8_t nameLen;      // 1
+    uint8_t attLen;       // 1
+    uint8_t reserved;     // 1 -- zero
+    float   loc[3];       // 12 -- world cm
+    float   rot[3];       // 12 -- pitch, yaw, roll (an emitter's)
+    float   scale[3];     // 12 -- an emitter's
+    float   volume;       // 4
+    float   pitch;        // 4
+    char    text[kEventSoundTextCap];  // 172 -- the asset's name, then the attenuation's
+};
+static_assert(sizeof(EventSoundCuePayload) == 220, "EventSoundCuePayload must be 220 bytes");
+static_assert(sizeof(EventSoundCuePayload) <= 256 - 20 - 8, "EventSoundCuePayload must fit one datagram");
 
 // A client's press of the tool gun's remover (RemoverRequest): the element it hit, the camera point it looked
 // from and the point its shot struck, in world centimetres. The host judges all three; none is trusted.
