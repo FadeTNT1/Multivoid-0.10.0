@@ -2,6 +2,8 @@
 
 #include "coop/props/prop_spawn_authoring.h"
 
+#include "coop/props/shrimp_tray_sync.h"
+
 #include "ue_wrap/core/fname_utils.h"     // StringToFName -- the two verb names, once
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/hot_path_guard.h"   // UE_ASSERT_GAME_THREAD
@@ -141,6 +143,10 @@ bool BirthIsPlayerAuthored() {
     // cannot outlive the body on any exit path, and an inner watched body belonging to some other
     // consumer cannot hide it.
     if (g_menuSpawnFn && sg::IsBodyActive(g_gamemodeSpawnFn, g_menuSpawnFn)) return true;
+    // A shrimp tray in this player's own hand, its RMB running: the portion it drops and, at the last one, the empty
+    // tray it leaves are the player's (coop/props/shrimp_tray_sync); the tray is its own item, so the host has no copy
+    // to run the verb on.
+    if (coop::props::shrimp_tray_sync::HandDispenseRunning()) return true;
     // The toolgun, via the calling frame the native seam already holds: its ubergraph finishes the
     // actor itself. The pointer is cached on first sight -- the class is loaded by definition,
     // since its bytecode is what is running.

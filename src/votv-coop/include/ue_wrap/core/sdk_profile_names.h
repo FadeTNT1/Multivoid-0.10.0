@@ -1034,6 +1034,77 @@ inline constexpr const wchar_t* WidgetComponentSetTickWhenOffscreenFn = L"SetTic
 inline constexpr const wchar_t* WidgetComponentGetTickWhenOffscreenFn = L"GetTickWhenOffscreen";
 inline constexpr const wchar_t* WidgetComponentTickWhenOffscreenProp  = L"bTickWhenOffscreen";
 inline constexpr const wchar_t* WidgetComponentSetTickModeFn          = L"SetTickMode";
+
+// The food family (ue_wrap/actors/food; 0.10.0 cook, read from prop_food_C's, prop_cookingFood_C's and
+// prop_food_shrimp_C's bytecode). prop_food_C::ReceiveTick lerps `temperature` (kelvin) toward the room, derives
+// `celsius` (temperature - 273), toggles the `eff_steam` component above 50 C, burns or freezes the actor at the
+// ends, and spends `freshnessAlpha`; at 0 it takes one from `invRead_freshness` and at none left calls
+// `setSpoiled(true)`. A bite takes one from `invRead_uses`. `ignoreRotting` is saved with the rest. Freezing writes
+// `tempLessThan0`, calls `freezed(frozen)` and writes custom primitive data 1 on the prop's `staticMesh`.
+inline constexpr const wchar_t* FoodClass = L"prop_food_C";
+inline constexpr const wchar_t* CookingFoodClass = L"prop_cookingFood_C";
+inline constexpr const wchar_t* FoodTemperatureProp = L"temperature";
+inline constexpr const wchar_t* FoodCelsiusProp = L"celsius";
+inline constexpr const wchar_t* FoodFreshnessProp = L"freshnessAlpha";
+inline constexpr const wchar_t* FoodFreshnessLeftProp = L"invRead_freshness";
+inline constexpr const wchar_t* FoodUsesProp = L"invRead_uses";
+inline constexpr const wchar_t* FoodIgnoreRottingProp = L"ignoreRotting";
+inline constexpr const wchar_t* FoodSpoiledProp = L"isSpoiled";
+inline constexpr const wchar_t* FoodFrozenProp = L"tempLessThan0";
+inline constexpr const wchar_t* FoodSteamComp = L"eff_steam";
+inline constexpr const wchar_t* FoodSetSpoiledFn = L"setSpoiled";
+inline constexpr const wchar_t* FoodSetSpoiledParam = L"isSpoiled";
+inline constexpr const wchar_t* FoodFreezedFn = L"freezed";
+inline constexpr const wchar_t* FoodFreezedParam = L"frozen";
+inline constexpr const wchar_t* PropStaticMeshComp = L"staticMesh";
+inline constexpr const wchar_t* SetCustomPrimitiveDataFloatFn = L"SetCustomPrimitiveDataFloat";
+// Freezing's custom primitive data: index 1, 0.5 frozen and 0 not (prop_food_C::ReceiveTick).
+inline constexpr int   FoodFrozenDataIndex = 1;
+inline constexpr float FoodFrozenDataValue = 0.5f;
+inline constexpr float FoodKelvinOffset = 273.0f;
+inline constexpr float FoodSteamCelsius = 50.0f;
+// prop_cookingFood_C::ReceiveTick adds to `cookProgress` while celsius >= 51 and calls `cookItem` at `cookFinal`.
+inline constexpr const wchar_t* FoodCookProgressProp = L"cookProgress";
+inline constexpr const wchar_t* FoodCookFinalProp = L"cookFinal";
+// The non-food `uses` counter some consumables keep instead (prop_snack_C), read where invRead_uses is absent.
+inline constexpr const wchar_t* LegacyUsesProp = L"uses";
+inline constexpr const wchar_t* NotEdibleProp = L"notEdible";
+
+// The shrimp tray (prop_food_shrimp_C): `shrimps` portions, drawn as instances by `upd()`; action 4 and
+// playerHandUse_RMB take one, run upd(), spawn the `shrimpDrop` class 10 cm above the tray and, at none left, spawn
+// the prop named shrimp_e in its place and destroy the tray. getData files `shrimps` as ints[0][0].
+inline constexpr const wchar_t* ShrimpTrayClass = L"prop_food_shrimp_C";
+inline constexpr const wchar_t* ShrimpTrayCountProp = L"shrimps";
+inline constexpr const wchar_t* ShrimpTrayDropClassProp = L"shrimpDrop";
+inline constexpr const wchar_t* ShrimpTrayUpdFn = L"upd";
+inline constexpr int ShrimpTrayMaxCount = 64;   // a sanity bound on the wire, far over the tray's nine
+
+// The microwave (prop_microwave_C; its door is the child actor prop_microwaveDoor_C, a prop_swinger_C). Action 4
+// cycles `timeMode` mod 5 and sets `timer` to 5/10/15/30/60 s; action 8 calls `wave()`, which (powered, door shut)
+// sets `active`, shows `pointLight`, starts `microwave_loop`, copies `timer` into `time` and runs a latent loop that
+// spends `time`, rotates `spin` 60 deg/s and calls microwave(self) / microwaveElec() on each of `objectsInside`;
+// at 0 it plays `microwave_ding` and stops. Opening the door while active runs forceOpenDoor (the same stop).
+inline constexpr const wchar_t* MicrowaveClass = L"prop_microwave_C";
+inline constexpr const wchar_t* MicrowaveDoorClass = L"prop_microwaveDoor_C";
+inline constexpr const wchar_t* MicrowaveOpenedProp = L"opened";
+inline constexpr const wchar_t* MicrowaveActiveProp = L"active";
+inline constexpr const wchar_t* MicrowaveTimerProp = L"timer";
+inline constexpr const wchar_t* MicrowaveTimeProp = L"time";
+inline constexpr const wchar_t* MicrowaveTimeModeProp = L"timeMode";
+inline constexpr const wchar_t* MicrowaveObjectsInsideProp = L"objectsInside";
+inline constexpr const wchar_t* MicrowaveDoorObjProp = L"doorObj";
+inline constexpr const wchar_t* MicrowaveDelayCloseProp = L"delayClose";
+inline constexpr const wchar_t* MicrowaveLoopComp = L"microwave_loop";
+inline constexpr const wchar_t* MicrowaveDingComp = L"microwave_ding";
+inline constexpr const wchar_t* MicrowaveLightComp = L"pointLight";
+inline constexpr const wchar_t* MicrowaveSpinComp = L"spin";
+inline constexpr const wchar_t* MicrowaveWaveFn = L"wave";
+inline constexpr const wchar_t* CordedPoweredProp = L"cordPowered";
+inline constexpr int MicrowaveActionMode = 4;
+inline constexpr int MicrowaveActionStart = 8;
+inline constexpr int   MicrowaveModeCount = 5;
+inline constexpr float MicrowaveSpinDegPerSec = 60.0f;
+inline constexpr const wchar_t* AddLocalRotationFn = L"K2_AddLocalRotation";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

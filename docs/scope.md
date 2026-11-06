@@ -14,6 +14,7 @@ the commit that ships the change.
 | Voice | 3D positional voice | each peer |
 | Master server and browser | an opt-in listing of the host's game, the update check, signaling for NAT traversal | the host opts in per session; the master is external infrastructure |
 | Physics props | pickup, drag, throw and drop; per-grab authority; an identity that survives saves and rejoins; world-to-inventory and inventory-to-world transitions | the holder while held; the host owns everything at rest |
+| Food on a world actor | its temperature, freshness and spoiling, bites left and cooking, and the cooked or burnt replacement (`docs/props.md`, Food); a food inside a pocket or a container is a stored record and travels with it | the host; a client's partial bite is an intent |
 | Sleeping bags and mattresses | folded/deployed actor replacement; clients send the source id and interaction action, the host runs the Blueprint transition and authors the replacement | host ([props.md](props.md)) |
 | Piles and trash | the whole collection loop: piles, clumps, carrying, depositing | the host |
 | NPCs and creatures | pose, spawn and despawn, the kerfur prop-to-NPC cycle; enemies target every peer and a pursuit can switch targets between peers; creatures whose AI reads the local player are owned per peer and visible to all | the host, except the per-peer owned creatures |
@@ -36,7 +37,6 @@ the commit that ships the change.
 | Custom content paks and asset replication | a peer without a skin pak sees the default body, by design; nothing is downloaded from another peer |
 | Anti-cheat | the host is trusted and is the admin; every bound and sanity check applies to clients only |
 | Hint toasts, tutorial tips, the per-viewer HUD | local to the machine; the HUD reads shared state, it is not itself replicated |
-| A food's live condition on a world actor: its temperature, ripeness and use count | every peer simulates its own, and the prop's save record cannot carry them: it is taken at one birth while all three move continuously, and its timestamp is the capturing peer's world clock, which the receiver reads as elapsed time. A lane that gives them one author is designed and not built. A food inside a pocket or a container is a stored record and travels with it |
 
 ## Rules for classifying a new item
 

@@ -30,10 +30,13 @@
 #include "coop/interactables/desk_verb_intent.h"  // a press on the main desk's save family, and its answers
 #include "coop/element/element.h"  // kInvalidId
 #include "coop/interactables/coffee_intent.h"
+#include "coop/interactables/microwave_sync.h"  // CLIENT->HOST a microwave press; HOST->CLIENT its state
 #include "coop/props/crate_break.h"  // CLIENT->HOST a contact on a world container, judged and run by the host
 #include "coop/props/pack_trash_intent.h"  // CLIENT->HOST bagging of a pile or clump
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
+#include "coop/props/prop_food_state.h"  // HOST->CLIENT a world food's state; CLIENT->HOST a bite of one
+#include "coop/props/shrimp_tray_sync.h"  // CLIENT->HOST a press on a shared shrimp tray
 #include "coop/props/prop_act_host.h"  // CLIENT->HOST a take or use of a shared prop, and its commit
 #include "coop/props/prop_act_request.h"  // HOST->CLIENT its answer
 #include "coop/props/prop_drop_intent.h"  // CLIENT->HOST client-placed keyed prop
@@ -336,6 +339,107 @@ bool HandleIntentEvent(net::Session& session,
         std::memcpy(&p, msg.payload, sizeof(p));
         if (p.key.len > sizeof(p.key.data)) { coop::coffee_intent::CountDropped(coop::coffee_intent::Drop::Key); break; }
         coop::coffee_intent::OnAction(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::FoodState: {
+        // HOST->CLIENT: a world food's progression as the host's tick left it (coop::props::prop_food_state).
+        // Host-authored only: the receive edge refuses a client's copy.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: FoodState dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::FoodStatePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::props::prop_food_state::CountDropped(coop::props::prop_food_state::Drop::Size);
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::props::prop_food_state::WellFormed(p)) {
+            coop::props::prop_food_state::CountDropped(coop::props::prop_food_state::Drop::Malformed);
+            break;
+        }
+        coop::props::prop_food_state::OnState(p);
+        break;
+    }
+    case net::ReliableKind::FoodBiteIntent: {
+        // CLIENT->HOST: a bite a client took from a shared food that did not finish it; judged and written by the host
+        // (coop::props::prop_food_state). Never relayed.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: FoodBiteIntent dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::FoodBiteIntentPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::props::prop_food_state::CountDropped(coop::props::prop_food_state::Drop::Size);
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (p.key.len == 0 || p.key.len > sizeof(p.key.data) || p.usesAfter < 0 || p.reserved[0] || p.reserved[1]) {
+            coop::props::prop_food_state::CountDropped(coop::props::prop_food_state::Drop::Malformed);
+            break;
+        }
+        coop::props::prop_food_state::OnBite(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::ShrimpDispenseIntent: {
+        // CLIENT->HOST: a press on a shared shrimp tray; judged and run by the host (coop::props::shrimp_tray_sync).
+        // Never relayed.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: ShrimpDispenseIntent dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::ShrimpDispenseIntentPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::props::shrimp_tray_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (p.key.len == 0 || p.key.len > sizeof(p.key.data) || p.route > net::shrimp_dispense::kHandUse ||
+            p.reserved[0] || p.reserved[1] || p.reserved[2]) {
+            coop::props::shrimp_tray_sync::CountDropped();
+            break;
+        }
+        coop::props::shrimp_tray_sync::OnIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::MicrowaveIntent: {
+        // CLIENT->HOST: a press on a microwave; judged and run by the host (coop::microwave_sync). Never relayed.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: MicrowaveIntent dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::MicrowaveIntentPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::microwave_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (p.key.len == 0 || p.key.len > sizeof(p.key.data) || (p.action != 4 && p.action != 8) || p.reserved[0] ||
+            p.reserved[1] || p.reserved[2]) {
+            coop::microwave_sync::CountDropped();
+            break;
+        }
+        coop::microwave_sync::OnIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::MicrowaveState: {
+        // HOST->CLIENT: a microwave's mode, time and run (coop::microwave_sync). Host-authored only: the receive edge
+        // refuses a client's copy.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: MicrowaveState dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::MicrowaveStatePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::microwave_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::microwave_sync::WellFormed(p)) {
+            coop::microwave_sync::CountDropped();
+            break;
+        }
+        coop::microwave_sync::OnState(p);
         break;
     }
     case net::ReliableKind::RemoverRequest: {

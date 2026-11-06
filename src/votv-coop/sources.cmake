@@ -216,6 +216,7 @@ set(VOTVCOOP_SOURCES
     src/coop/props/prop_destroy_seam.cpp
     src/coop/props/prop_lifecycle.cpp
     src/coop/props/prop_food_state.cpp
+    src/coop/props/shrimp_tray_sync.cpp
     src/coop/props/prop_record_refresh.cpp
     src/coop/props/pack_trash_intent.cpp
     src/coop/props/prop_drop_intent.cpp
@@ -404,6 +405,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/tape_caddy_sync.cpp
     src/coop/interactables/coffee_intent.cpp
     src/coop/interactables/coffee_state.cpp
+    src/coop/interactables/microwave_sync.cpp
     src/coop/interactables/laptop_sync.cpp
     src/coop/interactables/laptop_tab.cpp
     src/coop/interactables/portable_pc_lid.cpp
