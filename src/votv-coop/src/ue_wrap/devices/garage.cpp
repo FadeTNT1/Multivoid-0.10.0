@@ -371,7 +371,7 @@ float Clamp01(float v) { return std::fmin(1.f, std::fmax(0.f, v)); }
 // mesh montage and moves the timeline and the box; what it leaves mid-way is finished here: the montage put at the end
 // of its section, the timeline stopped at its end with its update fired (settime sets it a second in and runs it on,
 // so the box would shrink and grow back), `mov` cleared, the swing sound out and the nav area set.
-bool DriveToRest(void* g, bool open) {
+bool DriveToRest(void* g, bool open, SettleReadback* rb = nullptr) {
     void* const settime = Verb(g, N::GarageSetTimeFn);
     void* tl = nullptr;
     float length = 0.f, pos = 0.f;
@@ -387,8 +387,13 @@ bool DriveToRest(void* g, bool open) {
     if (g_movOff >= 0) *reinterpret_cast<bool*>(reinterpret_cast<char*>(g) + g_movOff) = false;
     if (void* const loop = ComponentAt(g, g_loopOff)) SetComponentActive(loop, false);
     if (!open) SetClosedNavArea(g);
-    if (void* const anim = DoorAnimInstance(g))
-        if (void* const montage = ActiveMontage(anim)) JumpToSectionsEnd(anim, montage, open);
+    if (void* const anim = DoorAnimInstance(g)) {
+        if (rb) rb->meshReached = true;
+        if (void* const montage = ActiveMontage(anim)) {
+            JumpToSectionsEnd(anim, montage, open);
+            if (rb) rb->montageRead = MontagePosition(anim, montage, rb->montagePos);
+        }
+    }
     return true;
 }
 
@@ -423,6 +428,30 @@ bool DriveMidSwing(void* g, bool open, float fraction) {
 }
 
 }  // namespace
+
+Settled SettleAtRest(void* g, bool open, SettleReadback* rb) {
+    SettleReadback local;
+    SettleReadback& r = rb ? *rb : local;
+    r = SettleReadback{};
+    void* tl = nullptr;
+    float length = 0.f, pos = 0.f;
+    bool playing = false;
+    if (!g || !TimelineReads(g, tl, length, pos, playing)) return NormalizeOpen(g, open, &r.timelineBefore, &r.timelineAfter);
+    r.timelineBefore = r.timelineAfter = pos;
+    bool moving = false;
+    TryReadMoving(g, moving);
+    if (moving || playing) return Settled::Busy;
+    WriteOpen(g, open);
+    constexpr float kEps = 0.01f;
+    if (std::fabs(pos - (open ? length : 0.f)) <= kEps) return Settled::Already;
+    // Off its end: the same drive a joiner's seed gives a door at rest. The timeline alone moves only the collision
+    // box -- the mesh is the montage's -- so setting the timeline by itself left the visible door where a load that
+    // ran settime before the mesh had an animation instance put it.
+    if (!DriveToRest(g, open, &r)) return NormalizeOpen(g, open, &r.timelineBefore, &r.timelineAfter);
+    r.timelineAfter = r.timelineBefore;
+    TimelineReads(g, tl, length, r.timelineAfter, playing);
+    return Settled::Snapped;
+}
 
 bool TryReadTravel(void* g, bool& moving, float& fraction) {
     void* tl = nullptr;
