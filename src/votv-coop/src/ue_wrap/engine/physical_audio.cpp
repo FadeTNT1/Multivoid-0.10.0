@@ -8,6 +8,7 @@
 #include "ue_wrap/core/reflection_props.h"
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/sdk_profile_names.h"
+#include "ue_wrap/engine/engine_attach.h"
 
 #include <cstdint>
 #include <cwctype>
@@ -152,7 +153,11 @@ void* ParticleFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which) {
 
 namespace {
 
-// The material a prop's physicsImpact component holds: the override when valid, else its own. Null for no component.
+// The material a prop's physicsImpact component plays from, as the component itself picks it (its getComponentPhysMat:
+// the override when valid, else physmat when customPhysmat is set, else the hit component's first material's physical
+// material). An ordinary prop (a mannequin, a can) sets neither property, so reading them alone finds nothing; the two
+// reads and the actor's root material remain as fallbacks for a component whose own pick comes back empty. Null for no
+// component.
 void* PhysMaterialOfProp(void* propActor) {
     if (!propActor || !R::IsLive(propActor)) return nullptr;
     static R::InstanceOffset sComp(N::PropPhysicsImpactProp);
@@ -160,8 +165,18 @@ void* PhysMaterialOfProp(void* propActor) {
     static R::InstanceOffset sMat(N::PhysImpactMatProp);
     void* comp = ReadObjectProp(propActor, sComp);
     if (!comp) return nullptr;
-    void* physMat = ReadObjectProp(comp, sOverride);
-    return physMat ? physMat : ReadObjectProp(comp, sMat);
+    if (void* cls = R::ClassOf(comp)) {
+        if (void* fn = R::FindFunction(cls, N::PhysImpactCompMatFn)) {
+            ParamFrame f(fn);
+            if (f.valid() && Call(comp, f)) {
+                void* m = f.Get<void*>(N::PhysImpactCompMatOutParam);
+                if (m && R::IsLive(m)) return m;
+            }
+        }
+    }
+    if (void* physMat = ReadObjectProp(comp, sOverride)) return physMat;
+    if (void* physMat = ReadObjectProp(comp, sMat)) return physMat;
+    return engine::GetActorRootPhysicalMaterial(propActor);
 }
 
 }  // namespace
