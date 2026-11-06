@@ -15,6 +15,8 @@
 #include "ue_wrap/desk/console_desk.h"  // Instance, AtlasWidget
 
 #include <chrono>
+#include <cwchar>
+#include <vector>
 
 namespace ue_wrap::sat_console {
 namespace {
@@ -617,6 +619,202 @@ void* FindPanelByName(const std::wstring& name) {
         if (p && R::IsLive(p) && R::ToString(R::NameOf(p)) == name) return p;
     }
     return nullptr;
+}
+
+// ---- the terminals ----
+
+namespace {
+
+CachedObjRef g_panelCls;
+int32_t  g_offPanelRoot = -1;
+uint8_t  g_maskPanelRoot = 0;
+int32_t  g_offPanelDish = -1;
+int32_t  g_offDishName = -1;
+int32_t  g_offOverlapActor = -1;
+bool     g_panelResolved = false;
+bool     g_panelSaidMiss = false;
+uint64_t g_panelNextTryMs = 0;
+
+void* PanelClass() {
+    void* cls = g_panelCls.Get();
+    if (!cls) {
+        cls = R::FindClass(N::SatPanelClass);
+        g_panelCls.Set(cls);
+    }
+    return cls;
+}
+
+// The panel's members, by name and type: the root flag (a bool, masked), the dish (an object), the dish's name
+// (a text), and the begin-overlap event's OtherActor. A miss is said once; the walk is retried at most once a second
+// while the classes load.
+bool EnsurePanelResolved() {
+    if (g_panelResolved) return true;
+    const uint64_t now = NowMs();
+    if (now < g_panelNextTryMs) return false;
+    g_panelNextTryMs = now + 1000;
+    void* cls = PanelClass();
+    void* dishCls = R::FindClass(N::DishClass);
+    if (!cls || !dishCls) return false;
+    R::FindBoolProperty(cls, N::SatPanelRootProp, g_offPanelRoot, g_maskPanelRoot);
+    std::wstring type;
+    int32_t off = -1;
+    g_offPanelDish = (R::PropertyOffsetAndClass(cls, N::SatPanelDishProp, off, type) && type == L"ObjectProperty") ? off : -1;
+    off = -1;
+    type.clear();
+    g_offDishName = (R::PropertyOffsetAndClass(dishCls, N::DishNameProp, off, type) && type == L"TextProperty") ? off : -1;
+    if (void* fn = R::FindFunction(cls, N::SatPanelOverlapFn)) g_offOverlapActor = R::FindParamOffset(fn, N::SatPanelOverlapActorParam);
+    if (g_offPanelRoot < 0 || !g_maskPanelRoot || g_offPanelDish < 0 || g_offDishName < 0) {
+        if (!g_panelSaidMiss) {
+            g_panelSaidMiss = true;
+            UE_LOGW("sat_console: the panel's members do not resolve (root=%d/%02X control_asDish=%d nameDish=%d) -- no "
+                    "terminal has a context; game version mismatch?", g_offPanelRoot, g_maskPanelRoot, g_offPanelDish,
+                    g_offDishName);
+        }
+        return false;
+    }
+    g_panelResolved = true;
+    UE_LOGI("sat_console: panels resolved (root=0x%X/%02X control_asDish=0x%X nameDish=0x%X overlap OtherActor=%d)",
+            g_offPanelRoot, g_maskPanelRoot, g_offPanelDish, g_offDishName, g_offOverlapActor);
+    return true;
+}
+
+uint32_t HashName(const std::wstring& name) {
+    uint32_t h = 2166136261u;
+    for (wchar_t ch : name) {
+        h ^= static_cast<uint16_t>(ch);
+        h *= 16777619u;
+    }
+    return h ? h : 1u;  // 0 names no terminal
+}
+
+struct PanelScan {
+    void* cls;
+    std::vector<void*>* out;
+};
+
+// The id -> panel cache: a placed panel keeps its id for the world's life, so a hit is validated and kept.
+struct CachedPanel {
+    uint32_t     id;
+    CachedObjRef panel;
+};
+std::vector<CachedPanel> g_panelCache;
+uint64_t g_nextPanelWalkMs = 0;
+
+void RefreshPanelCache() {
+    std::vector<void*> panels;
+    EnumeratePanels(panels);
+    g_panelCache.clear();
+    for (void* p : panels) {
+        const uint32_t id = PanelId(p);
+        bool dup = false;
+        for (const CachedPanel& c : g_panelCache)
+            if (c.id == id) dup = true;
+        if (dup) {
+            UE_LOGW("sat_console: two panels share terminal id %08X ('%ls') -- the second is not a terminal", id,
+                    PanelName(p).c_str());
+            continue;
+        }
+        CachedPanel c;
+        c.id = id;
+        c.panel.Set(p);
+        g_panelCache.push_back(std::move(c));
+    }
+}
+
+}  // namespace
+
+bool IsPanel(void* obj) {
+    if (!obj || !R::IsLive(obj)) return false;
+    void* cls = PanelClass();
+    return cls && R::ClassOf(obj) == cls;
+}
+
+size_t EnumeratePanels(std::vector<void*>& out) {
+    void* cls = PanelClass();
+    if (!cls) return 0;
+    const size_t before = out.size();
+    PanelScan scan{cls, &out};
+    object_index::ForEachInstance(cls, [](void* ctx, void* obj, int32_t index) {
+        auto* sc = static_cast<PanelScan*>(ctx);
+        if (!obj || (R::SlotFlags(index) & (R::slot_flags::Dying | R::slot_flags::NotYetReadable))) return;
+        if (R::ClassOf(obj) == sc->cls) sc->out->push_back(obj);
+    }, &scan);
+    return out.size() - before;
+}
+
+uint32_t PanelId(void* panel) {
+    if (!IsPanel(panel)) return 0;
+    return HashName(PanelName(panel));
+}
+
+std::wstring KeyForId(uint32_t id) {
+    if (!id) return {};
+    wchar_t key[16]{};
+    swprintf_s(key, L"sat_%08x", id);
+    return key;
+}
+
+std::wstring PanelKey(void* panel) { return KeyForId(PanelId(panel)); }
+
+bool PanelContext(void* panel, TerminalBinding& out) {
+    out = TerminalBinding{};
+    if (!IsPanel(panel)) return false;
+    out.panel = panel;
+    out.id = PanelId(panel);
+    out.key = KeyForId(out.id);
+    if (!EnsurePanelResolved()) return true;  // a panel, its context not readable yet: not ready
+    out.root = (*At<uint8_t>(panel, g_offPanelRoot) & g_maskPanelRoot) != 0;
+    if (out.root) {
+        out.name = L"ROOT";  // con()'s own literal
+        out.ready = true;
+        return true;
+    }
+    void* dish = ReadObject(panel, g_offPanelDish);
+    if (!dish) return true;  // a field panel whose dish is not set yet: not ready, never ROOT
+    out.dish = dish;
+    out.name = ftext_utils::FTextToString(At<uint8_t>(dish, g_offDishName));
+    out.ready = !out.name.empty();
+    return true;
+}
+
+TerminalBinding TerminalForPanel(void* panel) {
+    TerminalBinding b;
+    PanelContext(panel, b);
+    return b;
+}
+
+bool BindingForTerminal(uint32_t id, TerminalBinding& out) {
+    out = TerminalBinding{};
+    if (!id) return false;
+    for (int pass = 0; pass < 2; ++pass) {
+        for (CachedPanel& c : g_panelCache) {
+            if (c.id != id) continue;
+            void* p = c.panel.Get();
+            if (p && IsPanel(p)) return PanelContext(p, out);
+        }
+        const uint64_t now = NowMs();
+        if (pass == 1 || now < g_nextPanelWalkMs) break;
+        g_nextPanelWalkMs = now + 500;
+        RefreshPanelCache();
+    }
+    return false;
+}
+
+void* RootPanel() {
+    if (!EnsurePanelResolved()) return nullptr;
+    std::vector<void*> panels;
+    EnumeratePanels(panels);
+    for (void* p : panels)
+        if (*At<uint8_t>(p, g_offPanelRoot) & g_maskPanelRoot) return p;
+    return nullptr;
+}
+
+void* ReadOverlapActor(const uint8_t* locals) {
+    if (!locals) return nullptr;
+    EnsurePanelResolved();
+    if (g_offOverlapActor < 0) return nullptr;
+    void* a = *reinterpret_cast<void* const*>(locals + g_offOverlapActor);
+    return (a && R::IsLive(a)) ? a : nullptr;
 }
 
 }  // namespace ue_wrap::sat_console
