@@ -140,10 +140,14 @@ bool IsSharedMemo(void* food) {
     return slot.shared;
 }
 
+PortionsRead  g_portionsRead = nullptr;
+PortionsApply g_portionsApply = nullptr;
+
 // ---- host: the table --------------------------------------------------------------------------------------------
 struct HostRec {
     ue_wrap::CachedObjRef actor;
     FD::State             last;
+    int16_t               portions = -1;
     bool                  sent = false;
     bool                  dirty = false;
     uint64_t              sentMs = 0;
@@ -205,6 +209,8 @@ bool Fill(void* food, const FD::State& st, coop::net::FoodStatePayload& p) {
     p.uses = static_cast<int16_t>(st.uses < -1 ? -1 : (st.uses > 30000 ? 30000 : st.uses));
     p.freshnessLeft = static_cast<int16_t>(st.freshnessLeft < -1 ? -1 : (st.freshnessLeft > 30000 ? 30000 : st.freshnessLeft));
     p.portions = -1;
+    int16_t portions = 0;
+    if (g_portionsRead && g_portionsRead(food, portions)) p.portions = portions;
     p.flags = static_cast<uint8_t>((st.ignoreRotting ? FS::kIgnoreRotting : 0) | (st.spoiled ? FS::kSpoiled : 0) |
                                    (st.frozen ? FS::kFrozen : 0) | (st.hasCook ? FS::kCooking : 0));
     return true;
@@ -234,6 +240,7 @@ void Publish(coop::net::Session& s, HostRec& r, void* food, const FD::State& st,
         return;
     }
     if (!s.SendReliable(coop::net::ReliableKind::FoodState, &p, sizeof(p))) return;   // no peer: the seed carries it
+    r.portions = p.portions;
     ++g_published;
     if (!g_publishSaid) {
         g_publishSaid = true;
@@ -264,7 +271,10 @@ void PumpHost(coop::net::Session& s) {
         }
         ++g_cursor;
         if (!anyPeer || coop::hand_item::IsHandAxisActor(food)) continue;
-        const bool due = !r.sent || r.dirty || Edge(st, r.last) || (Stepped(st, r.last) && now - r.sentMs >= kPeriodMs);
+        int16_t portions = -1;
+        const bool portionsMoved = g_portionsRead && g_portionsRead(food, portions) && portions != r.portions;
+        const bool due = !r.sent || r.dirty || portionsMoved || Edge(st, r.last) ||
+                         (Stepped(st, r.last) && now - r.sentMs >= kPeriodMs);
         if (due) Publish(s, r, food, st, now);
     }
 }
@@ -324,6 +334,7 @@ bool Apply(const coop::net::FoodStatePayload& p) {
         return true;
     }
     FD::RefreshDisplay(food, now, was);
+    if (p.portions >= 0 && g_portionsApply) g_portionsApply(food, p.portions);
     ++g_applied;
     if (!g_applySaid) {
         g_applySaid = true;
@@ -562,6 +573,11 @@ void MarkDirty(void* food) {
     Enroll(food);
     const auto it = g_foodIndex.find(food);
     if (it != g_foodIndex.end()) g_foods[it->second].dirty = true;
+}
+
+void SetPortions(PortionsRead read, PortionsApply apply) {
+    g_portionsRead = read;
+    g_portionsApply = apply;
 }
 
 void OnDisconnect() {

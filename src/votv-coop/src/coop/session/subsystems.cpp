@@ -45,6 +45,7 @@
 #include "coop/props/container_contents_sync.h"  // the world-container GObjStack slice
 #include "coop/props/container_view_close.h"  // a view into a container ends where the player's reach does
 #include "coop/props/prop_food_state.h"  // the food family's live state is the host's
+#include "coop/props/shrimp_tray_sync.h"  // a shrimp tray's portions are the host's
 #include "coop/props/prop_record_refresh.h"  // a drive box or reel case republishes its record in place
 #include "coop/interactables/signal_catch_sync.h"
 #include "coop/interactables/signal_sync.h"
@@ -283,6 +284,7 @@ void Install(coop::net::Session& session) {
     coop::props::container_contents_sync::Install(&session);  // container contents
     coop::props::prop_record_refresh::Install(&session);  // drive box + reel case republish their own record
     coop::props::prop_food_state::Install(&session);  // BOTH: the food ticks, heating, cookItem and bite watches; the family stays off the record lane
+    coop::props::shrimp_tray_sync::Install(&session);  // BOTH: the tray's press, hand use and redraw watches; HOST: a client's press, judged
     coop::desk_cursor_sync::Install(&session);  // coords-panel live-cursor unreliable motion stream (interpolated mirror)
     coop::desk_input_sync::Install(&session);  // the claim-free field-granular desk input lane
     coop::desk_snd_fx::Install(&session);  // desk audio-effect mirror (Func-patch audio seam)
@@ -463,6 +465,7 @@ DisconnectStats DisconnectAll() {
     coop::melee_fx::OnDisconnect();  // drop the pace and the ids, say the counts
     coop::props::fire_extinguisher_sync::OnDisconnect();  // drop the marked bursts and the replayed set, say the counts
     coop::props::prop_food_state::OnDisconnect();  // drop the noted foods, the seeds and the parked states, say the counts
+    coop::props::shrimp_tray_sync::OnDisconnect();  // say the press counts
     coop::props::prop_impact_fx::OnDisconnect();  // drop the cue pace, say the counts
     coop::props::container_act_host::OnDisconnect();  // restore the records held in escrow, drop the tallies and refusals
     coop::prop_act_host::OnDisconnect();  // drop the take-or-use tallies, refusals and reservations
@@ -698,6 +701,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::melee_fx::Tick(); }  // the swing and contact watches' settle, a stale swing scope
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::fire_extinguisher_sync::Tick(); }  // the two burst watches' settle; HOST: each burst claimed and its record published
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::prop_food_state::Tick(session); }  // the food watches' settle; HOST: the noted foods' states and the joiners' seeds; CLIENT: parked states
+    { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::shrimp_tray_sync::Tick(session); }  // the tray watches' settle; HOST: each sender's queued press, judged and paced
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::prop_impact_fx::Tick(); }  // the cue watch's settle
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::container_act_host::Tick(); }  // HOST: each sender's queued container act, judged and paced; the holds' deadline
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::prop_act_host::Tick(); }  // HOST: each sender's queued take or use, judged and paced

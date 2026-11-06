@@ -490,6 +490,27 @@ food and is the take-or-use request's (`coop/props/prop_act_request`). `ReadFood
 a coffee cup's spill and the blue brain cheese's hatch shown only on the host's copy, are read, not
 measured.
 
+### Shrimp trays
+
+A shrimp tray (`prop_food_shrimp_C`) is a food whose `shrimps` portions its `upd()` draws as
+instances. Its action 4 and its `playerHandUse_RMB` take one, run `upd()`, spawn its `shrimpDrop`
+class 10 cm above the tray and, at the last one, spawn the prop named `shrimp_e` in its place and
+destroy the tray; `getData` files the count as `ints[0][0]`. `[V]` the decoded prop_food_shrimp
+bodies. A client's run of either took a portion from its copy alone and made births the drop-intent
+lane refuses (`coop/props/prop_drop_intent`), so the trays and the shrimp differed between players.
+
+On a client both presses on a shared tray (a keyed world prop, not one in a hand) are cancelled at
+the script-body gate and sent as `ShrimpDispenseIntent` with the tray's key and which press it was
+(`coop/props/shrimp_tray_sync`); a press the client cannot send runs on its own copy. The host
+refuses a sender not alive, out of reach, a tray another peer holds and an empty tray, and runs the
+game's own verb once with the sender's puppet. The drop, the empty tray and the destroy are host
+births and a death on the ordinary lifecycle. The count rides the tray's `FoodState` as `portions`:
+the host marks the tray when its `upd` runs, and a client writes `shrimps` and runs the game's
+`upd`; a joiner takes it with every food's state. A tray in a player's hand is that player's own
+item (`coop/player/hand_item`), so its RMB runs where it is pressed, and the drop and empty tray it
+spawns are the player's births (`coop/props/prop_spawn_authoring` asks the tray lane), admitted as
+the player's spawn intents. `[?]` until a two-peer run reads the `[SHRIMP]` lines.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -528,6 +549,7 @@ measured.
 | `InventoryPickup` | each peer, relayed | the pocket blip, so others hear a pickup |
 | `FoodState` | the host to all | a world food's temperature, freshness and its count, bites left, `ignoreRotting`, spoiled, frozen and `cookProgress`, by key |
 | `FoodBiteIntent` | a client to the host | a bite of a shared food that did not finish it, with the bites left |
+| `ShrimpDispenseIntent` | a client to the host | a press on a shared shrimp tray, by key: its action 4 or its hand use |
 
 ## Late join
 
@@ -583,6 +605,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
+| a shrimp tray's portions | `coop/props/shrimp_tray_sync`, `ue_wrap/actors/shrimp_tray`, `coop/props/prop_food_state` (the count's carrier) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |
 | the pocket blip | `coop/items/inventory_pickup_sync` |
 | the join | `coop/props/prop_snapshot`, `coop/props/snapshot_census`, `coop/props/join_membership_sweep`, `coop/props/join_sweep_tally`, `coop/props/join_keyed_replay`, `coop/props/unresolved_pose_ledger` |

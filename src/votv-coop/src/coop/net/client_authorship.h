@@ -138,6 +138,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::PropContactIntent:
     case ReliableKind::MeleeFxRequest:
     case ReliableKind::FoodBiteIntent:
+    case ReliableKind::ShrimpDispenseIntent:
     case ReliableKind::ProjectileFired:
     case ReliableKind::ExplosionRequest:
     case ReliableKind::AtvExplodeRequest:

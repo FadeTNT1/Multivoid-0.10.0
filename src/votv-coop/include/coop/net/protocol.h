@@ -1282,6 +1282,14 @@ enum class ReliableKind : uint8_t {
     // sender's reach and that the count is one under its own, writes it and publishes the food's state. Never
     // relayed; not pre-world. Late join: nothing to replay. FoodBiteIntentPayload.
     FoodBiteIntent = 217,
+
+    // CLIENT->HOST: a client's press on a shared shrimp tray -- its action 4, or its playerHandUse_RMB -- by the tray's
+    // prop key (coop::props::shrimp_tray_sync). The client cancels its own run; the host refuses a sender that is not
+    // alive, out of reach, a tray another peer holds and an empty one, and runs the game's own verb once with the
+    // sender's puppet, so the portion, the drop, the empty tray and the destroy are the host's and cross on the
+    // lifecycle and FoodState. Never relayed; not pre-world. Late join: nothing to replay; the count is the tray's
+    // FoodState. ShrimpDispenseIntentPayload.
+    ShrimpDispenseIntent = 218,
 };
 
 #pragma pack(push, 1)
@@ -2375,6 +2383,19 @@ struct FoodBiteIntentPayload {
 };
 static_assert(sizeof(FoodBiteIntentPayload) == 36, "FoodBiteIntentPayload must be 36 bytes");
 static_assert(sizeof(FoodBiteIntentPayload) <= 256 - 20 - 8, "FoodBiteIntentPayload must fit one datagram");
+
+// A client's press on a shared shrimp tray (ShrimpDispenseIntent): the tray by its prop key and which press it was.
+namespace shrimp_dispense {
+constexpr uint8_t kAction  = 0;   // actionOptionIndex, action 4
+constexpr uint8_t kHandUse = 1;   // playerHandUse_RMB
+}  // namespace shrimp_dispense
+struct ShrimpDispenseIntentPayload {
+    WireKey key;          // 32
+    uint8_t route;        // 1 -- shrimp_dispense
+    uint8_t reserved[3];  // 3 -- zero
+};
+static_assert(sizeof(ShrimpDispenseIntentPayload) == 36, "ShrimpDispenseIntentPayload must be 36 bytes");
+static_assert(sizeof(ShrimpDispenseIntentPayload) <= 256 - 20 - 8, "ShrimpDispenseIntentPayload must fit one datagram");
 
 // A client's press of the tool gun's remover (RemoverRequest): the element it hit, the camera point it looked
 // from and the point its shot struck, in world centimetres. The host judges all three; none is trusted.

@@ -35,6 +35,7 @@
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
 #include "coop/props/prop_food_state.h"  // HOST->CLIENT a world food's state; CLIENT->HOST a bite of one
+#include "coop/props/shrimp_tray_sync.h"  // CLIENT->HOST a press on a shared shrimp tray
 #include "coop/props/prop_act_host.h"  // CLIENT->HOST a take or use of a shared prop, and its commit
 #include "coop/props/prop_act_request.h"  // HOST->CLIENT its answer
 #include "coop/props/prop_drop_intent.h"  // CLIENT->HOST client-placed keyed prop
@@ -377,6 +378,27 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::props::prop_food_state::OnBite(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::ShrimpDispenseIntent: {
+        // CLIENT->HOST: a press on a shared shrimp tray; judged and run by the host (coop::props::shrimp_tray_sync).
+        // Never relayed.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: ShrimpDispenseIntent dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::ShrimpDispenseIntentPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::props::shrimp_tray_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (p.key.len == 0 || p.key.len > sizeof(p.key.data) || p.route > net::shrimp_dispense::kHandUse ||
+            p.reserved[0] || p.reserved[1] || p.reserved[2]) {
+            coop::props::shrimp_tray_sync::CountDropped();
+            break;
+        }
+        coop::props::shrimp_tray_sync::OnIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::RemoverRequest: {

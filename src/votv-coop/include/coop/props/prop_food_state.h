@@ -66,6 +66,12 @@ void CountDropped(Drop why);
 // HOST: publish this food's state on the next tick, whatever the step (a lane that changed it out of the tick).
 void MarkDirty(void* food);
 
+// The shrimp tray's portions, carried in the state: the lane that owns the count registers how the host reads it and
+// how a client lands it (coop/props/shrimp_tray_sync). `read` answers false for any food that is not a tray.
+using PortionsRead  = bool (*)(void* food, int16_t& portions);
+using PortionsApply = void (*)(void* food, int16_t portions);
+void SetPortions(PortionsRead read, PortionsApply apply);
+
 // Net disconnect: the tables, the seeds, the parked states and the counters go, with one summary line.
 void OnDisconnect();
 

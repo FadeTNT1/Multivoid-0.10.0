@@ -1035,6 +1035,15 @@ inline constexpr const wchar_t* FoodCookFinalProp = L"cookFinal";
 // The non-food `uses` counter some consumables keep instead (prop_snack_C), read where invRead_uses is absent.
 inline constexpr const wchar_t* LegacyUsesProp = L"uses";
 inline constexpr const wchar_t* NotEdibleProp = L"notEdible";
+
+// The shrimp tray (prop_food_shrimp_C): `shrimps` portions, drawn as instances by `upd()`; action 4 and
+// playerHandUse_RMB take one, run upd(), spawn the `shrimpDrop` class 10 cm above the tray and, at none left, spawn
+// the prop named shrimp_e in its place and destroy the tray. getData files `shrimps` as ints[0][0].
+inline constexpr const wchar_t* ShrimpTrayClass = L"prop_food_shrimp_C";
+inline constexpr const wchar_t* ShrimpTrayCountProp = L"shrimps";
+inline constexpr const wchar_t* ShrimpTrayDropClassProp = L"shrimpDrop";
+inline constexpr const wchar_t* ShrimpTrayUpdFn = L"upd";
+inline constexpr int ShrimpTrayMaxCount = 64;   // a sanity bound on the wire, far over the tray's nine
 }  // namespace name
 
 }  // namespace ue_wrap::profile
