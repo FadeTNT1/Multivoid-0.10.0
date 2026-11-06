@@ -57,5 +57,7 @@ void SetAmount(uint8_t* row, uint8_t amount);
 std::wstring Name(const uint8_t* row);
 // The row's place on its canvas and its rotation.
 bool Placement(const uint8_t* row, float& x, float& y, float& rotation);
+// Write the row's place on its canvas and its rotation.
+bool SetPlacement(uint8_t* row, float x, float y, float rotation);
 
 }  // namespace ue_wrap::inventory_item_codec

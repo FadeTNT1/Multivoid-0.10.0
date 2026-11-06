@@ -77,8 +77,19 @@ bool ReadTerms(void* component, Terms& out);
 // The local player's own component (inventoryComponent_player) holding a row with this fingerprint and at least
 // `amount`: the row is taken off it (removed whole, or reduced) through the same verbs. False when none holds it.
 bool TakeFromPlayer(void* playerComponent, uint64_t fingerprint, uint8_t amount);
-// Add a Full-encoded row to the player's own component at a free place. False when it refused it.
-bool GiveToPlayer(void* playerComponent, const std::vector<uint8_t>& row);
+// Add a Full-encoded row to the player's own component. With the inventory screen open and nothing held, the row is
+// kept at the place it carries (where the game's own beginDrag puts a container item it hands to the cursor);
+// otherwise it lands at a random free place. `widget` receives the item widget drawn for it, or null. False when the
+// component refused it.
+bool GiveToPlayer(void* playerComponent, const std::vector<uint8_t>& row, void*& widget);
+// How a granted take ended up: held on the cursor (the drag resumed), dropped where the cursor was because the button
+// had already gone up, or stored in the inventory with no drag (the screen closed, or it holds something else).
+enum class HeldDrag : uint8_t { Held, Dropped, Stored };
+// Make the player's `widget` (from GiveToPlayer) the screen's held item, as beginDrag does for a widget of the
+// player's own canvas, without splitting its stack again. When the mouse button is already up the drag is ended at once.
+HeldDrag ResumeDrag(void* widget);
+// The place and rotation a Full-encoded row carries.
+bool PeekPlacement(const std::vector<uint8_t>& row, float& x, float& y, float& rotation);
 
 // The inventory screen: the storage it shows beside the player's, or null when it is closed or shows none.
 void* ShownStorage();
@@ -93,7 +104,7 @@ bool BeginDragRow(const uint8_t* locals, void* function, void*& component, int32
 // the right button, else the whole row, as the screen's own takeFromStack splits it.
 uint8_t BeginDragAmount(uint8_t rowAmount);
 // addItemAdvanced(data, ...): the row asked to be added (Full), its fingerprint and amount, and whether it keeps
-// its own place.
+// its own place. When it does, the encoded row carries the place the call names (itemPosition, itemRotation).
 bool AddCallRow(const uint8_t* locals, void* function, std::vector<uint8_t>& row, uint64_t& fingerprint,
                 uint8_t& amount, bool& keepPlace);
 // transferFromInvToInf(to): the receiving component.
