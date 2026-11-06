@@ -13,7 +13,9 @@
 // .../<folder>/autosave/<guid>.json for its autosave: one set per entry, cut beside the file written. The blob is
 // opaque here (coop/items/inventory_wire owns its layout); the file wraps it in a magic, an FNV
 // hash, a nick and a last-seen time. A GUID that is not exactly 32 hex characters never becomes a
-// path component. Game thread: the memory half has no lock.
+// path component. A profile that collapses from a populated one is kept as the player's current profile and logged
+// (PROFILE SHRANK); the last full one is kept beside it as <guid>.json.good, .good.1, .good.2, cut with the world save.
+// Game thread: the memory half has no lock.
 
 #pragma once
 
