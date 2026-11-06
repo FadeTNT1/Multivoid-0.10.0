@@ -47,6 +47,10 @@ constexpr uint64_t kRefreshMs = 2000;
 // settle back to the client that had just let go and parked that client's copy under its player's feet, so the
 // prop changed hands every few seconds (docs/props.md, standing on a prop). The baseline follows meanwhile.
 constexpr uint64_t kQuietAfterReleaseMs = 1500;
+// A second feeder: how often the buoyancy master's list of the bodies a water volume holds is read. Those props
+// coast at once, ahead of the sweep, because water moves a body for as long as it is held, and waiting behind the
+// other props' coasts left a floating crate on the host unseen by the clients (docs/props.md).
+constexpr uint64_t kWaterFeedMs = 400;
 
 // --- the pure rules, constexpr so the .cpp checks them at compile time ---
 
@@ -86,6 +90,7 @@ void Tick(coop::net::Session& s, bool isHost);
 
 // Coasts opened by this module this session, for the log and the drills.
 size_t CoastsOpened();
+
 
 // Session end: the candidate lists and baselines go. Game thread.
 void OnDisconnect();

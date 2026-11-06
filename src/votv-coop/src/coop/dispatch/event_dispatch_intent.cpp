@@ -39,6 +39,7 @@
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
 #include "coop/props/prop_food_state.h"  // HOST->CLIENT a world food's state; CLIENT->HOST a bite of one
 #include "coop/props/water_fill_sync.h"  // HOST->CLIENT a world bucket's water level
+#include "coop/world/basement_flood_sync.h"  // HOST->CLIENT the basement's water level
 #include "coop/props/shrimp_tray_sync.h"  // CLIENT->HOST a press on a shared shrimp tray
 #include "coop/props/prop_act_host.h"  // CLIENT->HOST a take or use of a shared prop, and its commit
 #include "coop/props/prop_act_request.h"  // HOST->CLIENT its answer
@@ -461,6 +462,25 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::tool_action::OnState(session, p);
+        break;
+    }
+    case net::ReliableKind::BasementFloodState: {
+        // HOST->CLIENT: the basement's water level (coop::basement_flood_sync). Host-authored only.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: BasementFloodState dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::BasementFloodStatePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::basement_flood_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::basement_flood_sync::WellFormed(p)) {
+            coop::basement_flood_sync::CountDropped();
+            break;
+        }
+        coop::basement_flood_sync::OnState(p);
         break;
     }
     case net::ReliableKind::MicrowaveState: {

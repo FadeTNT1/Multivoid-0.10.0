@@ -222,6 +222,21 @@ again (`coop/props/prop_drive_stream`). A hand always wins: a claimed prop someb
 set and rides the held-prop stream, and a receiver yields at once to its own player's grab, which
 no stream from the host knows of yet, handing back the physics its park took.
 
+### Props floating in water
+
+A prop a water volume holds floats on the host (the buoyancy master, `waterFloatMaster_C`, pushes every simulating
+body in its `actorsInWater` toward the surface and damps it), and a client's copy of the same crate sat where its own
+dry world had left it. The motion scan's round-robin reads would find a floating body moving, but only behind the
+coasts other props' motion held open, so a crate floating in a flooded basement could wait a long time for a slot. A
+second feeder in `coop/props/prop_motion_scan` reads that list every 400 ms (`ue_wrap/world/water_float_master`) and
+coasts those props at once, ahead of the sweep, under the same coast budget: simulating props only, none in a hand
+(the held-prop lane owns a held prop, as everywhere). A prop a client is syncing and nobody holds is overridden to
+the host, as a push on it would (`prop_drive_host::OverrideClientSyncer`); a row a host verb holds stays that verb's.
+The row ends as any coast does, at rest, with the final pose, flags and velocity, and a joiner at its ready edge is
+sent every driven prop's pose again. The water itself is the host's too (`BasementFloodState`,
+[events-and-weather.md](events-and-weather.md)), so a client's own buoyancy master floats its copies in the same
+water the host's floats them in while the host's rows lead them.
+
 A mirror's physics and collision are set to what the game's own initialisation would have
 produced on this peer (`coop/props/prop_wire_parity`); a fresh mirror starts kinematic while it
 is remote-owned. A spawn or destroy the receiver applied is marked so the symmetric observer

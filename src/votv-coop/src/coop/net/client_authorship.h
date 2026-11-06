@@ -181,6 +181,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ToolActionState:
     case ReliableKind::EventScenePhase:
     case ReliableKind::EventSoundCue:
+    case ReliableKind::BasementFloodState:
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:

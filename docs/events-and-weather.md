@@ -206,6 +206,24 @@ generic carries, the brain: the four state-writing timers are cancelled on the m
 gather choreography is relayed, and the wisp it chases is streamed by identity so the mirror
 runs the native chase look (`coop/creatures/piramid_sync`).
 
+### The basement flood
+
+The basement holds one water volume, `waterVolume_basementFlooder_C`, whose level is the actor's distance from its
+dry position in world units. The game moves it from three writers that every peer ran on its own: the basement
+drain's tick (`addWater`, power below zero, the level falls), a burst pipe's tick (`addWater`, power above zero, it
+rises) and the cheat menu's `bflood` (`startMoving`). The host's basement flooded and a client's stayed dry, and a
+client walking where the host's water was not held a different swimming state.
+
+The host owns the level. On a client the two bodies, `addWater` and `startMoving`, are refused at the script gate for
+the game's own callers (a removed second author: the level they would write is the replicated one; the drain's blockage
+count and particles and the pipe's spray still run). The host sends `BasementFloodState` (the level, the full height,
+the cheat's `moveTo`) about twice a second while the level moves, once when it settles, and to a joiner at its ready
+edge. A client places the water with the actor's own `setLevel` and refreshes the water's data with the parent's
+`updateWaterData`, so the surface, the depth, the buoyancy boxes and the depths the player and the props track follow
+it (`coop/world/basement_flood_sync`, `ue_wrap/world/basement_flood`). The power panel's `waterlogged` is not sent: the
+drain's own two-second timer derives it from the level on every peer. The bodies that float in the water are the
+host's too: see "Props floating in water" in [props.md](props.md).
+
 ### The base alarm
 
 One trigger actor is the base alarm: the siren, every red beacon, the ceiling flicker, the
@@ -278,6 +296,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | an event's actors | the host | the world-actor mirror |
 | the pyramid's brain | the host | timers cancelled on the mirror; the gather relayed |
 | the base alarm | whoever transitions | polled; the host canonicalises |
+| the basement flood | the host | the drain's, a pipe's and the cheat's writers refused on a client; the level on `BasementFloodState` |
 | the Stolas church | the host | its verbs refused on a client; its four save fields polled and mirrored |
 | the UFO flocks | the host | the controllers refused on a client; the ships on the world-actor mirror |
 | the black fog and its eyes | the host | presence, its one number and its fade on `WeatherState`, a client copy written by phase with its eyes refused; the host's eyes on the owner-entity mirror |
@@ -295,6 +314,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | `WorldActorSpawn`, `WorldActorDestroy`, `WorldActorPose` (stream) | the host to all | an event actor's birth with scale and blob; its death; full-rotation poses |
 | `PyramidGather` | the host to all | the gather commit |
 | `AlarmState` | either role | the alarm's active flag |
+| `BasementFloodState` | the host to all | the basement water's level, its full height and the cheat's `moveTo` |
 | `ChurchState` | the host to all | the church's broken, angry and struck flags and its harvest count |
 | `EmailAppend`, `EmailDelete`, `TaskNewState` | the host to all; either role; the host to all | an email; a deletion; the task |
 
@@ -332,7 +352,7 @@ The in-flight events arrive as snapshot entries and replay with the override; th
 re-sent; every tracked event actor is re-spawned on the joiner; the pyramid's gather in flight
 is re-sent after its mirrors exist; the alarm's current flag is sent unconditionally, and the
 joiner runs the native trigger, which is idempotent against a save that already carried it; the
-church's state is sent unconditionally; a UFO flock in flight arrives with the tracked event actors.
+church's state is sent unconditionally; the basement's water level is sent at the ready edge, and one that arrives before the water volume has streamed in waits for it; a UFO flock in flight arrives with the tracked event actors.
 Emails are seeded as a delta against the blob instant; the task state is sent at the ready
 edge. A one-shot cue a joiner was not present for is missed, by definition.
 
@@ -356,6 +376,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | A client sees no church herbs and cannot pick them (the herbs are spawned inside the church's graph and no lane carries them yet); the striking client gets no camera turn or slow motion of its own | `[RD]` `coop/world/church_sync`; needs a plant lane and a per-striker cue |
 | The eventer's world actors (the knocker, the morning UFO, the mothership, the droppers) and the arirFollower event's follower have not been seen crossing in a play session yet. A joiner's mothership mirror restarts its flight from the beginning (its progress is not on the wire), and a morning UFO or a dropper shows on a peer only once a player, or a puppet, walks into it there | `[RD]` `coop/creatures/npc_world_enum`, `coop/world/world_actor_mirror` |
 | The UK ships' shots, a crashed ship's wreck and crater, and the calvine saucer's fall are not mirrored: the host's run only | `[RD]` `coop/world/spawn_authority` refuses them on a client; the wreck's and crater's base classes are unverified |
+| The basement flood has been built and read against the 0.10.0 bytecode; a two-peer run (`bflood` on the host, the client watching the water rise and drain, a joiner mid-flood) is pending. The cheat menu's `bflood` is a cheat command, not a row of the event catalog, so the dev event menu does not list it; it is host-authored all the same (a client's press is refused) | `[?]` `coop/world/basement_flood_sync`; the cheat menu's `bflood` branch calls `startMoving` |
 | Only the pyramid and the alarm have had the one-event-at-a-time pass; every other event rides the generic lanes on the per-row replay policy | `[V]` `coop/world/event_fire_sync`, the replay allowlist |
 
 ## Code map
@@ -369,5 +390,6 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | event actors and the pyramid | `coop/world/world_actor_sync`, `coop/world/world_actor_mirror`, `coop/creatures/piramid_sync` |
 | the story scenes | `coop/world/event_scene_sync`, `coop/world/event_scene_refuse`, `coop/world/event_scene_agrav`, `coop/world/event_scene_crawler`, `coop/world/event_sound_relay`, `ue_wrap/actors/event_scenes` |
 | the church | `coop/world/church_sync` |
+| the basement flood | `coop/world/basement_flood_sync`, `ue_wrap/world/basement_flood` |
 | the alarm, emails, the task | `coop/world/alarm_sync`, `coop/world/email_sync`, `coop/world/daily_task_sync`, `ue_wrap/world/email` |
 | tests | `harness/autotest/autotest_weather.cpp`, `autotest_fog_probe.cpp`, `autotest_eventforce.cpp`, `autotest_alarmforce.cpp`, `autotest_piramidforce.cpp`; the event drill, `coop/dev/event_drill`; the world roll drill, `coop/dev/world_roll_drill` |

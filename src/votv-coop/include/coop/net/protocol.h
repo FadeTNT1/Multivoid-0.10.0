@@ -1368,6 +1368,15 @@ enum class ReliableKind : uint8_t {
     // relayed; a client's copy is refused at the host's receive edge; not pre-world. Late join: none, a sound that
     // has played is gone. EventSoundCuePayload.
     EventSoundCue = 228,
+
+    // HOST->ALL: the basement's water level (coop::basement_flood_sync). The flood is the host's: its level moves
+    // only where addWater runs (the drain's tick, a burst pipe's tick, the cheat), and a client's copy of those
+    // writers is parked, so the host sends the level (the water volume's distance from its dry position, world
+    // units) and the cheat's `moveTo` as it changes, about twice a second while it moves and once when it settles,
+    // and to a joiner at its ready edge. A receiver places the water volume with its own setLevel and refreshes
+    // the water's data. Never relayed; a client's copy is refused at the host's receive edge.
+    // BasementFloodStatePayload.
+    BasementFloodState = 229,
 };
 
 #pragma pack(push, 1)
@@ -3007,6 +3016,20 @@ struct ToolActionPayload {
 };
 static_assert(sizeof(ToolActionPayload) == 68, "ToolActionPayload must be 68 bytes");
 static_assert(sizeof(ToolActionPayload) <= 256 - 20 - 8, "ToolActionPayload must fit one datagram");
+
+// The basement flood (BasementFloodState): the water volume's level and its cheat toggle.
+namespace basement_flood_flags {
+constexpr uint8_t kMoveTo = 1u << 0;   // waterVolume_basementFlooder_C::moveTo, as startMoving last set it
+constexpr uint8_t kKnown = kMoveTo;
+}  // namespace basement_flood_flags
+struct BasementFloodStatePayload {
+    float   level;        // 4 -- distance from the dry position, world units; finite, 0..kMaxLevel
+    float   height;       // 4 -- the full level (`height`); finite, 0..kMaxLevel
+    uint8_t flags;        // 1 -- basement_flood_flags
+    uint8_t reserved[3];  // 3 -- zero
+};
+constexpr float kBasementFloodMaxLevel = 100000.f;   // far past any basement, so a hostile value cannot place the actor
+static_assert(sizeof(BasementFloodStatePayload) == 12, "BasementFloodStatePayload must be 12 bytes");
 
 // A dispenser pile's counters (TrashPileState): the displayed count is their sum. adopt 1 writes as
 // is; 0 applies the per-component minimum, so concurrent collects converge.

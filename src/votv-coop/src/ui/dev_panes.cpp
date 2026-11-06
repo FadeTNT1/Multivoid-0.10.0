@@ -18,6 +18,7 @@
 #include "coop/dev/spawn_npc.h"
 #include "coop/permissions/grants_core.h"
 #include "coop/session/local_grants.h"
+#include "coop/player/anti_noclip_rescue.h"
 #include "coop/session/teleport_client.h"
 #include "ui/scale.h"
 
@@ -60,6 +61,13 @@ void RenderTeleportClients() {
     if (ImGui::Button("Teleport clients to me")) coop::teleport_client::TeleportClientsToHost();
     ImGui::SameLine();
     ImGui::TextDisabled("(host only)");
+}
+
+void RenderForceAntiNoclip() {
+    // Local to this machine: it stands the game's own check line through the world, so the next tick runs the rescue.
+    if (ImGui::Button("Force the anti-noclip check")) coop::anti_noclip_rescue::DevForce();
+    ImGui::SameLine();
+    ImGui::TextDisabled("(in a session: relocated to the last safe place, never the backrooms)");
 }
 
 void RenderFreecam() {

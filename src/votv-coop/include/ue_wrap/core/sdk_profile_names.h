@@ -1336,6 +1336,46 @@ inline constexpr const wchar_t* BucketHeightInterpProp = L"height_interp";
 inline constexpr const wchar_t* BucketEmptyProp = L"empty";
 inline constexpr const wchar_t* BucketUpdFn = L"upd";
 
+// The basement flood: waterVolume_basementFlooder_C, the one water volume of the basement, which the game moves up and
+// down between `loc_a` (dry) and `loc_b` (full, `height` above it). Its level is the actor's distance from loc_a in
+// world units: getLevel reads it, setLevel(alpha) places the actor there in one step, and addWater(deltaTime, power)
+// walks it toward loc_b (power > 0, a burst pipe's tick) or loc_a (power < 0, the drain's tick). startMoving(moveTo)
+// is the cheat's toggle (`bflood`): it sets `moveTo` and enables the actor's tick, whose body refreshes the water's
+// data through the parent waterVolume_C's no-arg updateWaterData (surface plane, depth, the buoyancy boxes).
+inline constexpr const wchar_t* BasementFloodClass = L"waterVolume_basementFlooder_C";
+inline constexpr const wchar_t* BasementFloodGetLevelFn = L"getLevel";
+inline constexpr const wchar_t* BasementFloodSetLevelFn = L"setLevel";
+inline constexpr const wchar_t* BasementFloodAddWaterFn = L"addWater";
+inline constexpr const wchar_t* BasementFloodStartMovingFn = L"startMoving";
+inline constexpr const wchar_t* BasementFloodMoveToProp = L"moveTo";
+inline constexpr const wchar_t* BasementFloodHeightProp = L"height";
+// `dist` is set by the actor's BeginPlay (the distance between loc_a and loc_b), so it is zero until the actor has begun
+// play, and loc_a is then still the origin: a level read or placed before that is meaningless.
+inline constexpr const wchar_t* BasementFloodDistProp = L"dist";
+inline constexpr const wchar_t* BasementFloodLevelParam = L"level";
+inline constexpr const wchar_t* BasementFloodAlphaParam = L"alpha";
+inline constexpr const wchar_t* WaterVolumeUpdateDataFn = L"updateWaterData";
+// The anti-noclip check of mainPlayer_C's tick (ue_wrap/actors/anti_noclip.h): `lastLoc`, the camera's place at the end
+// of the last tick; the gamemode's canBackrooms() and its out parameter; the controller's GetViewTarget; and
+// teleportWOBackrooms (newTransform, useRotation, trueRotation, useVelocity, controlRotation), the verb both branches
+// end in, which also writes `lastLoc` and takes the velocity from the transform's scale when useVelocity is set.
+inline constexpr const wchar_t* MainPlayerLastLocProp = L"lastLoc";
+inline constexpr const wchar_t* MainPlayerTeleportFn = L"teleportWOBackrooms";
+inline constexpr const wchar_t* TeleportNewTransformParam = L"newTransform";
+inline constexpr const wchar_t* TeleportUseRotationParam = L"useRotation";
+inline constexpr const wchar_t* TeleportTrueRotationParam = L"trueRotation";
+inline constexpr const wchar_t* TeleportUseVelocityParam = L"useVelocity";
+inline constexpr const wchar_t* TeleportControlRotationParam = L"controlRotation";
+inline constexpr const wchar_t* CanBackroomsReturnParam = L"return";
+inline constexpr const wchar_t* GetViewTargetFn = L"GetViewTarget";
+// The collision channel the anti-noclip check reads the capsule's response on (ECollisionChannel 16, game channel 10).
+inline constexpr int AntiNoclipCapsuleChannel = 16;
+
+// The buoyancy master (waterFloatMaster_C): one per world, holding in `actorsInWater` every body a water volume has
+// reported inside it, which its tick pushes toward the surface.
+inline constexpr const wchar_t* WaterFloatMasterClass = L"waterFloatMaster_C";
+inline constexpr const wchar_t* WaterFloatMasterActorsProp = L"actorsInWater";
+
 // The poster, in its two forms. Rolled: prop_poster_C, a prop held in the hand; its left-button use calls put(),
 // which (the holder's hitResult blocking, on a body that does not simulate) spawns `posterClass` at the `turn`
 // component's world transform (scale included: the scroll wheel sizes `spawnLoc`, `turn`'s parent), copies `type`,

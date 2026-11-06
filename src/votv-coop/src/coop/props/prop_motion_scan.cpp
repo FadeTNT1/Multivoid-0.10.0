@@ -19,6 +19,7 @@
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/engine/engine_pawn.h"       // GetCameraLocation: the host's own view
 #include "ue_wrap/engine/engine_physics.h"    // IsComponentSimulatingPhysics
+#include "ue_wrap/world/water_float_master.h"  // ActorsInWater: what a water volume holds
 
 #include <cstdint>
 #include <unordered_map>
@@ -61,6 +62,9 @@ size_t   g_nearCursor = 0;
 size_t   g_farCursor  = 0;
 uint64_t g_nextRefreshMs = 0;
 size_t   g_coastsOpened = 0;
+size_t   g_waterCoasts = 0;
+uint64_t g_nextWaterMs = 0;
+std::vector<void*> g_water;   // kept for its capacity
 size_t   g_nextSayAt = 1;   // the log line's next count: the first coast, then every 64
 std::vector<coop::element::Registry::ActorIdPair> g_snap;   // kept for its capacity
 
@@ -177,6 +181,36 @@ bool Check(uint32_t eid, bool mayCoast) {
     return true;
 }
 
+// The bodies a water volume holds are coasted without waiting for the sweep to see them move: the water pushes them
+// for as long as they are inside it. Props only, simulating, in no hand; a client's unheld row on one goes to the host.
+// Bounded by the same coast slots as the sweep. Returns how many coasts it opened.
+size_t FeedWater(size_t alreadyOpened) {
+    const uint64_t now = coop::active_drive::NowMs();
+    if (now < g_nextWaterMs) return 0;
+    g_nextWaterMs = now + kWaterFeedMs;
+    if (ue_wrap::water_float_master::ActorsInWater(g_water) == 0) return 0;
+    size_t opened = 0;
+    for (void* a : g_water) {
+        if (CoastSlots(coop::prop_drive_host::CoastingCount(), alreadyOpened + opened) == 0) break;
+        if (!R::IsLive(a) || !PR::IsDescendantOfProp(a)) continue;
+        if (coop::prop_drive_host::InAHand(a)) continue;   // the held-prop lane owns it
+        if (coop::prop_drive_host::IsDriven(a)) {
+            coop::prop_drive_host::OverrideClientSyncer(a, "buoyancy");   // a client's unheld row; a host row stands
+            continue;
+        }
+        void* mesh = PR::GetStaticMesh(a);
+        if (!mesh || !E::IsComponentSimulatingPhysics(mesh)) continue;
+        coop::prop_drive_host::Coast(a, "buoyancy");
+        if (!coop::prop_drive_host::IsDriven(a)) continue;   // the channel refused it (no element id, a class no peer holds)
+        ++opened;
+        ++g_coastsOpened;
+        ++g_waterCoasts;
+        if (g_waterCoasts == 1 || g_waterCoasts % 32 == 0)
+            UE_LOGI("[PROP-SCAN] HOST buoyancy: %zu coast(s) opened for props a water volume holds", g_waterCoasts);
+    }
+    return opened;
+}
+
 void Sweep(std::vector<uint32_t>& list, size_t& cursor, size_t reads, size_t& opened) {
     const size_t n = list.size();
     if (n == 0) return;
@@ -200,6 +234,7 @@ void Tick(coop::net::Session& /*s*/, bool isHost) {
         g_nextRefreshMs = now + kRefreshMs;
     }
     size_t opened = 0;
+    opened += FeedWater(opened);   // before the sweep: the props the water holds take the coast slots first
     // The near set first: when the budget runs short, the props a player can see take it.
     Sweep(g_near, g_nearCursor, kNearChecksPerTick, opened);
     Sweep(g_far, g_farCursor, kFarChecksPerTick, opened);
@@ -222,6 +257,9 @@ void OnDisconnect() {
     g_nearCursor = g_farCursor = 0;
     g_nextRefreshMs = 0;
     g_coastsOpened = 0;
+    g_waterCoasts = 0;
+    g_nextWaterMs = 0;
+    g_water.clear();
     g_nextSayAt = 1;
 }
 
