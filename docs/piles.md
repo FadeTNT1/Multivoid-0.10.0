@@ -122,7 +122,12 @@ The dispenser piles ("uses 6 of 7") are keyed save actors; a press, the vacuum o
 dispenses items and decrements a counter pair inside the Blueprint. Each peer polls its
 indexed piles and broadcasts the pair on a decrease; receivers apply a per-component minimum,
 so concurrent collects converge, and the host's connect snapshot is applied as sent
-(`coop/props/trash_pile_sync`). Depletion destroys the pile inside the Blueprint, caught by a
+(`coop/props/trash_pile_sync`). A packet for a pile that has not streamed in is parked by key
+(`coop/props/trash_pile_pending`): a snapshot replaces what is parked, and a later live collect merges into it by
+per-component minimum while the entry stays a snapshot, so the pile lands at the newest counts. An unresolved entry
+expires after 25 s with a rate-limited warning naming its key and counts; `[dev] trash_pile_log=1` logs every snapshot
+sent and packet received by key, and each peer logs a `world-ready summary` line (pile count, `keysHash`) to compare
+host against client. Depletion destroys the pile inside the Blueprint, caught by a
 death-watch in the poll and broadcast as the ordinary keyed destroy: outside a transition window,
 an indexed pile that vanishes is a depletion if this peer has just run a destroying verb on it, or
 if it vanished near the local camera, and any other disappearance is a sublevel stream-out. The

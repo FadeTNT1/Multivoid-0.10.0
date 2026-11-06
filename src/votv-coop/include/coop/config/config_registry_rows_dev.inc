@@ -798,3 +798,8 @@ CFG_FLAG(key_index_forget_one, "key_index_forget_one", "dev", false, "VOTVCOOP_K
 CFG_FLAG(melee_fx_log, "melee_fx_log", "dev", false, "VOTVCOOP_MELEE_FX_LOG",
     "Developer: log every melee effect this peer sends, judges, refuses and plays (the [MELEE-FX] lines), not only the "
     "first few of each.")
+CFG_FLAG(trash_pile_log, "trash_pile_log", "dev", false, "VOTVCOOP_TRASH_PILE_LOG",
+    "Diagnostic (BOTH peers): log every dispenser-pile counter the host's connect snapshot sends, every one a peer "
+    "receives (parked or applied), and the counter moves the poll takes silently (first sighting, a rise), by key, to "
+    "diff host against client when kitchen piles disagree. Off, only expired parked applies and the per-world pile "
+    "count + keysHash are logged.")

@@ -5,10 +5,13 @@
 
 #include "coop/props/trash_pile_sync.h"
 
+#include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
 #include "coop/props/prop_element_tracker.h"
+#include "coop/props/trash_pile_pending.h"
 #include "coop/session/net_pump.h"             // TickSerial: the authored-death window's clock
 
 #include "ue_wrap/engine/engine.h"
@@ -48,8 +51,9 @@ struct Entry {
     float   x = 0, y = 0, z = 0;  // last live position (the death-watch proximity test)
 };
 std::unordered_map<std::wstring, Entry> g_index;
-struct Pending { int16_t a; int16_t b; bool adopt; Clock::time_point deadline; };
-std::unordered_map<std::wstring, Pending> g_pending;   // deferred applies (instance not streamed in)
+// Deferred applies (instance not streamed in). A host snapshot parked here keeps absorbing later live
+// decreases by component-wise minimum -- see trash_pile_pending.h.
+PendingTable g_pending;
 std::unordered_set<std::wstring> g_depletedKeys;       // depleted THIS session (connect replay)
 // Piles this peer has just run a destroying verb on. The death-watch cannot see a BP-internal
 // K2_DestroyActor, so it asks whether a WRITER acted -- and geometry is only a proxy for that
@@ -68,6 +72,10 @@ Clock::time_point g_nextRebuild{};
 constexpr auto kPollEvery    = std::chrono::milliseconds(50);
 constexpr auto kRebuildEvery = std::chrono::seconds(2);
 constexpr auto kPendingTtl   = std::chrono::seconds(25);
+constexpr auto kSummaryDelay = std::chrono::seconds(15);   // after the index first belongs to a world
+uint32_t         g_summaryGen = 0xFFFFFFFFu;                          // world gen the summary line was last armed for
+Clock::time_point g_summaryAt{};
+bool             g_summaryDone = true;
 // Death-watch proximity gate: a writer on this peer (the E-grab, the vacuum, the broom) acts at
 // arm's length, so a depletion it caused dies near this peer's camera and a far death is a sublevel
 // stream-out. Eight metres, the same radius the grime super-sponge uses. A death this peer caused
@@ -86,6 +94,41 @@ bool WasAuthoredHere(const std::wstring& key) {
 
 uint64_t Fnv1a(const std::wstring& s, uint64_t h) {
     for (wchar_t c : s) { h ^= static_cast<uint64_t>(c); h *= 1099511628211ull; }
+    return h;
+}
+
+// The `trash_pile_log` row: per-key lines for every snapshot sent, every packet received, and the silent
+// baseline moves of the poll. Off by default -- a placed world holds a few hundred piles.
+bool VerboseLog() {
+    static const bool on = coop::config::ResolveFlag(::coop::config_registry::rows::trash_pile_log);
+    return on;
+}
+
+// A rate limit for the lines that are worth having in every log but must not flood one: at most `kBurst`
+// lines per `kWindow`, and the next line that gets through says how many were held back.
+struct RateLimit {
+    Clock::time_point windowEnd{};
+    int      used = 0;
+    uint32_t held = 0;
+    // True when the caller may log now; `heldOut` receives the count held back since the last allowed line.
+    bool Allow(Clock::time_point now, uint32_t& heldOut) {
+        constexpr int kBurst = 6;
+        constexpr auto kWindow = std::chrono::seconds(30);
+        if (now >= windowEnd) { windowEnd = now + kWindow; used = 0; }
+        if (used >= kBurst) { ++held; return false; }
+        ++used;
+        heldOut = held;
+        held = 0;
+        return true;
+    }
+};
+RateLimit g_expiryLimit;
+
+// XOR-fold of per-key FNV hashes: ORDER-INDEPENDENT, so identical key sets hash identically across peers
+// regardless of map iteration order.
+uint64_t KeysHash(const std::unordered_map<std::wstring, Entry>& index) {
+    uint64_t h = 0;
+    for (const auto& [k, e] : index) h ^= Fnv1a(k, 1469598103934665603ull);
     return h;
 }
 
@@ -133,12 +176,8 @@ size_t HubPassComplete(void*, bool /*isFull*/, uint32_t worldGen) {
     g_indexGen = worldGen;
     g_scanFound.clear();
     if (g_index.size() != before) {
-        // XOR-fold of per-key FNV hashes: ORDER-INDEPENDENT, so identical key sets
-        // hash identically across peers regardless of map iteration order.
-        uint64_t h = 0;
-        for (const auto& [k, e] : g_index) h ^= Fnv1a(k, 1469598103934665603ull);
         UE_LOGI("trash_pile: indexed %zu pile(s), keysHash=0x%llX", g_index.size(),
-                static_cast<unsigned long long>(h));
+                static_cast<unsigned long long>(KeysHash(g_index)));
     }
     return g_index.size();
 }
@@ -193,12 +232,15 @@ void ApplyToLive(Entry& e, const std::wstring& key, int16_t wa, int16_t wb, bool
     }
     if (na == la && nb == lb) {
         e.lastA = na; e.lastB = nb;  // idempotent -- still prime the baseline
+        if (VerboseLog())
+            UE_LOGI("trash_pile: apply no-op key='%ls' A=%d B=%d (wire %d,%d%s, from slot %u)", key.c_str(),
+                    la, lb, wa, wb, adopt ? ", adopt" : "", fromSlot);
         return;
     }
     UP::WriteTrashPileAmounts(e.actor, na, nb);
     e.lastA = na; e.lastB = nb;
-    UE_LOGI("trash_pile: applied A=%d B=%d key='%ls' (from slot %u%s)",
-            na, nb, key.c_str(), fromSlot, adopt ? ", adopt" : "");
+    UE_LOGI("trash_pile: applied A=%d B=%d key='%ls' (was %d,%d; from slot %u%s)",
+            na, nb, key.c_str(), la, lb, fromSlot, adopt ? ", adopt" : "");
 }
 
 }  // namespace
@@ -223,6 +265,9 @@ void OnReliable(const coop::net::TrashPileStatePayload& payload, uint8_t senderP
     for (uint8_t i = 0; i < payload.key.len && i < 31; ++i)
         key.push_back(static_cast<wchar_t>(static_cast<unsigned char>(payload.key.data[i])));
     if (key.empty()) return;
+    if (VerboseLog())
+        UE_LOGI("trash_pile: recv key='%ls' A=%d B=%d %s from slot %u", key.c_str(), payload.amountA,
+                payload.amountB, adopt ? "snapshot(adopt)" : "collect", senderPeerSlot);
     // A stale-gen index holds another world's piles, so treat it as a miss: the apply then PARKS
     // in g_pending and lands after the hub's next pass, never on a dead-world actor.
     auto it = IndexCurrent() ? g_index.find(key) : g_index.end();
@@ -230,20 +275,14 @@ void OnReliable(const coop::net::TrashPileStatePayload& payload, uint8_t senderP
         ApplyToLive(it->second, key, payload.amountA, payload.amountB, adopt, senderPeerSlot);
         return;
     }
-    // Not streamed in / not yet indexed: defer (merge: adopt overrides, live keeps MIN).
-    auto pit = g_pending.find(key);
-    if (pit == g_pending.end()) {
-        g_pending[key] = Pending{payload.amountA, payload.amountB, adopt,
-                                 Clock::now() + kPendingTtl};
-    } else {
-        Pending& p = pit->second;
-        if (adopt) {
-            p = Pending{payload.amountA, payload.amountB, true, Clock::now() + kPendingTtl};
-        } else if (!p.adopt) {
-            if (payload.amountA < p.a) p.a = payload.amountA;
-            if (payload.amountB < p.b) p.b = payload.amountB;
-            p.deadline = Clock::now() + kPendingTtl;
-        }
+    // Not streamed in / not yet indexed: defer. A snapshot replaces what is parked; a live collect merges
+    // into it by component-wise minimum whether or not a snapshot is parked (the entry stays adopt), so
+    // the pile lands at the newest counts when it appears.
+    g_pending.Offer(key, payload.amountA, payload.amountB, adopt, Clock::now() + kPendingTtl);
+    if (VerboseLog()) {
+        const PendingEntry* p = g_pending.Find(key);
+        UE_LOGI("trash_pile: parked key='%ls' -> A=%d B=%d%s (pile not resolved yet)", key.c_str(),
+                p ? p->a : -1, p ? p->b : -1, p && p->adopt ? ", adopt" : "");
     }
 }
 
@@ -263,7 +302,7 @@ void NotifyWireDestroy(const std::wstring& key) {
     if (g_index.erase(key) > 0) {
         UE_LOGI("trash_pile: wire destroy for key='%ls' -- unwatched (no re-broadcast)", key.c_str());
     }
-    g_pending.erase(key);
+    g_pending.Erase(key);
 }
 
 void QueueConnectBroadcastForSlot(int peerSlot) {
@@ -281,6 +320,8 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
         if (!UP::ReadTrashPileAmounts(e.actor, a, b)) continue;
         SendState(s, key, a, b, /*adopt=*/true, peerSlot);
         ++sent;
+        if (VerboseLog())
+            UE_LOGI("trash_pile: snapshot send key='%ls' A=%d B=%d -> slot %d", key.c_str(), a, b, peerSlot);
     }
     // Depleted-this-session piles: replay the keyed destroy so a joiner whose
     // transferred save predates the depletion drops its copy. (Pre-session
@@ -297,8 +338,8 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
         s->SendReliableToSlot(peerSlot, coop::net::ReliableKind::PropDestroy, &dp, sizeof(dp));
         ++replayed;
     }
-    UE_LOGI("trash_pile: connect-snapshot -> slot %d (%zu pile(s), %zu depleted-key replay(s))",
-            peerSlot, sent, replayed);
+    UE_LOGI("trash_pile: connect-snapshot -> slot %d (%zu pile(s), %zu depleted-key replay(s), keysHash=0x%llX)",
+            peerSlot, sent, replayed, static_cast<unsigned long long>(KeysHash(g_index)));
 }
 
 void Tick(bool inTransition) {
@@ -307,22 +348,43 @@ void Tick(bool inTransition) {
     if (!g_installed) { Install(s); if (!g_installed) return; }
     if (!IndexCurrent()) return;  // index belongs to a dead world -- wait for the hub's next pass
     const auto now = Clock::now();
+    // One line per world, once the index has had time to settle (the hub's tail pass reaches the late
+    // sublevels within a few passes): the same (count, keysHash) pair on host and client means the kitchen's
+    // piles share keys; a differing hash names the side whose index holds keys the other lacks.
+    if (g_summaryGen != g_indexGen) {
+        g_summaryGen = g_indexGen;
+        g_summaryAt = now + kSummaryDelay;
+        g_summaryDone = false;
+    }
+    if (!g_summaryDone && now >= g_summaryAt) {
+        g_summaryDone = true;
+        UE_LOGI("trash_pile: world-ready summary (%s): %zu dispenser pile(s) indexed, keysHash=0x%llX, %zu parked",
+                s->role() == coop::net::Role::Host ? "host" : "client", g_index.size(),
+                static_cast<unsigned long long>(KeysHash(g_index)), g_pending.size());
+    }
     if (now >= g_nextRebuild) {
         g_nextRebuild = now + kRebuildEvery;
         // Deferred-apply retry on the same throttle (the hub refreshes the index on its own
         // cadence; this throttle now paces only the retries).
-        for (auto it = g_pending.begin(); it != g_pending.end();) {
-            auto idx = g_index.find(it->first);
+        g_pending.Sweep([&](const std::wstring& key, PendingEntry& p) {
+            auto idx = g_index.find(key);
             if (idx != g_index.end() && R::IsLiveByIndex(idx->second.actor, idx->second.idx)) {
-                ApplyToLive(idx->second, it->first, it->second.a, it->second.b,
-                            it->second.adopt, 0);
-                it = g_pending.erase(it);
-            } else if (now >= it->second.deadline) {
-                it = g_pending.erase(it);  // event-cluster pile with a peer-local key: expire silently
-            } else {
-                ++it;
+                ApplyToLive(idx->second, key, p.a, p.b, p.adopt, 0);
+                return true;
             }
-        }
+            if (now < p.deadline) return false;
+            // An event-cluster pile with a peer-local key, or a pile whose sublevel never streamed in. The
+            // entry holds no actor, so the key and the counts are all there is to report.
+            uint32_t held = 0;
+            if (g_expiryLimit.Allow(now, held)) {
+                UE_LOGW("trash_pile: pending apply expired unresolved: class=trashBitsPile key='%ls' A=%d B=%d%s "
+                        "(%s; index holds %zu pile(s)); %u similar line(s) held back",
+                        key.c_str(), p.a, p.b, p.adopt ? " adopt" : "",
+                        idx != g_index.end() ? "key indexed but not live" : "key not indexed",
+                        g_index.size(), held);
+            }
+            return true;
+        });
     }
     if (now < g_nextPoll) return;
     g_nextPoll = now + kPollEvery;
@@ -354,7 +416,7 @@ void Tick(bool inTransition) {
                         it->first.c_str(),
                         authored ? "a verb this peer ran" : "near this peer's camera");
             }
-            g_pending.erase(it->first);
+            g_pending.Erase(it->first);
             it = g_index.erase(it);
             continue;
         }
@@ -362,6 +424,8 @@ void Tick(bool inTransition) {
         if (UP::ReadTrashPileAmounts(e.actor, a, b)) {
             if (e.lastA < 0) {
                 e.lastA = a; e.lastB = b;  // first sighting: prime silently
+                if (VerboseLog())
+                    UE_LOGI("trash_pile: primed key='%ls' A=%d B=%d", it->first.c_str(), a, b);
             } else if (a < e.lastA || b < e.lastB) {
                 // Local collect (any of the three writers). Broadcast absolute values.
                 e.lastA = a; e.lastB = b;
@@ -370,6 +434,9 @@ void Tick(bool inTransition) {
                         it->first.c_str(), a, b);
             } else if (a > e.lastA || b > e.lastB) {
                 e.lastA = a; e.lastB = b;  // BeginPlay re-roll / save reload: re-prime, never propagate
+                if (VerboseLog())
+                    UE_LOGI("trash_pile: counters rose key='%ls' -> A=%d B=%d (re-primed, not propagated)",
+                            it->first.c_str(), a, b);
             }
             // No per-poll location read here: it is a ProcessEvent dispatch, and a few hundred
             // piles at the 20 Hz poll would push several thousand dispatches a second through our
@@ -382,10 +449,12 @@ void Tick(bool inTransition) {
 
 void OnDisconnect() {
     g_index.clear();
-    g_pending.clear();
+    g_pending.Clear();
     g_depletedKeys.clear();
     g_authoredDeaths.clear();
     g_installed = false;
+    g_summaryGen = 0xFFFFFFFFu;
+    g_summaryDone = true;
     g_nextPoll = {};
     g_nextRebuild = {};
     UE_LOGI("trash_pile: OnDisconnect cleared index + baselines + depleted keys");
