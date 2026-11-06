@@ -427,7 +427,7 @@ void OnWorldGather() {
 // THE world counts: the live save object. The save-slot menu writes regenerated and copied save
 // objects of its own; the join capture writes through SaveGameToSlot and never reaches this. The
 // profiles are cut beside the hosted world's key (coop/save/save_transfer).
-void OnWorldSaveWritten(void* saveObject) {
+void OnWorldSaveWritten(void* saveObject, bool /*autosave*/) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running() || s->role() != coop::net::Role::Host) return;
     const std::wstring& world = coop::save_transfer::HostSlot();

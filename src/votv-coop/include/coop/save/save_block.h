@@ -28,8 +28,9 @@ void Pump();
 void Tick(coop::net::Session* session);
 
 // Called on the game thread after saveSlot_C::saveToSlot ran on a peer that may save, with the save
-// object that was written: the moment the world on disk changed. One listener.
-using WrittenFn = void (*)(void* saveObject);
+// object that was written and whether the entry written was the folder's autosave (autosave.sav)
+// rather than main.sav: the moment the world on disk changed. One listener.
+using WrittenFn = void (*)(void* saveObject, bool autosave);
 void SetWritten(WrittenFn fn);
 
 }  // namespace coop::save_block

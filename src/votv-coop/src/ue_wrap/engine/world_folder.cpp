@@ -183,7 +183,7 @@ std::wstring MetadataStarterMap(void* metadata) {
     return R::ToString(n);
 }
 
-std::wstring SaveObjectFile(void* saveSlot) {
+std::wstring SaveObjectFile(void* saveSlot, const wchar_t* entry) {
     if (!saveSlot || !R::IsLive(saveSlot)) return {};
     void* cls = R::ClassOf(saveSlot);
     const int32_t pathOff = R::FindPropertyOffset(cls, N::SaveSlotSavePathProp);
@@ -195,7 +195,9 @@ std::wstring SaveObjectFile(void* saveSlot) {
     if (dir.empty() || name.empty()) return {};
     std::filesystem::path p(dir);
     if (p.is_relative()) p = std::filesystem::path(SaveGamesDir()) / p;
-    p /= name + N::WorldSaveExt;
+    // The object's slotName is its own entry (main). An autosave is written beside it, into the
+    // same folder, under the entry's name, by the same saveToSlot call.
+    p /= (entry && *entry ? std::wstring(entry) : name) + N::WorldSaveExt;
     return p.make_preferred().wstring();
 }
 
