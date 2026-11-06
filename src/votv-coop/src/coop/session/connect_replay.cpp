@@ -19,6 +19,7 @@
 #include "coop/interactables/dish_sync.h"
 #include "coop/interactables/download_arm_sync.h"
 #include "coop/interactables/sat_console_sync.h"  // the SAT console's shared commands run on the host
+#include "coop/world/achievement_sync.h"
 #include "coop/world/daily_task_sync.h"
 #include "coop/interactables/device_occupancy.h"
 #include "coop/world/email_sync.h"
@@ -155,6 +156,7 @@ void ConnectReplayForSlot(int slot) {
     coop::balance_sync::SendCurrentToSlot(slot);  // host's current balance
     coop::upgrade_sync::SendCurrentToSlot(slot);  // and the upgrade levels: the joiner's save was taken at the handshake
     coop::daily_task_sync::SendCurrentToSlot(slot);  // and the daily task: a change in its load window was hashed but never sent to it
+    coop::achievement_sync::SendUnionToSlot(slot);  // and the completed achievements and advancements every player holds between them
     // The host-to-client apply-blob push is not here: this fires at ClientWorldReady, after the
     // joiner loaded its world, so the blob would miss the pre-materialise hook; the host tick's
     // connect-edge detector drives it pre-world instead. No join teleport here either: the

@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 300;
+inline constexpr uint16_t kProtocolVersion = 301;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1410,6 +1410,21 @@ enum class ReliableKind : uint8_t {
     // whose pipe has not streamed in waits for it. Never relayed; a client's copy is refused at the host's receive
     // edge. BasementPipeStatePayload.
     BasementPipeState = 232,
+
+    // CLIENT->HOST: completions this client's own game made, to be folded into the session's shared set
+    // (coop::achievement_sync): up to kAchievementRowsMax rows, each an achievement (the player's profile) or an
+    // advancement (the world's), by the game's row name. Bit 0 of `flags` marks completions made just now, whose
+    // award the host pays from its own catalogue; a clear bit is the client's earlier profile, which pays nothing. The host
+    // checks every row against its game's catalogue and never takes an amount from the wire. Never relayed; the
+    // host answers with AchievementState. AchievementBatchPayload.
+    AchievementClaim = 233,
+
+    // HOST->ALL, and the whole set to a joiner at its world-ready: completed rows the session's shared set now
+    // holds, in the same batch shape (bit 0 of `flags` marks completions made just now; the replay clears it). A
+    // receiver completes each row it has not through the game's own verb, with its popup only for a fresh one and
+    // no award paid (the balance reaches it on BalanceSync), and keeps a row it cannot reach yet until its store loads. The claimant gets its own rows back and skips them as done. Never
+    // relayed; a client's copy is refused at the host's receive edge. AchievementBatchPayload.
+    AchievementState = 234,
 };
 
 #pragma pack(push, 1)
@@ -3098,6 +3113,27 @@ struct BasementPipeStatePayload {
     uint8_t reserved[3];  // 3  -- zero
 };
 static_assert(sizeof(BasementPipeStatePayload) == 36, "BasementPipeStatePayload must be 36 bytes");
+
+// A batch of completed rows (AchievementClaim, AchievementState). `domain` is 0 for an achievement, 1 for an
+// advancement; `name` is the game's row name, zero-padded printable ASCII with at least one terminating zero.
+inline constexpr int kAchievementNameBytes = 40;
+inline constexpr int kAchievementRowsMax = 5;
+namespace achievement_flags {
+constexpr uint8_t kFresh = 1;  // completions made just now: a claim's, the host pays the award of; a state's, shown with its popup
+}  // namespace achievement_flags
+struct AchievementRow {
+    uint8_t domain;                       // 1  -- 0 achievement, 1 advancement
+    char    name[kAchievementNameBytes];  // 40 -- the row name, zero-padded: at most 39 characters
+};
+static_assert(sizeof(AchievementRow) == 41, "AchievementRow must be 41 bytes");
+struct AchievementBatchPayload {
+    uint8_t        flags;                      // 1   -- achievement_flags
+    uint8_t        count;                      // 1   -- rows in use, 1..kAchievementRowsMax
+    AchievementRow rows[kAchievementRowsMax];  // 205
+};
+static_assert(sizeof(AchievementBatchPayload) == 207, "AchievementBatchPayload must be 207 bytes");
+static_assert(sizeof(AchievementBatchPayload) <= 256 - 20 - 8,
+              "AchievementBatchPayload must fit in one reliable datagram");
 
 // The client's answer to a restored inventory (InventoryRestoreAck): `before` and `after` are the item counts of
 // the carried grid, the hands and the equipment slots (-1 where an array did not resolve).

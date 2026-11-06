@@ -31,5 +31,11 @@ bool CharacterStep(void* character, float volume);
 // resolves, or when the name does not convert. Game thread (ProcessEvent).
 bool AddGloss(const std::wstring& name, int32_t level, void* worldContext);
 
+// Dispatch lib_C::progressAdvancement(name, disablePopup, worldContext): in game mode 0 only, the world's save slot
+// progresses the advancement by one (saveSlot_C::prAdvanc, which on reaching its target marks it completed and pays
+// its award) and the laptop's list is refreshed; in any other mode it does nothing. False until lib_C resolves, or
+// when the name does not convert. Game thread (ProcessEvent).
+bool ProgressAdvancement(const std::wstring& name, bool disablePopup, void* worldContext);
+
 
 }  // namespace ue_wrap::votv_lib

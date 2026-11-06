@@ -182,6 +182,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/physics_impact.cpp
     src/ue_wrap/world/votv_lib.cpp
     src/ue_wrap/world/economy.cpp
+    src/ue_wrap/world/achievements.cpp
     src/ue_wrap/world/profile.cpp
     src/ue_wrap/world/event_list.cpp
     src/ue_wrap/world/order_economy.cpp

@@ -151,7 +151,7 @@ bool KeybindDisplayName(const wchar_t* name, std::wstring& out) {
     return false;
 }
 
-bool ProgressAchievement(const wchar_t* name) {
+bool ProgressAchievement(const wchar_t* name, bool popup) {
     void* p = Profile();
     if (!p || g_progressMissing) return false;
     if (!g_progressFn) {
@@ -165,11 +165,22 @@ bool ProgressAchievement(const wchar_t* name) {
     const R::FName achievement = fname_utils::StringToFName(name);
     if (achievement.ComparisonIndex == 0) return false;
     ParamFrame f(g_progressFn);
-    const bool popup = true, autosave = false;
+    const bool autosave = false;
     if (!f.valid() || !f.Set(L"achievement", achievement) || !f.Set(L"popup", popup) ||
         !f.Set(L"autosave", autosave))
         return false;
     return Call(p, f);
+}
+
+void* Save() { return Profile(); }
+
+bool SaveProfile() {
+    void* p = Profile();
+    // Found each call: a save is rare, and the class's function list is cheap to read.
+    void* fn = p ? R::FindFunction(R::ClassOf(p), L"save") : nullptr;
+    if (!fn) return false;
+    ParamFrame f(fn);
+    return f.valid() && Call(p, f);
 }
 
 }  // namespace ue_wrap::profile

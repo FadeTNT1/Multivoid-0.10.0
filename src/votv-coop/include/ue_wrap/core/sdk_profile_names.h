@@ -1532,6 +1532,22 @@ inline constexpr const wchar_t* MeshVolumeLibClass = L"BPCodeLib";
 inline constexpr const wchar_t* MeshVolumeFn = L"MeshConvexVolume2";
 inline constexpr float HacksawVolumeDivisor = 200000.0f;  // vol / 100000 / 2
 inline constexpr float HacksawSoundPeriodSec = 0.8f;
+
+// The two completion stores (ue_wrap/world/achievements). The profile (save_main_C) keeps the achievements, the
+// world's save slot (saveSlot_C) the advancements, each as three parallel arrays: the row names, a struct_achievement
+// per row (progress, progressTarget, award) and a completed flag; a row is appended when it first progresses.
+// Their catalogues are the cooked list_achievements and list_advancements data tables.
+inline constexpr const wchar_t* AchievementCatalogue = L"list_achievements";
+inline constexpr const wchar_t* AdvancementCatalogue = L"list_advancements";
+inline constexpr const wchar_t* AchievementNamesProp = L"achievementsNames";
+inline constexpr const wchar_t* AchievementRowsProp = L"achievements";
+inline constexpr const wchar_t* AchievementCompletedProp = L"achievementsCompleted";
+inline constexpr const wchar_t* AdvancementNamesProp = L"advancementsNames";
+inline constexpr const wchar_t* AdvancementRowsProp = L"advancements";
+inline constexpr const wchar_t* AdvancementCompletedProp = L"advancementsCompleted";
+inline constexpr const wchar_t* AchievementProgressMember = L"progress_";
+inline constexpr const wchar_t* AchievementTargetMember = L"progressTarget_";
+inline constexpr const wchar_t* ProgressAdvancementFn = L"progressAdvancement";
 }  // namespace name
 
 }  // namespace ue_wrap::profile
