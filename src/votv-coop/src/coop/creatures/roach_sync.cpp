@@ -15,14 +15,17 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/types.h"
 #include "ue_wrap/engine/engine.h"
+#include "ue_wrap/facts/function_row.h"
 #include "ue_wrap/world/world_singleton.h"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -32,8 +35,17 @@ namespace {
 
 namespace R  = ue_wrap::reflection;
 namespace GT = ue_wrap::game_thread;
+namespace SG = ue_wrap::script_gate;
+
+// The body a client's native eat or stomp runs to remove a roach: actionOptionIndex(4) -> addFood ->
+// deleteRoach(index, false), and dedt -> deleteRoach(index, true). A name watch on it sees the removal at
+// the moment it happens, on every route, with the index still readable; the 1 Hz liveness scan it replaces
+// only noticed afterwards, and lost the race to a host snapshot (see "pending removal" below).
+UE_FACT_FN(kRowDeleteRoach, "roach_sync", L"cockroachMaster_C", L"deleteRoach", Declared);
+constexpr int kDeleteRoachTag = 0x52434431;  // 'RCD1'
 
 std::atomic<coop::net::Session*> g_session{nullptr};
+std::atomic<bool> g_watched{false};
 
 constexpr long long kPollIntervalMs     = 1000;   // host population poll + client liveness scan
 constexpr long long kKeepaliveMs        = 10000;  // periodic full resend (join/loss convergence)
@@ -42,6 +54,8 @@ constexpr float     kApplyMoveEpsilon   = 1.f;    // skip SetWorldLocation under
 constexpr float     kApplyScaleEpsilon  = 0.05f;
 constexpr float     kAdjudicateRadius   = 200.f;  // RoachConsumed nearest-match cap
 constexpr int       kMaxIntentsPerTick  = 4;      // client consumption-intent send cap
+constexpr long long kPendingTimeoutMs   = 2000;   // a local removal the host has not confirmed is dropped after this
+constexpr size_t    kMaxPending         = 16;
 
 // The pose lane.
 constexpr long long kPoseIntervalMs     = 80;     // ~12.5 Hz host publish
@@ -433,6 +447,8 @@ SnapEntry g_asmEntries[coop::net::kRoachSnapshotCap];
 // Liveness on THIS set is the local-consumption detector (a native eat/stomp
 // K2_DestroyComponent's the entry -- no polling dispatches needed). Index k here is the host's
 // roach ordinal k, which is also the key of the pose lane's glide state below.
+// comp == nullptr is a TOMBSTONE: a roach the local player removed (its intent is sent) kept in its slot, so
+// the tracked index stays the host's roach ordinal until the host's own removal arrives and a rebuild re-keys.
 struct TrackedRoach { void* comp; int32_t idx; Vec3 loc; };
 std::vector<TrackedRoach> g_tracked;
 bool  g_haveApplied = false;
@@ -459,24 +475,176 @@ bool GlideFresh(int ordinal, long long now) {
            now - g_glide[ordinal].lastRxMs < kTrackStaleMs;
 }
 
-void RebuildTracked(void* master) {
+// ---- pending removal (client prediction) ----
+// A roach the local player ate or stomped is gone here at once, but the host still has it until the intent
+// lands. A host snapshot taken in that window lists it, and applying that snapshot as-is rebuilt the
+// population and brought the roach back about a second later. So each local removal is kept as a pending
+// entry (where the roach was, and until when): ApplySnapshot hides the host's matching entry, and drops the
+// entry when the host's count shows the removal landed, or after kPendingTimeoutMs if it never does (a lost
+// or denied intent -- the host's roach then returns, which is correct).
+struct Pending { Vec3 pos; long long expireMs; };
+std::vector<Pending> g_pending;
+bool g_ownDelete = false;  // our own deleteRoach calls (the population rebuild) are not the player's
+
+void PrunePending(long long now) {
+    for (size_t i = 0; i < g_pending.size();) {
+        if (now >= g_pending[i].expireMs) {
+            UE_LOGI("roach_sync: client: pending removal at (%.0f,%.0f,%.0f) timed out unconfirmed -- host roach may return",
+                    g_pending[i].pos.x, g_pending[i].pos.y, g_pending[i].pos.z);
+            g_pending.erase(g_pending.begin() + static_cast<std::ptrdiff_t>(i));
+        } else {
+            ++i;
+        }
+    }
+}
+
+bool PendingNear(const Vec3& at) {
+    for (const auto& p : g_pending)
+        if (Dist2(p.pos, at) <= kAdjudicateRadius * kAdjudicateRadius) return true;
+    return false;
+}
+
+void AddPending(const Vec3& at, long long now) {
+    if (g_pending.size() >= kMaxPending) g_pending.erase(g_pending.begin());
+    g_pending.push_back({at, now + kPendingTimeoutMs});
+}
+
+// Tombstone the tracked entry for `comp` (the roach the player just removed), closing its glide.
+void TombstoneTracked(void* comp) {
+    for (size_t k = 0; k < g_tracked.size(); ++k) {
+        if (g_tracked[k].comp != comp) continue;
+        g_tracked[k].comp = nullptr;
+        if (k < static_cast<size_t>(coop::net::kRoachSnapshotCap)) g_glide[k] = RoachGlide{};
+        return;
+    }
+}
+
+// The watch on deleteRoach, a PRE so the roach and its array slot are still intact. On a client, a call
+// that is not ours is the local player's native eat (crush=false) or stomp (crush=true): send the intent
+// now, hide the roach from snapshots until the host confirms, and let the body run (the food award stays
+// native, once, on the eater).
+SG::Verdict OnDeleteRoachPre(const SG::Call& c) {
+    if (c.fromOurCode || g_ownDelete || !c.object || !c.locals) return SG::Verdict::Run;
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || s->role() != coop::net::Role::Client) return SG::Verdict::Run;
+    if (!Resolved()) return SG::Verdict::Run;
+
+    static void*   sFn = nullptr;
+    static int32_t sIdxOff = -1, sCrushOff = -1;
+    if (c.function != sFn) {
+        sFn = c.function;
+        sIdxOff   = R::FindParamOffset(c.function, L"IndexToRemove");
+        sCrushOff = R::FindParamOffset(c.function, L"crush");
+    }
+    if (sIdxOff < 0) return SG::Verdict::Run;
+    int32_t idx = -1;
+    std::memcpy(&idx, c.locals + sIdxOff, sizeof(idx));
+    const bool crush = sCrushOff >= 0 && c.locals[sCrushOff] != 0;
+
+    const FArrayRaw* arr = reinterpret_cast<const FArrayRaw*>(reinterpret_cast<uint8_t*>(c.object) + g_offRoaches);
+    if (!arr->Data || idx < 0 || idx >= arr->Num) return SG::Verdict::Run;
+    void* comp = reinterpret_cast<void* const*>(arr->Data)[idx];
+    if (!comp || !R::IsLive(comp)) return SG::Verdict::Run;
+    Vec3 loc{};
+    if (!GetCompLocation(comp, loc)) return SG::Verdict::Run;
+
+    const long long now = NowMs();
+    PrunePending(now);
+    coop::net::RoachConsumedPayload p{loc.x, loc.y, loc.z};
+    if (!s->SendReliable(coop::net::ReliableKind::RoachConsumed, &p, sizeof(p))) {
+        // Nothing reached the host, so its roach stays and the snapshot returning it is right; the
+        // liveness scan retries the intent.
+        UE_LOGW("roach_sync: client %s -> intent SEND FAILED at (%.0f,%.0f,%.0f); the scan retries",
+                crush ? "stomp" : "eat", loc.x, loc.y, loc.z);
+        return SG::Verdict::Run;
+    }
+    AddPending(loc, now);
+    TombstoneTracked(comp);
+    UE_LOGI("roach_sync: client %s -> intent pos (%.0f,%.0f,%.0f) idx=%d (pending %zu)",
+            crush ? "stomp" : "eat", loc.x, loc.y, loc.z, idx, g_pending.size());
+    return SG::Verdict::Run;
+}
+
+// Rebuild the tracked mirror set from the live slots. `hostDropped` lists, ascending, the host ordinals a
+// pending removal hid from the applied snapshot: each becomes a tombstone at its ordinal, so the tracked
+// index is still the host's roach ordinal while the host holds the roach.
+void RebuildTracked(void* master, const std::vector<int>& hostDropped) {
     g_tracked.clear();
     g_trackedMaster = master;
     std::vector<RoachSlot> slots;
     ReadRoaches(master, slots);
+    std::vector<TrackedRoach> live;
     for (const auto& s : slots) {
         Vec3 loc{};
         if (!GetCompLocation(s.comp, loc)) continue;
-        g_tracked.push_back({s.comp, R::InternalIndexOf(s.comp), loc});
+        live.push_back({s.comp, R::InternalIndexOf(s.comp), loc});
+    }
+    size_t li = 0, di = 0;
+    const int hostTotal = static_cast<int>(live.size() + hostDropped.size());
+    for (int k = 0; k < hostTotal; ++k) {
+        if (di < hostDropped.size() && hostDropped[di] == k) {
+            g_tracked.push_back({nullptr, -1, Vec3{0.f, 0.f, 0.f}});
+            ++di;
+        } else if (li < live.size()) {
+            g_tracked.push_back(live[li++]);
+        }
     }
 }
 
-void ApplySnapshot(const SnapEntry* entries, int total) {
+void ApplySnapshot(const SnapEntry* hostEntries, int hostTotal) {
     void* master = Master();
     if (!master) return;  // no world/master yet; the next snapshot re-delivers
     std::vector<RoachSlot> slots;
     ReadRoaches(master, slots);
     const long long now = NowMs();
+    PrunePending(now);
+
+    // Pending local removals: hide the host's entry for each roach this player already removed, so the
+    // snapshot cannot resurrect it. `ord` maps a kept entry to its host ordinal (empty = identity).
+    std::vector<SnapEntry> kept;
+    std::vector<int> ord, dropped;
+    const SnapEntry* entries = hostEntries;
+    int total = hostTotal;
+    if (!g_pending.empty()) {
+        if (hostTotal == static_cast<int>(slots.size())) {
+            // The host's count already equals ours: it applied every removal.
+            UE_LOGI("roach_sync: client: host confirmed %zu pending removal(s) (%d roach(es))",
+                    g_pending.size(), hostTotal);
+            g_pending.clear();
+        } else {
+            std::vector<char> claimed(static_cast<size_t>(hostTotal), 0);
+            for (size_t pi = 0; pi < g_pending.size();) {
+                int best = -1;
+                float bestD2 = kAdjudicateRadius * kAdjudicateRadius;
+                for (int e = 0; e < hostTotal; ++e) {
+                    if (claimed[e]) continue;
+                    const Vec3 at{hostEntries[e].loc.x, hostEntries[e].loc.y, hostEntries[e].loc.z};
+                    const float d2 = Dist2(at, g_pending[pi].pos);
+                    if (d2 <= bestD2) { bestD2 = d2; best = e; }
+                }
+                if (best < 0) {  // the host no longer has a roach there: it removed it
+                    UE_LOGI("roach_sync: client: host confirmed pending removal at (%.0f,%.0f,%.0f)",
+                            g_pending[pi].pos.x, g_pending[pi].pos.y, g_pending[pi].pos.z);
+                    g_pending.erase(g_pending.begin() + static_cast<std::ptrdiff_t>(pi));
+                    continue;
+                }
+                claimed[best] = 1;
+                ++pi;
+            }
+            for (int e = 0; e < hostTotal; ++e) {
+                if (claimed[e]) { dropped.push_back(e); continue; }
+                kept.push_back(hostEntries[e]);
+                ord.push_back(e);
+            }
+            if (!dropped.empty()) {
+                entries = kept.data();
+                total = static_cast<int>(kept.size());
+                UE_LOGI("roach_sync: client: pending kept hidden across snapshot (%zu hidden, host %d -> applied %d, local %zu)",
+                        dropped.size(), hostTotal, total, slots.size());
+            }
+        }
+    }
+    auto hostOrd = [&](int i) { return ord.empty() ? i : ord[static_cast<size_t>(i)]; };
 
     if (static_cast<int>(slots.size()) == total) {
         // Ordinal drive: k-th local valid slot <- k-th snapshot entry. A roach the pose lane is
@@ -484,13 +652,14 @@ void ApplySnapshot(const SnapEntry* entries, int total) {
         // it would undo the smoothing every second. Far off (a roach the lane lost) still snaps.
         for (int i = 0; i < total; ++i) {
             Vec3 cur{};
+            const int ho = hostOrd(i);
             const Vec3 want{entries[i].loc.x, entries[i].loc.y, entries[i].loc.z};
             if (GetCompLocation(slots[i].comp, cur) &&
                 Dist2(cur, want) > kApplyMoveEpsilon * kApplyMoveEpsilon) {
-                const bool gliding = GlideFresh(i, now) && Dist2(cur, want) < kSnapDist * kSnapDist;
+                const bool gliding = GlideFresh(ho, now) && Dist2(cur, want) < kSnapDist * kSnapDist;
                 if (!gliding) {
                     SetCompLocation(slots[i].comp, want);
-                    if (i < coop::net::kRoachSnapshotCap) g_glide[i] = RoachGlide{};
+                    if (ho < coop::net::kRoachSnapshotCap) g_glide[ho] = RoachGlide{};
                 }
             }
             Vec3 sc{1.f, 1.f, 1.f};
@@ -502,7 +671,9 @@ void ApplySnapshot(const SnapEntry* entries, int total) {
     } else {
         // Population rebuild via the game's OWN mutators (array/Count/collision
         // stay SP-consistent). deleteRoach nulls the slot (no index shift), so
-        // deleting in array order is safe; addRoach appends.
+        // deleting in array order is safe; addRoach appends. The deletes are ours: the deleteRoach watch
+        // must not read them as the player eating.
+        g_ownDelete = true;
         for (const auto& s : slots) {
             ue_wrap::ParamFrame del(g_delRoachFn);
             if (!del.valid()) break;
@@ -510,6 +681,7 @@ void ApplySnapshot(const SnapEntry* entries, int total) {
             del.Set<bool>(L"crush", false);
             ue_wrap::Call(master, del);
         }
+        g_ownDelete = false;
         for (int i = 0; i < total; ++i) {
             ue_wrap::ParamFrame add(g_addRoachFn);
             if (!add.valid()) break;
@@ -521,10 +693,10 @@ void ApplySnapshot(const SnapEntry* entries, int total) {
             ue_wrap::Call(master, add);
         }
         ResetGlides();  // new components, new ordinals
-        UE_LOGI("roach_sync: client REBUILT population (%zu local -> %d host roach(es))",
-                slots.size(), total);
+        UE_LOGI("roach_sync: client REBUILT population (%zu local -> %d host roach(es), %zu pending hidden)",
+                slots.size(), total, dropped.size());
     }
-    RebuildTracked(master);
+    RebuildTracked(master, dropped);
     g_haveApplied = true;
 }
 
@@ -545,7 +717,7 @@ void ClientIngestPose(coop::net::Session* s, long long now) {
         const auto& row = body.rows[i];
         if (row.ordinal >= g_tracked.size()) continue;
         TrackedRoach& t = g_tracked[row.ordinal];
-        if (!R::IsLiveByIndex(t.comp, t.idx)) continue;
+        if (!t.comp || !R::IsLiveByIndex(t.comp, t.idx)) continue;  // a tombstone: removed here, host not yet
         RoachGlide& g = g_glide[row.ordinal];
         const Vec3 to{row.x, row.y, row.z};
         const Vec3 toPyr{coop::net::DequantDeg(row.pitchCdeg), coop::net::DequantDeg(row.yawCdeg),
@@ -590,7 +762,7 @@ void ClientDrivePose(long long now) {
         RoachGlide& g = g_glide[k];
         if (!g.win.IsOpen()) continue;
         TrackedRoach& t = g_tracked[k];
-        if (!R::IsLiveByIndex(t.comp, t.idx)) { g.win.Close(); continue; }
+        if (!t.comp || !R::IsLiveByIndex(t.comp, t.idx)) { g.win.Close(); continue; }
         ++open;
         bool arrived = false;
         const float d = g.win.Advance(static_cast<uint64_t>(now), &arrived);
@@ -615,9 +787,10 @@ void ClientDrivePose(long long now) {
     ++g_stats.depthFrames;
 }
 
-// Client 1 Hz: any tracked component that died locally (and not via our own
-// apply, which rebuilds g_tracked) was consumed by the LOCAL player's native
-// eat/stomp event -> forward the intent.
+// Client 1 Hz FALLBACK: the deleteRoach watch reports a local eat or stomp the moment it happens. This scan
+// only catches a tracked component that died without that report (the watch missed it, or its intent send
+// failed): forward the intent and hold the roach pending, as the watch does. A roach already pending is
+// just tombstoned. Tombstones stay in place: compacting them shifted the ordinals under the pose lane.
 void DetectLocalConsumption(coop::net::Session* s) {
     if (!g_haveApplied || g_tracked.empty()) return;
     // Master-liveness gate. A client WORLD TEARDOWN while the session is still
@@ -633,26 +806,25 @@ void DetectLocalConsumption(coop::net::Session* s) {
         ResetGlides();
         return;
     }
+    const long long now = NowMs();
+    PrunePending(now);
     int sent = 0;
-    size_t w = 0;
     for (size_t r = 0; r < g_tracked.size(); ++r) {
         TrackedRoach& t = g_tracked[r];
-        if (R::IsLiveByIndex(t.comp, t.idx)) { g_tracked[w++] = t; continue; }
-        if (sent < kMaxIntentsPerTick) {
-            coop::net::RoachConsumedPayload p{t.loc.x, t.loc.y, t.loc.z};
-            if (s->SendReliable(coop::net::ReliableKind::RoachConsumed, &p, sizeof(p))) {
-                ++sent;
-                UE_LOGI("roach_sync: local roach consumed at (%.0f,%.0f,%.0f) -> intent to host",
-                        t.loc.x, t.loc.y, t.loc.z);
-            } else {
-                g_tracked[w++] = t;  // send failed -> keep, retry next tick
-            }
-        } else {
-            g_tracked[w++] = t;      // over the per-tick cap -> retry next tick
+        if (!t.comp || R::IsLiveByIndex(t.comp, t.idx)) continue;  // tombstone, or alive
+        if (PendingNear(t.loc)) {  // already reported (the watch's intent): nothing to send
+            t.comp = nullptr;
+            continue;
         }
+        if (sent >= kMaxIntentsPerTick) continue;  // over the per-tick cap -> retry next tick
+        coop::net::RoachConsumedPayload p{t.loc.x, t.loc.y, t.loc.z};
+        if (!s->SendReliable(coop::net::ReliableKind::RoachConsumed, &p, sizeof(p))) continue;  // retry next tick
+        ++sent;
+        AddPending(t.loc, now);
+        UE_LOGI("roach_sync: client scan found a roach removed unreported -> intent pos (%.0f,%.0f,%.0f) (pending %zu)",
+                t.loc.x, t.loc.y, t.loc.z, g_pending.size());
+        t.comp = nullptr;
     }
-    if (w != g_tracked.size()) ResetGlides();  // the ordinals shifted; the next snapshot re-keys them
-    g_tracked.resize(w);
 }
 
 // HOST 1 Hz: poll the population -> paged broadcast on change / drift / keepalive.
@@ -686,6 +858,18 @@ void HostPoll(coop::net::Session* s, long long now) {
     }
 }
 
+// HOST: publish the population now (after an accepted removal), not at the next 1 Hz poll, so a client's
+// pending removal is confirmed within a round trip instead of waiting out a stale snapshot.
+void HostBroadcastNow(coop::net::Session* s, void* master) {
+    std::vector<SnapEntry> snap;
+    ReadSnapshot(master, snap);
+    g_polledMaster = master;
+    g_lastSent = snap;
+    g_lastSendMs = NowMs();
+    SendSnapshot(s, snap, -1);
+    ++g_stats.snapshotsSent;
+}
+
 void MaybeSummary(bool isHost, long long now) {
     if (g_stats.sinceMs == 0) { g_stats.sinceMs = now; return; }
     const long long dt = now - g_stats.sinceMs;
@@ -716,6 +900,14 @@ void MaybeSummary(bool isHost, long long now) {
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
+    if (g_watched.load(std::memory_order_acquire)) return;
+    if (SG::WatchName(kRowDeleteRoach, kDeleteRoachTag, &OnDeleteRoachPre, nullptr)) {
+        g_watched.store(true, std::memory_order_release);
+        UE_LOGI("roach_sync: deleteRoach watch registered (a client's eat or stomp sends its intent at the call)");
+    } else {
+        UE_LOGW("roach_sync: deleteRoach watch did NOT register -- a client's eat is found by the 1 Hz scan only "
+                "(and can be undone by a host snapshot)");
+    }
 }
 
 void Tick() {
@@ -808,8 +1000,8 @@ void OnConsumedIntent(const coop::net::RoachConsumedPayload& payload, int sender
     if (bestIdx < 0) {
         // Already gone (host trim raced the intent) or a stale/duplicate
         // intent -- benign; the periodic snapshot has converged everyone.
-        UE_LOGI("roach_sync: consumed-intent from slot %d matched no roach within %.0f -- no-op",
-                senderPeerSlot, kAdjudicateRadius);
+        UE_LOGI("roach_sync: host denied slot %d consumption at (%.0f,%.0f,%.0f): no roach within %.0f (already gone)",
+                senderPeerSlot, at.x, at.y, at.z, kAdjudicateRadius);
         return;
     }
     ue_wrap::ParamFrame del(g_delRoachFn);
@@ -817,8 +1009,9 @@ void OnConsumedIntent(const coop::net::RoachConsumedPayload& payload, int sender
     del.Set<int32_t>(L"IndexToRemove", bestIdx);
     del.Set<bool>(L"crush", false);
     ue_wrap::Call(master, del);
-    UE_LOGI("roach_sync: slot %d consumed roach rawIdx=%d (d=%.0f) -- deleted; next poll broadcasts",
-            senderPeerSlot, bestIdx, std::sqrt(bestD2));
+    UE_LOGI("roach_sync: host accepted slot %d consumption at (%.0f,%.0f,%.0f): rawIdx=%d (d=%.0f) deleted, "
+            "publishing the population now", senderPeerSlot, at.x, at.y, at.z, bestIdx, std::sqrt(bestD2));
+    HostBroadcastNow(s, master);
 }
 
 void QueueConnectBroadcastForSlot(int slot) {
@@ -842,6 +1035,7 @@ void OnDisconnect() {
     g_havePoseBody = false;
     g_asmSeq = 0; g_asmPagesGot = 0; g_asmPageCount = 0; g_asmTotal = 0;
     g_tracked.clear();
+    g_pending.clear();
     g_trackedMaster = nullptr;
     g_haveApplied = false;
     ResetGlides();

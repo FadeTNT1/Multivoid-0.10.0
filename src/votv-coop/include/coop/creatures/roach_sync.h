@@ -39,9 +39,13 @@ void Install(coop::net::Session* session);
 // LerpWindow (location linear, rotation slerp; a jump past 300 units snaps). The roach is a bare
 // UStaticMeshComponent: the host's script calc() moves and turns it with K2_SetWorldLocation and
 // K2_SetWorldRotation, with no skeletal mesh, AnimBP, movement component or velocity, so the
-// location and rotation are the whole of the crawl. At 1 Hz liveness-scan the tracked mirror set
-// and send a RoachConsumed intent for a roach eaten or stomped locally. Client SUPPRESSION itself
-// lives in coop/world/spawn_authority: it refuses the cockroachMaster_C and ticker_roachSummoner_C
+// location and rotation are the whole of the crawl. A script_gate watch on cockroachMaster.deleteRoach
+// sends the RoachConsumed intent at the instant the local player eats (crush=false) or stomps
+// (crush=true) a roach, and keeps that roach PENDING for 2 s: a host snapshot that still lists it is
+// applied with the entry hidden, so it cannot be resurrected before the host's own removal lands. A
+// 1 Hz liveness scan of the tracked set is only the fallback for a removal the watch missed.
+//
+// Client SUPPRESSION itself lives in coop/world/spawn_authority: it refuses the cockroachMaster_C and ticker_roachSummoner_C
 // ticks, summonRoach, and the three looping timer delegates, which fire independently of the
 // tick. Interaction events, an eat or a stomp, are not tick-driven and stay native.
 void Tick();
@@ -58,7 +62,8 @@ void Tick();
 void OnState(const coop::net::RoachStatePayload& payload);
 
 // HOST receive: a client consumed a roach locally, by eating or stomping it -- delete the nearest
-// live roach within the adjudication radius. The next snapshot converges everyone. Game thread.
+// live roach within the adjudication radius and publish the new population at once (the client holds
+// the roach pending until that snapshot confirms it). Game thread.
 //
 // The dead-roach husk the acting peer spawns locally is NOT mirrored: its BeginDeferred runs inside
 // the script function tryCrush, which ProcessEvent cannot see, and the husk is a 300 s cosmetic. A
