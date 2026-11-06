@@ -121,6 +121,12 @@ std::wstring ReadCoordLogWrite(void* function, const uint8_t* locals);
 // refiner pane's text-block chain consumes. Null while the desk or atlas is not live.
 void* AtlasWidget();
 
+// The desk's `Widget` backref bound to `atlas`, when that slot is null or dead and `atlas` is a live widget of the
+// atlas class (the one the desk's own widget component holds). A repair for a desk whose backref is missing while
+// its component already shows the widget: it writes the one pointer and runs nothing -- no BeginPlay, no use. False
+// when the slot is live already, the desk or the slot's offset is not resolved, or `atlas` is not the atlas class.
+bool BindAtlasWidget(void* atlas);
+
 // The raw desk widget to atlas coordinates-slot value (the atlas liveness-checked, the widget
 // pointer unvalidated); coords_panel's instance chain does the class-validate and cache half.
 // Null while the desk or atlas is not live.

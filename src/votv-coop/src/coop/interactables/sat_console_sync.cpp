@@ -3,6 +3,7 @@
 #include "coop/interactables/sat_console_sync.h"
 
 #include "coop/config/config.h"
+#include "coop/interactables/computer_readiness.h"
 #include "coop/interactables/device_occupancy.h"  // LocalHolds, HolderOf: who has the SAT console
 #include "coop/interactables/sat_console_table.h"
 #include "coop/interactables/sat_console_wire.h"
@@ -39,6 +40,7 @@ namespace SC = ue_wrap::sat_console;
 namespace T  = coop::sat_console_table;
 namespace V  = coop::sat_console_wire;
 namespace DO = coop::device_occupancy;
+namespace CR = coop::computer_readiness;
 namespace GT = ue_wrap::game_thread;
 namespace WI = ue_wrap::world_identity;
 namespace sg = ue_wrap::script_gate;
@@ -56,9 +58,16 @@ constexpr auto   kScreenEvery    = std::chrono::milliseconds(100);  // the scree
 constexpr auto   kInputEvery     = std::chrono::milliseconds(50);   // the holder's input goes out at most twenty times a second
 constexpr auto   kPollEvery      = std::chrono::milliseconds(100);  // the input is read this often when no watch tells of a change
 constexpr auto   kHeldGrace      = std::chrono::seconds(2);         // a screen kept back for the typist's own output waits this long
+constexpr auto   kLineWaitMax    = std::chrono::seconds(10);        // a client's line kept for a terminal that is not up, then answered not ready
+constexpr size_t kMaxWaitingPerSlot = 8;                            // lines one typist may have kept
+constexpr size_t kOwedCap        = 256;                             // prints kept for the host's terminal while it is not up
+constexpr int    kOwedAttempts   = 5;                               // a print that reached a live terminal and still failed this many times is dropped
+constexpr auto   kPublishRetry   = std::chrono::milliseconds(500);  // a screen that could not be published is tried again this often
+constexpr auto   kTickLinger     = std::chrono::seconds(2);         // the terminal keeps ticking offscreen this long after the last remote work
 const wchar_t* const kSatKey   = L"sat";                            // the device claim of the SAT console
 const wchar_t* const kBusyLine = L"<r>The terminal is busy</>";  // the game's answer to a line it cannot take
 const wchar_t* const kErrLine  = L"<r>err</>";                   // the game's answer to a line it cannot run
+const wchar_t* const kNotReadyLine = L"<r>The terminal is not ready</>";  // a line the host's terminal never came up for
 
 UE_FACT_FN(kRowEnterCommand, "sat_console_sync", L"ui_console_C", L"enterCommand", Declared);
 UE_FACT_FN(kRowUbergraph, "sat_console_sync", L"ui_console_C", L"ExecuteUbergraph_ui_console", Declared);
@@ -93,6 +102,10 @@ enum class Reason : uint8_t {
     NoScreenTerminal,   // the host has no terminal of its own to put the screen on
     ScreenHeld,         // a screen kept back, for the typist's own unmerged output or a terminal not up
     NoContext,          // a replica could not resolve the prompt's dish or init failed
+    LineKept,           // a client's line waited, unrun, for the host's terminal to come up
+    LineNotReady,       // ... and the terminal never did within the wait: the typist was told
+    PrintKept,          // a print waited for the host's terminal to come up
+    InputKept,          // the holder's input waited for the host's terminal to come up
     Count
 };
 constexpr size_t kReasons = static_cast<size_t>(Reason::Count);
@@ -109,6 +122,10 @@ const char* const kReasonText[kReasons] = {
     "the host has no terminal of its own to show the screen on",
     "a screen was kept back (the typist's own output is not merged yet, or no terminal is up)",
     "the prompt's dish could not be resolved or its init failed: the prompt stays",
+    "a client's line was kept, not run, until the host's terminal came up",
+    "a client's line waited ten seconds for the host's terminal and was answered not ready, never run",
+    "a print was kept until the host's terminal came up, and written in order then",
+    "the holder's input was kept until the host's terminal came up",
 };
 uint64_t g_reason[kReasons] = {};
 bool     g_reasonSaid[kReasons] = {};
@@ -264,6 +281,41 @@ uint32_t  g_slotInSeq[kMaxPeers] = {};
 uint32_t  g_slotPresSeq[kMaxPeers] = {};
 bool      g_owedScreen[kMaxPeers] = {};  // a slot told its world is ready before the host had a terminal to read
 
+// A client's line that arrived while the host's own terminal was not up, kept unrun and in order; it runs when the
+// terminal is, once, and is answered not ready after kLineWaitMax. Only a line that has not run is ever kept: a line
+// that ran (or was answered) is gone from here, so no command is run twice.
+struct WaitingLine {
+    uint8_t slot = 0;
+    V::Line line;
+    Clock::time_point since{};
+};
+std::deque<WaitingLine> g_waiting;
+
+// A print, or a reset, owed to the host's own terminal: written in the order it was asked, once the terminal is up.
+// An entry carries the present sequence it acknowledges, which is taken (acked) only as it is written.
+struct Owed {
+    bool         clear = false;
+    std::wstring text;
+    uint8_t      type = 0;
+    int          ackSlot = -1;
+    uint32_t     ackSeq = 0;
+    int          attempts = 0;
+};
+std::deque<Owed> g_owed;
+bool      g_saidOwedFull = false;
+uint32_t  g_queuedPresSeq[kMaxPeers] = {};  // the newest present sequence taken into the owed queue, per slot
+
+// The holder's newest input, kept while the host's terminal is not up: applied (and acked) once it is.
+struct HeldInput {
+    bool     valid = false;
+    uint8_t  slot = 0;
+    V::Input in;
+};
+HeldInput g_heldInput;
+
+Clock::time_point g_holdUntil{};  // the desk's widget component ticks offscreen until this
+bool      g_holding = false;
+
 // ---- state: the holder's input, host or client ----
 
 bool      g_wasHolding = false;
@@ -377,19 +429,35 @@ void SendScreenTo(uint8_t slot, const V::Screen& base) {
     ++g_counts.screensSent;
 }
 
+// Where the host's widget chain breaks, in the readiness trace's words: the actor, each link, the claim holder.
+void ReportNoScreen(CR::Site site, const char* what) {
+    const SC::ScreenDiag d = SC::DiagnoseLocal();
+    CR::Report(site, d.status == SC::ScreenStatus::NoDesk ? CR::Why::MissingActor : CR::Why::MissingWidget,
+               "%s: %s (desk %p, desk widget %p, terminal %p, desk widget component %p%s), claim holder %u", what,
+               SC::StatusText(d.status), d.desk, d.atlas, d.terminal, d.widgetComponent,
+               d.componentHoldsAtlas ? " holding the atlas" : "", static_cast<unsigned>(DO::HolderOf(kSatKey)));
+}
+
 // Publish the screen when it moved: the history, the prompt or the busy level (the input rides its own packets).
-void HostPublish(bool force) {
+// False when it could not be read or published, so the caller keeps the screen dirty and tries again; true when it
+// was sent or had not moved.
+bool HostPublish(bool force) {
     void* vis = SC::LocalTerminal();
     if (!vis) {
         Note(Reason::NoScreenTerminal);
-        return;
+        ReportNoScreen(CR::Site::SatPublish, "the screen cannot be published");
+        return false;
     }
     V::Screen cur;
-    if (!HostBuildScreen(vis, cur)) return;
+    if (!HostBuildScreen(vis, cur)) {
+        CR::Report(CR::Site::SatPublish, CR::Why::DispatchFailed,
+                   "the host terminal %p's log, prompt or input could not be read", vis);
+        return false;
+    }
     const bool changed = force || !g_pubValid || cur.log != g_pub.log || cur.name != g_pub.name ||
                          cur.dish != g_pub.dish || cur.busy != g_pub.busy || cur.holder != g_pub.holder ||
                          cur.gen != g_pub.gen;
-    if (!changed) return;
+    if (!changed) return true;
     cur.rev = ++g_rev;
     g_pub = cur;
     g_pubValid = true;
@@ -402,6 +470,7 @@ void HostPublish(bool force) {
         UE_LOGI("sat_console: HOST screen rev %u to %zu peer(s): %zu chars, prompt '%ls' dish %d, busy %d, holder %u gen %u",
                 cur.rev, peers, cur.log.size(), Printable(cur.name).c_str(), cur.dish, static_cast<int>(cur.busy),
                 static_cast<unsigned>(cur.holder), cur.gen);
+    return true;
 }
 
 // A late joiner, or a peer whose world just became ready: the whole screen, even if nothing moved.
@@ -420,25 +489,121 @@ void SendWholeScreen(uint8_t slot) {
             cur.log.size(), cur.rev, static_cast<unsigned>(cur.holder));
 }
 
-// A line printed on a terminal of the host's own is on the shared screen: written to the host's terminal, whose
-// own append and trim make it the canonical text.
-bool MergeToScreen(const std::wstring& text, uint8_t type) {
-    void* vis = SC::LocalTerminal();
-    if (!vis) {
-        Note(Reason::NoScreenTerminal);
-        return false;
+// What a typist whose screen cannot be published is told: the last published screen with one line more, in the prompt
+// the line named. Best effort -- the terminal that would hold the canonical text is not up -- and the lines the host
+// owes its terminal are written in their order when it is, so the notice is in the history then. A client applies it
+// like any screen, and the next real publish replaces it.
+void SendNoticeScreen(uint8_t slot, const V::Line& in, const wchar_t* text) {
+    V::Screen s = g_pubValid ? g_pub : V::Screen{};
+    s.log = ClampTail(s.log + (s.log.empty() ? std::wstring() : std::wstring(L"\n")) + text, V::kMaxHistory);
+    s.name = in.name;
+    s.dish = in.dish;
+    s.input.clear();
+    s.busy = 0;
+    s.holder = g_holder;
+    s.gen = g_gen;
+    s.rev = g_rev;
+    SendScreenTo(slot, s);
+}
+
+// Write one owed entry to the host's terminal; false when the call did not run.
+bool ApplyOwed(void* vis, const Owed& o) {
+    if (o.clear) {
+        Applying guard;
+        return SC::WriteLog(vis, std::wstring());
     }
-    std::wstring t = text.size() > V::kMaxPrintChars ? text.substr(0, V::kMaxPrintChars) : text;
-    if (!SC::CallWriteToLog(vis, t, type)) return false;
+    return SC::CallWriteToLog(vis, o.text, o.type);
+}
+
+// An entry written: the screen moved, and the print it acknowledged is taken.
+void FinishOwed(const Owed& o) {
     g_screenDirty = true;
+    if (o.ackSlot >= 0 && o.ackSlot < kMaxPeers) {
+        g_slotPresSeq[o.ackSlot] = std::max(g_slotPresSeq[o.ackSlot], o.ackSeq);
+        ++g_counts.presentsMerged;
+        if (Trace())
+            UE_LOGI("sat_console: HOST merged slot %d's %s (seq %u)", o.ackSlot, o.clear ? "clr" : "print", o.ackSeq);
+    }
+    if (CR::TraceOn())
+        CR::Report(CR::Site::SatMerge, CR::Why::OutputMerged,
+                   "%s '%ls' type %u written to the host terminal, claim holder %u", o.clear ? "reset" : "print",
+                   Printable(o.text).c_str(), static_cast<unsigned>(o.type),
+                   static_cast<unsigned>(DO::HolderOf(kSatKey)));
+}
+
+// Write the owed entries in their order while the host's terminal is up; one whose call does not run stays at the
+// head, tried again, and dropped (said) after kOwedAttempts runs of the call refused.
+void FlushOwed() {
+    if (g_owed.empty()) return;
+    void* vis = SC::LocalTerminal();
+    if (!vis) return;
+    while (!g_owed.empty()) {
+        Owed& o = g_owed.front();
+        if (ApplyOwed(vis, o)) {
+            FinishOwed(o);
+            g_owed.pop_front();
+            continue;
+        }
+        if (++o.attempts >= kOwedAttempts) {
+            CR::Report(CR::Site::SatMerge, CR::Why::DispatchFailed,
+                       "the host terminal %p refused a %s %d times -- dropped: '%ls'", vis, o.clear ? "reset" : "print",
+                       o.attempts, Printable(o.text).c_str());
+            g_owed.pop_front();
+            continue;
+        }
+        return;
+    }
+}
+
+// A print or reset for the shared screen: written at once while nothing is owed and the terminal is up, else kept in
+// order behind what is owed and written when the terminal is. Never lost while the session lasts, within the cap.
+void SubmitOwed(Owed o) {
+    if (g_owed.empty()) {
+        if (void* vis = SC::LocalTerminal()) {
+            if (ApplyOwed(vis, o)) {
+                FinishOwed(o);
+                return;
+            }
+            ++o.attempts;
+            CR::Report(CR::Site::SatMerge, CR::Why::DispatchFailed,
+                       "the host terminal %p's writeToLog did not run for '%ls' -- kept, tried again", vis,
+                       Printable(o.text).c_str());
+        } else {
+            Note(Reason::NoScreenTerminal);
+            ReportNoScreen(CR::Site::SatMerge, "a print is kept for the terminal");
+        }
+    }
+    if (g_owed.size() >= kOwedCap) {
+        if (!g_saidOwedFull) {
+            g_saidOwedFull = true;
+            UE_LOGW("sat_console: %zu prints are owed to the host's terminal and it is still not up -- the oldest dropped",
+                    kOwedCap);
+        }
+        g_owed.pop_front();
+    }
+    Note(Reason::PrintKept);
+    g_owed.push_back(std::move(o));
+    FlushOwed();
+}
+
+// A line printed on a terminal of the host's own is on the shared screen: written to the host's terminal, whose
+// own append and trim make it the canonical text. While that terminal is not up the line is kept and written in
+// its order when it is (SubmitOwed). Always accepted.
+bool MergeToScreen(const std::wstring& text, uint8_t type) {
+    Owed o;
+    o.text = text.size() > V::kMaxPrintChars ? text.substr(0, V::kMaxPrintChars) : text;
+    o.type = type;
+    SubmitOwed(std::move(o));
     return true;
 }
 
 // A line the host will not run is answered as the game answers one it cannot take or run: its echo,
-// then the reason's line, on the shared screen. The typist already consumed it.
-void AnswerRefused(const std::wstring& line, const wchar_t* why) {
-    MergeToScreen(line, 1);
+// then the reason's line, on the shared screen. The typist already consumed it. With the host's terminal not up the
+// answer is also sent to the typist as a screen of its own, so it is not left waiting on one.
+void AnswerRefused(uint8_t slot, const V::Line& in, const wchar_t* why) {
+    MergeToScreen(in.line, 1);
     MergeToScreen(why, 0);
+    if (!SC::LocalTerminal()) SendNoticeScreen(slot, in, why);
 }
 
 // The prompt the console's holder stands at, put on the host's terminal. A dish that does not resolve yet is
@@ -545,21 +710,42 @@ Context ApplyContext(Terminal& t, int32_t dish, const std::wstring& name) {
     return Context::Ready;
 }
 
-void HostOnLine(uint8_t slot, const V::Line& in) {
+void HostRunLine(uint8_t slot, const V::Line& in);
+
+// The kept lines, run in the order they came, once the host's terminal is up. Each is taken off the queue before it
+// runs, so none can run twice.
+void DrainWaiting() {
+    while (!g_waiting.empty()) {
+        WaitingLine w = std::move(g_waiting.front());
+        g_waiting.pop_front();
+        HostRunLine(w.slot, w.line);
+    }
+}
+
+// Each tick: run the kept lines if the terminal is up; else answer those that have waited kLineWaitMax not ready,
+// on the shared screen (kept for the terminal) and to the typist directly.
+void TickWaiting(Clock::time_point now) {
+    if (g_waiting.empty()) return;
+    if (SC::LocalTerminal()) {
+        DrainWaiting();
+        return;
+    }
+    while (!g_waiting.empty() && now - g_waiting.front().since >= kLineWaitMax) {
+        WaitingLine w = std::move(g_waiting.front());
+        g_waiting.pop_front();
+        Note(Reason::LineNotReady, w.line.line);
+        ReportNoScreen(CR::Site::SatLine, "the line waited for the terminal and is answered not ready");
+        AnswerRefused(w.slot, w.line, kNotReadyLine);
+    }
+}
+
+// A client's line, run on the typist's terminal, answered, or refused: the host's own terminal is up. Whatever this
+// does with the line is final -- it is run once or answered, never kept to run later.
+void HostRunLine(uint8_t slot, const V::Line& in) {
     const int32_t dish = in.dish;
     const std::wstring& name = in.name;
     const std::wstring& used = in.used;
     const std::wstring& line = in.line;
-    // The host runs only a command a typist may send: a line the table keeps on its typist's machine
-    // would run on the host's own compass, player or screen. A client that sends one was not built to.
-    if (T::Classify(line) != T::Runs::OnHost) {
-        if (!g_saidRefused[slot]) {
-            g_saidRefused[slot] = true;
-            UE_LOGW("sat_console: HOST refused '%ls' from slot %u -- it runs on its typist's machine",
-                    Printable(line).c_str(), static_cast<unsigned>(slot));
-        }
-        return;
-    }
     const std::string& guid = coop::player_handshake::GuidForSlot(slot);
     Terminal* t = guid.empty() ? nullptr : TerminalFor(slot, guid);
     if (!t) {
@@ -568,7 +754,7 @@ void HostOnLine(uint8_t slot, const V::Line& in) {
             UE_LOGW("sat_console: HOST no terminal for slot %u (%s) -- its lines are answered err",
                     static_cast<unsigned>(slot), guid.empty() ? "its identity not in yet" : "none could be made");
         }
-        AnswerRefused(line, kErrLine);
+        AnswerRefused(slot, in, kErrLine);
         return;
     }
     const auto now = Clock::now();
@@ -578,7 +764,7 @@ void HostOnLine(uint8_t slot, const V::Line& in) {
     }
     const bool spawns = T::SpawnsEveryCall(line);
     if (++t->lines > kLinesPerWindow || (spawns && now < t->nextSpawnOk)) {
-        AnswerRefused(line, kBusyLine);  // the terminal cannot take the line, as the game says it
+        AnswerRefused(slot, in, kBusyLine);  // the terminal cannot take the line, as the game says it
         return;
     }
     // A terminal still running a command keeps its context: its latent continuation reads the dish,
@@ -586,7 +772,7 @@ void HostOnLine(uint8_t slot, const V::Line& in) {
     bool busy = false;
     const bool readOk = SC::ReadProcessing(t->pin.Raw(), busy);
     if (!readOk || busy) {
-        AnswerRefused(line, readOk ? kBusyLine : kErrLine);   // an unreadable flag is not "busy"
+        AnswerRefused(slot, in, readOk ? kBusyLine : kErrLine);   // an unreadable flag is not "busy"
         return;
     }
     // The line runs only in the context it names. One that cannot be set up is answered err and not
@@ -599,7 +785,7 @@ void HostOnLine(uint8_t slot, const V::Line& in) {
                     static_cast<unsigned>(slot), dish,
                     ctx == Context::Bad ? "past the host's dishes" : "not resolved, or the init failed");
         }
-        AnswerRefused(line, kErrLine);
+        AnswerRefused(slot, in, kErrLine);
         return;
     }
     // The panel the typist last used: none is a real answer (ROOT), a name that does not resolve here
@@ -611,37 +797,82 @@ void HostOnLine(uint8_t slot, const V::Line& in) {
             UE_LOGW("sat_console: HOST no panel '%ls' for slot %u's line -- answered err",
                     Printable(used).c_str(), static_cast<unsigned>(slot));
         }
-        AnswerRefused(line, kErrLine);
+        AnswerRefused(slot, in, kErrLine);
         return;
     }
     if (spawns) t->nextSpawnOk = now + kSpawnEvery;
     UE_LOGI("sat_console: HOST runs '%ls' for slot %u (dish %d)", Printable(line).c_str(),
             static_cast<unsigned>(slot), dish);
+    // What the run did to the host's screen, read around it: the typist's terminal's busy level, the canonical log,
+    // and what was owed to it.
+    void* vis = SC::LocalTerminal();
+    std::wstring logBefore, logAfter;
+    const bool haveBefore = vis && SC::ReadLog(vis, logBefore);
+    const size_t owedBefore = g_owed.size();
+    bool busyBefore = false, busyAfter = false;
+    SC::ReadProcessing(t->pin.Raw(), busyBefore);
     if (!SC::RunCommand(t->pin.Raw(), line)) {
-        AnswerRefused(line, kErrLine);
+        CR::Report(CR::Site::SatLine, CR::Why::DispatchFailed,
+                   "slot %u '%ls': enterCommand did not run on terminal %p (host terminal %p, claim holder %u)",
+                   static_cast<unsigned>(slot), Printable(line).c_str(), t->pin.Raw(), vis,
+                   static_cast<unsigned>(DO::HolderOf(kSatKey)));
+        AnswerRefused(slot, in, kErrLine);
         return;
     }
     ++g_counts.linesRun;
+    SC::ReadProcessing(t->pin.Raw(), busyAfter);
+    const bool haveAfter = vis && SC::ReadLog(vis, logAfter);
+    const bool printed = (haveBefore && haveAfter && logAfter != logBefore) || g_owed.size() > owedBefore;
+    const CR::Why why = printed ? CR::Why::OutputMerged
+                                : (busyAfter ? CR::Why::WaitingContinuation : CR::Why::NativeNoOp);
+    CR::Report(CR::Site::SatLine, why,
+               "slot %u '%ls': typist terminal %p busy %d->%d, host terminal %p log %s%s, claim holder %u, %zu print(s) "
+               "owed%s", static_cast<unsigned>(slot), Printable(line).c_str(), t->pin.Raw(), busyBefore ? 1 : 0,
+               busyAfter ? 1 : 0, vis, printed ? "moved" : "unchanged", busyAfter ? ", a continuation runs" : "",
+               static_cast<unsigned>(DO::HolderOf(kSatKey)), g_owed.size(),
+               why == CR::Why::NativeNoOp ? " (it printed nothing and left nothing running: a world effect only, or a no-op)" : "");
 }
 
-// The holder's input line, put on the host's terminal and relayed to the others. Refused unless the sender is the
-// claim table's holder of the console, and unless it is newer than the last taken from that slot.
-void HostOnInput(uint8_t slot, const V::Input& in) {
-    if (DO::HolderOf(kSatKey) != slot) {
-        ++g_counts.inputsStale;
-        Note(Reason::NotHolder);
+// A client's line. Refused at once when it is not one the host runs; run when the host's own terminal -- the screen
+// its output goes to -- is up; else kept, unrun and in order, and run when the terminal is, or answered not ready.
+void HostOnLine(uint8_t slot, const V::Line& in) {
+    // The host runs only a command a typist may send: a line the table keeps on its typist's machine
+    // would run on the host's own compass, player or screen. A client that sends one was not built to.
+    if (T::Classify(in.line) != T::Runs::OnHost) {
+        if (!g_saidRefused[slot]) {
+            g_saidRefused[slot] = true;
+            UE_LOGW("sat_console: HOST refused '%ls' from slot %u -- it runs on its typist's machine",
+                    Printable(in.line).c_str(), static_cast<unsigned>(slot));
+        }
         return;
     }
-    if (in.stamp < g_slotStamp[slot] || (in.stamp == g_slotStamp[slot] && in.seq <= g_slotInSeq[slot])) {
-        ++g_counts.inputsStale;
-        Note(Reason::StaleInput);
+    if (SC::LocalTerminal()) {
+        DrainWaiting();  // lines kept before this one run first: a typist's lines keep their order
+        HostRunLine(slot, in);
         return;
     }
-    void* vis = SC::LocalTerminal();
-    if (!vis) {
-        Note(Reason::NoScreenTerminal);
+    size_t mine = 0;
+    for (const WaitingLine& w : g_waiting)
+        if (w.slot == slot) ++mine;
+    if (mine >= kMaxWaitingPerSlot) {
+        AnswerRefused(slot, in, kBusyLine);
         return;
     }
+    Note(Reason::LineKept, in.line);
+    ReportNoScreen(CR::Site::SatLine, "the line is kept, unrun, until the terminal is up");
+    WaitingLine w;
+    w.slot = slot;
+    w.line = in;
+    w.since = Clock::now();
+    g_waiting.push_back(std::move(w));
+}
+
+bool InputNewer(const V::Input& a, const V::Input& b) {
+    return a.stamp > b.stamp || (a.stamp == b.stamp && a.seq > b.seq);
+}
+
+// The holder's input, put on the host's terminal and relayed to the others; taken (acked) here and no sooner.
+void HostApplyInput(uint8_t slot, const V::Input& in, void* vis) {
     g_slotStamp[slot] = in.stamp;
     g_slotInSeq[slot] = in.seq;
     const std::wstring text = V::SanitizeInput(in.text);
@@ -649,7 +880,14 @@ void HostOnInput(uint8_t slot, const V::Input& in) {
     std::wstring cur;
     if (!ReadHolderInput(vis, cur) || cur != text) {
         Applying guard;
-        SC::WriteInput(vis, text);
+        if (!SC::WriteInput(vis, text))
+            CR::Report(CR::Site::SatInput, CR::Why::DispatchFailed,
+                       "slot %u's %zu-char input could not be written to the host terminal %p",
+                       static_cast<unsigned>(slot), text.size(), vis);
+        else if (CR::TraceOn())
+            CR::Report(CR::Site::SatInput, CR::Why::StateChanged,
+                       "slot %u's %zu-char input written to the host terminal %p, claim holder %u",
+                       static_cast<unsigned>(slot), text.size(), vis, static_cast<unsigned>(DO::HolderOf(kSatKey)));
     }
     ++g_counts.inputsTaken;
     V::InputRelay r;
@@ -668,35 +906,74 @@ void HostOnInput(uint8_t slot, const V::Input& in) {
                 in.stamp, in.seq, text.size());
 }
 
+// The holder's input line. Refused unless the sender is the claim table's holder of the console, and unless it is
+// newer than the last taken from that slot. While the host's terminal is not up the newest is kept and put on it
+// when it is, so the sequence is acked only after it is applied.
+void HostOnInput(uint8_t slot, const V::Input& in) {
+    if (DO::HolderOf(kSatKey) != slot) {
+        ++g_counts.inputsStale;
+        Note(Reason::NotHolder);
+        return;
+    }
+    if (in.stamp < g_slotStamp[slot] || (in.stamp == g_slotStamp[slot] && in.seq <= g_slotInSeq[slot])) {
+        ++g_counts.inputsStale;
+        Note(Reason::StaleInput);
+        return;
+    }
+    void* vis = SC::LocalTerminal();
+    if (!vis) {
+        Note(Reason::NoScreenTerminal);
+        if (!g_heldInput.valid || g_heldInput.slot != slot || InputNewer(in, g_heldInput.in)) {
+            g_heldInput.valid = true;
+            g_heldInput.slot = slot;
+            g_heldInput.in = in;
+        }
+        Note(Reason::InputKept);
+        ReportNoScreen(CR::Site::SatInput, "the holder's input is kept for the terminal");
+        return;
+    }
+    g_heldInput.valid = false;  // this one is newer than anything kept
+    HostApplyInput(slot, in, vis);
+}
+
+// The kept input, applied once the host's terminal is up if its sender still holds the console and nothing newer
+// from it was taken meanwhile.
+void TickHeldInput() {
+    if (!g_heldInput.valid) return;
+    if (DO::HolderOf(kSatKey) != g_heldInput.slot) {
+        g_heldInput.valid = false;
+        return;
+    }
+    void* vis = SC::LocalTerminal();
+    if (!vis) return;
+    const HeldInput h = g_heldInput;
+    g_heldInput.valid = false;
+    if (h.in.stamp < g_slotStamp[h.slot] || (h.in.stamp == g_slotStamp[h.slot] && h.in.seq <= g_slotInSeq[h.slot])) return;
+    HostApplyInput(h.slot, h.in, vis);
+}
+
 // What a command the holder ran at its own terminal printed, written to the shared screen in the order the
-// typist saw it. `clr` is the shared reset.
+// typist saw it. `clr` is the shared reset. Kept, in order, while the host's terminal is not up; its sequence is
+// acked when it is written.
 void HostOnPresent(uint8_t slot, const V::Present& p) {
     if (DO::HolderOf(kSatKey) != slot) {
         Note(Reason::NotHolder);
         return;
     }
-    if (p.seq <= g_slotPresSeq[slot]) {
+    if (p.seq <= std::max(g_slotPresSeq[slot], g_queuedPresSeq[slot])) {
         Note(Reason::StaleInput);
         return;
     }
-    if (p.kind == V::PresentKind::Write) {
-        if (!MergeToScreen(p.text, p.type)) return;
-    } else {
-        void* vis = SC::LocalTerminal();
-        if (!vis) {
-            Note(Reason::NoScreenTerminal);
-            return;
-        }
-        Applying guard;
-        if (!SC::WriteLog(vis, std::wstring())) return;
-        g_screenDirty = true;
+    g_queuedPresSeq[slot] = p.seq;
+    Owed o;
+    o.clear = p.kind != V::PresentKind::Write;
+    if (!o.clear) {
+        o.text = p.text.size() > V::kMaxPrintChars ? p.text.substr(0, V::kMaxPrintChars) : p.text;
+        o.type = p.type;
     }
-    g_slotPresSeq[slot] = p.seq;
-    ++g_counts.presentsMerged;
-    g_screenDirty = true;
-    if (Trace())
-        UE_LOGI("sat_console: HOST merged slot %u's %s (seq %u)", static_cast<unsigned>(slot),
-                p.kind == V::PresentKind::Clear ? "clr" : "print", p.seq);
+    o.ackSlot = slot;
+    o.ackSeq = p.seq;
+    SubmitOwed(std::move(o));
 }
 
 void HostOnBlob(uint8_t slot, const std::vector<uint8_t>& blob) {
@@ -1134,7 +1411,33 @@ void OnWorldChanged() {
     g_wasHolding = false;
     g_ctxSentValid = false;
     g_pendingClear = false;
+    if (g_holding) SC::HoldOffscreenTick(false);  // the old world's component is no more: nothing of its to put back
+    g_holding = false;
+    g_holdUntil = Clock::time_point{};
     UE_LOGI("sat_console: the world changed -- the screen is read again from this world's terminal");
+}
+
+// The desk's widget component ticks offscreen while a remote typist holds the console, a line waits or a typist's
+// terminal runs a command, and for kTickLinger after: nobody on the host looks at the screen the work is done on.
+void TickOffscreen(Clock::time_point now) {
+    bool want = (g_holder != V::kNoHolder && g_holder != 0) || !g_waiting.empty() || !g_owed.empty() ||
+                g_heldInput.valid;
+    if (!want)
+        for (const Terminal& t : g_terms) {
+            bool busy = false;
+            if (SC::ReadProcessing(t.pin.Raw(), busy) && busy) {
+                want = true;
+                break;
+            }
+        }
+    if (want) g_holdUntil = now + kTickLinger;
+    if (now < g_holdUntil) {
+        g_holding = true;
+        SC::HoldOffscreenTick(true);
+    } else if (g_holding) {
+        g_holding = false;
+        SC::HoldOffscreenTick(false);
+    }
 }
 
 void HostTick(Clock::time_point now) {
@@ -1149,11 +1452,18 @@ void HostTick(Clock::time_point now) {
     }
     for (int i = 1; i < kMaxPeers; ++i)
         if (g_owedScreen[i]) SendWholeScreen(static_cast<uint8_t>(i));
+    FlushOwed();
+    TickWaiting(now);
+    TickHeldInput();
     HolderTick(now, true);
+    TickOffscreen(now);
     if (g_screenDirty && now >= g_nextScreen) {
-        g_screenDirty = false;
+        g_screenDirty = false;  // cleared before the publish, so a body that runs during it keeps it dirty
         g_nextScreen = now + kScreenEvery;
-        HostPublish(false);
+        if (!HostPublish(false)) {
+            g_screenDirty = true;  // not published: still owed, tried again
+            g_nextScreen = now + kPublishRetry;
+        }
     }
 }
 
@@ -1235,7 +1545,14 @@ void OnPeerGone(uint8_t slot) {
     g_out[slot] = Outbox{};
     g_saidRefused[slot] = g_saidMalformed[slot] = g_saidNoTerminal[slot] = g_saidNoContext[slot] = false;
     g_slotStamp[slot] = g_slotInSeq[slot] = g_slotPresSeq[slot] = 0;
+    g_queuedPresSeq[slot] = 0;
     g_owedScreen[slot] = false;
+    // Its lines that never ran are not run for a typist that is gone (a line is run for its sender, once); what it
+    // printed is still owed to the screen, but no longer acknowledged to a slot that may have another occupant.
+    for (auto it = g_waiting.begin(); it != g_waiting.end();) it = (it->slot == slot) ? g_waiting.erase(it) : it + 1;
+    for (Owed& o : g_owed)
+        if (o.ackSlot == slot) o.ackSlot = -1;
+    if (g_heldInput.valid && g_heldInput.slot == slot) g_heldInput.valid = false;
     for (Terminal& t : g_terms) {
         if (t.slot != slot) continue;
         t.slot = -1;  // its command, if any, runs to its end; the terminal waits for its typist
@@ -1258,6 +1575,16 @@ void OnDisconnect() {
     for (uint32_t& v : g_slotStamp) v = 0;
     for (uint32_t& v : g_slotInSeq) v = 0;
     for (uint32_t& v : g_slotPresSeq) v = 0;
+    for (uint32_t& v : g_queuedPresSeq) v = 0;
+    g_waiting.clear();
+    g_owed.clear();
+    g_saidOwedFull = false;
+    g_heldInput = HeldInput{};
+    if (g_holding) SC::HoldOffscreenTick(false);
+    g_holding = false;
+    g_holdUntil = Clock::time_point{};
+    for (CR::Site site : {CR::Site::SatLine, CR::Site::SatMerge, CR::Site::SatInput, CR::Site::SatPublish})
+        CR::ResetSite(site);
     g_asm.Clear();
     if (g_counts.linesSent || g_counts.linesRun)
         UE_LOGI("sat_console: session end -- %llu line(s) sent to the host, %llu run for clients",

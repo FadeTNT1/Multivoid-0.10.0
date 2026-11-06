@@ -410,6 +410,16 @@ void* AtlasWidget() {
     return (w && R::IsLive(w)) ? w : nullptr;
 }
 
+bool BindAtlasWidget(void* atlas) {
+    void* d = Instance();
+    if (!d || g_offWidget < 0 || !g_atlasCls || !atlas || !R::IsLive(atlas) || R::ClassOf(atlas) != g_atlasCls)
+        return false;
+    void*& slot = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(d) + g_offWidget);
+    if (slot && R::IsLive(slot)) return false;
+    slot = atlas;
+    return true;
+}
+
 // The desk half of the coordinates-panel instance chain: the raw slot value from the atlas,
 // the atlas liveness-checked and the widget itself unvalidated; ue_wrap::coords_panel does
 // the class validation and caching half.

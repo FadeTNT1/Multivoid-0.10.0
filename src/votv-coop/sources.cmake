@@ -151,6 +151,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/server_upgrade_sync.cpp
     src/coop/interactables/sat_console_table.cpp
     src/coop/interactables/sat_console_wire.cpp
+    src/coop/interactables/computer_readiness.cpp
     src/coop/interactables/sat_console_sync.cpp
     src/coop/interactables/window_sync.cpp
     src/coop/interactables/window_stroke_sync.cpp

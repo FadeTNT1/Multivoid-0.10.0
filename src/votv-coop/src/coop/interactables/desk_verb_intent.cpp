@@ -5,6 +5,7 @@
 #include "coop/element/element.h"
 #include "coop/element/intent_authority.h"
 #include "coop/element/registry.h"
+#include "coop/interactables/computer_readiness.h"
 #include "coop/interactables/desk_verb_effects.h"
 #include "coop/interactables/signal_wire.h"
 #include "coop/net/intent_bucket.h"
@@ -38,6 +39,7 @@ namespace DP = ue_wrap::desk_press;
 namespace DC = ue_wrap::drive_chain;
 namespace SD = ue_wrap::signal_dynamic;
 namespace DV = coop::net::desk_verb;
+namespace CR = coop::computer_readiness;
 using coop::net::DeskVerbPayload;
 
 constexpr int kTagPress = 0x44565001;  // 'DVP' 1
@@ -86,6 +88,7 @@ struct Seen {
     uint64_t driveRow = 0, selectedRow = 0, compRow = 0;
     float    signal[4] = {};
     bool     signalArmed = false;
+    int32_t  rows = -1;  // the saved-signal rows: not compared with a presser's, read to see whether a press moved them
 };
 
 // A row's cross-peer identity, 0 for a row with no data (size 0, the empty drive's and refiner's).
@@ -128,6 +131,7 @@ void DriveIn(int role, bool withRow, Seen& out) {
 
 Seen Look(void* desk, uint8_t button) {
     Seen s;
+    s.rows = ue_wrap::saved_signals::Count();
     if (button == DV::kSave || button == DV::kDelete) {
         ue_wrap::console_desk::CoordSignal sig;
         if (ue_wrap::console_desk::ReadCoordSignal(sig)) {
@@ -148,6 +152,16 @@ Seen Look(void* desk, uint8_t button) {
         if (base && SD::ReadStruct(base, r)) s.compRow = button == DV::kUpload ? HashOf(r) : DecodeOf(r);
     }
     return s;
+}
+
+// Whether a press moved anything it is looked at by: the same fields a press is checked on, and the saved rows.
+bool Moved(const Seen& a, const Seen& b) {
+    if (a.driveEid != b.driveEid || a.driveRow != b.driveRow || a.selectedRow != b.selectedRow ||
+        a.compRow != b.compRow || a.signalArmed != b.signalArmed || a.rows != b.rows)
+        return true;
+    for (int i = 0; i < 4; ++i)
+        if (a.signal[i] != b.signal[i]) return true;
+    return false;
 }
 
 // Where what the presser saw and what this desk shows first differ, for what the button acts on; null when
@@ -264,6 +278,10 @@ bool Execute(coop::net::Session& s, const DeskVerbPayload& p, uint8_t slot) {
     void* desk = ue_wrap::console_desk::Instance();
     void* button = desk ? DP::Member(desk, kButtonMember[p.button]) : nullptr;
     if (!button || desk_verb_effects::Refused()) {
+        CR::Report(CR::Site::DeskPress,
+                   !desk ? CR::Why::MissingActor : (!button ? CR::Why::MissingWidget : CR::Why::DispatchFailed),
+                   "slot %u's %s press #%u: desk %p, button component %p%s", static_cast<unsigned>(slot),
+                   kButtonName[p.button], p.seq, desk, button, button ? ", the effects' seams are refused" : "");
         Refuse(s, slot, p, DV::kUnavailable, button ? "the effects' seams are refused" : "no desk or no button");
         return true;
     }
@@ -281,7 +299,8 @@ bool Execute(coop::net::Session& s, const DeskVerbPayload& p, uint8_t slot) {
         Refuse(s, slot, p, DV::kFar, EL::OutcomeName(subj.outcome));
         return true;
     }
-    if (const char* what = Differs(p, Look(desk, p.button))) {
+    const Seen here = Look(desk, p.button);
+    if (const char* what = Differs(p, here)) {
         Refuse(s, slot, p, DV::kMissed, what);
         return true;
     }
@@ -305,8 +324,20 @@ bool Execute(coop::net::Session& s, const DeskVerbPayload& p, uint8_t slot) {
         pressed = DP::PressForAnother(desk, puppet, button, &dropped);
     }
     if (!pressed) {
+        CR::Report(CR::Site::DeskPress, CR::Why::DispatchFailed,
+                   "slot %u's %s press #%u: the desk %p's lookAt/actionOptionIndex did not run on button %p",
+                   static_cast<unsigned>(slot), kButtonName[p.button], p.seq, desk, button);
         Refuse(s, slot, p, DV::kUnavailable, "the press did not dispatch");
         return true;
+    }
+    // The verdict says the press dispatched, not that the game did anything with it: read what it moved.
+    {
+        const bool moved = Moved(here, Look(desk, p.button));
+        CR::Report(CR::Site::DeskPress, moved ? CR::Why::StateChanged : CR::Why::NativeNoOp,
+                   "slot %u's %s press #%u: desk %p button %p dispatched; %s (checked: the caught signal, the drives, "
+                   "the deck row, the refiner's decode, the saved rows -- a latent continuation may still land)",
+                   static_cast<unsigned>(slot), kButtonName[p.button], p.seq, desk, button,
+                   moved ? "the watched state moved" : "nothing watched moved");
     }
     ++g_ran;
     Answer(s, slot, p, DV::kRan);
@@ -392,6 +423,7 @@ void OnDisconnect() {
                 g_ran, g_refused, g_dropped, g_heard);
     g_sent = g_ran = g_refused = g_dropped = g_heard = 0;
     g_saidOffline = false;
+    CR::ResetSite(CR::Site::DeskPress);
     desk_verb_effects::OnDisconnect();
 }
 

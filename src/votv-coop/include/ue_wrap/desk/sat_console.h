@@ -17,8 +17,34 @@ namespace ue_wrap::sat_console {
 // loaded. Game thread.
 bool EnsureResolved();
 
-// This machine's terminal: the desk atlas's umg_console. Null while the desk is not live.
+// This machine's terminal: the desk atlas's umg_console. Null while the desk is not live. When a link of the desk's
+// widget chain is missing while what it should name is already there -- the desk's `Widget` backref null with the
+// desk's widget component holding the atlas, or the atlas's umg_console null with the terminal among its widget
+// tree's children -- the backref is bound again (at most once a second, said when it happens); nothing is run, no
+// BeginPlay and no use. A null answer says the chain is not up here: DiagnoseLocal says where it breaks.
 void* LocalTerminal();
+
+// The chain from the desk to the terminal, read as it stands (no repair): which link is the first missing.
+enum class ScreenStatus : uint8_t { Ready, Unresolved, NoDesk, NoAtlas, NoTerminal };
+struct ScreenDiag {
+    ScreenStatus status = ScreenStatus::Unresolved;
+    void* desk = nullptr;
+    void* atlas = nullptr;            // the desk's Widget backref, live
+    void* terminal = nullptr;         // the atlas's umg_console, live and of the terminal class
+    void* widgetComponent = nullptr;  // the desk's widget component that holds the atlas, when one does (searched only while the chain is short)
+    bool  componentHoldsAtlas = false;
+};
+ScreenDiag DiagnoseLocal();
+const char* StatusText(ScreenStatus s);
+
+// Keep the widget component that shows the terminal ticking while it is off the screen, so the terminal's latent
+// continuations and the widget's own updates run while no player of this machine looks at it: with `hold` set, the
+// component's SetTickWhenOffscreen(true) is called if its signature validates (one bool), its prior value reads back
+// (GetTickWhenOffscreen, or bTickWhenOffscreen by reflection) and it was not on already; cleared, the prior value is
+// put back. A component or function that does not resolve is said once and the call does nothing. Retried at most
+// every two seconds while it fails. True when the component is held (or was ticking already). The terminals the host
+// keeps for its typists have no component (they are never shown), so there is nothing of theirs to hold.
+bool HoldOffscreenTick(bool hold);
 
 // A new terminal of the game's class, made by WidgetBlueprintLibrary.Create with no owning player:
 // its outer is the game instance, and the engine binds the widgets its body writes to. Nothing adds it
@@ -50,7 +76,8 @@ bool  ReadLog(void* term, std::wstring& out);  // the printed lines, the last 30
 // alternate keyboard path typed into it instead; a shown input is written to both and redrawn. A shown log
 // is written to consoleLine and repainted through the terminal's own fixLog, which also keeps its
 // rightmost 3000 characters. None of these runs a command, and none prints through writeToLog.
-// ScreenReady: the members these need are all resolved (the miss is logged once).
+// ScreenReady: the members these need are all resolved (the miss is logged once). It says the schema is, not that a
+// terminal is up: LocalTerminal's answer and DiagnoseLocal say that.
 bool ScreenReady();
 bool ReadInput(void* term, std::wstring& out);
 bool WriteInput(void* term, const std::wstring& text);
