@@ -33,6 +33,11 @@ bool SetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, ui
 // Game thread.
 bool GetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, uint8_t& out);
 
+// UPrimitiveComponent::GetCollisionObjectType: the object channel the component sits on (ECollisionChannel:
+// 0 WorldStatic, 1 WorldDynamic, 2 Pawn, 5 PhysicsBody), into `out`. False when it does not resolve or run,
+// `out` then untouched. Game thread.
+bool GetCollisionObjectType(void* primitiveComponent, uint8_t& out);
+
 // Every live UPrimitiveComponent owned by `actor` (Outer == actor): default subobjects and components
 // added later, whatever their class. A GUObjectArray walk, so not for a per-frame call. Empty when
 // `actor` is null or dead. Game thread.

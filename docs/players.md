@@ -29,6 +29,17 @@ read before the spawn and written back after it, so the local player's battery k
 has a controller is the local-versus-puppet test everywhere in the code
 (`coop/player/players_registry`).
 
+The puppet never shoves a simulated prop. It is teleported to the wire pose at full capsule height, so a
+crouch (the streamed Z drops, the capsule does not shrink) or a jump onto a prop lands the capsule inside it,
+and the physics step would depenetrate the prop: a crate or dumpster that jitters, hops or slides on the
+other peer's screen while the player's own screen is fine. The game files a prop under a collision object
+channel by weight, light props as PhysicsBody and heavy ones as WorldDynamic, so every primitive the puppet
+owns sets BOTH channels to Ignore (`EnforcePuppetPropGuard`, read back, re-checked on the capsule once a
+second). WorldStatic geometry, the pawn channel and the visibility and camera channels are untouched: the
+puppet still blocks the local player, and hit, grab and nameplate traces still find it. The spawn log carries
+`PROP-GUARD ... WorldDynamic=n/n PhysicsBody=n/n` and the `PROP-CHANNELS` census of each prop class's own
+channel, so a test shows what the guard ignores and which props it covers.
+
 ### The pose stream
 
 Each peer streams its own pose per tick as an unreliable, newest-wins message: position, yaw,

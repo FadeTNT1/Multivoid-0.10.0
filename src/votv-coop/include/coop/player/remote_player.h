@@ -252,6 +252,9 @@ private:
     bool             burningTried_ = false;   // the last switch did not dispatch; retried each second
     bool             burningFailSaid_ = false;   // the missing flame was said, once per body
     std::chrono::steady_clock::time_point burningNextTry_{};
+    // The next once-a-second check that the prop guard still holds on the capsule; a response the game's own
+    // graph or a body swap put back is logged and the guard asserted again.
+    std::chrono::steady_clock::time_point guardNextCheck_{};
     ue_wrap::FVector targetPos_{};
     float            targetYaw_ = 0.f;
     float            targetPitch_ = 0.f;

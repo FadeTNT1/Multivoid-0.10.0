@@ -45,22 +45,35 @@ void* SpawnPuppet(const FVector& loc, void* skeletalMeshAsset, void* animClass,
 
 // What EnforcePuppetPropGuard found and did, for the one summary line it logs and for tests.
 struct PropGuardReport {
-    int primitives = 0;       // UPrimitiveComponents the puppet owns
-    int confirmedIgnore = 0;  // of those, read back as Ignore on ECC_PhysicsBody
-    int setFailed = 0;        // SetCollisionResponseToChannel did not dispatch
-    int readFailed = 0;       // GetCollisionResponseToChannel did not dispatch
-    int notIgnore = 0;        // dispatched both ways, yet the read-back is not Ignore
-    int cmcPhysicsInteraction = -1;  // CMC bEnablePhysicsInteraction after the write: 0 off, 1 still on, -1 unresolved
+    int primitives = 0;             // UPrimitiveComponents the puppet owns
+    int ignoredWorldDynamic = 0;    // of those, read back as Ignore on ECC_WorldDynamic (heavy props: crates, dumpsters)
+    int ignoredPhysicsBody = 0;     // of those, read back as Ignore on ECC_PhysicsBody (light props)
+    int setFailed = 0;              // SetCollisionResponseToChannel did not dispatch (either channel)
+    int readFailed = 0;             // GetCollisionResponseToChannel did not dispatch (either channel)
+    int notIgnore = 0;              // dispatched both ways, yet the read-back is not Ignore (either channel)
+    int cmcPhysicsInteraction = -1; // CMC bEnablePhysicsInteraction after the write: 0 off, 1 still on, -1 unresolved
 };
 
-// The puppet never shoves a simulated prop: ECC_PhysicsBody is set to Ignore on EVERY primitive
-// component the puppet owns (capsule, both body meshes, arms, playermodel, anything attached later),
-// each read back, and the puppet's CharacterMovement physics interaction is switched off. The
-// visibility, camera and pawn channels are left alone: hit judging, grab and nameplate traces use
-// them. Idempotent and cheap enough for a spawn or a body swap, not for a per-frame call (it walks
-// the object array). `why` names the call site in the one summary log line. Null or dead actor:
-// all-zero report, nothing logged. Game thread.
+// The puppet never shoves a simulated prop: ECC_WorldDynamic and ECC_PhysicsBody are set to Ignore on
+// EVERY primitive component the puppet owns (capsule, both body meshes, arms, playermodel, anything
+// attached later), each read back, and the puppet's CharacterMovement physics interaction is switched
+// off. A prop's collision object channel follows its weight (light props PhysicsBody, heavy props such
+// as crates and dumpsters WorldDynamic), and the puppet is teleported to the wire pose at full capsule
+// height, so a crouch or a jump onto a prop lands the capsule inside it: an Ignore on one channel only
+// leaves the other kind of prop to be depenetrated. World geometry (WorldStatic) keeps blocking, the
+// pawn, visibility and camera channels are left alone: hit judging, grab and nameplate traces and the
+// local player's own walk against the puppet use them. Idempotent and cheap enough for a spawn or a
+// body swap, not for a per-frame call (it walks the object array). `why` names the call site in the one
+// summary log line, which also names the channels ignored; a "spawn" call adds the census of the prop
+// classes' own object channels (PROP-CHANNELS lines). Null or dead actor: all-zero report, nothing
+// logged. Game thread.
 PropGuardReport EnforcePuppetPropGuard(void* puppetActor, const char* why);
+
+// False only when the puppet capsule reads a response other than Ignore on a guarded channel (the game's own
+// graph or a body swap put one back); one pair of reflected calls, cheap enough for a once-a-second check.
+// A null or dead puppet, a capsule that does not resolve or a read that does not dispatch cannot be judged
+// and answer true, so the caller does not loop on the re-assert. Game thread.
+bool PuppetPropGuardHolds(void* puppetActor);
 
 // The puppet's USkeletalMeshComponent (the first such child), cached per actor; nullptr if none.
 void* GetSkeletalMeshComponent(void* puppetActor);

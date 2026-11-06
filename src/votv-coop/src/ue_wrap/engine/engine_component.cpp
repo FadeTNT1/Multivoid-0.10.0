@@ -424,6 +424,20 @@ bool GetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, ui
     return true;
 }
 
+bool GetCollisionObjectType(void* primitiveComponent, uint8_t& out) {
+    if (!primitiveComponent || !R::IsLive(primitiveComponent)) return false;
+    static void* sFn = nullptr;
+    if (!sFn) {
+        void* pc = R::FindClass(P::name::PrimitiveComponentClass);
+        if (pc) sFn = R::FindFunction(pc, P::name::GetCollisionObjectTypeFn);
+    }
+    if (!sFn) return false;
+    ParamFrame f(sFn);
+    if (!f.valid() || !Call(primitiveComponent, f)) return false;
+    out = f.Get<uint8_t>(L"ReturnValue");
+    return true;
+}
+
 std::vector<void*> GetPrimitiveComponents(void* actor) {
     // Every UPrimitiveComponent whose Outer is `actor`: the default subobjects and any component added
     // at runtime. A GUObjectArray walk (ChildObjectsOf), so for spawn-time and rare re-assertion, not
