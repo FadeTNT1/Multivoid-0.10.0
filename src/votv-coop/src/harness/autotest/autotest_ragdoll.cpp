@@ -25,6 +25,7 @@
 #include "ue_wrap/actors/puppet.h"
 #include "ue_wrap/core/reflection.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -49,30 +50,44 @@ bool WaitDone(const std::shared_ptr<std::atomic<int>>& d, int timeoutMs) {
     return d->load() != 0;
 }
 
-// Whether the slot-1 puppet has a live ragdoll display body whose mesh is physically
-// simulating (the visible flop is a separate ragdoll body, not the puppet's own mesh). The
-// rigid-body-awake query on the body's mesh confirms it is actually flopping: true while
-// falling, false once settled. False on a missing or dead body.
-bool PuppetHasFloppingRagdollBody() {
+// One sample of the slot-1 puppet's displayed ragdoll body: whether any rigid body is awake, and
+// the pelvis pitch/roll. An awake body alone proves nothing: the spawn itself leaves bodies awake
+// for a frame, and a plushie that stands rigid and upright keeps its sim running. The fall-over
+// verdict is the pelvis rotation changing, which is what a body left upright never does.
+struct FlopSample {
+    bool bodyLive = false;
+    bool awake = false;
+    bool rotOk = false;
+    float pitch = 0.f, roll = 0.f;
+};
+
+FlopSample SamplePuppetRagdollBody() {
     auto done = std::make_shared<std::atomic<int>>(0);
-    auto ok = std::make_shared<int>(0);
-    GT::Post([done, ok] {
+    auto out = std::make_shared<FlopSample>();
+    GT::Post([done, out] {
         coop::RemotePlayer& rp = coop::puppet_drive::Puppet(1);
         void* body = rp.RagdollBody();
         if (body && R::IsLiveByIndex(body, rp.RagdollBodyIdx())) {  // recycle-proof
-            // The ragdoll body's mesh component.
-            void* mesh = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(body) + 0x0230);
-            if (mesh && R::IsLive(mesh)) {
+            out->bodyLive = true;
+            // The DISPLAYED ragdoll body mesh component (reflected offset, not the puppet mesh).
+            void* mesh = E::GetRagdollBodyMesh(body);
+            if (mesh) {
                 if (void* awakeFn = R::FindFunction(R::FindClass(L"PrimitiveComponent"), L"IsAnyRigidBodyAwake")) {
                     ue_wrap::ParamFrame f(awakeFn);
-                    if (ue_wrap::Call(mesh, f) && f.Get<bool>(L"ReturnValue")) *ok = 1;
+                    if (ue_wrap::Call(mesh, f) && f.Get<bool>(L"ReturnValue")) out->awake = true;
                 }
+            }
+            ue_wrap::FRotator rot{};
+            if (E::ReadRagdollBodyPelvisRotation(body, rot)) {
+                out->rotOk = true;
+                out->pitch = ue_wrap::NormalizeAxis(rot.Pitch);
+                out->roll = ue_wrap::NormalizeAxis(rot.Roll);
             }
         }
         done->store(1);
     });
     WaitDone(done, 8000);
-    return *ok != 0;
+    return *out;
 }
 
 // The player and the puppet whose location read failed, each for itself: a failed read of a live actor
@@ -171,7 +186,16 @@ void ProbePuppetRagdollGeometry(const char* tag) {
         ue_wrap::FVector origin{}, extent{};
         const bool okB = E::GetActorBounds(puppet, false, origin, extent);
         const float bottom = origin.Z - extent.Z;
-        void* mesh = ue_wrap::puppet::GetSkeletalMeshComponent(puppet);
+        // The DISPLAYED ragdoll body mesh while one is up (the puppet kel meshes are hidden for
+        // the flop and sit pelvis-attached, so they would read the wrong thing); the puppet own
+        // mesh while it stands.
+        void* mesh = nullptr;
+        {
+            coop::RemotePlayer& rp = coop::puppet_drive::Puppet(1);
+            void* body = rp.RagdollBody();
+            if (body && R::IsLiveByIndex(body, rp.RagdollBodyIdx())) mesh = E::GetRagdollBodyMesh(body);
+        }
+        if (!mesh) mesh = ue_wrap::puppet::GetSkeletalMeshComponent(puppet);
         const float compZ = (mesh && R::IsLive(mesh)) ? E::GetComponentLocation(mesh).Z : 0.f;
         float lowBoneZ = 0.f;
         const bool okBone = (mesh && R::IsLive(mesh)) ? E::GetLowestBoneWorldZ(mesh, lowBoneZ) : false;
@@ -200,6 +224,11 @@ void ObserveOnHost() {
     int phase = 0;
     bool sawPuppet = false;
     bool sawFlop = false;
+    // The fall-over oracle: the pelvis pitch/roll at the rising edge, and the largest change since.
+    FlopSample base{};
+    bool sawAwake = false;
+    float peakTilt = 0.f;
+    constexpr float kFellOverDeg = 45.f;
     bool positioned = false;  // host moved back + aimed at the standing puppet
     int settle = 0;           // poll ticks waited for the puppet to converge
     for (int attempt = 0; attempt < 120 && phase < 3; ++attempt) {
@@ -242,20 +271,32 @@ void ObserveOnHost() {
         } else if (phase == 1 && positioned) {
             AimHostAtPuppet();  // keep the standing puppet framed until it flops
             if (r == 1) {
-                // Confirm the separate ragdoll display body is physically flopping (not just the
-                // display latch): the rigid-body-awake query on the body mesh, true while it falls,
-                // false once it settles.
-                sawFlop = PuppetHasFloppingRagdollBody();
+                // Baseline for the fall-over oracle: the displayed body awake flag and pelvis
+                // rotation right after the spawn. The verdict below needs the rotation to CHANGE.
+                base = SamplePuppetRagdollBody();
+                sawAwake = base.awake;
                 UE_LOGI("ragdoll_test[host]: observed RISING edge -- puppet ragdoll-displayed over the "
-                        "wire; separate playerRagdoll_C body physically flopping=%d", sawFlop ? 1 : 0);
+                        "wire; playerRagdoll_C body live=%d awake=%d pelvis pitch=%.0f roll=%.0f (baseline)",
+                        base.bodyLive ? 1 : 0, base.awake ? 1 : 0, static_cast<double>(base.pitch),
+                        static_cast<double>(base.roll));
                 phase = 2;
             }
         }
         if (phase == 2 && r == 1) {
             AimHostAtPuppet();  // track the puppet (anchored over the flopping body)
+            const FlopSample s = SamplePuppetRagdollBody();
+            sawAwake = sawAwake || s.awake;
+            if (s.rotOk && base.rotOk) {
+                const float dp = std::fabs(ue_wrap::NormalizeAxis(s.pitch - base.pitch));
+                const float dr = std::fabs(ue_wrap::NormalizeAxis(s.roll - base.roll));
+                peakTilt = (std::max)(peakTilt, (std::max)(dp, dr));
+            }
         }
         if (phase == 2 && r == 0) {
-            UE_LOGI("ragdoll_test[host]: observed FALLING edge -- puppet ragdoll body destroyed (recovered)");
+            sawFlop = sawAwake && peakTilt > kFellOverDeg;
+            UE_LOGI("ragdoll_test[host]: observed FALLING edge -- puppet ragdoll body destroyed (recovered); "
+                    "awake seen=%d peak pelvis tilt from baseline=%.0f deg (fell over needs > %.0f)",
+                    sawAwake ? 1 : 0, static_cast<double>(peakTilt), static_cast<double>(kFellOverDeg));
             phase = 3;
         }
         ::Sleep(1000);
@@ -264,7 +305,8 @@ void ObserveOnHost() {
     if (phase >= 3) {
         UE_LOGI("ragdoll_test[host]: VERDICT ragdoll e2e %s -- a client's local ragdoll "
                 "propagated to its host puppet (rising + falling) purely via the pose stream; the puppet "
-                "spawned a SEPARATE playerRagdoll_C body that physically flopped=%d (death-free, no host kill)",
+                "spawned a SEPARATE playerRagdoll_C body that fell over (awake and pelvis tilted > 45 deg)=%d "
+                "(death-free, no host kill)",
                 sawFlop ? "PASS" : "PARTIAL (no flop)", sawFlop ? 1 : 0);
     } else if (!sawPuppet) {
         UE_LOGW("ragdoll_test[host]: VERDICT INCONCLUSIVE -- slot-1 puppet never resolved "

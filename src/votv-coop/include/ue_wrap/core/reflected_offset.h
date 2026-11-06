@@ -78,6 +78,13 @@ int32_t MainPlayer_ticker_flashlightController();
 // ticker_playerFlashlight_C.player: the one player whose equipped flashlight the ticker drains.
 int32_t TickerFlashlight_player();
 
+// The plushie ragdoll. mainPlayer_C.ragdollActor is the native ragdoll actor ragdollMode spawned (null
+// unless ragdolling); playerRagdoll_C.Player is the owner an Expose-On-Spawn write stamps before
+// finish; ragdoll_C.SkeletalMesh is the body mesh (inherited by playerRagdoll_C).
+int32_t MainPlayer_ragdollActor();
+int32_t PlayerRagdoll_Player();
+int32_t Ragdoll_SkeletalMesh();
+
 // AnimBlueprint_kerfurOmega_regular_C field accessors (VOTV BP).
 int32_t AnimBP_kerfur_walkSpeed();
 int32_t AnimBP_kerfur_Pawn();

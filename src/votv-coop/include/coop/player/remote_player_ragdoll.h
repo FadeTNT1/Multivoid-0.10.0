@@ -81,6 +81,8 @@ public:
 private:
     void Start(void* puppetActor, int32_t puppetIdx);
     void Stop(void* puppetActor, int32_t puppetIdx);
+    // Sample the body's pelvis rotation and fold its change since Start into peakTiltDeg_.
+    void SampleTilt();
 
     // Last WIRE-bit value acted on (edge detector: the spawn/recover dispatch
     // fires once per transition, no retry).
@@ -106,6 +108,18 @@ private:
     uint32_t startFails_ = 0;   // failed spawn attempts this episode
     uint64_t nextRetryMs_ = 0;  // throttle for a Start retry
     uint64_t nextSimCheckMs_ = 0;
+
+    // The newest pelvis velocity the sender streamed, kept even while no body is live: the Start
+    // kickoff adds it as the fall velocity when it is fresh (a packet that raced the rising edge).
+    float   lastLinVel_[3] = {0.f, 0.f, 0.f};
+    uint64_t lastPoseMs_ = 0;
+
+    // Proof the plushie fell over: the pelvis pitch/roll at Start, and the largest change of either
+    // since (degrees). The pelvis bone's own axes are not world-up, so the raw rotation of a standing
+    // plushie is not zero; the change from its standing rotation is what counts.
+    bool  haveStartRot_ = false;
+    float startPitch_ = 0.f, startRoll_ = 0.f;
+    float peakTiltDeg_ = 0.f;
 };
 
 }  // namespace coop

@@ -759,7 +759,9 @@ void Tick(coop::net::Session& session, void* local, void* controller) {
         } else if (g_wasRagdolling) {
             session.SetLocalRagdollPose(false, {});
             g_wasRagdolling = false;
-            UE_LOGI("net: RagdollPose stream STOP (local player recovered)");
+            UE_LOGI("net: RagdollPose stream STOP (local player recovered, %llu packets emitted)",
+                    static_cast<unsigned long long>(g_ragdollEmitCount));
+            g_ragdollEmitCount = 0;  // the next episode logs its first emits again
         }
     }
 }

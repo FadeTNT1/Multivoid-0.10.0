@@ -117,6 +117,9 @@ VC_DEFINE_OFFSET(MainPlayer_actionIndex,          L"mainPlayer_C", L"actionIndex
 VC_DEFINE_OFFSET(MainPlayer_equipped_flashlight,  L"mainPlayer_C", L"equipped_flashlight")
 VC_DEFINE_OFFSET(MainPlayer_ticker_flashlightController, L"mainPlayer_C", L"ticker_flashlightController")
 VC_DEFINE_OFFSET(TickerFlashlight_player,         P::name::TickerPlayerFlashlightClass, L"player")
+VC_DEFINE_OFFSET(MainPlayer_ragdollActor,         L"mainPlayer_C", L"ragdollActor")
+VC_DEFINE_OFFSET(PlayerRagdoll_Player,            P::name::PlayerRagdollClass, L"Player")
+VC_DEFINE_OFFSET(Ragdoll_SkeletalMesh,            P::name::RagdollBaseClass, L"SkeletalMesh")
 
 VC_DEFINE_OFFSET(AnimBP_kerfur_walkSpeed,           P::name::AnimBPKerfurRegularClass, L"walkSpeed")
 VC_DEFINE_OFFSET(AnimBP_kerfur_Pawn,                P::name::AnimBPKerfurRegularClass, L"Pawn")
