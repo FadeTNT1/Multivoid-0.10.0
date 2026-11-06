@@ -2,6 +2,7 @@
 // described at its declaration in harness/autotest.h.
 
 #include "harness/autotest_dispatch.h"
+#include "synctest_err_scenarios.h"
 
 #include "harness/autotest.h"
 #include "harness/autotest/broomstroke.h"   // the drill that declares itself
@@ -56,6 +57,7 @@ bool IsClientRole() {
 }
 
 void SpawnEnvGatedTests(coop::net::Role role) {
+    SpawnSyncTestErrors();
     // The grab test: the host drives grab, move and release through the PhysicsHandle UFunctions;
     // the client only scans.
     SpawnIf("VOTVCOOP_RUN_GRAB_TEST", "grab test", &GrabTestThread, role);

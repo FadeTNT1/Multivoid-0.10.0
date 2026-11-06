@@ -53,6 +53,7 @@ EXE_PATH_FILES = {
     "ue_wrap/core/paths.cpp": "ExeDir itself",
     "loader/cppmod_entry.cpp": "the scan for an older mod DLL beside the exe",
     "harness/sdk_check.cpp": "the compatibility report's exe line",
+    "harness/autotest/synctest_err_scenarios.cpp": "read-only containment check before a rig scenario runs",
     "ue_wrap/core/reflection.cpp": "LogGameVersion, the exe's file version",
 }
 
