@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 286;
+inline constexpr uint16_t kProtocolVersion = 287;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -253,7 +253,8 @@ enum class ReliableKind : uint8_t {
     GrimeState = 31,
 
     // Any peer, relayed by the host: the garage door's open state, keyed by the garage's
-    // level-export name (its save key can be None after a reload). KeyedTogglePayload.
+    // level-export name (its save key can be None after a reload). KeyedTogglePayload. Late join: the host's door
+    // at the joiner's world-ready, as a seed (kSeedFlagSeed) carrying its place in a swing in `travel`.
     GarageDoorState = 33,
 
     // Host to all: the star dome's world rotation, the moon phase and the sky eye, about once a
@@ -2151,11 +2152,20 @@ struct KeyedTogglePayload {
     uint8_t  action;     // 1  -- 0 = closed/off, 1 = open/on (the state AFTER the edge)
     uint8_t  holder;     // 1  -- ContainerState: a peer slot + 1 (0 = none); other kinds: 0
     uint16_t holdGen;    // 2  -- ContainerState: that peer's hold generation (0 = unknown); other kinds: 0
-    uint8_t  _pad[4];    // 4  -- 8-byte alignment / reserved
+    uint16_t travel;     // 2  -- GarageDoorState snapshot: the door's place in its swing, 0 = closed end .. 1000 = open end
+    uint8_t  seedFlags;  // 1  -- GarageDoorState: kSeedFlag* bits; 0 on every other kind and on a live edge
+    uint8_t  _pad;       // 1  -- 8-byte alignment / reserved
 };
 static_assert(sizeof(KeyedTogglePayload) == 40, "KeyedTogglePayload must be 40 bytes");
 static_assert(sizeof(KeyedTogglePayload) <= 256 - 20 - 8,
               "KeyedTogglePayload must fit in one reliable datagram");
+
+// KeyedTogglePayload::seedFlags, GarageDoorState only. A SEED is the host's connect snapshot of a garage: the joiner does not
+// replay the wall button's toggle but puts the door where the host's stood (ue_wrap::garage::SeedTo), keeps the newest
+// seed until the door and its mesh have converged, and drives it again if a late save load rewrites it. A live edge
+// carries 0 and is the animated swing as before.
+inline constexpr uint8_t kSeedFlagSeed   = 1;  // this state is a snapshot's seed
+inline constexpr uint8_t kSeedFlagMoving = 2;  // the host's door was mid-swing toward `action`; `travel` is its place in it
 
 // Where an open swinger lid rests (SwingerRestPose): the container lane's key for the lid, as
 // KeyedTogglePayload carries it, and the lid actor's world location (cm) and rotation (deg).

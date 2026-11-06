@@ -15,6 +15,7 @@
 #include "coop/player/players_registry.h"   // coop::players::kMaxPeers
 #include "coop/element/object_scan_hub.h"      // the shared sliced scan pass
 #include "coop/element/portable_identity.h"  // the cross-peer name, when one exists
+#include "coop/interactables/interactable_seed.h"  // SeedBook: a seed kept until its device converges
 #include "coop/session/net_pump.h"             // IsInAnnouncedWorld: a client's own load is not sent
 #include "ue_wrap/engine/world_identity.h"     // the world generation the index is stamped with
 #include "ue_wrap/engine/engine.h"            // TryGetActorLocation, for the probe
@@ -93,6 +94,12 @@ struct Adapter {
     void (*FillPayload)(void* actor, const std::wstring& key, bool on, coop::net::KeyedTogglePayload& p) = nullptr;
     // Optional: hears every state that arrives for this lane, before it is applied or parked. Game thread.
     void (*OnStateReceived)(const std::wstring& key, bool on, const coop::net::KeyedTogglePayload& p) = nullptr;
+    // Optional, with IsSeed and ApplySeed (interactable_seed.h): a lane whose joiner must be put where the host's device
+    // stands, not toggled to a state, marks each connect-snapshot payload a SEED (never a live edge) and fills what the
+    // joiner needs. A received seed is kept, newest per key, and driven by ApplySeed until the device converges.
+    void (*FillSeed)(void* actor, bool on, coop::net::KeyedTogglePayload& p) = nullptr;
+    bool (*IsSeed)(const coop::net::KeyedTogglePayload& p) = nullptr;
+    SeedBook::ApplyFn ApplySeed = nullptr;
 };
 
 // The engine.
@@ -108,7 +115,8 @@ public:
     // (coop/interactables/lightgroup_verbs).
     enum class Mode { Symmetric, HostAuth };
 
-    explicit Channel(const Adapter& a, Mode mode = Mode::Symmetric) : a_(a), mode_(mode) {}
+    explicit Channel(const Adapter& a, Mode mode = Mode::Symmetric)
+        : a_(a), mode_(mode), seeds_(a.name, a.ApplySeed, MakeSeedHooks()) {}
 
     // The wire kind this channel sends and receives.
     coop::net::ReliableKind Kind() const { return a_.kind; }
@@ -214,6 +222,13 @@ public:
         if (key.empty()) { UE_LOGW("%s: OnReliable empty key -- dropping", a_.name); return; }
         const bool want = (p.action != 0);
         if (a_.OnStateReceived) a_.OnStateReceived(key, want, p);
+        // A seed is kept and driven; any other state is newer and replaces a held seed.
+        if (a_.IsSeed && a_.ApplySeed && a_.IsSeed(p)) {
+            pending_.erase(key);
+            seeds_.Accept(key, want, p, senderSlot);
+            return;
+        }
+        seeds_.Erase(key);
         const bool resolved = a_.EnsureResolved();
         void* actor = resolved ? ResolveFast(key) : nullptr;
         if (actor) { ApplyResolved(actor, key, want, senderSlot); return; }
@@ -276,6 +291,7 @@ public:
             }
             return;
         }
+        if (!seeds_.Empty() && IsDelta(key, cur)) seeds_.Erase(key);  // the player's own change is newer than the seed
         SendEdge(key, cur, s);
     }
 
@@ -320,6 +336,7 @@ public:
             WireKeyFromString(d.first, p.key);
             p.action = on ? 1 : 0;
             if (a_.FillPayload) a_.FillPayload(d.second.actor, d.first, on, p);
+            if (a_.FillSeed) a_.FillSeed(d.second.actor, on, p);
             s->SendReliableToSlot(peerSlot, a_.kind, &p, sizeof(p));
             { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[d.first] = on; }
             ++sent;
@@ -369,6 +386,7 @@ public:
         if (!a_.EnsureResolved()) return;
         RegisterWithScanHub();  // safety net for any order where Tick precedes Install
         if (a_.TickApply) a_.TickApply();  // finish an async apply (doors)
+        seeds_.Run();
         if (!IndexCurrent()) return;  // a dead world's index: wait for the hub
         const auto now = std::chrono::steady_clock::now();
         if (now - lastRetry_ >= kRetryRebuildThrottle) {
@@ -450,6 +468,7 @@ public:
     void OnDisconnect() {
         size_t nP = pending_.size();
         pending_.clear();
+        seeds_.Clear();
         if (unindexedEdges_)
             UE_LOGI("%s: session end -- %llu verb edge(s) ran on a device the index did not hold yet, not sent",
                     a_.name, static_cast<unsigned long long>(unindexedEdges_));
@@ -649,6 +668,19 @@ private:
         return nullptr;
     }
 
+    // What the seed book asks of this channel (interactable_seed.h).
+    SeedHooks MakeSeedHooks() {
+        SeedHooks h;
+        h.resolve = [this](const std::wstring& key) { return ResolveFast(key); };
+        h.waitSettled = [this](uint64_t queuedAt) { return WaitSettled(queuedAt); };
+        h.passes = [this]() { return passes_; };
+        h.indexCurrent = [this]() { return a_.EnsureResolved() && IndexCurrent(); };
+        h.applyLive = [this](void* actor, const std::wstring& key, bool want) { ApplyResolved(actor, key, want, 0xFF); };
+        h.echo = [this](bool on) { echo_.store(on, std::memory_order_release); };
+        h.landed = [this](const std::wstring& key, bool want) { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[key] = want; };
+        return h;
+    }
+
     void ApplyResolved(void* actor, const std::wstring& key, bool want, unsigned fromSlot) {
         // The idempotent skip is symmetric-only, where the local field is moved only by us or by
         // the peer being echoed. On a HostAuth channel the apply always runs, and each HostAuth
@@ -750,6 +782,7 @@ private:
     std::unordered_set<std::wstring> sendRefused_;               // GT-only: refused sends, retried each tick
 
     std::unordered_map<std::wstring, Pending> pending_;            // GT-only
+    SeedBook seeds_;                                               // GT-only: the newest seed per key, until its device converges
     std::unordered_set<int> snapshotWait_;                         // GT-only: joiner slots whose snapshot waits for the index
     uint32_t settledGen_ = 0;                                      // GT-only: the world gen a_.Settle last ran over
     std::vector<std::pair<std::wstring, Ref>> pollScratch_;       // GT-only: the dev probe's snapshot buffer

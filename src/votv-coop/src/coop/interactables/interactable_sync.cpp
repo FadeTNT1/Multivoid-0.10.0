@@ -164,6 +164,26 @@ const Adapter g_garageAdapter = {
                 "now %.2f s", ue_wrap::garage::GetNameKey(a).c_str(), on ? "OPEN" : "CLOSED", before, after);
         return true;
     },
+    nullptr, nullptr,  // the payload is the bool; the seed carries the rest
+    // The connect snapshot of a garage is a SEED: whether the host's door is mid-swing and how far along, so the
+    // joiner puts the door, its mesh and its collision where the host's are instead of replaying the wall button. At
+    // rest the travel is the end the door stands at.
+    [](void* a, bool on, coop::net::KeyedTogglePayload& p) {
+        bool moving = false;
+        float fraction = on ? 1.f : 0.f;
+        if (!ue_wrap::garage::TryReadTravel(a, moving, fraction) || !moving) fraction = on ? 1.f : 0.f;
+        p.seedFlags = coop::net::kSeedFlagSeed | (moving ? coop::net::kSeedFlagMoving : 0);
+        p.travel = static_cast<uint16_t>(fraction * 1000.f + 0.5f);
+    },
+    [](const coop::net::KeyedTogglePayload& p) { return (p.seedFlags & coop::net::kSeedFlagSeed) != 0; },
+    [](void* a, bool on, const coop::net::KeyedTogglePayload& p, uint32_t& cookie) -> SeedStep {
+        const bool moving = (p.seedFlags & coop::net::kSeedFlagMoving) != 0;
+        switch (ue_wrap::garage::SeedTo(a, on, moving, static_cast<float>(p.travel) / 1000.f, cookie)) {
+        case ue_wrap::garage::Seeded::Rest:   return SeedStep::Rest;
+        case ue_wrap::garage::Seeded::Failed: return SeedStep::Failed;
+        default:                              return SeedStep::Retry;
+        }
+    },
 };
 // The appliance family (six Aactor_save_C descendants: faucet, sink, shower, kitchen oven,
 // serverBox, wall-unit tapes), symmetric single-bool toggles with no auto-revert. One adapter:
