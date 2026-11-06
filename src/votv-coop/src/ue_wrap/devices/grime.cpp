@@ -133,8 +133,8 @@ bool WriteProcessAndApply(void* grime, float process) {
     if (Repaint(grime, process)) return true;
 
     // No live material on this decal yet. applyMaterial is the verb that builds one -- and only
-    // builds it, on the branch above -- so build, then paint. Failing to paint here would drop
-    // this wipe silently: the caller records the target as applied and never retries.
+    // builds it, on the branch above -- so build, then paint. A false here leaves `process`
+    // written and the decal unpainted; the caller keeps it as visual pending and retries.
     // The verb THIS decal runs. IsGrime admits any descendant of grime_C, and six of them --
     // blood, blood test, oil, UV, graffiti and the dynamic decal -- declare their own
     // applyMaterial. A UFunction handed to ProcessEvent is the body that runs, so the base
