@@ -1129,6 +1129,9 @@ inline constexpr const wchar_t* CmcPushForceFactorProp               = L"PushFor
 inline constexpr const wchar_t* CmcInitialPushForceFactorProp        = L"InitialPushForceFactor";
 inline constexpr const wchar_t* CmcTouchForceFactorProp              = L"TouchForceFactor";
 inline constexpr const wchar_t* CmcStandingDownwardForceScaleProp    = L"StandingDownwardForceScale";
+// ACharacter's FBasedMovementInfo StructProperty: what the character stands on (its MovementBase first). Read by
+// character_push::MovementBaseOf so prop sync knows which prop a player stands on.
+inline constexpr const wchar_t* CharacterBasedMovementProp           = L"BasedMovement";
 // The cap-mushroom class: it overrides Aprop_C::Init and its natural-spawn path
 // (AmushroomSpawner_C::Spawn -> spawnedNaturally()) sets its StaticMesh to NoCollision.
 // mushroom7_C grows into prop_puffballMature_C, a separate species.

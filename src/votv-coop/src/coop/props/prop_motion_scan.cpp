@@ -9,6 +9,7 @@
 #include "coop/player/remote_player.h"
 #include "coop/props/active_drive.h"          // NowMs
 #include "coop/props/prop_drive_host.h"       // Coast, IsDriven, InAHand, CoastingCount
+#include "coop/props/prop_drive_stream.h"     // LastEndAgeMs: a released row's settle
 #include "coop/props/prop_lifecycle.h"        // IsWireSuppressedPropClass
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/hot_path_guard.h"
@@ -147,7 +148,8 @@ bool Check(uint32_t eid, bool mayCoast) {
     const bool driven = coop::prop_drive_host::IsDriven(e.actor);
     const bool inHand = !driven && coop::prop_drive_host::InAHand(e.actor);
     const bool moved  = MovedPastScanEps(loc, rot, e.baseLoc, e.baseRot);
-    if (driven || inHand || !moved) {
+    const bool settling = moved && coop::prop_drive_stream::LastEndAgeMs(eid) < kQuietAfterReleaseMs;
+    if (driven || inHand || !moved || settling) {
         // Another lane moves it, or nothing did: the baseline follows, so the prop a row just brought
         // to rest is not coasted again for the motion that row already streamed.
         if (moved) {

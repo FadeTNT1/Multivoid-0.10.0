@@ -118,4 +118,28 @@ bool WriteForces(void* pawn, const PushValues& v) {
     return true;
 }
 
+void* MovementBaseOf(void* pawn) {
+    UE_ASSERT_GAME_THREAD("character_push::MovementBaseOf");
+    if (!pawn || !R::IsLive(pawn)) return nullptr;
+    static void*   s_cls = nullptr;
+    static int32_t s_off = -1;
+    void* cls = R::ClassOf(pawn);
+    if (cls != s_cls) {
+        s_cls = cls;
+        s_off = -1;
+        int32_t off = -1;
+        std::wstring type;
+        if (R::PropertyOffsetAndClass(cls, P::name::CharacterBasedMovementProp, off, type) && off >= 0 &&
+            type == L"StructProperty") {
+            s_off = off;
+        } else {
+            UE_LOGW("character_push: BasedMovement not found as a StructProperty on %ls -- no movement base is read",
+                    R::ClassNameOf(cls).c_str());
+        }
+    }
+    if (s_off < 0) return nullptr;
+    void* base = ReadAt<void*>(pawn, s_off + static_cast<ptrdiff_t>(P::off::FBasedMovementInfo_MovementBase));
+    return (base && R::IsLive(base)) ? base : nullptr;
+}
+
 }  // namespace ue_wrap::character_push

@@ -24,6 +24,7 @@ std::vector<Prop> props;                 // actor i is &props[i]; eid i + 1
 std::unordered_set<void*> driven;        // rows the drive channel holds (all coasting here)
 std::vector<void*> coastOrder;           // every Coast the scan asked for, in order
 uint64_t nowMs = 0;
+std::unordered_map<int, uint64_t> endAtMs;   // eid -> when an End last applied to its copy
 ue_wrap::FVector camera{};
 int eidOf(void* a) { return static_cast<int>(static_cast<Prop*>(a) - props.data()) + 1; }
 }  // namespace fixture
@@ -70,6 +71,12 @@ inline void Coast(void* a, const char*) {
     if (!InAHand(a)) fixture::driven.insert(a);
 }
 }  // namespace prop_drive_host
+namespace prop_drive_stream {
+inline uint64_t LastEndAgeMs(uint32_t eid) {
+    const auto it = fixture::endAtMs.find(static_cast<int>(eid));
+    return it == fixture::endAtMs.end() ? UINT64_MAX : fixture::nowMs - it->second;
+}
+}  // namespace prop_drive_stream
 }  // namespace coop
 namespace ue_wrap {
 namespace reflection {
@@ -111,6 +118,7 @@ void Reset(size_t n, float farX) {
     for (size_t i = 0; i < n; ++i) fixture::props[i].loc = ue_wrap::FVector{farX + 10.f * i, 0.f, 0.f};
     fixture::driven.clear();
     fixture::coastOrder.clear();
+    fixture::endAtMs.clear();
     fixture::nowMs = 1000;
     fixture::camera = ue_wrap::FVector{};
 }
@@ -212,6 +220,21 @@ int main() {
     fixture::driven.clear();
     Run(60);
     Check(fixture::coastOrder.empty(), "the end of a row's motion is not coasted again");
+
+    // A client's row the host just released settles from the End's pose: that motion is not coasted back to the
+    // client that let go, and the settle's place is the baseline once the window is over.
+    Reset(10, 0.f);
+    Run(30);
+    fixture::endAtMs[fixture::eidOf(&fixture::props[6])] = fixture::nowMs;
+    for (int i = 0; i < 10; ++i) { fixture::props[6].loc.Z -= 3.f; Run(3); }
+    Check(fixture::coastOrder.empty(), "a released row's settle inside the quiet window is not coasted");
+    while (fixture::nowMs - fixture::endAtMs[fixture::eidOf(&fixture::props[6])] < S::kQuietAfterReleaseMs) Run(1);
+    Run(60);
+    Check(fixture::coastOrder.empty(), "the settle's place is the baseline after the window");
+    fixture::props[6].loc.Z -= 30.f;
+    Run(60);
+    Check(fixture::coastOrder.size() == 1 && fixture::coastOrder.front() == &fixture::props[6],
+          "a real move after the window coasts as before");
 
     if (g_fail == 0) std::printf("prop_motion_scan_test: all checks passed\n");
     return g_fail == 0 ? 0 : 1;

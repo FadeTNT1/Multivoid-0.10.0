@@ -42,6 +42,11 @@ constexpr size_t kMaxNewCoastsPerTick = 4;
 constexpr size_t kMaxCoasting         = 24;
 // How often the candidate list is rebuilt from the Registry and re-split by distance.
 constexpr uint64_t kRefreshMs = 2000;
+// A client's row the host released (its End applied to the host's copy) this recently: the copy's motion is the
+// release's own settle -- the body simulating again from the End's pose -- not new motion. Coasting it streamed the
+// settle back to the client that had just let go and parked that client's copy under its player's feet, so the
+// prop changed hands every few seconds (docs/props.md, standing on a prop). The baseline follows meanwhile.
+constexpr uint64_t kQuietAfterReleaseMs = 1500;
 
 // --- the pure rules, constexpr so the .cpp checks them at compile time ---
 

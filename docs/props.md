@@ -277,6 +277,17 @@ election, a claim already open) is claimed with `PropSyncReason::LocalShove` thr
 another client's row and a prop out of reach are refused there), so a shove never steals a prop. `client_shove=0` switches
 it off, `[dev] local_prop_push_log=1` logs every event (`[CLIENT-SHOVE]`).
 
+A prop a player stands on has one physics authority for as long as the player stands there: the standing player's own
+peer, whose capsule rests on its copy. Both peers read the pawn's movement base (`ACharacter::BasedMovement`, through
+`character_push::MovementBaseOf`). On a client, `client_shove` claims the host prop its pawn stands on at once, without
+waiting for a shove's motion and without the settle window after a host end edge, and refreshes the open claim every tick,
+so the claim's rest end waits until the pawn steps off. The host refuses a claim (`HostAuthored`) on a prop its own pawn
+stands on. The host's motion scan does not coast a prop for 1.5 s after it released a client's row: that motion is the
+release's own settle. Before this, a still player let the claim's rest end go out after half a second, the host released
+its copy, coasted the settle back and parked the client's copy under the player's feet, and the next touch claimed it
+again: the prop changed hands every few seconds, each hand-over a park, a pose snap and a fresh simulation under a capsule,
+which a crouch-jump onto a crate turned into a launch or a spin.
+
 ### Sticking to a wall
 
 A prop sticks through its wall-attach component, which the wall-attachable props (the cameras, the
