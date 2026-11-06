@@ -11,6 +11,7 @@
 #include "coop/player/players_registry.h"
 #include "coop/props/crate_break.h"
 
+#include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
@@ -190,6 +191,8 @@ void Emit(void* player, bool hit, const ue_wrap::hit_result::Hit& h) {
     // A host-damaged target (a container, an extinguisher, a breakable explosive, a cubicle) has its hit and break
     // cues sent by the host (coop/props/prop_impact_fx): relaying them here too would play them twice.
     const bool container = hit && h.actor && coop::props::crate_break::IsHostDamaged(h.actor);
+    // Any prop the swing strikes: its damage and break run on the host's copy, which sends their particles.
+    const bool damageLane = container || (hit && h.actor && ue_wrap::prop::IsDescendantOfProp(h.actor));
     const uint32_t targetEid =
         hit && h.actor ? static_cast<uint32_t>(EL::Registry::Get().EidForActor(h.actor)) : 0u;
     const uint32_t target = targetEid == EL::kInvalidId ? 0u : targetEid;
@@ -227,10 +230,18 @@ void Emit(void* player, bool hit, const ue_wrap::hit_result::Hit& h) {
             if (void* cue = ue_wrap::physical_audio::CueFromPhysicalMaterial(h.physMaterial, player, Cue::kImpact))
                 e.sound = E::SoundName(cue);
         // Most surface materials carry no impact particle, only damaged/destroyed ones (metal: eff_metalSpark,
-        // eff_metalBreak); the hitter's own screen shows the damaged one, so fall back to it as the contact path does.
+        // eff_metalBreak), so a surface with none shows its damaged one, as the contact path does. A prop's damaged
+        // particle is not this event's: the host's cue watch sends it to every peer, the hitter included, when the
+        // swing damages the prop (coop/props/prop_impact_fx), and the host's own body spawns it there.
         void* ps = ue_wrap::physical_audio::ParticleFromPhysicalMaterial(h.physMaterial, player, Cue::kImpact);
-        if (!ps) ps = ue_wrap::physical_audio::ParticleFromPhysicalMaterial(h.physMaterial, player, Cue::kDamaged);
+        bool fallback = false;
+        if (!ps && !damageLane) {
+            ps = ue_wrap::physical_audio::ParticleFromPhysicalMaterial(h.physMaterial, player, Cue::kDamaged);
+            fallback = ps != nullptr;
+        }
         if (ps) e.particle = E::SoundName(ps);
+        // No native call of the swing shows that fallback to its own maker, only to the others: play it here too.
+        if (fallback) PlayOwn(e);
     } else if (!g_noMaterialSaid) {
         g_noMaterialSaid = true;
         UE_LOGI("[MELEE-FX] a swing's hit named no physical material -- its surface sound and particles are skipped "

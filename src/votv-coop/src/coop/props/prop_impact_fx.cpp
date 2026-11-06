@@ -11,7 +11,9 @@
 #include "coop/props/crate_break.h"
 #include "coop/props/prop_damage_gate.h"
 #include "coop/props/prop_sound.h"
+#include "coop/props/remote_prop.h"
 
+#include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
@@ -64,6 +66,7 @@ int      g_sentSaid = 0;
 int      g_playedSaid = 0;
 bool     g_noActorSaid = false;
 bool     g_emitterFailedSaid = false;
+bool     g_authoredSaid = false;
 bool     g_noCueSaid[coop::net::kPropImpactFxCount] = {};
 
 R::ParamOffset g_hitOff{L"hit"};
@@ -102,7 +105,13 @@ sg::Verdict OnImpactPre(const sg::Call& c) {
     coop::net::Session* s = LoadSession();
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return sg::Verdict::Run;
     void* owner = R::OuterOf(c.object);
-    if (!owner || !coop::props::crate_break::IsHostDamaged(owner)) return sg::Verdict::Run;
+    if (!owner) return sg::Verdict::Run;
+    // Every prop whose component damages or breaks here, whatever the cause (a swing, a fall, a throw, a bump): a
+    // client's copy runs none of that body, so a mannequin's or a crate's particles are the host's alone otherwise.
+    const bool hostDamaged = coop::props::crate_break::IsHostDamaged(owner);
+    if (!hostDamaged && !ue_wrap::prop::IsDescendantOfProp(owner)) return sg::Verdict::Run;
+    // A prop a client drives is that client's: it runs its own body (or the melee contact lane sends its cues).
+    if (!hostDamaged && coop::remote_prop::DrivingSlotOf(owner) >= 0) return sg::Verdict::Run;
     uint8_t kind = coop::net::kPropImpactFxImpact;
     switch (coop::props::prop_damage_gate::ImpactOutcomeOf(c)) {
     case coop::props::prop_damage_gate::ImpactOutcome::Lethal:  kind = coop::net::kPropImpactFxDestroyed; break;
@@ -110,7 +119,7 @@ sg::Verdict OnImpactPre(const sg::Call& c) {
     default:
         // A strike without damage is a cue only when a client's swing or contact made it: the host's own physics
         // bumps its containers all the time.
-        if (!coop::props::crate_break::HostApplying()) return sg::Verdict::Run;
+        if (!hostDamaged || !coop::props::crate_break::HostApplying()) return sg::Verdict::Run;
         break;
     }
     const EL::ElementId eid = EL::Registry::Get().EidForActor(owner);
@@ -188,6 +197,17 @@ void OnFx(const coop::net::PropImpactFxPayload& p) {
         }
         return;
     }
+    // A prop this client authors ran its own impactDamage body (its swing, throw or grip), which played the cue and
+    // the particles natively: the host's copy of it sending the same would show them twice. A host-damaged prop's
+    // body is cancelled here whoever authors it, so its cues are always this lane's.
+    if (!coop::props::crate_break::IsHostDamaged(actor) && coop::props::prop_damage_gate::AuthoredHere(actor)) {
+        if (!g_authoredSaid) {
+            g_authoredSaid = true;
+            UE_LOGI("[CRATE] client fx: %ls eid=%u is authored here, its own body played the cue -- skipped (said once)",
+                    R::ClassNameOf(actor).c_str(), static_cast<unsigned>(p.targetEid));
+        }
+        return;
+    }
     // The kind's own cue, else the next milder one a material carries.
     void* cue = nullptr;
     if (p.kind == coop::net::kPropImpactFxDestroyed)
@@ -196,15 +216,21 @@ void OnFx(const coop::net::PropImpactFxPayload& p) {
         cue = ue_wrap::physical_audio::CueFromPropImpactComponent(actor, Cue::kDamaged);
     if (!cue) cue = ue_wrap::physical_audio::CueFromPropImpactComponent(actor, Cue::kImpact);
     const FVector at{p.loc[0], p.loc[1], p.loc[2]};
-    // A break's particles: the destroy that follows on this lane removes the copy without running its own break, so
-    // the material's destroyed particles are spawned here, from the copy's component while it still stands.
-    if (p.kind == coop::net::kPropImpactFxDestroyed) {
-        void* ps = ue_wrap::physical_audio::ParticleFromPropImpactComponent(actor, Cue::kDestroyed);
-        if (ps && !ue_wrap::engine::SpawnEmitterAtLocation(actor, ps, at, ue_wrap::FRotator{}, FVector{1.f, 1.f, 1.f}) &&
-            !g_emitterFailedSaid) {
-            g_emitterFailedSaid = true;
-            UE_LOGW("[CRATE] client fx: the break particles of %ls did not spawn (said once)",
-                    R::ClassNameOf(actor).c_str());
+    // The particles of a damage or a break: this copy ran none of the impactDamage body (its call was cancelled, or the
+    // destroy that follows on this lane removes the copy without running its own break), so the material's particle of
+    // that kind is spawned here, from the copy's component while it still stands.
+    bool particlePlayed = false;
+    if (p.kind >= coop::net::kPropImpactFxDamaged) {
+        void* ps = ue_wrap::physical_audio::ParticleFromPropImpactComponent(
+            actor, p.kind == coop::net::kPropImpactFxDestroyed ? Cue::kDestroyed : Cue::kDamaged);
+        if (ps) {
+            particlePlayed =
+                ue_wrap::engine::SpawnEmitterAtLocation(actor, ps, at, ue_wrap::FRotator{}, FVector{1.f, 1.f, 1.f});
+            if (!particlePlayed && !g_emitterFailedSaid) {
+                g_emitterFailedSaid = true;
+                UE_LOGW("[CRATE] client fx: the %s particles of %ls did not spawn (said once)", KindName(p.kind),
+                        R::ClassNameOf(actor).c_str());
+            }
         }
     }
     if (!cue) {
@@ -218,9 +244,9 @@ void OnFx(const coop::net::PropImpactFxPayload& p) {
     coop::prop_sound::PlayMaterialCueAt(actor, cue, at);
     if (g_playedSaid < kMaxSaid) {
         ++g_playedSaid;
-        UE_LOGI("[CRATE] client fx: container eid=%u %s played at (%.0f, %.0f, %.0f)",
-                static_cast<unsigned>(p.targetEid), KindName(p.kind), static_cast<double>(at.X),
-                static_cast<double>(at.Y), static_cast<double>(at.Z));
+        UE_LOGI("[CRATE] client fx: %ls eid=%u %s played at (%.0f, %.0f, %.0f): sound=1 particle=%d",
+                R::ClassNameOf(actor).c_str(), static_cast<unsigned>(p.targetEid), KindName(p.kind),
+                static_cast<double>(at.X), static_cast<double>(at.Y), static_cast<double>(at.Z), particlePlayed ? 1 : 0);
     }
 }
 
@@ -238,6 +264,7 @@ void OnDisconnect() {
     g_playedSaid = 0;
     g_noActorSaid = false;
     g_emitterFailedSaid = false;
+    g_authoredSaid = false;
     for (bool& b : g_noCueSaid) b = false;
 }
 

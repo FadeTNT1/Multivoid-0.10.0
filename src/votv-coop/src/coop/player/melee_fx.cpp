@@ -227,8 +227,11 @@ std::wstring TextOf(const N::MeleeFxPayload& p, size_t from, size_t n) {
     return std::wstring(p.text + from, p.text + from + n);
 }
 
-// Play `p` here. `skipSound` leaves the sound out (the host's own zombie feedback already played one).
-void Play(const N::MeleeFxPayload& p, bool skipSound) {
+int g_ownSaid = 0;
+
+// Play `p` here. `skipSound` leaves the sound out (the host's own zombie feedback already played one). `own` is this
+// machine's player's effect, played as it is made (PlayOwn): it has its own log line.
+void Play(const N::MeleeFxPayload& p, bool skipSound, bool own = false) {
     if (!detail::Enabled()) return;
     if (!g_playBucket.Take(kPlayBudget, N::NowMs())) {
         ++g_playPaced;
@@ -274,6 +277,15 @@ void Play(const N::MeleeFxPayload& p, bool skipSound) {
     }
     if (!soundPlayed && !particlePlayed) return;
     ++g_played;
+    if (own) {
+        if (detail::LogAll() || g_ownSaid < kSaid) {
+            ++g_ownSaid;
+            UE_LOGI("[MELEE-FX] local play own %s event %u at (%.0f, %.0f, %.0f): sound=%d particle=%d (#%u)",
+                    KindName(p.kind), p.eventId, static_cast<double>(at.X), static_cast<double>(at.Y),
+                    static_cast<double>(at.Z), soundPlayed ? 1 : 0, particlePlayed ? 1 : 0, g_played);
+        }
+        return;
+    }
     if (detail::LogAll() || g_playedSaid < kSaid) {
         ++g_playedSaid;
         UE_LOGI("[MELEE-FX] play %s from player %u event %u at (%.0f, %.0f, %.0f): sound=%d particle=%d (#%u)",
@@ -324,6 +336,28 @@ uint32_t KeyHash(const std::wstring& text) {
         h *= 16777619u;
     }
     return h;
+}
+
+void PlayOwn(const Effect& e) {
+    if (!Enabled() || e.particle.empty() || !Ascii(e.particle) ||
+        e.particle.size() > static_cast<size_t>(N::kMeleeFxTextCap))
+        return;
+    N::MeleeFxPayload p{};
+    p.eventId = g_nextEventId;   // the id Publish gives this effect, so the two log lines name one event
+    p.kind = e.kind;
+    p.loc[0] = e.loc.X;
+    p.loc[1] = e.loc.Y;
+    p.loc[2] = e.loc.Z;
+    p.normal[0] = e.normal.X;
+    p.normal[1] = e.normal.Y;
+    p.normal[2] = e.normal.Z;
+    p.scale = e.scale;
+    p.volume = e.volume;
+    p.pitch = e.pitch;
+    p.effects = N::kMeleeFxParticle;
+    p.particleLen = static_cast<uint8_t>(e.particle.size());
+    for (size_t i = 0; i < e.particle.size(); ++i) p.text[i] = static_cast<char>(e.particle[i]);
+    Play(p, false, true);
 }
 
 bool Publish(const Effect& e) {
@@ -483,7 +517,7 @@ void OnDisconnect() {
     g_playBucket.Reset();
     g_nextEventId = 1;
     g_sent = g_paced = g_judged = g_played = g_playPaced = 0;
-    g_sentSaid = g_judgedSaid = g_playedSaid = 0;
+    g_sentSaid = g_judgedSaid = g_playedSaid = g_ownSaid = 0;
     g_wireSaid = g_noWorldSaid = g_noSoundSaid = g_noParticleSaid = g_spawnFailedSaid = false;
     for (Seen& v : g_seen) v = Seen{};
     g_seenNext = 0;
