@@ -373,6 +373,20 @@ the reply; a put's goes in), and the client makes its own half in its player inv
 30 s or the taker's departure puts a take's row back; a put whose commit never comes stays put. A repeated transaction is
 answered, never run twice `[?]`. The open and closed state is a keyed-device channel like a door's ([devices.md](devices.md)).
 
+The free-layout screen moves item widgets, not rows: a row's place follows only when a widget's own verbs write it back
+(`updateSlotInfo`; `despawnCanvas`, which writes the widget's `truePosition`, not its bounds-clamped slot). So a "Sort items"
+press (`ui_freeLayoutInventory_C.sortItems`) and a dropped item's toss (`endDrag`, then `toss` on its own ticks) leave the rows
+as they were. Both peers run the game's own sort and toss locally; once the widgets stand still (a sort at the next tick, a
+drop after 300 ms without motion) `ue_wrap/actors/storage_inventory` carries every widget's slot place into its row through
+the widget's own verbs and sets `truePosition` to it, so a later despawn writes the same place. A Shift-snapped drop is snapped
+once, there, at the peer that dropped. The host then marks the storage and the contents lane publishes the new set; a client
+sends a layout request on the request lane -- the storage, the revision seen, the row count and, per row whose place changed,
+its ordinal among the non-empty rows, its fingerprint and the new place and rotation. The host judges reach and lock, checks
+the row count and each named fingerprint at its ordinal (the revision may be behind by a placement-only publish; the items
+may not differ), writes only the places, and publishes; if the items differ it refuses and publishes its own state again
+under a new revision, which redraws the sender's screen `[?]`. The despawn of a canvas also marks the storage on the host, so
+a place a close writes into the rows is published too.
+
 A container's damage, break and spill are the host's (`coop/props/crate_break`). A supply crate
 (`prop_container_sbox_C`, the `wbox` row: health 200, resistance 1) takes damage through its physics component's
 `impactDamage`, which plays the material's cues and, at zero health, breaks it; the break spills its loot as fresh
@@ -746,7 +760,7 @@ two-peer run reads the `[POSTER]` lines.
 | `PropStickState` | the peer that sticks or frees it, to all | frozen or static, the commit pose and the hold the stick ended; or an unstick, with the pose and velocity |
 | `PropSnapPos` | the host to one joiner | a position correction for a save-authoritative prop moved in the join window, with a keyed prop's frozen and sleep; it carries the host's drive context for the prop (claim generation and open), the client drops one older than a drive END still on its copy, and a prop a hand held after its correction went out gets a follow-up after the release `[?]` |
 | `ContainerState`, `ContainerContents` | the presser; the host | open or closed; one page of a world storage's set: its address, revision, row plan and rows |
-| `ContainerActRequest`, `ContainerActReply`, `ContainerActCommit` | a client to the host; the host to that client; the client to the host | a take or put on a world storage (address, fingerprint, amount, revision, the row of a put); the answer, with a granted take's row; the client's half done or aborted |
+| `ContainerActRequest`, `ContainerActReply`, `ContainerActCommit` | a client to the host; the host to that client; the client to the host | a take or put on a world storage (address, fingerprint, amount, revision, the row of a put), or a layout change (revision, row count, the changed rows' ordinal, fingerprint and place); the answer, with a granted take's row; the client's half done or aborted |
 | `PropContactIntent` | a client to the host | a contact on a world container by a prop the client throws, or by the container it threw: the ids, the damage, the speed, the point, the impact |
 | `PropImpactFx` | the host to all | a world container's impact, damaged or destroyed cue, with the point |
 | `MeleeFxRequest`, `MeleeFx` | a client to the host; the host to every other client | the sound and particles of a held prop's damaging knock or its break, found by the maker through the prop's own material and named by asset path; a container's sound is not among them ([players.md](players.md)) |

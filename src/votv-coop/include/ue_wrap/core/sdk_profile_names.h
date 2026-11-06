@@ -166,6 +166,17 @@ inline constexpr const wchar_t* ItemWidgetOwnerComponentProp  = L"ownerComponent
 inline constexpr const wchar_t* ItemWidgetIndexProp           = L"index";
 inline constexpr const wchar_t* CanvasDespawnFn               = L"despawnCanvas";
 inline constexpr const wchar_t* CanvasConnectedComponentProp  = L"connectedComponent";
+// The free-layout screen's placement members (storage_act's sort and settled-layout commits): a canvas's
+// attached item widgets, an item widget's copy of its row (dataReference), its placement verbs (updateSlotPosition
+// writes the widget's slot place and angle into that copy, setPosition sets truePosition and the slot, updateSlotInfo
+// writes the copy into the component's row), and the screen's Shift-snap flag and grid size.
+inline constexpr const wchar_t* CanvasItemsAttachedProp       = L"itemsAttached";
+inline constexpr const wchar_t* ItemWidgetDataReferenceProp   = L"dataReference";
+inline constexpr const wchar_t* ItemWidgetUpdateSlotPositionFn = L"updateSlotPosition";
+inline constexpr const wchar_t* ItemWidgetSetPositionFn       = L"setPosition";
+inline constexpr const wchar_t* ItemWidgetUpdateSlotInfoFn    = L"updateSlotInfo";
+inline constexpr const wchar_t* ScreenSnapShiftProp           = L"snapToGrid_shift";
+inline constexpr const wchar_t* ScreenGridSizeProp            = L"gridSize";
 
 // 0.10.0's player inventory (ue_wrap/actors/inventory_component): mainPlayer_C's own
 // inventoryComponent_player, its three item arrays (the carried grid, the hands and hotbar, the

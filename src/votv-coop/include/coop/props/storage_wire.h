@@ -8,6 +8,10 @@
 //             then for a put: [u8 keepPlace][u32 len][row]
 //   reply     [u16 txn][u8 granted][u8 reason][u32 rev] then for a granted take: [u32 len][row]
 //   commit    [u16 txn][u8 committed]
+//   layout    [u16 txn][u8 family=3][address][u32 rev][u32 plan][u8 cause][u16 rowCount][u16 n]
+//             then n x ([u16 ordinal][u64 fingerprint][f32 x][f32 y][f32 rotation])
+//             a client's placement-only change (a sort, a settled drop): carried by the request lane, answered by no
+//             reply -- the host applies it and publishes, or refuses it and publishes its own state again
 //
 // HOSTILE-INPUT CONTRACT: every length is bounded before it is used and every byte after a message's tail is
 // Malformed. No pointer and no array index of the sender's memory travels: a storage is named by its element or its
@@ -50,7 +54,19 @@ bool PackContents(const Address& a, uint32_t revision, uint32_t plan, const std:
                   std::vector<std::vector<uint8_t>>& out);
 bool ParseContents(const std::vector<uint8_t>& b, ContentsPage& out);
 
-enum class Family : uint8_t { Take = 1, Put = 2 };
+enum class Family : uint8_t { Take = 1, Put = 2, Layout = 3 };
+
+// What a layout request is for (the log names it; the host judges both alike).
+enum class LayoutCause : uint8_t { Sort = 1, Settle = 2 };
+// One row's place: its ordinal among the storage's non-empty rows at the revision the client saw, and the row's
+// fingerprint, so a duplicate or a shifted row is told from the one meant.
+struct LayoutEntry {
+    uint16_t ordinal = 0;
+    uint64_t fingerprint = 0;
+    float x = 0.f, y = 0.f, rotation = 0.f;
+};
+// Bounds on a place, in the screen's own units; a value past it, or not a number, is Malformed.
+inline constexpr float kMaxPlaceAbs = 1.0e5f;
 
 struct Request {
     uint16_t txn = 0;
@@ -62,6 +78,9 @@ struct Request {
     uint8_t amount = 0;
     bool keepPlace = false;          // Put
     std::vector<uint8_t> row;        // Put: the row, Full
+    LayoutCause cause = LayoutCause::Sort;   // Layout (the fields below; fingerprint and amount are unused)
+    uint16_t rowCount = 0;           // Layout: the non-empty rows the client holds
+    std::vector<LayoutEntry> layout; // Layout: the rows whose place changed, ordinals strictly increasing
 };
 std::vector<uint8_t> PackRequest(const Request& r);
 bool ParseRequest(const std::vector<uint8_t>& b, Request& out);

@@ -13,6 +13,7 @@
 #include "ue_wrap/engine/engine_widget.h"   // SpawnUObject
 #include "ue_wrap/world/world_singleton.h"
 
+#include <cmath>
 #include <cstring>
 
 namespace ue_wrap::storage_inventory {
@@ -37,6 +38,9 @@ R::InstanceOffset g_offCanvasComponent(N::CanvasConnectedComponentProp);
 R::InstanceOffset g_offDragging(N::ScreenDraggingProp);
 R::InstanceOffset g_offPlayerCanvas(N::ScreenPlayerCanvasProp);
 R::InstanceOffset g_offWidgetCanvas(N::ItemWidgetOwnerCanvasProp);
+R::InstanceOffset g_offItemsAttached(N::CanvasItemsAttachedProp);
+R::InstanceOffset g_offDataRef(N::ItemWidgetDataReferenceProp);
+R::InstanceOffset g_offGridSize(N::ScreenGridSizeProp);
 
 constexpr const wchar_t* kSlotArrays[] = {N::InventoryHandsArray, N::InventoryEquipmentArray, N::InventorySlotArrayC,
                                           N::InventorySlotArrayD};
@@ -516,6 +520,166 @@ bool RowInfo(void* component, int32_t index, uint64_t& fingerprint, uint8_t& amo
     fingerprint = IC::Fingerprint(row);
     amount = IC::Amount(row);
     return fingerprint != 0;
+}
+
+// ---- Free-layout placement ----
+
+namespace {
+
+// The item widgets of `canvas` that draw `comp`'s rows. A widget is kept only while its row exists and still names the
+// item its copy of the row names: a removed row's widget can linger on the canvas, and carrying it would write the
+// removed item back.
+bool WidgetsOf(void* canvas, void* comp, std::vector<WidgetPlace>& out) {
+    out.clear();
+    const int32_t off = g_offItemsAttached.Of(canvas);
+    const int32_t stride = IC::RowStride();
+    if (off < 0 || stride <= 0 || !IC::Ready()) return false;
+    const SR::Arr list = SR::ReadArr(canvas, off);
+    for (int32_t i = 0; i < list.num; ++i) {
+        void* const w = ReadAt<void*>(list.data, static_cast<int32_t>(static_cast<size_t>(i) * sizeof(void*)));
+        if (!w || !SR::PlausibleObjPtr(w) || !R::IsLive(w)) continue;
+        if (LiveObjAt(w, g_offWidgetOwner.Of(w)) != comp) continue;
+        const int32_t idxOff = g_offWidgetIndex.Of(w), refOff = g_offDataRef.Of(w);
+        if (idxOff < 0 || refOff < 0) continue;
+        WidgetPlace p;
+        p.widget = w;
+        p.index = ReadAt<int32_t>(w, idxOff);
+        const uint8_t* const ref = static_cast<const uint8_t*>(w) + refOff;
+        const uint8_t* const row = RowAt(comp, p.index);
+        if (!row || IC::IsEmpty(row) || IC::IsEmpty(ref)) continue;
+        const uint64_t fp = IC::Fingerprint(row);
+        if (!fp || fp != IC::Fingerprint(ref)) continue;
+        if (!IC::Placement(ref, p.x, p.y, p.rotation)) continue;
+        out.push_back(p);
+    }
+    return true;
+}
+
+bool CallNoArgs(void* obj, const wchar_t* name) {
+    void* const fn = Fn(obj, name);
+    if (!fn) return false;
+    ParamFrame f(fn);
+    return Call(obj, f);
+}
+
+bool SetWidgetPosition(void* widget, float x, float y, bool checkBounds) {
+    void* const fn = Fn(widget, N::ItemWidgetSetPositionFn);
+    if (!fn) return false;
+    ParamFrame f(fn);
+    const float pos[2] = {x, y};
+    f.SetRaw(L"inPosition", pos, sizeof(pos));
+    f.SetRaw(L"checkBounds", &checkBounds, 1);
+    return Call(widget, f);
+}
+
+}  // namespace
+
+bool ReadPlacements(void* component, std::vector<RowPlace>& out) {
+    out.clear();
+    if (!component || !IC::Ready()) return false;
+    const SR::Arr a = Canvas(component);
+    const int32_t stride = IC::RowStride();
+    if (g_offCanvas.Of(component) < 0 || stride <= 0) return false;
+    uint32_t ordinal = 0;
+    for (int32_t i = 0; i < a.num; ++i) {
+        const uint8_t* const row = a.data + static_cast<size_t>(i) * static_cast<size_t>(stride);
+        if (IC::IsEmpty(row)) continue;
+        RowPlace p;
+        p.ordinal = ordinal++;
+        p.fingerprint = IC::Fingerprint(row);
+        if (!p.fingerprint || !IC::Placement(row, p.x, p.y, p.rotation)) return false;
+        out.push_back(p);
+    }
+    return true;
+}
+
+bool ShownWidgetPlaces(void* component, std::vector<WidgetPlace>& out) {
+    out.clear();
+    void* const canvas = ShownCanvasOf(component);
+    return canvas && WidgetsOf(canvas, component, out);
+}
+
+bool ScreenDragging() {
+    void* const screen = OpenScreen();
+    return screen && LiveObjAt(screen, g_offDragging.Of(screen)) != nullptr;
+}
+
+bool SnapShiftHeld() {
+    static BoolField sSnap{N::ScreenSnapShiftProp};
+    void* const screen = OpenScreen();
+    bool held = false;
+    return screen && sSnap.Read(screen, held) && held;
+}
+
+int32_t CommitShownLayout(void* component, const std::vector<void*>& snapWidgets) {
+    void* const canvas = ShownCanvasOf(component);
+    std::vector<WidgetPlace> widgets;
+    if (!canvas || !WidgetsOf(canvas, component, widgets)) return -1;
+    void* const screen = OpenScreen();
+    const int32_t gridOff = screen ? g_offGridSize.Of(screen) : -1;
+    const float grid = gridOff >= 0 ? ReadAt<float>(screen, gridOff) : 0.f;
+    int32_t carried = 0;
+    for (const WidgetPlace& w : widgets) {
+        // The slot's place and angle into the widget's copy of the row.
+        if (!CallNoArgs(w.widget, N::ItemWidgetUpdateSlotPositionFn)) continue;
+        const int32_t refOff = g_offDataRef.Of(w.widget);
+        float x = w.x, y = w.y, rot = w.rotation;
+        if (refOff < 0 || !IC::Placement(static_cast<const uint8_t*>(w.widget) + refOff, x, y, rot)) continue;
+        bool snapped = false;
+        for (void* const s : snapWidgets) {
+            if (s != w.widget || !(grid > 0.f)) continue;
+            x = std::round(x / grid) * grid;
+            y = std::round(y / grid) * grid;
+            snapped = true;
+            break;
+        }
+        // truePosition and the slot both take the place, so a later despawn writes the place the player sees.
+        if (!SetWidgetPosition(w.widget, x, y, /*checkBounds=*/snapped)) continue;
+        if (!CallNoArgs(w.widget, N::ItemWidgetUpdateSlotInfoFn)) continue;
+        ++carried;
+    }
+    return carried;
+}
+
+LayoutResult ApplyLayout(void* component, uint32_t rowCount, const std::vector<RowPlace>& rows) {
+    if (!component || !IC::Ready()) return LayoutResult::Failed;
+    const int32_t stride = IC::RowStride();
+    if (g_offCanvas.Of(component) < 0 || stride <= 0) return LayoutResult::Failed;
+    std::vector<int32_t> indices;   // canvas index of each non-empty row, by ordinal
+    {
+        const SR::Arr a = Canvas(component);
+        for (int32_t i = 0; i < a.num; ++i)
+            if (!IC::IsEmpty(a.data + static_cast<size_t>(i) * static_cast<size_t>(stride))) indices.push_back(i);
+    }
+    if (indices.size() != rowCount) return LayoutResult::Stale;
+    for (const RowPlace& p : rows) {
+        const uint8_t* const row = p.ordinal < indices.size() ? RowAt(component, indices[p.ordinal]) : nullptr;
+        if (!row || IC::Fingerprint(row) != p.fingerprint) return LayoutResult::Stale;
+    }
+    // The screen's widgets are unbound first, which writes their places into the rows; the places asked for go on top
+    // of that and the widgets are drawn again from the rows.
+    void* const canvas = ShownCanvasOf(component);
+    if (canvas) Despawn(canvas);
+    for (const RowPlace& p : rows) {
+        uint8_t* const row = p.ordinal < indices.size() ? RowAt(component, indices[p.ordinal]) : nullptr;
+        if (!row || IC::IsEmpty(row) || !IC::SetPlacement(row, p.x, p.y, p.rotation)) {
+            if (canvas) Assign(component, canvas);
+            return LayoutResult::Failed;
+        }
+    }
+    if (!canvas || !Assign(component, canvas)) CalculateVolumes(component);
+    return LayoutResult::Applied;
+}
+
+void* CanvasStorage(void* canvas) {
+    return (canvas && R::IsLive(canvas)) ? LiveObjAt(canvas, g_offCanvasComponent.Of(canvas)) : nullptr;
+}
+
+void* SortCallStorage(const uint8_t* locals, void* function) {
+    static R::ParamOffset sTarget(L"target");
+    const int32_t off = sTarget.Of(function);
+    void* const canvas = (locals && off >= 0) ? ReadAt<void*>(locals, off) : nullptr;
+    return (canvas && SR::PlausibleObjPtr(canvas)) ? CanvasStorage(canvas) : nullptr;
 }
 
 }  // namespace ue_wrap::storage_inventory
