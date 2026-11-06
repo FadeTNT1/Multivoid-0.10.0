@@ -92,6 +92,27 @@ ContainerActReason JudgeReach(coop::net::Session& s, uint8_t slot, const W::Addr
     }
 }
 
+// The row an add stored: the entry of `after` that `before` does not hold (matched by item and place, not by ordinal,
+// since the add may take a free slot ahead of other rows). False when the add stacked onto a row already there.
+bool StoredRow(const std::vector<SI::RowPlace>& before, const std::vector<SI::RowPlace>& after, SI::RowPlace& out) {
+    std::vector<bool> used(before.size(), false);
+    for (const SI::RowPlace& a : after) {
+        bool matched = false;
+        for (size_t i = 0; i < before.size(); ++i) {
+            const SI::RowPlace& b = before[i];
+            if (used[i] || b.fingerprint != a.fingerprint || b.x != a.x || b.y != a.y || b.rotation != a.rotation)
+                continue;
+            used[i] = matched = true;
+            break;
+        }
+        if (!matched) {
+            out = a;
+            return true;
+        }
+    }
+    return false;
+}
+
 W::Reply Judge(uint8_t slot, const W::Request& q) {
     coop::net::Session* const s = Session();
     if (!s->IsSlotWorldReady(slot)) return Refuse(q.txn, ContainerActReason::Lapsed);
@@ -140,11 +161,22 @@ W::Reply Judge(uint8_t slot, const W::Request& q) {
             if (terms.totalVolume + volume * static_cast<float>(amount) > terms.maxVolume + 1e-3f)
                 return Refuse(q.txn, ContainerActReason::NoSpace);
         }
+        std::vector<SI::RowPlace> placedBefore, placedAfter;
+        const bool readBefore = SI::ReadPlacements(comp, placedBefore);
         if (!SI::AddRow(comp, q.row, q.keepPlace)) return Refuse(q.txn, ContainerActReason::NoSpace);
+        // The line names the place the STORED row carries, read back after the add, beside the place that was asked for.
         float x = 0.f, y = 0.f, rot = 0.f;
-        if (SI::PeekPlacement(q.row, x, y, rot))
-            UE_LOGI("storage_act[host]: slot %u put txn %u placement applied x=%.1f y=%.1f rot=%.1f (%s)",
-                    static_cast<unsigned>(slot), q.txn, x, y, rot,
+        const bool asked = SI::PeekPlacement(q.row, x, y, rot);
+        SI::RowPlace stored;
+        if (readBefore && SI::ReadPlacements(comp, placedAfter) && StoredRow(placedBefore, placedAfter, stored))
+            UE_LOGI("storage_act[host]: slot %u put txn %u placement applied: stored x=%.1f y=%.1f rot=%.1f "
+                    "(asked x=%.1f y=%.1f rot=%.1f, %s)",
+                    static_cast<unsigned>(slot), q.txn, stored.x, stored.y, stored.rotation, x, y, rot,
+                    q.keepPlace ? "the drop's own place" : "a random place");
+        else
+            UE_LOGI("storage_act[host]: slot %u put txn %u placement applied: no new row to read back (stacked onto a "
+                    "row there; asked x=%.1f y=%.1f rot=%.1f, %s)",
+                    static_cast<unsigned>(slot), q.txn, asked ? x : 0.f, asked ? y : 0.f, asked ? rot : 0.f,
                     q.keepPlace ? "the drop's own place" : "a random place");
         h.row = q.row;
     }
@@ -261,6 +293,10 @@ void OnRequestChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot) {
                     static_cast<unsigned>(senderSlot), blob.size(), g_malformed);
         return;
     }
+    if (q.family == W::Family::Layout) {
+        OnLayoutRequest(senderSlot, q);   // no answer, no hold: the host publishes its state either way
+        return;
+    }
     if (const auto it = g_answered.find({senderSlot, q.txn}); it != g_answered.end()) {
         SendReply(senderSlot, it->second);   // a repeat: the same answer, nothing run again
         return;
@@ -303,6 +339,73 @@ void OnCommitChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot) {
     }
     UE_LOGI("storage_act[host]: slot %u commit for txn %u matches no hold (late or repeated)",
             static_cast<unsigned>(senderSlot), c.txn);
+}
+
+void OnLayoutRequest(uint8_t slot, const W::Request& q) {
+    coop::net::Session* const s = Session();
+    if (!s || !IsHost()) return;
+    const char* const cause = q.cause == W::LayoutCause::Sort ? "sort" : "settle";
+    if (!s->IsSlotWorldReady(slot) || q.plan != ue_wrap::inventory_item_codec::PlanSignature()) {
+        UE_LOGI("storage_act[host]: slot %u %s layout ignored (%s)", static_cast<unsigned>(slot), cause,
+                !s->IsSlotWorldReady(slot) ? "its world is not ready" : "its row plan is not this peer's");
+        return;
+    }
+    void* const comp = SC::Resolve(q.address);
+    if (!comp) {
+        UE_LOGI("storage_act[host]: slot %u %s layout at %s refused (the storage is gone)",
+                static_cast<unsigned>(slot), cause, SC::Describe(q.address));
+        return;
+    }
+    // Refused from here on, the host's own state goes out again so the sender's local layout is redrawn from it.
+    const auto refuse = [&](const char* why) {
+        UE_LOGI("storage_act[host]: slot %u %s layout at %s refused (%s) -- rev %u, the host's state published again",
+                static_cast<unsigned>(slot), cause, SC::Describe(q.address), why, SC::RevisionOf(q.address));
+        SC::Resync(q.address);
+    };
+    if (const ContainerActReason r = JudgeReach(*s, slot, q.address, comp); r != ContainerActReason::Granted) {
+        refuse(r == ContainerActReason::Reach ? "out of reach" : "no body");
+        return;
+    }
+    SI::Terms terms;
+    if (!SI::ReadTerms(comp, terms) || terms.locked) {
+        refuse("locked");
+        return;
+    }
+    if (q.revision > SC::RevisionOf(q.address)) {
+        refuse("a revision the host has not published");
+        return;
+    }
+    // The revision the client saw may be behind the host's by a placement-only publish; what must hold is the items:
+    // the same row count and, at each named ordinal, the same item. ApplyLayout checks both before it touches a row.
+    std::vector<SI::RowPlace> places;
+    places.reserve(q.layout.size());
+    for (const W::LayoutEntry& e : q.layout) {
+        SI::RowPlace p;
+        p.ordinal = e.ordinal;
+        p.fingerprint = e.fingerprint;
+        p.x = e.x;
+        p.y = e.y;
+        p.rotation = e.rotation;
+        places.push_back(p);
+    }
+    const SI::LayoutResult r = SI::ApplyLayout(comp, q.rowCount, places);
+    if (r != SI::LayoutResult::Applied) {
+        refuse(r == SI::LayoutResult::Stale ? "the items changed since the client's revision"
+                                            : "the rows did not take it");
+        return;
+    }
+    SC::MarkDirty(comp);
+    // Read the stored rows back: the line reports what the host now holds, not what was asked.
+    std::vector<SI::RowPlace> stored;
+    size_t differ = 0;
+    if (SI::ReadPlacements(comp, stored))
+        for (const SI::RowPlace& p : places)
+            if (p.ordinal < stored.size() && (stored[p.ordinal].x != p.x || stored[p.ordinal].y != p.y ||
+                                              stored[p.ordinal].rotation != p.rotation))
+                ++differ;
+    UE_LOGI("storage_act[host]: slot %u %s layout applied rows=%zu of %u rev=%u (read back: %zu differ)",
+            static_cast<unsigned>(slot), cause, places.size(), static_cast<unsigned>(q.rowCount),
+            SC::RevisionOf(q.address), differ);
 }
 
 }  // namespace coop::props::storage_act::host

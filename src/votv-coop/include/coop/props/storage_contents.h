@@ -38,6 +38,10 @@ void QueueConnectBroadcastForSlot(int peerSlot);
 // Host: a storage changed by this peer's own hand (storage_act's apply); published at the next drain.
 void MarkDirty(void* component);
 
+// Host: the storage's rows go out again under a new revision, even though they are unchanged -- a client's layout was
+// refused, and its local layout is redrawn from this.
+void Resync(const storage_wire::Address& a);
+
 // The wire address of a world storage, and back. False / null when it is not one, or names nothing here.
 bool AddressOf(void* component, storage_wire::Address& out);
 void* Resolve(const storage_wire::Address& a);

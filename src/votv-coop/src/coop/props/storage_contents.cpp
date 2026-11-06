@@ -35,7 +35,9 @@ using Clock = std::chrono::steady_clock;
 
 UE_FACT_FN(kRowCalculateVolumes, "storage_contents", L"inventoryComponent_C", L"calculateVolumes", Declared);
 UE_FACT_FN(kRowTransfer, "storage_contents", L"inventoryComponent_C", L"transferFromInvToInf", Declared);
+UE_FACT_FN(kRowDespawn, "storage_contents", L"uicomp_FLI_canvas_C", L"despawnCanvas", Declared);
 constexpr int kTagCalculate = 0x53544331;   // 'STC1'
+constexpr int kTagDespawn   = 0x53544333;   // 'STC3'
 constexpr int kTagTransfer  = 0x53544332;   // 'STC2'
 
 constexpr auto kDrainEvery = std::chrono::milliseconds(250);
@@ -83,6 +85,9 @@ void MarkComponent(void* comp) {
 }
 
 void OnCalculatePost(const SG::Call& c) { MarkComponent(c.object); }
+
+// A canvas unbinding its item widgets writes each widget's place into its row: the storage's rows may have moved.
+void OnDespawnPost(const SG::Call& c) { MarkComponent(SI::CanvasStorage(c.object)); }
 
 void OnTransferPost(const SG::Call& c) {
     MarkComponent(c.object);
@@ -217,10 +222,11 @@ void RegisterWatches() {
     const bool a = SG::WatchName(kRowCalculateVolumes, kTagCalculate, nullptr, &OnCalculatePost);
     // The client's gate on the same body (storage_act) rides this row's watch.
     const bool b = SG::WatchName(kRowTransfer, kTagTransfer, &coop::props::storage_act::GateTransfer, &OnTransferPost);
-    g_watchesRegistered = a && b;
+    const bool d = SG::WatchName(kRowDespawn, kTagDespawn, nullptr, &OnDespawnPost);
+    g_watchesRegistered = a && b && d;
     if (g_watchesRegistered) SG::ResolvePendingNames();
     else UE_LOGE("storage_contents: the storage watches were refused by the gate (calculateVolumes %d, "
-                 "transferFromInvToInf %d) -- the host's storages are not published", a, b);
+                 "transferFromInvToInf %d, despawnCanvas %d) -- the host's storages are not published", a, b, d);
 }
 
 }  // namespace
@@ -288,6 +294,12 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
 }
 
 void MarkDirty(void* component) { MarkComponent(component); }
+
+void Resync(const W::Address& a) {
+    if (!IsHost()) return;
+    g_sent[a].known = false;   // the next publish reads it as changed: a new revision, to every world-ready peer
+    g_dirty.insert(a);
+}
 
 bool AddressOf(void* component, W::Address& out) {
     if (!SI::IsWorldStorage(component)) return false;

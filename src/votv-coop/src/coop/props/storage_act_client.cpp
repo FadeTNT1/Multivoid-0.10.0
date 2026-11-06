@@ -234,14 +234,28 @@ void ResumeHeldDrag(uint16_t txn, void* widget) {
 
 }  // namespace
 
+bool ActInFlight() { return g_pending.open; }
+
+uint16_t NextTxn() {
+    const uint16_t t = g_nextTxn++;
+    if (g_nextTxn == 0) g_nextTxn = 1;
+    return t;
+}
+
+bool SendRequestBlob(const std::vector<uint8_t>& blob) {
+    return coop::blob_chunks::SendBlob(Session(), coop::net::ReliableKind::ContainerActRequest, g_requestSeq++, blob);
+}
+
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
     RegisterGates();
     host::Install(session);
+    layout::Install(session);
 }
 
 void Tick() {
     host::Tick();
+    layout::Tick();
     if (!IsClient()) return;
     if (g_pending.open && Clock::now() - g_pending.sent > kReplyBound) {
         UE_LOGW("storage_act[client]: %s txn %u got no answer in %llds -- forgotten", FamilyName(g_pending.family),
@@ -257,6 +271,7 @@ void Tick() {
 
 void OnDisconnect() {
     host::OnDisconnect();
+    layout::OnDisconnect();
     g_pending = Pending{};
     g_unsentCommits.clear();
     g_replyAsm.Clear();

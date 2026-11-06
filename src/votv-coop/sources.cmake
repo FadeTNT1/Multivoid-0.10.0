@@ -483,6 +483,7 @@ set(VOTVCOOP_SOURCES
     src/coop/props/storage_contents.cpp
     src/coop/props/storage_act_client.cpp
     src/coop/props/storage_act_host.cpp
+    src/coop/props/storage_act_layout.cpp
     src/ue_wrap/actors/inventory.cpp
     src/ue_wrap/hotbar/icons.cpp
     src/coop/items/hotbar_icon_edge.cpp

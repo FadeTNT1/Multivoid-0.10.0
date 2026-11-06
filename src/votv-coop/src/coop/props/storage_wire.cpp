@@ -4,6 +4,9 @@
 
 #include "ue_wrap/actors/inventory_item_codec.h"   // kMaxItemBytes
 
+#include <cmath>
+#include <cstring>
+
 namespace coop::props::storage_wire {
 namespace {
 
@@ -14,6 +17,7 @@ void U8(std::vector<uint8_t>& o, uint8_t v) { o.push_back(v); }
 void U16(std::vector<uint8_t>& o, uint16_t v) { o.push_back(uint8_t(v)); o.push_back(uint8_t(v >> 8)); }
 void U32(std::vector<uint8_t>& o, uint32_t v) { for (int i = 0; i < 4; ++i) o.push_back(uint8_t(v >> (8 * i))); }
 void U64(std::vector<uint8_t>& o, uint64_t v) { for (int i = 0; i < 8; ++i) o.push_back(uint8_t(v >> (8 * i))); }
+void F32(std::vector<uint8_t>& o, float v) { uint32_t u; std::memcpy(&u, &v, 4); U32(o, u); }
 void Addr(std::vector<uint8_t>& o, const Address& a) { U8(o, static_cast<uint8_t>(a.kind)); U32(o, a.id); }
 void Bytes(std::vector<uint8_t>& o, const std::vector<uint8_t>& b) {
     U32(o, static_cast<uint32_t>(b.size()));
@@ -38,6 +42,12 @@ struct In {
         v = 0;
         for (int i = 0; i < 8; ++i) v |= uint64_t(b[o + i]) << (8 * i);
         o += 8;
+        return true;
+    }
+    bool F32(float& v) {
+        uint32_t u = 0;
+        if (!U32(u)) return false;
+        std::memcpy(&v, &u, 4);
         return true;
     }
     bool Addr(Address& a) {
@@ -126,6 +136,20 @@ std::vector<uint8_t> PackRequest(const Request& r) {
     Addr(o, r.address);
     U32(o, r.revision);
     U32(o, r.plan);
+    if (r.family == Family::Layout) {
+        if (r.layout.size() > kMaxRows || r.rowCount > kMaxRows) return {};
+        U8(o, static_cast<uint8_t>(r.cause));
+        U16(o, r.rowCount);
+        U16(o, static_cast<uint16_t>(r.layout.size()));
+        for (const LayoutEntry& e : r.layout) {
+            U16(o, e.ordinal);
+            U64(o, e.fingerprint);
+            F32(o, e.x);
+            F32(o, e.y);
+            F32(o, e.rotation);
+        }
+        return o;
+    }
     U64(o, r.fingerprint);
     U8(o, r.amount);
     if (r.family == Family::Put) {
@@ -141,8 +165,31 @@ bool ParseRequest(const std::vector<uint8_t>& b, Request& out) {
     In in{b};
     uint8_t family = 0;
     if (!in.U16(out.txn) || out.txn == 0 || !in.U8(family) || !in.Addr(out.address) || !in.U32(out.revision) ||
-        !in.U32(out.plan) || !in.U64(out.fingerprint) || !in.U8(out.amount))
+        !in.U32(out.plan))
         return false;
+    if (family == static_cast<uint8_t>(Family::Layout)) {
+        out.family = Family::Layout;
+        uint8_t cause = 0;
+        uint16_t n = 0;
+        if (!in.U8(cause) || (cause != static_cast<uint8_t>(LayoutCause::Sort) &&
+                              cause != static_cast<uint8_t>(LayoutCause::Settle)) ||
+            !in.U16(out.rowCount) || !in.U16(n) || out.rowCount > kMaxRows || n > out.rowCount)
+            return false;
+        out.cause = static_cast<LayoutCause>(cause);
+        out.layout.reserve(n);
+        for (uint16_t i = 0; i < n; ++i) {
+            LayoutEntry e;
+            if (!in.U16(e.ordinal) || !in.U64(e.fingerprint) || !in.F32(e.x) || !in.F32(e.y) || !in.F32(e.rotation))
+                return false;
+            if (e.fingerprint == 0 || e.ordinal >= out.rowCount) return false;
+            if (!out.layout.empty() && e.ordinal <= out.layout.back().ordinal) return false;   // strictly increasing
+            for (const float v : {e.x, e.y, e.rotation})
+                if (!std::isfinite(v) || std::fabs(v) > kMaxPlaceAbs) return false;
+            out.layout.push_back(e);
+        }
+        return in.End();
+    }
+    if (!in.U64(out.fingerprint) || !in.U8(out.amount)) return false;
     if (out.fingerprint == 0 || out.amount == 0) return false;
     if (family == static_cast<uint8_t>(Family::Take)) {
         out.family = Family::Take;

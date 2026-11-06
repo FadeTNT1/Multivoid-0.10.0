@@ -116,4 +116,56 @@ void* DoubleClickComponent(void* screen);
 // The fingerprint and amount of the canvas row at `index`. False when it is empty or unreadable.
 bool RowInfo(void* component, int32_t index, uint64_t& fingerprint, uint8_t& amount);
 
+// ---- Free-layout placement: where the screen's item widgets sit, and carrying it into the rows. ----
+//
+// The rows hold a place and a rotation each, but the open screen moves the item widgets, not the rows: a "Sort items"
+// press, a drop and its toss all end in a widget's slot, and the row follows only when the widget's own verbs write it
+// back (updateSlotInfo, or despawnCanvas, which writes the widget's truePosition -- not its clamped slot -- into the
+// row). These verbs read the widgets' settled places and write them into the rows through the game's own verbs.
+
+// One non-empty row's place: its ordinal among the non-empty canvas rows (the order ReadRows and the wire carry), its
+// fingerprint and its place and rotation.
+struct RowPlace {
+    uint32_t ordinal = 0;
+    uint64_t fingerprint = 0;
+    float x = 0.f, y = 0.f, rotation = 0.f;
+};
+inline bool SamePlace(const RowPlace& a, const RowPlace& b) {
+    return a.ordinal == b.ordinal && a.fingerprint == b.fingerprint && a.x == b.x && a.y == b.y &&
+           a.rotation == b.rotation;
+}
+// Every non-empty canvas row's place, in canvas order. False when the component or the plan does not resolve.
+bool ReadPlacements(void* component, std::vector<RowPlace>& out);
+
+// One item widget the open screen draws for `component`, with the place its copy of the row carries (kept current by
+// the widget's own checkBounds and toss). Only a widget whose row still exists and still names the same item.
+struct WidgetPlace {
+    void* widget = nullptr;
+    int32_t index = -1;
+    float x = 0.f, y = 0.f, rotation = 0.f;
+};
+// False when the screen is closed or draws no canvas for `component`.
+bool ShownWidgetPlaces(void* component, std::vector<WidgetPlace>& out);
+
+// Whether the screen is holding an item on the cursor, and whether Shift-snap is down.
+bool ScreenDragging();
+bool SnapShiftHeld();
+
+// Carry every widget the open screen draws for `component` into the rows: the widget's slot place into its copy of the
+// row, its truePosition set to that place (so a later despawn writes the same place), the copy into the component's
+// row. The widgets in `snapWidgets` are first moved to the screen's grid. Returns how many widgets were carried, -1
+// when the screen draws none for `component`.
+int32_t CommitShownLayout(void* component, const std::vector<void*>& snapWidgets);
+
+// A client's layout, applied (host). `rowCount` and each row's fingerprint must match the component's non-empty rows
+// at their ordinals, else nothing is touched (Stale). The places are written into the rows; an open screen showing the
+// component is redrawn from them.
+enum class LayoutResult : uint8_t { Applied, Stale, Failed };
+LayoutResult ApplyLayout(void* component, uint32_t rowCount, const std::vector<RowPlace>& rows);
+
+// sortItems(target): the component the target canvas draws, or null. And the component a canvas draws, for a verb that
+// runs on the canvas itself (despawnCanvas).
+void* SortCallStorage(const uint8_t* locals, void* function);
+void* CanvasStorage(void* canvas);
+
 }  // namespace ue_wrap::storage_inventory
