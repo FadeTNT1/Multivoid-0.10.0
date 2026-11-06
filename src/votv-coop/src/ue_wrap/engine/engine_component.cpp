@@ -410,6 +410,35 @@ bool SetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, ui
     return Call(primitiveComponent, f);
 }
 
+bool GetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, uint8_t& out) {
+    if (!primitiveComponent || !R::IsLive(primitiveComponent)) return false;
+    static void* sFn = nullptr;
+    if (!sFn) {
+        void* pc = R::FindClass(P::name::PrimitiveComponentClass);
+        if (pc) sFn = R::FindFunction(pc, P::name::GetCollisionResponseToChannelFn);
+    }
+    if (!sFn) return false;
+    ParamFrame f(sFn);
+    if (!f.valid() || !f.Set<uint8_t>(L"Channel", channel) || !Call(primitiveComponent, f)) return false;
+    out = f.Get<uint8_t>(L"ReturnValue");
+    return true;
+}
+
+std::vector<void*> GetPrimitiveComponents(void* actor) {
+    // Every UPrimitiveComponent whose Outer is `actor`: the default subobjects and any component added
+    // at runtime. A GUObjectArray walk (ChildObjectsOf), so for spawn-time and rare re-assertion, not
+    // a per-frame call.
+    std::vector<void*> out;
+    if (!actor || !R::IsLive(actor)) return out;
+    void* pc = R::FindClass(P::name::PrimitiveComponentClass);
+    if (!pc) return out;
+    for (const auto& c : R::ChildObjectsOf(actor)) {
+        if (!c.object || !R::IsLive(c.object)) continue;
+        if (R::IsDescendantOfAny(R::ClassOf(c.object), &pc, 1)) out.push_back(c.object);
+    }
+    return out;
+}
+
 bool IsComponentTickEnabled(void* component) {
     if (!component || !R::IsLive(component)) return false;
     static void* sFn = nullptr;

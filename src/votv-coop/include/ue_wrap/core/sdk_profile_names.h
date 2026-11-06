@@ -911,6 +911,12 @@ inline constexpr const wchar_t* SetCollisionEnabledFn                = L"SetColl
 // SetCollisionResponseToChannel (UPrimitiveComponent; params `Channel` ECollisionChannel, `NewResponse`
 // ECollisionResponse): the player puppet's capsule ignores PhysicsBody so it never shoves a simulated prop.
 inline constexpr const wchar_t* SetCollisionResponseToChannelFn      = L"SetCollisionResponseToChannel";
+// GetCollisionResponseToChannel (UPrimitiveComponent; param `Channel`, returns ECollisionResponse): the
+// read-back that confirms the puppet guard's Ignore landed.
+inline constexpr const wchar_t* GetCollisionResponseToChannelFn      = L"GetCollisionResponseToChannel";
+// UCharacterMovementComponent::bEnablePhysicsInteraction (a bool bitfield, resolved at run time through
+// FindBoolProperty): off, CapsuleTouched returns before it pushes any simulated body the capsule touches.
+inline constexpr const wchar_t* CmcEnablePhysicsInteractionProp      = L"bEnablePhysicsInteraction";
 // The cap-mushroom class: it overrides Aprop_C::Init and its natural-spawn path
 // (AmushroomSpawner_C::Spawn -> spawnedNaturally()) sets its StaticMesh to NoCollision.
 // mushroom7_C grows into prop_puffballMature_C, a separate species.

@@ -43,6 +43,25 @@ void* GetComponentSkeletalMeshAsset(void* skinnedComponent);
 void* SpawnPuppet(const FVector& loc, void* skeletalMeshAsset, void* animClass,
                   engine::BeforeFinishFn beforeFinish = nullptr, void* ctx = nullptr);
 
+// What EnforcePuppetPropGuard found and did, for the one summary line it logs and for tests.
+struct PropGuardReport {
+    int primitives = 0;       // UPrimitiveComponents the puppet owns
+    int confirmedIgnore = 0;  // of those, read back as Ignore on ECC_PhysicsBody
+    int setFailed = 0;        // SetCollisionResponseToChannel did not dispatch
+    int readFailed = 0;       // GetCollisionResponseToChannel did not dispatch
+    int notIgnore = 0;        // dispatched both ways, yet the read-back is not Ignore
+    int cmcPhysicsInteraction = -1;  // CMC bEnablePhysicsInteraction after the write: 0 off, 1 still on, -1 unresolved
+};
+
+// The puppet never shoves a simulated prop: ECC_PhysicsBody is set to Ignore on EVERY primitive
+// component the puppet owns (capsule, both body meshes, arms, playermodel, anything attached later),
+// each read back, and the puppet's CharacterMovement physics interaction is switched off. The
+// visibility, camera and pawn channels are left alone: hit judging, grab and nameplate traces use
+// them. Idempotent and cheap enough for a spawn or a body swap, not for a per-frame call (it walks
+// the object array). `why` names the call site in the one summary log line. Null or dead actor:
+// all-zero report, nothing logged. Game thread.
+PropGuardReport EnforcePuppetPropGuard(void* puppetActor, const char* why);
+
 // The puppet's USkeletalMeshComponent (the first such child), cached per actor; nullptr if none.
 void* GetSkeletalMeshComponent(void* puppetActor);
 
