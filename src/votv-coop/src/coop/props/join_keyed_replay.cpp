@@ -31,7 +31,7 @@ void NoteSpawn(uint32_t eid, const coop::remote_prop_spawn::HostPose& pose, cons
 void NoteSnapPos(uint32_t eid, const ue_wrap::FVector& loc, const ue_wrap::FRotator& rot, uint8_t physFlags) {
     const auto it = g_retained.find(eid);
     if (it == g_retained.end()) return;
-    it->second.pose = coop::remote_prop_spawn::HostPose{loc.X, loc.Y, loc.Z, rot.Pitch, rot.Yaw, rot.Roll, physFlags};
+    it->second.pose = coop::remote_prop_spawn::HostPose{loc.X, loc.Y, loc.Z, rot.Pitch, rot.Yaw, rot.Roll, physFlags, /*hostAuthored=*/true};
 }
 
 bool ReplayOnto(uint32_t eid, void* actor) {

@@ -59,14 +59,18 @@ void ConvergeFrozenSleep(void* actor, uint8_t physFlags);
 // ConvergeFrozenSleep runs it first.
 void ConvergeGravity(void* actor, uint8_t physFlags);
 
-// The one place a flag converge takes a prop OUT of Static: a wall vent (prop_vent_C) the ventCrawler
-// event has pulled down. The host's break timeline ends in setPropProps(static false, frozen true), so the
-// end of the vent's drive (coop/props/vent_drive) carries Static cleared; this copy, born Static and
-// moved kinematically by the stream, takes the same release through prop_C's own setter (frozen and sleep
-// as the flags say). Narrow on purpose: no other class changes Static through a converge, and a flag
-// read off a spawn's default (no kLiveState) never counts. Only on a difference. Returns true when it
-// wrote. Game thread.
-bool ConvergeStaticRelease(void* actor, uint8_t physFlags);
+// The one place a flag converge takes a prop OUT of Static, for any Aprop_C whose host copy has cleared it: a
+// wall vent the ventCrawler pulled down (its break timeline ends in setPropProps(static false, frozen true)), a
+// pried plank, banister, pillar or asologo piece (the pry's breakingSequence frees it). This copy, born Static
+// and so ungrabbable, takes the same release through prop_C's base setter (frozen and sleep as the flags say).
+// Acts only when `hostAuthored` (the flags are the host's word: a drive end it sent, a snapshot or spawn row,
+// a hold release from slot 0) -- a client-authored flag never releases a Static here. A flag read off a spawn's
+// default (no kLiveState) never counts; only on a difference; a wall-attachable is left to its component's
+// unstick (prop_stick_sync, ConvergeStuck) and a trash clump to its own lane. With `restorePhysics` the
+// SP-parity simulate state follows at once (RestoreSpParityPhysicsAfterConverge); a caller with its own
+// physics decision after (the drive end) passes false. Logs "static released for eid X class Y" and, with
+// restorePhysics, "physics restored". Returns true when it wrote. Game thread.
+bool ConvergeStaticRelease(void* actor, uint8_t physFlags, bool hostAuthored, bool restorePhysics);
 
 // SP-parity simulate state from the wire identity flags. Aprop_C::init() computes
 // SetSimulatePhysics(NOT(static || frozen || sleep)), so a settled prop is simulate-ENABLED but

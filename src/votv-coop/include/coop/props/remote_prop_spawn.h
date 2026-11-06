@@ -57,6 +57,9 @@ struct HostPose {
     float locX, locY, locZ;
     float rotPitch, rotYaw, rotRoll;
     uint8_t physFlags;   // coop::net::propspawn_flags
+    // True when the row is the host's own word (sender slot 0, a snapshot row or the host's join correction): only
+    // then may its Static-cleared flag release this copy's Static (prop_wire_parity::ConvergeStaticRelease).
+    bool    hostAuthored = false;
 };
 
 // Converges a keyed actor this peer already holds onto `pose`: no write when it already agrees (2 cm / 1 degree),

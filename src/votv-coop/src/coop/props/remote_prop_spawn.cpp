@@ -72,6 +72,7 @@ namespace E = ue_wrap::engine;
 
 // The shared physics and collision helpers (prop_wire_parity) under local names.
 using coop::prop_wire_parity::ConvergeFrozenSleep;
+using coop::prop_wire_parity::ConvergeStaticRelease;
 using coop::prop_wire_parity::ReconcileToHostPhysics;
 using coop::prop_wire_parity::RestoreCollisionIfNeeded;
 using coop::prop_wire_parity::RestoreSpParityPhysicsAfterConverge;
@@ -180,6 +181,7 @@ void AdoptByPosition(const coop::net::PropSpawnPayload& payload, int senderSlot,
         ue_wrap::FVector{payload.locX, payload.locY, payload.locZ});
     ue_wrap::engine::SetActorRotation(fuzzy,
         ue_wrap::FRotator{payload.rotPitch, payload.rotYaw, payload.rotRoll});
+    ConvergeStaticRelease(fuzzy, payload.physFlags, /*hostAuthored=*/senderSlot == 0, /*restorePhysics=*/false);
     coop::prop_stick_sync::ConvergeStuck(fuzzy, payload.physFlags);
     ConvergeFrozenSleep(fuzzy, payload.physFlags);
     RestoreSpParityPhysicsAfterConverge(fuzzy, payload.physFlags);
@@ -265,6 +267,9 @@ void ConvergeKeyedToHost(void* actor, const HostPose& pose, const std::wstring& 
         // Its stuck state, frozen and sleep still converge where they differ: a prop the host
         // stuck, froze or woke in place after the blob was cut. The game's own verbs, which wake
         // nothing that agrees.
+        // A prop the host pried free after the blob was cut: Static here, free there. The release runs the game's
+        // setter, which re-derives the simulate state, so the physics follows it.
+        ConvergeStaticRelease(actor, pose.physFlags, pose.hostAuthored, /*restorePhysics=*/true);
         coop::prop_stick_sync::ConvergeStuck(actor, pose.physFlags);
         ConvergeFrozenSleep(actor, pose.physFlags);
     } else {
@@ -283,6 +288,7 @@ void ConvergeKeyedToHost(void* actor, const HostPose& pose, const std::wstring& 
         // The host's stuck state, frozen and sleep after the move (the extinguisher it took off a
         // mount is no longer frozen there, a sign it pried is no longer on its wall), then the
         // simulate state the flags give.
+        ConvergeStaticRelease(actor, pose.physFlags, pose.hostAuthored, /*restorePhysics=*/false);
         coop::prop_stick_sync::ConvergeStuck(actor, pose.physFlags);
         ConvergeFrozenSleep(actor, pose.physFlags);
         RestoreSpParityPhysicsAfterConverge(actor, pose.physFlags);
@@ -333,7 +339,7 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
         coop::join_keyed_replay::NoteSpawn(
             payload.elementId,
             HostPose{payload.locX, payload.locY, payload.locZ,
-                     payload.rotPitch, payload.rotYaw, payload.rotRoll, payload.physFlags},
+                     payload.rotPitch, payload.rotYaw, payload.rotRoll, payload.physFlags, /*hostAuthored=*/true},
             keyW, classW);
     }
     // The trash path: a chip pile, a garbage clump or a variant, mirrored as the GAME's own actor
@@ -507,7 +513,8 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
         }
         ConvergeKeyedToHost(existing,
                             HostPose{payload.locX, payload.locY, payload.locZ,
-                                     payload.rotPitch, payload.rotYaw, payload.rotRoll, payload.physFlags},
+                                     payload.rotPitch, payload.rotYaw, payload.rotRoll, payload.physFlags,
+                                     /*hostAuthored=*/senderSlot == 0},
                             keyW, classW);
         // No sleep write after a converge: a simulating body teleported into a divergent layout
         // penetrates and PhysX ejects it, and PutRigidBodyToSleep mid-depenetration dereferences

@@ -302,6 +302,15 @@ void OnRelease(int senderSlot, const coop::net::PropReleasePayload& payload, voi
     // A wall-attachable already stuck here was stuck by its stick, which arrived first on the same lane,
     // and the component's own re-trace placed it; read before the converge below, which freezes a
     // copy whose stick did not land here and must not be taken for one.
+    // The host's hold ends with the host's flags: a Static it has cleared (a prop it pried free, then lifted) is
+    // released here before the physics decision reads it, or the copy would stay an ungrabbable, frozen body. Only
+    // slot 0's word releases; a client holder's flags are its own copy's.
+    if (propActor && senderSlot == 0 && !HostAuthorsTrashBody(propActor) &&
+        coop::prop_wire_parity::ConvergeStaticRelease(propActor, payload.physFlags, /*hostAuthored=*/true,
+                                                      /*restorePhysics=*/false)) {
+        UE_LOGI("remote_prop: RELEASE eid=%u static released at the host's hold end -- physics restored: %s",
+                payload.elementId, StickHoldsPhysicsOff(propActor) ? "no (frozen here)" : "yes (the release below)");
+    }
     const bool stuckOnWall = StickHoldsPhysicsOff(propActor) && coop::prop_stick_sync::IsWallAttachable(propActor);
     // The holder's frozen and sleep at the release edge, before the physics decision below reads
     // them. A grab that reached this copy through no pose still ends unfrozen here, and a hold that
