@@ -273,6 +273,22 @@ minimum, and two peers wiping at once converge with no oscillation; the grime de
 their quantised world position, since both peers place them from the same save
 (`coop/interactables/window_sync`, `coop/interactables/grime_sync`).
 
+The kitchen sink's and the shower cubicle's dirt (`clean`, 0 filthy to 1 spotless) is the same register turned
+over: the sponge's `cleanSponge` body raises it, calls the surface's own `upd` to paint the material and, at 1,
+credits the wiper's own advancement. Each peer sends the value its own wipe raised (a watch on both bodies, keyed
+by the surface's save key, the one the appliance lane names the tap bit by) and a receiver keeps the greater, so two
+peers wiping at once converge. The apply writes the field and calls `upd` and nothing else: no sound, no wipe
+cursor, no advancement. The host sends each surface's value to a joiner with the adopt flag
+(`coop/interactables/surface_clean_sync`).
+
+A bucket under a running faucet or shower is the host's. Each tap's `ReceiveTick` raises the `height` of the bucket
+its trace finds, on every peer on its own, so on a client the bucket's water is read before that tick and put back
+after it (the splash and the sound stay) and the host's level travels: every changed world bucket about twice a
+second, and every bucket holding water to a joiner. Two cases are not covered. A bucket or watering can in a hand is
+the holder's hotbar item, not a world entity: the sink's press fills it on its holder's machine and the contents
+reach other peers in its save record when it is dropped. A bucket dipped into a lake fills on the machine that dips
+it (`coop/props/water_fill_sync`).
+
 The base's bay window is not one of those: its dirt is a 1645x512 render target that a sponge
 wipes one dab at a time, so there is no scalar to compare. A stroke reaches the window's own
 `cleanPhys` through a script call no hook here carries arguments for, so the dab is observed at
@@ -445,6 +461,8 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | the fuse towers (the three coordinate towers and the radio tower) | the host | a row per tower whenever one changes; a client's presses are intents the host runs, its fuse pulls and inserts claims the host takes or refuses |
 | the turbine | the host | six floats a second |
 | a window, the grime | any peer, minimum wins | monotone decreases |
+| the sink's and the shower's dirt | any peer, maximum wins | monotone rises; the host's value to a joiner |
+| a world bucket's water | the host | a client's tap-tick fill is put back; `BucketFillState` on a change, about twice a second |
 | the drone | the host | a transform stream; the client's tick suppressed |
 | a microwave's mode, time and run | the host | a client's press is an intent; `MicrowaveState` on a change and once a second while it runs |
 
@@ -464,6 +482,8 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | `PowerGridState` | the host to all; a client to the host | every generator's row and each slot's last op taken; a repair, a service, an upgrade install or a hit |
 | `FuseTowerState` | the host to all; a client to the host | every tower's row (kind, broken, fuses, puzzle, panel, levers), each slot's last op taken and last claim refused; a press of a puzzle button, a lever or the retract, a fuse pulled or inserted |
 | `TurbineState`, `WindowCleanState`, `GrimeState` | each peer or the host | the driver floats; a decrease |
+| `SurfaceCleanState` | each peer, relayed | a sink's or shower's key and its `clean`, with an adopt flag on the host's snapshot |
+| `BucketFillState` | the host to all | a world bucket's prop key, its `height` and `empty` |
 | `DroneState` | the host to all | the drone's transform and flags, among them its leave timer |
 | `DroneFlyIntent` | a client to the host | the face pressed, the keyboard or the leave timer; the host finds the console by the sender's reach |
 | `MicrowaveIntent` | a client to the host | a microwave's key and the action, 4 or 8 |
@@ -500,6 +520,8 @@ state it shows, and the first rows a world takes play no sound.
 | the fuse towers | `coop/world/fuse_tower_rows`, `coop/world/fuse_tower_ops`, `coop/world/fuse_tower_kind`, `ue_wrap/devices/coord_tower`, `ue_wrap/devices/radio_tower` |
 | the drone | `coop/interactables/drone_sync`, `coop/interactables/drone_call_intent`, `ue_wrap/devices/drone`, `ue_wrap/devices/drone_console` |
 | the signal servers | `coop/interactables/serverbox_sync`, `coop/interactables/server_upgrade_sync`, `ue_wrap/devices/serverbox` |
+| the sink and shower dirt | `coop/interactables/surface_clean_sync`, `ue_wrap/devices/surface_clean` |
+| a bucket's water | `coop/props/water_fill_sync`, `ue_wrap/devices/water_container` |
 | the microwave | `coop/interactables/microwave_sync`, `ue_wrap/devices/microwave`, `coop/props/prop_food_state` (what it heats) |
 | identity | `coop/element/portable_identity` |
 | tests and probes | `coop/dev/container_selftest`, `coop/dev/door_drill`, `coop/dev/lightswitch_probe`, `coop/dev/drone_probe`, `coop/dev/drone_call_drill`, `coop/dev/light_group_census`, `coop/dev/tower_drill` |

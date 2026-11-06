@@ -30,6 +30,7 @@
 #include "coop/props/trash_pile_sync.h"
 #include "coop/interactables/turbine_sync.h"
 #include "coop/interactables/window_stroke_sync.h"
+#include "coop/interactables/surface_clean_sync.h"
 #include "coop/interactables/window_sync.h"
 
 #include "ue_wrap/core/log.h"
@@ -264,6 +265,34 @@ bool HandleStateEvent(net::Session& session,
                 ? static_cast<uint8_t>(msg.senderPeerSlot)
                 : static_cast<uint8_t>(0xFF);
         coop::window_sync::OnReliable(wp, senderSlot);
+        break;
+    }
+    case net::ReliableKind::SurfaceCleanState: {
+        // The sink's and the shower's dirt scalar. Symmetric cooperative cleaning: any peer sends a wipe (a rise) and
+        // the host relays a client edge. The receiver applies the maximum of local and wire, or the value as sent on
+        // the host's connect snapshot (coop::surface_clean_sync).
+        if (msg.payloadLen < sizeof(net::KeyedScalarPayload)) {
+            UE_LOGW("event_feed: SurfaceCleanState payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::KeyedScalarPayload));
+            break;
+        }
+        net::KeyedScalarPayload sp{};
+        std::memcpy(&sp, msg.payload, sizeof(sp));
+        // The value drives a material scalar and the field upd() clamps: a NaN or infinity is undefined visual
+        // output, and the surface's range is 0..1, so anything past it is garbage too.
+        if (!std::isfinite(sp.value) || sp.value < 0.0f || sp.value > 1.0f) {
+            UE_LOGW("event_feed: SurfaceCleanState value=%.3f invalid -- dropping", sp.value);
+            break;
+        }
+        if (sp.adopt != 0 && sp.adopt != 1) {
+            UE_LOGW("event_feed: SurfaceCleanState adopt=%u out of range -- dropping", static_cast<unsigned>(sp.adopt));
+            break;
+        }
+        const uint8_t senderSlot =
+            (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
+                ? static_cast<uint8_t>(msg.senderPeerSlot)
+                : static_cast<uint8_t>(0xFF);
+        coop::surface_clean_sync::OnReliable(sp, senderSlot);
         break;
     }
     case net::ReliableKind::WindowStroke: {

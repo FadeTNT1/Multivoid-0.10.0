@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 279;
+inline constexpr uint16_t kProtocolVersion = 280;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1304,6 +1304,21 @@ enum class ReliableKind : uint8_t {
     // refused at the host's receive edge. Late join: every noted microwave's state to the joiner at its ready edge,
     // no ding. MicrowaveStatePayload.
     MicrowaveState = 220,
+
+    // PEER->PEER, relayed: the dirt of the kitchen sink and the shower cubicle (sink_C / prop_shower_C `clean`,
+    // 0 filthy .. 1 spotless), keyed by the surface's Aactor_save_C::Key (coop::surface_clean_sync). Each peer sends
+    // a value its own sponge raised (the cleanSponge body); a receiver takes the MAXIMUM of its own and the wire
+    // (adopt 0), so two peers wiping at once converge and nothing lowers it. The host's snapshot to a joiner at its
+    // ready edge is adopt 1: the joiner takes the host's value as sent, an adopt counted from slot 0 only.
+    // KeyedScalarPayload.
+    SurfaceCleanState = 221,
+
+    // HOST->ALL: a world bucket's water (prop_bucket_C `height`, and its `empty` flag), keyed by the prop's key
+    // (coop::water_fill_sync). A tap's tick fills a bucket under it on every peer independently, so on a client that
+    // fill is suppressed and the host's level is the one that travels: about twice a second while it changes, and to a
+    // joiner at its ready edge for every bucket holding water. Never relayed; a client's copy is refused at the host's
+    // receive edge. BucketFillStatePayload.
+    BucketFillState = 222,
 };
 
 #pragma pack(push, 1)
@@ -2746,7 +2761,7 @@ struct ServerSettingPayload {
 static_assert(sizeof(ServerSettingPayload) == 227 && sizeof(ServerSettingPayload) <= 228,
               "ServerSettingPayload must be 227 bytes and fit the inline reliable buffer");
 
-// The shared payload of the keyed monotone-decreasing dirt scalars (WindowCleanState, GrimeState):
+// The shared payload of the keyed monotone-decreasing dirt scalars (WindowCleanState, GrimeState, SurfaceCleanState):
 // the instance's identity string (a Key for a window, a quantized position for a grime decal), the
 // value, and adopt: 0 applies the minimum of local and wire, 1 (a host snapshot, trusted from slot
 // 0 only) writes the value as is.
@@ -2760,6 +2775,20 @@ struct KeyedScalarPayload {
 static_assert(sizeof(KeyedScalarPayload) == 40, "KeyedScalarPayload must be 40 bytes");
 static_assert(sizeof(KeyedScalarPayload) <= 256 - 20 - 8,
               "KeyedScalarPayload must fit in one reliable datagram");
+
+// A world bucket's water (BucketFillState), by its prop key.
+namespace bucket_fill_flags {
+constexpr uint8_t kEmpty = 1u << 0;   // the bucket's `empty` flag
+constexpr uint8_t kKnown = kEmpty;
+}  // namespace bucket_fill_flags
+struct BucketFillStatePayload {
+    WireKey key;          // 32 -- the bucket's prop key
+    float   height;       // 4  -- prop_bucket_C::height, finite and 0..1000
+    uint8_t flags;        // 1  -- bucket_fill_flags
+    uint8_t reserved[3];  // 3  -- zero
+};
+static_assert(sizeof(BucketFillStatePayload) == 40, "BucketFillStatePayload must be 40 bytes");
+static_assert(sizeof(BucketFillStatePayload) <= 256 - 20 - 8, "BucketFillStatePayload must fit one datagram");
 
 // A dispenser pile's counters (TrashPileState): the displayed count is their sum. adopt 1 writes as
 // is; 0 applies the per-component minimum, so concurrent collects converge.

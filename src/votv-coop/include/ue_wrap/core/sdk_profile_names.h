@@ -1123,6 +1123,18 @@ inline constexpr int MicrowaveActionStart = 8;
 inline constexpr int   MicrowaveModeCount = 5;
 inline constexpr float MicrowaveSpinDegPerSec = 60.0f;
 inline constexpr const wchar_t* AddLocalRotationFn = L"K2_AddLocalRotation";
+// The sink and the shower: the dirt scalar `clean` (0 filthy .. 1 spotless) their cleanSponge raises, and the no-arg
+// upd() that clamps it and paints it onto the cube's material. The bucket: `height` (the water level), `height_interp`
+// (what the look follows), `empty` (the tipped-over / nothing-in-it flag the tap's tick clears) and its no-arg upd().
+inline constexpr const wchar_t* SinkClass = L"sink_C";
+inline constexpr const wchar_t* ShowerClass = L"prop_shower_C";
+inline constexpr const wchar_t* BucketClass = L"prop_bucket_C";
+inline constexpr const wchar_t* SurfaceCleanProp = L"clean";
+inline constexpr const wchar_t* SurfaceUpdFn = L"upd";
+inline constexpr const wchar_t* BucketHeightProp = L"height";
+inline constexpr const wchar_t* BucketHeightInterpProp = L"height_interp";
+inline constexpr const wchar_t* BucketEmptyProp = L"empty";
+inline constexpr const wchar_t* BucketUpdFn = L"upd";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

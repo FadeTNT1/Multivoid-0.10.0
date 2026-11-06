@@ -43,6 +43,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ItemActivate:
     case ReliableKind::WindowCleanState:
     case ReliableKind::GrimeState:
+    case ReliableKind::SurfaceCleanState:
     case ReliableKind::GarageDoorState:
     case ReliableKind::ApplianceState:
     case ReliableKind::PowerControlState:
@@ -174,6 +175,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::MeleeFx:
     case ReliableKind::FoodState:
     case ReliableKind::MicrowaveState:
+    case ReliableKind::BucketFillState:
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:
