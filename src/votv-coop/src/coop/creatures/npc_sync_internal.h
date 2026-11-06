@@ -22,7 +22,8 @@ namespace coop::npc_sync {
 
 // -- Shared install-resolved state (written once by Install; read on hot paths) --------------
 
-// NPC UClass* allowlist (resolved from P::name::kNpcAllowlist at install). Read by the
+// NPC UClass* allowlist (resolved from P::name::kNpcAllowlist at install; an entry the level had not
+// loaded yet stays null and is bound later by the install pump, null bases never match). Read by the
 // subclass-aware allowlist walk (IsClassOrDerivedFromAnyAllowlisted) on every interceptor fire.
 extern void* g_npcAllowlist[ue_wrap::profile::name::kNpcAllowlistSize];
 
