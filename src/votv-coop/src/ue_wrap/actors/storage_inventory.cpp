@@ -34,6 +34,9 @@ R::InstanceOffset g_offScreenStorage(N::ScreenContainerComponentProp);
 R::InstanceOffset g_offWidgetOwner(N::ItemWidgetOwnerComponentProp);
 R::InstanceOffset g_offWidgetIndex(N::ItemWidgetIndexProp);
 R::InstanceOffset g_offCanvasComponent(N::CanvasConnectedComponentProp);
+R::InstanceOffset g_offDragging(N::ScreenDraggingProp);
+R::InstanceOffset g_offPlayerCanvas(N::ScreenPlayerCanvasProp);
+R::InstanceOffset g_offWidgetCanvas(N::ItemWidgetOwnerCanvasProp);
 
 constexpr const wchar_t* kSlotArrays[] = {N::InventoryHandsArray, N::InventoryEquipmentArray, N::InventorySlotArrayC,
                                           N::InventorySlotArrayD};
@@ -70,6 +73,13 @@ struct BoolField {
         }
         if (off < 0 || mask == 0) return false;
         out = (*(static_cast<const uint8_t*>(obj) + off) & mask) != 0;
+        return true;
+    }
+    bool Write(void* obj, bool value) {
+        bool unused = false;
+        if (!Read(obj, unused)) return false;
+        uint8_t& byte = *(static_cast<uint8_t*>(obj) + off);
+        byte = value ? static_cast<uint8_t>(byte | mask) : static_cast<uint8_t>(byte & ~mask);
         return true;
     }
 };
@@ -174,7 +184,8 @@ void Rederive(void* comp) {
     CalculateVolumes(comp);
 }
 
-bool AddRowRaw(void* comp, const uint8_t* row, bool keepPlace) {
+// `itemOut`, when given, receives the item widget the add drew (null when the component draws none).
+bool AddRowRaw(void* comp, const uint8_t* row, bool keepPlace, void** itemOut = nullptr) {
     void* const fn = Fn(comp, N::InventoryAddItemAdvancedFn);
     const int32_t stride = IC::RowStride();
     if (!fn || stride <= 0 || R::FindParamSize(fn, L"data") != stride) return false;
@@ -190,7 +201,12 @@ bool AddRowRaw(void* comp, const uint8_t* row, bool keepPlace) {
     f.SetRaw(L"itemPosition", pos, sizeof(pos));
     f.Set<float>(L"itemRotation", rot);
     if (!Call(comp, f)) return false;
-    return f.Get<bool>(L"success_volume") && f.Get<bool>(L"validClass");
+    if (!f.Get<bool>(L"success_volume") || !f.Get<bool>(L"validClass")) return false;
+    if (itemOut) {
+        void* const widget = f.Get<void*>(L"item");
+        *itemOut = (widget && SR::PlausibleObjPtr(widget) && R::IsLive(widget)) ? widget : nullptr;
+    }
+    return true;
 }
 
 bool RemoveAt(void* comp, bool slotBar, uint8_t slotIndex, int32_t index) {
@@ -362,8 +378,56 @@ bool TakeFromPlayer(void* playerComponent, uint64_t fingerprint, uint8_t amount)
     return false;
 }
 
-bool GiveToPlayer(void* playerComponent, const std::vector<uint8_t>& row) {
-    return AddRow(playerComponent, row, /*keepPlace=*/false);
+bool PeekPlacement(const std::vector<uint8_t>& row, float& x, float& y, float& rotation) {
+    if (!IC::Ready()) return false;
+    void* const scratch = DecodeToScratch({row});
+    const SR::Arr a = scratch ? Canvas(scratch) : SR::Arr{};
+    return a.num == 1 && IC::Placement(a.data, x, y, rotation);
+}
+
+bool GiveToPlayer(void* playerComponent, const std::vector<uint8_t>& row, void*& widget) {
+    widget = nullptr;
+    if (!playerComponent || !IC::Ready()) return false;
+    void* const scratch = DecodeToScratch({row});
+    const SR::Arr a = scratch ? Canvas(scratch) : SR::Arr{};
+    if (a.num != 1) return false;
+    // With the screen open and nothing held, the row goes where the game's own beginDrag puts a container item that
+    // becomes the held one: at the place its data carries. Otherwise it lands at a random free place.
+    void* const screen = OpenScreen();
+    const bool resumable = screen && !LiveObjAt(screen, g_offDragging.Of(screen));
+    return AddRowRaw(playerComponent, a.data, /*keepPlace=*/resumable, &widget);
+}
+
+HeldDrag ResumeDrag(void* widget) {
+    static BoolField sRmb{N::ScreenDragRmbProp}, sCtrl{N::ScreenStackCtrlProp};
+    static BoolField sHoldLmb{N::ScreenHoldLmbProp}, sHoldRmb{N::ScreenHoldRmbProp};
+    void* const screen = OpenScreen();
+    if (!screen || !widget || !R::IsLive(widget)) return HeldDrag::Stored;
+    if (LiveObjAt(screen, g_offDragging.Of(screen))) return HeldDrag::Stored;
+    // beginDrag keeps a widget of the player's own canvas as the held one; any other widget it would add again.
+    void* const playerCanvas = LiveObjAt(screen, g_offPlayerCanvas.Of(screen));
+    if (!playerCanvas || LiveObjAt(widget, g_offWidgetCanvas.Of(widget)) != playerCanvas) return HeldDrag::Stored;
+    void* const begin = Fn(screen, N::ScreenBeginDragFn);
+    if (!begin) return HeldDrag::Stored;
+    // The host already split the stack the key asked for; beginDrag must not split the granted row again.
+    bool rmb = false, ctrl = false;
+    const bool hadRmb = sRmb.Read(screen, rmb), hadCtrl = sCtrl.Read(screen, ctrl);
+    if (hadRmb) sRmb.Write(screen, false);
+    if (hadCtrl) sCtrl.Write(screen, false);
+    ParamFrame f(begin);
+    f.Set<void*>(L"item", widget);
+    const bool called = Call(screen, f);
+    if (hadRmb) sRmb.Write(screen, rmb);
+    if (hadCtrl) sCtrl.Write(screen, ctrl);
+    if (!called || LiveObjAt(screen, g_offDragging.Of(screen)) != widget) return HeldDrag::Stored;
+    bool lmb = false, holdRmb = false;
+    const bool knowLmb = sHoldLmb.Read(screen, lmb), knowRmb = sHoldRmb.Read(screen, holdRmb);
+    if ((!knowLmb && !knowRmb) || lmb || holdRmb) return HeldDrag::Held;
+    // The button went up while the host answered: the drag ends where the cursor is now, as its release would have.
+    void* const end = Fn(screen, N::ScreenEndDragFn);
+    if (!end) return HeldDrag::Held;
+    ParamFrame e(end);
+    return Call(screen, e) ? HeldDrag::Dropped : HeldDrag::Held;
 }
 
 void* ShownStorage() {
@@ -407,16 +471,27 @@ uint8_t BeginDragAmount(uint8_t rowAmount) {
 
 bool AddCallRow(const uint8_t* locals, void* function, std::vector<uint8_t>& row, uint64_t& fingerprint,
                 uint8_t& amount, bool& keepPlace) {
-    static R::ParamOffset sData(L"data"), sPlace(L"setPositionAndRotation");
+    static R::ParamOffset sData(L"data"), sPlace(L"setPositionAndRotation"), sPos(L"itemPosition"),
+        sRot(L"itemRotation");
     row.clear();
     const int32_t dataOff = sData.Of(function), placeOff = sPlace.Of(function);
     if (!locals || dataOff < 0 || placeOff < 0 || !IC::Ready()) return false;
     const uint8_t* const data = locals + dataOff;
-    if (IC::IsEmpty(data) || !IC::Encode(data, row)) return false;
+    if (IC::IsEmpty(data)) return false;
     fingerprint = IC::Fingerprint(data);
     amount = IC::Amount(data);
     keepPlace = locals[placeOff] != 0;
-    return fingerprint != 0 && amount != 0;
+    if (fingerprint == 0 || amount == 0) return false;
+    if (!keepPlace) return IC::Encode(data, row);
+    // The call names where the row lands (itemPosition, itemRotation) and addItemAdvanced overwrites the row's own
+    // place with it: the encoded row carries the named place, which is what the host's add then keeps.
+    const int32_t posOff = sPos.Of(function), rotOff = sRot.Of(function), stride = IC::RowStride();
+    if (posOff < 0 || rotOff < 0 || stride <= 0) return false;
+    std::vector<uint8_t> placed(data, data + stride);
+    float pos[2], rot;
+    std::memcpy(pos, locals + posOff, sizeof(pos));
+    std::memcpy(&rot, locals + rotOff, sizeof(rot));
+    return IC::SetPlacement(placed.data(), pos[0], pos[1], rot) && IC::Encode(placed.data(), row);
 }
 
 void* TransferCallTarget(const uint8_t* locals, void* function) {

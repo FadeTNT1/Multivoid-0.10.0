@@ -400,4 +400,12 @@ bool Placement(const uint8_t* row, float& x, float& y, float& rotation) {
     return true;
 }
 
+bool SetPlacement(uint8_t* row, float x, float y, float rotation) {
+    if (!row || !Measure()) return false;
+    std::memcpy(row + g_plan.posOff, &x, 4);
+    std::memcpy(row + g_plan.posOff + 4, &y, 4);
+    std::memcpy(row + g_plan.rotOff, &rotation, 4);
+    return true;
+}
+
 }  // namespace ue_wrap::inventory_item_codec

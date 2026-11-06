@@ -129,6 +129,10 @@ void Ask(W::Request r) {
     g_pending = Pending{true, r.txn, r.family, r.address, r.fingerprint, r.amount, Clock::now()};
     UE_LOGI("storage_act[client]: asked %s txn %u at %s x%u (rev %u, %zu B)", FamilyName(r.family), r.txn,
             SC::Describe(r.address), static_cast<unsigned>(r.amount), r.revision, blob.size());
+    float x = 0.f, y = 0.f, rot = 0.f;
+    if (r.family == W::Family::Put && SI::PeekPlacement(r.row, x, y, rot))
+        UE_LOGI("storage_act[client]: put txn %u placement sent x=%.1f y=%.1f rot=%.1f (%s)", r.txn, x, y, rot,
+                r.keepPlace ? "the drop's own place" : "a random place");
 }
 
 // beginDrag of a row a world storage holds: the take starts here, so it is asked of the host instead.
@@ -198,13 +202,34 @@ void RegisterGates() {
                  "host", a, b, c, d, e, f);
 }
 
-// The client's half of a granted act: the row into the player's inventory (a take) or out of it (a put).
-bool RunGranted(const W::Reply& reply) {
+// The client's half of a granted act: the row into the player's inventory (a take, `widget` the item widget drawn for
+// it) or out of it (a put).
+bool RunGranted(const W::Reply& reply, void*& widget) {
+    widget = nullptr;
     void* const pawn = coop::players::Registry::Get().Local();
     void* const mine = pawn ? ue_wrap::inventory_component::Of(pawn) : nullptr;
     if (!mine) return false;
-    if (g_pending.family == W::Family::Take) return !reply.row.empty() && SI::GiveToPlayer(mine, reply.row);
+    if (g_pending.family == W::Family::Take) return !reply.row.empty() && SI::GiveToPlayer(mine, reply.row, widget);
     return SI::TakeFromPlayer(mine, g_pending.fingerprint, g_pending.amount);
+}
+
+// A granted take's item is in the player's inventory; the drag the player began on it (cancelled until the host
+// answered) goes on from there, as the game's own beginDrag leaves it.
+void ResumeHeldDrag(uint16_t txn, void* widget) {
+    const SI::HeldDrag how = SI::ResumeDrag(widget);
+    switch (how) {
+        case SI::HeldDrag::Held:
+            UE_LOGI("storage_act[client]: take txn %u granted -> drag resumed, the item is held", txn);
+            break;
+        case SI::HeldDrag::Dropped:
+            UE_LOGI("storage_act[client]: take txn %u granted -> drag resumed, the button was up: ended at the cursor",
+                    txn);
+            break;
+        case SI::HeldDrag::Stored:
+            UE_LOGI("storage_act[client]: take txn %u granted -> fallback, the item is in the inventory (%s)", txn,
+                    widget ? "the screen could not hold it" : "no item widget drawn");
+            break;
+    }
 }
 
 }  // namespace
@@ -267,13 +292,17 @@ void OnReplyChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot) {
         g_pending = Pending{};
         return;
     }
-    const bool done = RunGranted(reply);
+    void* widget = nullptr;
+    const bool done = RunGranted(reply, widget);
     SendCommit(reply.txn, done);
     UE_LOGI("storage_act[client]: %s txn %u granted at %s x%u -> %s", FamilyName(g_pending.family), reply.txn,
             SC::Describe(g_pending.address), static_cast<unsigned>(g_pending.amount),
             done ? "done" : "aborted (the player's inventory refused its half)");
     if (!done) LineFor(static_cast<uint8_t>(ContainerActReason::NoSpace));
+    const bool take = g_pending.family == W::Family::Take;
     g_pending = Pending{};
+    // After the act is closed: a drag that ends at once may start the next one (a put into a storage).
+    if (done && take) ResumeHeldDrag(reply.txn, widget);
 }
 
 SG::Verdict GateTransfer(const SG::Call& c) {

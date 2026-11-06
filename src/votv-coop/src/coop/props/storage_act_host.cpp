@@ -141,6 +141,11 @@ W::Reply Judge(uint8_t slot, const W::Request& q) {
                 return Refuse(q.txn, ContainerActReason::NoSpace);
         }
         if (!SI::AddRow(comp, q.row, q.keepPlace)) return Refuse(q.txn, ContainerActReason::NoSpace);
+        float x = 0.f, y = 0.f, rot = 0.f;
+        if (SI::PeekPlacement(q.row, x, y, rot))
+            UE_LOGI("storage_act[host]: slot %u put txn %u placement applied x=%.1f y=%.1f rot=%.1f (%s)",
+                    static_cast<unsigned>(slot), q.txn, x, y, rot,
+                    q.keepPlace ? "the drop's own place" : "a random place");
         h.row = q.row;
     }
     SC::MarkDirty(comp);
