@@ -29,11 +29,14 @@ bool WriteField(void* object, const wchar_t* field, void* actor, void* component
 
 // What an FHitResult holds, as the game reads it through BreakHitResult. `actor` and `component` are the
 // hit's weak pointers resolved to the live object: null when the pointer is empty, stale (its slot recycled)
-// or its object is pending kill. `location` and `normal` are the impact point and impact normal.
+// or its object is pending kill. `physMaterial` is the struck surface's UPhysicalMaterial, resolved the same way (null
+// when the hit names none or the struct carries no such member). `location` and `normal` are the impact point and
+// impact normal.
 struct Hit {
     bool    blocking = false;
     void*   actor = nullptr;
     void*   component = nullptr;
+    void*   physMaterial = nullptr;
     FVector location{};
     FVector normal{};
 };

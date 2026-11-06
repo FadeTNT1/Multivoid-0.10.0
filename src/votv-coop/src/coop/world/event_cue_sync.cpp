@@ -16,6 +16,7 @@
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/engine/engine.h"
+#include "ue_wrap/engine/engine_emitter.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
@@ -32,7 +33,6 @@
 namespace coop::event_cue_sync {
 namespace {
 
-namespace P  = ue_wrap::profile;
 namespace R  = ue_wrap::reflection;
 namespace GT = ue_wrap::game_thread;
 namespace sg = ue_wrap::script_gate;
@@ -62,10 +62,6 @@ void* g_cueTemplates[kCueCount] = {};
 R::FName g_cueRows[kCueCount] = {};
 bool g_rowsResolved = false;
 
-// Reflected spawn path (resolved once -- cloned from firefly_sync).
-void* g_gameplayStaticsCdo = nullptr;
-void* g_spawnEmitterFn     = nullptr;
-
 std::atomic<unsigned> g_replays{0};  // emitters this peer replayed (ReplayCount)
 
 // The host's watch on runEvent, registered once per process.
@@ -80,17 +76,6 @@ void* CueTemplate(int cueId) {
     if (!g_cueTemplates[cueId])
         g_cueTemplates[cueId] = R::FindObject(kCues[cueId].templateName, L"ParticleSystem");
     return g_cueTemplates[cueId];
-}
-
-bool ResolveSpawn() {
-    if (g_gameplayStaticsCdo && g_spawnEmitterFn) return true;
-    if (!g_gameplayStaticsCdo)
-        g_gameplayStaticsCdo = R::FindClassDefaultObject(P::name::GameplayStaticsClass);
-    if (g_gameplayStaticsCdo && !g_spawnEmitterFn) {
-        if (void* cls = R::ClassOf(g_gameplayStaticsCdo))
-            g_spawnEmitterFn = R::FindFunction(cls, L"SpawnEmitterAtLocation");
-    }
-    return g_gameplayStaticsCdo && g_spawnEmitterFn;
 }
 
 // The exact runEvent and its row parameter; the eventer's class loads with the world.
@@ -155,11 +140,6 @@ void OnReliable(const coop::net::EventCuePayload& payload) {
         return;
     }
     if (!std::isfinite(payload.x) || !std::isfinite(payload.y) || !std::isfinite(payload.z)) return;
-    if (!ResolveSpawn()) {
-        UE_LOGW("event_cue: OnReliable spawn path unresolved (cdo=%p fn=%p) -- dropping",
-                g_gameplayStaticsCdo, g_spawnEmitterFn);
-        return;
-    }
     void* tmpl = CueTemplate(static_cast<int>(payload.cueId));
     if (!tmpl) {
         UE_LOGW("event_cue: cue %u ('%s') template not loaded on this peer -- dropping",
@@ -169,19 +149,9 @@ void OnReliable(const coop::net::EventCuePayload& payload) {
     void* worldCtx = coop::players::Registry::Get().Local();
     if (!worldCtx) return;  // no local pawn yet -> can't resolve the world
 
-    ue_wrap::FVector loc{ payload.x, payload.y, payload.z };
-    ue_wrap::FVector scale{ 1.f, 1.f, 1.f };
-    ue_wrap::FRotator rot{ 0.f, 0.f, 0.f };
-    ue_wrap::ParamFrame f(g_spawnEmitterFn);
-    f.Set<void*>(L"WorldContextObject", worldCtx);
-    f.Set<void*>(L"EmitterTemplate", tmpl);
-    f.SetRaw(L"Location", &loc, sizeof(loc));
-    f.SetRaw(L"Rotation", &rot, sizeof(rot));
-    f.SetRaw(L"Scale", &scale, sizeof(scale));
-    f.Set<bool>(L"bAutoDestroy", true);
-    f.Set<uint8_t>(L"PoolingMethod", 0);       // EPSCPoolMethod::None
-    f.Set<bool>(L"bAutoActivateSystem", true);
-    if (!ue_wrap::Call(g_gameplayStaticsCdo, f)) {
+    const ue_wrap::FVector loc{ payload.x, payload.y, payload.z };
+    if (!ue_wrap::engine::SpawnEmitterAtLocation(worldCtx, tmpl, loc, ue_wrap::FRotator{ 0.f, 0.f, 0.f },
+                                                 ue_wrap::FVector{ 1.f, 1.f, 1.f })) {
         UE_LOGW("event_cue: '%s' (cue %u) replay dispatch FAILED", kCues[payload.cueId].name, payload.cueId);
         return;
     }

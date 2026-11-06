@@ -41,7 +41,8 @@ void PlaySoundAtLocation(void* worldContext, void* sound, const FVector& locatio
 void PlaySound2D(void* worldContext, void* sound, float volume, float pitch, float startTime, bool uiSound);
 
 // A sound asset's name across machines, its class, package and own name as the engine's GetFullName writes an
-// asset's ("SoundWave /Game/audio/effects/x.x"). Empty when `sound` is not an asset's (its outer is no package).
+// asset's ("SoundWave /Game/audio/effects/x.x"). Empty when `sound` is not an asset's (its outer is no package). Any
+// asset names itself this way, a particle system as a sound; FindSound finds it again.
 std::wstring SoundName(void* sound);
 
 // The loaded sound asset SoundName names, or null. Walks that class's instances in the object index, never

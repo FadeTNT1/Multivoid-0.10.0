@@ -29,4 +29,14 @@ void* CueFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which);
 // else physmat). Null for an actor with no such component, or on any miss as above.
 void* CueFromPropImpactComponent(void* propActor, Cue which);
 
+// The impact, damage or break particle system of a material's audio object (kSoft is not a particle cue and yields null),
+// or null. The audio material's particle field is not named in the game's tables this build was made against, so it is
+// found by reflection: an object member holding a UParticleSystem whose name says impact or hit (kImpact), damage
+// (kDamaged) or destroy or break (kDestroyed). The first lookup writes the class's whole member list to the log. A miss
+// is null and never a hint. Game thread.
+void* ParticleFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which);
+
+// The same for the material a prop_C's physicsImpact component holds, as CueFromPropImpactComponent picks it.
+void* ParticleFromPropImpactComponent(void* propActor, Cue which);
+
 }  // namespace ue_wrap::physical_audio

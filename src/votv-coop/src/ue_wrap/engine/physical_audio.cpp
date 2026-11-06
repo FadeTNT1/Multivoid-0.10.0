@@ -5,10 +5,14 @@
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflection_props.h"
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/sdk_profile_names.h"
 
 #include <cstdint>
+#include <cwctype>
+#include <string>
+#include <vector>
 
 namespace ue_wrap::physical_audio {
 namespace {
@@ -34,11 +38,9 @@ void LogOnce(bool& said, const char* what) {
     UE_LOGW("physical_audio: %s -- grab / land cue skipped (logged once)", what);
 }
 
-}  // namespace
-
-void* CueFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which) {
+void* AudioMaterialOf(void* physMat, void* worldCtx) {
     if (!physMat || !R::IsLive(physMat) || !worldCtx || !R::IsLive(worldCtx)) return nullptr;
-    static bool sSaidLib = false, sSaidCall = false, sSaidProp = false;
+    static bool sSaidLib = false, sSaidCall = false;
     static void* sLibCdo = nullptr;
     static void* sFn = nullptr;
     // The cached CDO and UFunction can be freed by a class reload; re-resolve when dead.
@@ -63,7 +65,71 @@ void* CueFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which) {
     }
     void* audioMat = f.Get<void*>(N::GetPhysicalAsAudioOutParam);
     if (!audioMat || !R::IsLive(audioMat)) return nullptr;
+    return audioMat;
+}
 
+
+// ---- the particle half --------------------------------------------------------------------------------------------
+
+bool ContainsNoCase(const std::wstring& hay, const wchar_t* needle) {
+    std::wstring h = hay;
+    for (wchar_t& c : h) c = static_cast<wchar_t>(::towlower(c));
+    return h.find(needle) != std::wstring::npos;
+}
+
+// What the audio material's class carries, said once: each own member's name, its type and, for an object member, what
+// it holds. The particle field of this build is not known by name, so the first lookup writes the list the next
+// reading of the log needs.
+void DumpFieldsOnce(void* audioMat) {
+    static bool sDumped = false;
+    if (sDumped) return;
+    sDumped = true;
+    void* cls = R::ClassOf(audioMat);
+    const std::vector<R::StructFieldInfo> fields = R::EnumerateStructFields(cls);
+    UE_LOGI("physical_audio: %ls has %zu own fields (the particle lookup picks an object field holding a particle "
+            "system whose name says impact, damage or break):", R::ClassNameOf(audioMat).c_str(), fields.size());
+    for (const R::StructFieldInfo& fi : fields) {
+        int32_t off = -1;
+        std::wstring type;
+        R::PropertyOffsetAndClass(cls, fi.name.c_str(), off, type);
+        std::wstring holds = L"-";
+        if (type == L"ObjectProperty" && fi.size == static_cast<int32_t>(sizeof(void*))) {
+            void* v = *reinterpret_cast<void**>(static_cast<uint8_t*>(audioMat) + fi.offset);
+            if (v && R::IsLive(v)) holds = R::ClassNameOf(v) + L" " + R::ToString(R::NameOf(v));
+        }
+        UE_LOGI("physical_audio:   field %ls offset=%d size=%d type=%ls holds=%ls", fi.name.c_str(), fi.offset, fi.size,
+                type.c_str(), holds.c_str());
+    }
+}
+
+// The particle system a field of the audio material holds and whose name says `which`, else null.
+void* ParticleOfAudioMaterial(void* audioMat, Cue which) {
+    if (which == Cue::kSoft) return nullptr;
+    DumpFieldsOnce(audioMat);
+    void* cls = R::ClassOf(audioMat);
+    for (const R::StructFieldInfo& fi : R::EnumerateStructFields(cls)) {
+        const bool nameSays = which == Cue::kDestroyed
+                                  ? (ContainsNoCase(fi.name, L"destroy") || ContainsNoCase(fi.name, L"break"))
+                              : which == Cue::kDamaged ? ContainsNoCase(fi.name, L"damage")
+                                                       : (ContainsNoCase(fi.name, L"impact") ||
+                                                          ContainsNoCase(fi.name, L"hit"));
+        if (!nameSays || fi.size != static_cast<int32_t>(sizeof(void*))) continue;
+        int32_t off = -1;
+        std::wstring type;
+        if (!R::PropertyOffsetAndClass(cls, fi.name.c_str(), off, type) || type != L"ObjectProperty") continue;
+        void* v = *reinterpret_cast<void**>(static_cast<uint8_t*>(audioMat) + fi.offset);
+        if (v && R::IsLive(v) && R::ClassNameOf(v) == L"ParticleSystem") return v;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+void* CueFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which) {
+    void* audioMat = AudioMaterialOf(physMat, worldCtx);
+    if (!audioMat) return nullptr;
+
+    static bool sSaidProp = false;
     static R::InstanceOffset sSoft(N::PhysAudioSoftProp);
     static R::InstanceOffset sImpact(N::PhysAudioImpactProp);
     static R::InstanceOffset sDamaged(N::PhysAudioDamagedProp);
@@ -79,17 +145,33 @@ void* CueFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which) {
     return cue;
 }
 
-void* CueFromPropImpactComponent(void* propActor, Cue which) {
+void* ParticleFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which) {
+    void* audioMat = AudioMaterialOf(physMat, worldCtx);
+    return audioMat ? ParticleOfAudioMaterial(audioMat, which) : nullptr;
+}
+
+namespace {
+
+// The material a prop's physicsImpact component holds: the override when valid, else its own. Null for no component.
+void* PhysMaterialOfProp(void* propActor) {
     if (!propActor || !R::IsLive(propActor)) return nullptr;
     static R::InstanceOffset sComp(N::PropPhysicsImpactProp);
     static R::InstanceOffset sOverride(N::PhysImpactMatOverrideProp);
     static R::InstanceOffset sMat(N::PhysImpactMatProp);
     void* comp = ReadObjectProp(propActor, sComp);
     if (!comp) return nullptr;
-    // Same pick the component's own audio lookup makes: the override when valid, else its material.
     void* physMat = ReadObjectProp(comp, sOverride);
-    if (!physMat) physMat = ReadObjectProp(comp, sMat);
-    return CueFromPhysicalMaterial(physMat, propActor, which);
+    return physMat ? physMat : ReadObjectProp(comp, sMat);
+}
+
+}  // namespace
+
+void* CueFromPropImpactComponent(void* propActor, Cue which) {
+    return CueFromPhysicalMaterial(PhysMaterialOfProp(propActor), propActor, which);
+}
+
+void* ParticleFromPropImpactComponent(void* propActor, Cue which) {
+    return ParticleFromPhysicalMaterial(PhysMaterialOfProp(propActor), propActor, which);
 }
 
 }  // namespace ue_wrap::physical_audio

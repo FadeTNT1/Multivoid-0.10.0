@@ -60,6 +60,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/engine/world_save.cpp
     src/ue_wrap/engine/save_to_slot_hook.cpp
     src/ue_wrap/engine/engine_audio.cpp
+    src/ue_wrap/engine/engine_emitter.cpp
     src/ue_wrap/engine/engine_bones.cpp
     src/ue_wrap/engine/engine_component.cpp
     src/ue_wrap/engine/engine_timeline.cpp
