@@ -97,6 +97,12 @@ simulation mutates shared props, eating food and destroying what it empties. A c
 own would diverge the shared food, so the host runs it and clients mirror a paged snapshot; a
 roach a client stomps or eats is a consumed intent to the host (`coop/creatures/roach_sync`).
 
+A roach is a bare static mesh: the host's script moves and turns it with `K2_SetWorldLocation` and
+`K2_SetWorldRotation` each tick, and there is no skeletal mesh, animation or velocity to mirror. The
+crawl a client sees is therefore the pose it is sent. The snapshot is one a second, which as a
+teleport reads as standing still and jumping; a near roach also rides an unreliable pose stream, and
+the client glides between its samples (the shared `LerpWindow`, a slerp for the rotation).
+
 ### The kerfur
 
 There are two robots. The regular one, the kerfus, is a corded prop with three radial actions: its
@@ -153,6 +159,7 @@ on [players.md](players.md).
 | `OwnerEntitySpawn`, `OwnerEntityPose`, `OwnerEntityDestroy` | the owner to all | a stalker's birth, pose and death |
 | `WispGrab`, `WispTear` | the host to the victim; the host to all | the grab and its delay; the tear to play on the mirror |
 | `RoachState`, `RoachConsumed` | the host to all; a client to the host | a page of the infestation; a stomped or eaten roach |
+| `RoachPose` (stream) | the host to all | the roaches near a player, about 12 Hz: ordinal, location, rotation; the client glides between them |
 | `KerfurConvertRequest`, `KerfurConvert` | a client to the host; the host to all | a turn-on or turn-off to perform; the form transition with both ids, the form, the class and the pose |
 | `KerfurCommand` | a client to the host | a radial verb, which the host runs serving the sender |
 

@@ -49,6 +49,7 @@ struct OutboundSamples {
     DueSample<TimeSyncPayload>         clock;
     DueSample<DishPoseBody>            dish;
     DueSample<ReelPosePayload>         reel;
+    DueSample<RoachPoseBody>           roach;
 };
 
 struct OutboundStreams {

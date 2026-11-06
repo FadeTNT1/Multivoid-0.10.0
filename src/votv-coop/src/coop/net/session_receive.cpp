@@ -256,6 +256,7 @@ void Session::HandleMessage(int peerSlot, uint32_t hConn, const void* data, int 
     case MsgType::DeskSimPose:
     case MsgType::DishPose:
     case MsgType::ReelPose:
+    case MsgType::RoachPose:
         // The nine scalar stream channels (session_streams.cpp): validate, newest-wins store, host
         // relay.
         StoreStreamPacket(type, routeSlot, peerSlot, data, len, seq);
