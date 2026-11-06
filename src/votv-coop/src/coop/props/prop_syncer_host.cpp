@@ -28,6 +28,7 @@
 #include "coop/props/prop_wire_parity.h"      // PhysFlagsOf: the flags an End carries
 #include "coop/props/remote_prop.h"           // ResolveLiveActorByEid
 #include "prop_drive_rows.h"                  // co-located private header (src tree, not include/)
+#include "ue_wrap/actors/character_push.h"   // MovementBaseOf: the host's own pawn standing on the prop
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
@@ -337,6 +338,11 @@ void OnClaim(coop::net::Session& s, const coop::net::PropSyncClaimPayload& p, ui
     void* actor = ResolveProp(p.eid);
     if (!actor) return Refuse(s, p, slot, PropSyncRefusal::Unknown);
     if (coop::prop_drive_host::InAHand(actor)) return Refuse(s, p, slot, PropSyncRefusal::InHand, actor);
+    // The host's own pawn stands on it: the host's copy, under the host's capsule, stays the one that simulates. A grant
+    // would park it under the host's feet and the two players' claims would trade the prop back and forth.
+    if (void* mesh = ue_wrap::prop::GetStaticMesh(actor);
+        mesh && ue_wrap::character_push::MovementBaseOf(coop::players::Registry::Get().Local()) == mesh)
+        return Refuse(s, p, slot, PropSyncRefusal::HostAuthored, actor);
     // A host verb or push in flight wins (MTA's persistent syncer); another client's row is not stolen (MTA steals
     // from a non-persistent syncer, :498-501, which would ping-pong two pushers here). The sender's own row is
     // refused the same way: the client never re-claims while it waits or syncs.

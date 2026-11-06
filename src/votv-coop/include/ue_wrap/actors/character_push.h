@@ -36,4 +36,9 @@ bool Read(void* pawn, PushValues& out);
 // Game thread.
 bool WriteForces(void* pawn, const PushValues& v);
 
+// The primitive component `pawn` stands on now (ACharacter::BasedMovement.MovementBase), or null when it stands on
+// nothing (falling, flying) or the property does not resolve on this build. The struct is found by name and type on the
+// pawn's class, once per class. Game thread.
+void* MovementBaseOf(void* pawn);
+
 }  // namespace ue_wrap::character_push

@@ -16,6 +16,7 @@
 #include "coop/props/prop_syncer.h"           // Claim, AuthorsActorHere
 #include "coop/props/prop_throw.h"            // SeqFor
 #include "coop/session/net_pump.h"            // HasAnnouncedWorldReady
+#include "ue_wrap/actors/character_push.h"   // MovementBaseOf
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
@@ -58,6 +59,7 @@ struct Entry {
     bool              hasBase  = false;
     bool              hasLoc   = false;
     bool              eligible = false;   // a keyed Aprop_C of a class the wire expresses; judged once per actor
+    void*             mesh = nullptr;     // its StaticMesh, the component a pawn standing on it has as its base
 };
 
 std::unordered_map<uint32_t, Entry> g_entries;       // eid -> state, the host-allocated props this client has
@@ -70,7 +72,12 @@ std::unordered_set<uint32_t> g_mine;                 // eids this module has cla
 uint64_t g_windowStartMs = 0;
 uint32_t g_sentInWindow = 0;
 size_t   g_claims = 0;
-unsigned g_saidClaim = 0, g_saidHold = 0;
+unsigned g_saidClaim = 0, g_saidHold = 0, g_saidStand = 0;
+size_t   g_standClaims = 0;
+uint32_t g_standEid = 0;                             // the prop the local pawn stood on at the last tick, 0 for none
+// A base no candidate has, until the next refresh: the far set is walked once per new base, so standing on the floor
+// costs one walk a second.
+void*    g_missBase = nullptr;
 bool     g_enabled = true;
 
 bool Verbose() {
@@ -110,12 +117,14 @@ void Refresh(const ue_wrap::FVector& pawn) {
             e.idx   = pr.internalIdx;
             e.eligible = PR::IsDescendantOfProp(pr.actor) &&
                          !coop::prop_lifecycle::IsWireSuppressedPropClass(R::ClassNameOf(pr.actor));
+            if (e.eligible) e.mesh = PR::GetStaticMesh(pr.actor);
         }
         if (!e.eligible) continue;
         (e.hasLoc && Within(Dist2(e.lastLoc, pawn), kNearCm) ? g_near : g_far).push_back(eid);
         next.emplace(eid, e);
     }
     g_entries.swap(next);
+    g_missBase = nullptr;
     g_nearCursor = g_nearCursor < g_near.size() ? g_nearCursor : 0;
     g_farCursor  = g_farCursor  < g_far.size()  ? g_farCursor  : 0;
     for (auto it = g_reclaimAt.begin(); it != g_reclaimAt.end();)
@@ -198,6 +207,73 @@ bool Check(uint32_t eid, const ue_wrap::FVector& pawn, uint64_t now) {
     return true;
 }
 
+// The prop the local pawn stands on: the eid of the near candidate whose StaticMesh is the pawn's movement base, 0 when
+// the pawn stands on no candidate (the floor, a mirror, a prop this client authors as no host element, or nothing).
+uint32_t Find(const std::vector<uint32_t>& list, void* base) {
+    for (const uint32_t eid : list) {
+        auto it = g_entries.find(eid);
+        if (it != g_entries.end() && it->second.mesh == base && R::IsLiveByIndex(it->second.actor, it->second.idx))
+            return eid;
+    }
+    return 0;
+}
+
+uint32_t StoodOn(void* pawn) {
+    void* base = ue_wrap::character_push::MovementBaseOf(pawn);
+    if (!base) return 0;
+    if (const uint32_t eid = Find(g_near, base)) return eid;
+    if (base == g_missBase) return 0;
+    if (const uint32_t eid = Find(g_far, base)) return eid;
+    g_missBase = base;
+    return 0;
+}
+
+// The prop the local pawn stands on is this client's to sync, for as long as it stands there (one physics authority
+// per body: the standing body's own peer, whose capsule rests on its copy). Without this, a still player let the
+// claim's rest End go out, the host released its copy and coasted the release's settle back, the client's copy under
+// the player's feet was parked and moved by the host's stream, and the next shove claimed it again -- the prop
+// changed hands every few seconds, each hand-over a park, a pose snap and a re-simulate under the capsule. Standing
+// claims without waiting for motion (a crouch-jump lands before any shove reads), skips the settle window after a host
+// End (standing is no settle), and refreshes the open episode every tick, so its rest End waits until the pawn steps
+// off. A prop another lane has (a hand, the host's stream, a throw, the host's own pawn standing on it, which the
+// host refuses) is left to it; the stand is asked again each tick, the pacing bounding the sends.
+void CheckStand(uint32_t eid, uint64_t now) {
+    auto it = g_entries.find(eid);
+    if (it == g_entries.end()) return;
+    Entry& e = it->second;
+    void* mesh = e.mesh;
+    if (!mesh || !E::IsComponentSimulatingPhysics(mesh)) return;
+    const bool authored = coop::prop_syncer::AuthorsActorHere(e.actor);
+    bool mine = g_mine.count(eid) != 0;
+    if (mine && !authored) {
+        g_mine.erase(eid);
+        mine = false;
+    }
+    if (mine) {   // the episode goes on while the pawn stands: its rest End waits
+        coop::prop_syncer::Claim(e.actor, coop::net::PropSyncReason::LocalShove);
+        return;
+    }
+    if (authored || coop::prop_drive_host::InAHand(e.actor) || coop::prop_drive_host::IsDriven(e.actor) ||
+        coop::prop_drive_stream::IsParked(e.actor) || coop::prop_throw::SeqFor(e.actor) != 0)
+        return;
+    if (auto r = g_reclaimAt.find(eid); r != g_reclaimAt.end() && now < r->second) return;
+    if (now - g_windowStartMs >= kWindowMs) {
+        g_windowStartMs = now;
+        g_sentInWindow = 0;
+    }
+    if (!ClaimAllowed(g_sentInWindow)) return;
+    ++g_sentInWindow;
+    g_reclaimAt[eid] = now + kReclaimMs;
+    g_mine.insert(eid);
+    ++g_claims;
+    ++g_standClaims;
+    if (Verbose() || g_saidStand < kMaxSaid) {
+        ++g_saidStand;
+        UE_LOGI("[CLIENT-SHOVE] stand claim eid=%u: the local pawn stands on it (#%zu)", eid, g_standClaims);
+    }
+    coop::prop_syncer::Claim(e.actor, coop::net::PropSyncReason::LocalShove);
+}
+
 void Sweep(std::vector<uint32_t>& list, size_t& cursor, size_t reads, const ue_wrap::FVector& pawn, uint64_t now) {
     const size_t n = list.size();
     if (n == 0) return;
@@ -223,6 +299,11 @@ void Tick(coop::net::Session& /*s*/, bool isHost) {
         g_nextRefreshMs = now + kRefreshMs;
     }
     if (!g_enabled) return;
+    const uint32_t stood = StoodOn(coop::players::Registry::Get().Local());
+    if (stood != g_standEid && Verbose())
+        UE_LOGI("[CLIENT-SHOVE] the local pawn's base: eid=%u (was %u)", stood, g_standEid);
+    g_standEid = stood;
+    if (stood) CheckStand(stood, now);
     Sweep(g_near, g_nearCursor, kNearChecksPerTick, pawn, now);
     Sweep(g_far, g_farCursor, kFarChecksPerTick, pawn, now);
 }
@@ -232,7 +313,9 @@ size_t ClaimsSent() {
 }
 
 void OnDisconnect() {
-    if (g_claims) UE_LOGI("[CLIENT-SHOVE] session end: %zu claim(s) sent for a prop this client's body shoved", g_claims);
+    if (g_claims)
+        UE_LOGI("[CLIENT-SHOVE] session end: %zu claim(s) sent for a prop this client's body shoved or stood on (%zu stand)",
+                g_claims, g_standClaims);
     g_entries.clear();
     g_near.clear();
     g_far.clear();
@@ -244,7 +327,10 @@ void OnDisconnect() {
     g_windowStartMs = 0;
     g_sentInWindow = 0;
     g_claims = 0;
-    g_saidClaim = g_saidHold = 0;
+    g_saidClaim = g_saidHold = g_saidStand = 0;
+    g_standClaims = 0;
+    g_standEid = 0;
+    g_missBase = nullptr;
     g_enabled = true;
 }
 
