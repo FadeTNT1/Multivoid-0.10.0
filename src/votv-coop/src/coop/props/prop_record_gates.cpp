@@ -20,6 +20,7 @@ struct Row {
 };
 std::vector<Row<IntentGate>> g_intent;
 std::vector<Row<ApplyGate>> g_apply;
+std::vector<Row<Applier>> g_applier;
 
 template <class Fn>
 void Add(std::vector<Row<Fn>>& rows, const wchar_t* className, Fn fn) {
@@ -40,6 +41,7 @@ bool Names(const wchar_t* className, void* actor) {
 
 void RegisterIntentGate(const wchar_t* className, IntentGate fn) { Add(g_intent, className, fn); }
 void RegisterApplyGate(const wchar_t* className, ApplyGate fn) { Add(g_apply, className, fn); }
+void RegisterApplier(const wchar_t* className, Applier fn) { Add(g_applier, className, fn); }
 
 bool IntentAllows(void* actor, uint8_t senderSlot) {
     for (const Row<IntentGate>& r : g_intent)
@@ -51,6 +53,21 @@ bool ApplyAllows(void* actor) {
     for (const Row<ApplyGate>& r : g_apply)
         if (Names(r.className, actor) && !r.fn(actor)) return false;
     return true;
+}
+
+bool HasApplier(void* actor) {
+    for (const Row<Applier>& r : g_applier)
+        if (Names(r.className, actor)) return true;
+    return false;
+}
+
+bool ApplyOwn(void* actor, const ue_wrap::save_record::SaveRecord& rec, bool& applied) {
+    for (const Row<Applier>& r : g_applier) {
+        if (!Names(r.className, actor)) continue;
+        applied = r.fn(actor, rec);
+        return true;
+    }
+    return false;
 }
 
 }  // namespace coop::prop_record_gates

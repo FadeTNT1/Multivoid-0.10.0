@@ -28,7 +28,8 @@ struct Call;
 
 namespace coop::props::crate_break {
 
-// Is `prop` a world container, whose damage only the host runs? Any role.
+// Is `prop` a world container or a fire extinguisher, whose damage only the host runs? Any role. The extinguisher is
+// one so that its burst starts on the host and travels as its record (coop/props/fire_extinguisher_sync).
 bool IsHostDamaged(void* prop);
 
 // CLIENT: comp_physicsImpact_C::impactDamage call `c` on the mirror of `container`, which prop_damage_gate cancels.

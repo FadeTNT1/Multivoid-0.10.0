@@ -330,7 +330,9 @@ bool TryApply(void* actor, const std::wstring& key, const SR::SaveRecord& rec) {
     // authoritative FindClass walk.
     const SR::ClassResolver resolve =
         PT::SessionIsHost() ? &ue_wrap::object_index::ClassByName : nullptr;
-    if (!SR::ApplyRecord(actor, rec, resolve)) return false;
+    bool applied = false;
+    if (!coop::prop_record_gates::ApplyOwn(actor, rec, applied)) applied = SR::ApplyRecord(actor, rec, resolve);
+    if (!applied) return false;
     ++g_appliedTotal;
     coop::dev::food_clock_probe::NoteApply(actor, key, rec);
     // The author's record has LANDED, so the host may publish this key again, and does so here, from
@@ -357,7 +359,7 @@ bool LandRecord(const std::wstring& key, SR::SaveRecord&& rec, uint8_t senderSlo
     // attachable's stuck state, and a held camera re-stuck ~0.45 s after the grab that way (measured,
     // join tail). The holder is the authority while it holds, so the record waits in the park and
     // the drain applies it once the prop is let go.
-    if (actor && coop::remote_prop::IsOwnedHere(actor)) {
+    if (actor && coop::remote_prop::IsOwnedHere(actor) && !coop::prop_record_gates::HasApplier(actor)) {
         UE_LOGI("prop_save_data: record for key '%ls' waits -- the prop is held here", key.c_str());
         actor = nullptr;
     }
@@ -698,7 +700,7 @@ void Drive() {
                           ? coop::prop_key_index::Find(key) : nullptr;
         // A held prop's record waits for its release (LandRecord's reason). It is skipped before the
         // budget is spent and is no failure: the row stays, and a later frame's scan applies it.
-        if (actor && coop::remote_prop::IsOwnedHere(actor)) actor = nullptr;
+        if (actor && coop::remote_prop::IsOwnedHere(actor) && !coop::prop_record_gates::HasApplier(actor)) actor = nullptr;
         if (actor && DropRowForGates(key, actor)) actor = nullptr;
         if (actor) {
             // The budget buys a DISPATCH, not a success: a row whose apply fails past the base
