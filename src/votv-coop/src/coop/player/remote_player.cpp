@@ -279,6 +279,8 @@ void RemotePlayer::SetTargetPose(const coop::net::PoseSnapshot& snap) {
     if (ragdoll_.OnWireBit((snap.stateBits & coop::net::kStateBitRagdoll) != 0,
                            actor_, internalIdx_)) {
         bodyYaw_.Reset(curYaw_);
+        // The kel meshes were hidden for the flop and are shown again: the guard is re-asserted with them.
+        ue_wrap::puppet::EnforcePuppetPropGuard(actor_, "ragdoll recover");
     }
 
     ShowBurning((snap.stateBits & coop::net::kStateBitBurning) != 0);
@@ -511,8 +513,12 @@ void RemotePlayer::ApplySkin(const std::string& skinName) {
     }
     // dr_kel needs the pristine baseline; a custom skin resolves its own mesh.
     void* nativeMesh = coop::local_body::NativeBodyMesh();
-    if (coop::client_model::ApplySkinToBody(actor_, skinName, nativeMesh))
+    if (coop::client_model::ApplySkinToBody(actor_, skinName, nativeMesh)) {
         appliedSkin_ = skinName;
+        // A skin swap rewrites the body meshes' assets and materials (and may attach a rig): the prop-shove
+        // guard is asserted again, so no component of the new body can push a prop.
+        ue_wrap::puppet::EnforcePuppetPropGuard(actor_, "skin swap");
+    }
 }
 
 void RemotePlayer::ApplyToEngine() {

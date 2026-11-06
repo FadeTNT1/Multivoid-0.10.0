@@ -117,6 +117,59 @@ void RestoreTickerOwner(void* ticker, void* owner) {
 // flipped. The class default may carry no SkeletalMesh (the skin is applied at runtime by
 // save-load and equipment graphs, which are suppressed here), so the caller passes the local
 // player's current mesh asset and AnimClass.
+// The puppet never physically shoves a simulated prop. Its capsule and body meshes are teleported to
+// the wire pose by SetActorLocation, so any overlap with a simulated body (a player crouching at a
+// prop's edge lowers the wire Z while the puppet capsule keeps its standing height, a step onto a prop
+// lands inside it) resolves as a depenetration impulse on the prop: a fling that prop sync then
+// spreads. Props belong to prop sync and the real player's machine, so every primitive the puppet owns
+// ignores ECC_PhysicsBody; the visibility/camera/pawn channels stay as they were, since hit judging,
+// grab and nameplate traces use them. The CMC's own physics interaction (the CapsuleTouched push) goes
+// off with it.
+PropGuardReport EnforcePuppetPropGuard(void* puppetActor, const char* why) {
+    PropGuardReport rep;
+    if (!puppetActor || !R::IsLive(puppetActor)) return rep;
+    constexpr uint8_t kEccPhysicsBody = 5;  // ECollisionChannel::ECC_PhysicsBody
+    constexpr uint8_t kResponseIgnore = 0;  // ECollisionResponse::ECR_Ignore
+
+    for (void* comp : E::GetPrimitiveComponents(puppetActor)) {
+        ++rep.primitives;
+        const bool setOk = E::SetCollisionResponseToChannel(comp, kEccPhysicsBody, kResponseIgnore);
+        if (!setOk) ++rep.setFailed;
+        uint8_t now = 0xFF;
+        if (!E::GetCollisionResponseToChannel(comp, kEccPhysicsBody, now)) {
+            ++rep.readFailed;
+            UE_LOGW("puppet[MainPlayer]: prop guard: component %p (%ls) response read-back did not dispatch (set ok=%d)",
+                    comp, R::ClassNameOf(comp).c_str(), setOk ? 1 : 0);
+        } else if (now == kResponseIgnore) {
+            ++rep.confirmedIgnore;
+        } else {
+            ++rep.notIgnore;
+            UE_LOGW("puppet[MainPlayer]: prop guard: component %p (%ls) reads response %u on PhysicsBody after Ignore (set ok=%d)",
+                    comp, R::ClassNameOf(comp).c_str(), (unsigned)now, setOk ? 1 : 0);
+        }
+    }
+
+    // bEnablePhysicsInteraction: a bool bitfield resolved from the live FProperty (byte + mask), so
+    // no offset is guessed. CapsuleTouched returns at its top when the flag is off.
+    if (void* cmc = ReadPtr(puppetActor, P::off::ACharacter_CharacterMovement); cmc && R::IsLive(cmc)) {
+        int32_t byteOff = -1;
+        uint8_t mask = 0;
+        if (R::FindBoolProperty(R::ClassOf(cmc), P::name::CmcEnablePhysicsInteractionProp, byteOff, mask) &&
+            byteOff >= 0 && mask != 0) {
+            const uint8_t cur = ReadAt<uint8_t>(cmc, byteOff);
+            WriteAt<uint8_t>(cmc, byteOff, static_cast<uint8_t>(cur & ~mask));
+            rep.cmcPhysicsInteraction = (ReadAt<uint8_t>(cmc, byteOff) & mask) ? 1 : 0;
+        }
+    }
+
+    UE_LOGI("puppet[MainPlayer]: PROP-GUARD (%s) actor=%p primitives=%d ignorePhysicsBody=%d "
+            "setFailed=%d readFailed=%d notIgnore=%d cmcPhysicsInteraction=%s",
+            why ? why : "?", puppetActor, rep.primitives, rep.confirmedIgnore, rep.setFailed,
+            rep.readFailed, rep.notIgnore,
+            rep.cmcPhysicsInteraction == 0 ? "off" : rep.cmcPhysicsInteraction == 1 ? "STILL-ON" : "unresolved");
+    return rep;
+}
+
 static void* SpawnPuppetMainPlayer(const FVector& loc,
                                    void* skeletalMeshAsset,
                                    void* animClass,
@@ -181,6 +234,7 @@ static void* SpawnPuppetMainPlayer(const FVector& loc,
     void* meshComp = ReadPtr(actor, P::off::AmainPlayer_mesh_playerVisible);
     if (!meshComp) {
         UE_LOGE("puppet[MainPlayer]: actor %p has no mesh_playerVisible @0x04F8", actor);
+        EnforcePuppetPropGuard(actor, "spawn, no body mesh");
         return actor;
     }
     // Cached for GetSkeletalMeshComponent.
@@ -193,24 +247,8 @@ static void* SpawnPuppetMainPlayer(const FVector& loc,
         E::SetComponentTickEnabled(cmc, false);
         UE_LOGI("puppet[MainPlayer]: disabled orphan CMC tick @ %p (puppet driven by SetActorLocation, not physics)", cmc);
     }
-    // The puppet never physically shoves a simulated prop. Its capsule and body meshes are teleported
-    // to the wire pose by SetActorLocation, so any overlap with a simulated body (a player crouching on
-    // a desk lowers the wire Z a few cm, a step onto a prop lands inside it) resolves as a depenetration
-    // impulse on the prop: a fling that prop sync then spreads. Props belong to prop sync and the real
-    // player's machine, so the puppet ignores ECC_PhysicsBody; it still blocks the visibility/camera/pawn
-    // channels that hit judging, grab and nameplate traces use.
-    {
-        constexpr uint8_t kEccPhysicsBody = 5;
-        constexpr uint8_t kResponseIgnore = 0;
-        void* capsule = ReadPtr(actor, P::off::ACharacter_CapsuleComponent);
-        const bool capOk = capsule && E::SetCollisionResponseToChannel(capsule, kEccPhysicsBody, kResponseIgnore);
-        E::SetCollisionResponseToChannel(meshComp, kEccPhysicsBody, kResponseIgnore);
-        if (void* slot = ReadPtr(actor, P::off::ACharacter_Mesh)) {
-            E::SetCollisionResponseToChannel(slot, kEccPhysicsBody, kResponseIgnore);
-        }
-        UE_LOGI("puppet[MainPlayer]: capsule %p ignores PhysicsBody (ok=%d) -- no depenetration shove on props",
-                capsule, capOk ? 1 : 0);
-    }
+    // The prop-shove guard (EnforcePuppetPropGuard) runs at the end of the rig-up, once every
+    // component the puppet will own exists; the early-out above runs it too.
     // The orphan's actor tick disabled: mainPlayer_C's ReceiveTick runs single-player logic each
     // frame (HUD updates, look traces, hunger and thirst, wind-sound placement), and branches
     // reading other fields still run with GameMode nulled. The mesh AnimBP keeps ticking
@@ -381,6 +419,8 @@ static void* SpawnPuppetMainPlayer(const FVector& loc,
     dumpMeshComp(L"playermodel",        ReadPtr(actor, P::off::AmainPlayer_playermodel));
     dumpMeshComp(L"ACharacter::Mesh",   ReadPtr(actor, P::off::ACharacter_Mesh));
 
+    // Last, once the body, arms and playermodel are all in their final state.
+    EnforcePuppetPropGuard(actor, "spawn");
     return actor;
 }
 

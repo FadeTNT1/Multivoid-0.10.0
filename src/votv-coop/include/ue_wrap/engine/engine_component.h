@@ -8,6 +8,7 @@
 #include "ue_wrap/core/types.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace ue_wrap::engine {
 
@@ -26,6 +27,16 @@ bool SetComponentTickEnabled(void* component, bool enabled);
 // UPrimitiveComponent::SetCollisionResponseToChannel(channel, response): channel is an ECollisionChannel
 // value, response 0 Ignore, 1 Overlap, 2 Block. False when it does not resolve or run. Game thread.
 bool SetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, uint8_t response);
+
+// UPrimitiveComponent::GetCollisionResponseToChannel: the response the component holds now for `channel`
+// (0 Ignore, 1 Overlap, 2 Block), into `out`. False when it does not resolve or run, `out` then untouched.
+// Game thread.
+bool GetCollisionResponseToChannel(void* primitiveComponent, uint8_t channel, uint8_t& out);
+
+// Every live UPrimitiveComponent owned by `actor` (Outer == actor): default subobjects and components
+// added later, whatever their class. A GUObjectArray walk, so not for a per-frame call. Empty when
+// `actor` is null or dead. Game thread.
+std::vector<void*> GetPrimitiveComponents(void* actor);
 
 // UActorComponent::IsComponentTickEnabled; false when it does not read. Game thread.
 bool IsComponentTickEnabled(void* component);
