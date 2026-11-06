@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>   // memcpy
+#include <cwctype>   // towlower
 #include <memory>
 #include <mutex>
 #include <string>
@@ -113,10 +114,22 @@ bool IsAllowlistedClass(void* cls) {
     return false;
 }
 
-// The wire class-name trust gate for the client receiver.
+// The wire class-name trust gate for the client receiver. Without case, as the host's interceptor matches (an FName
+// compare): the host sends the class's own spelling, which the curated list need not repeat letter for letter.
 bool IsAllowlistedClassNameW(const std::wstring& nm) {
     for (size_t i = 0; i < P::name::kWorldActorAllowlistSize; ++i)
-        if (nm == P::name::kWorldActorAllowlist[i]) return true;
+        if (_wcsicmp(nm.c_str(), P::name::kWorldActorAllowlist[i]) == 0) return true;
+    return false;
+}
+
+// A class the joiner's save carries: the connect snapshot leaves it out, the joiner's own load made its copy.
+bool IsSaveCarriedClassName(const std::string& nm) {
+    for (const wchar_t* c : P::name::kWorldActorSaveCarriedClasses) {
+        size_t i = 0;
+        for (; i < nm.size() && c[i]; ++i)
+            if (std::towlower(static_cast<wchar_t>(static_cast<unsigned char>(nm[i]))) != std::towlower(c[i])) break;
+        if (i == nm.size() && !c[i]) return true;
+    }
     return false;
 }
 
@@ -563,11 +576,13 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
 
     std::vector<coop::element::WorldActor*> elems;
     WaMirrors().Snapshot(elems);
-    int sent = 0, unbound = 0, unread = 0;
+    int sent = 0, unbound = 0, unread = 0, saved = 0;
     for (coop::element::WorldActor* el : elems) {
         if (!el) continue;
         void* actor = el->GetActor();
         if (!actor || !R::IsLiveByIndex(actor, el->GetInternalIdx())) { ++unbound; continue; }
+        // An actor_save_C the joiner's save carried: its own load made the copy, so a mirror would be a second one.
+        if (IsSaveCarriedClassName(el->GetTypeName())) { ++saved; continue; }
         // A row at the origin or at a zero facing would misplace the joiner's mirror: an actor whose
         // location or rotation cannot be read is left out, named and counted.
         ue_wrap::FVector loc{};
@@ -602,9 +617,10 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
         if (s->SendReliableToSlot(peerSlot, coop::net::ReliableKind::WorldActorSpawn, &p, sizeof(p)))
             ++sent;
     }
-    if (sent > 0 || unbound > 0 || unread > 0)
+    if (sent > 0 || unbound > 0 || unread > 0 || saved > 0)
         UE_LOGI("world-actor: connect-snapshot -- sent %d existing WA(s) to slot %d (%zu element(s), "
-                "%d unbound-skipped, %d unread-skipped)", sent, peerSlot, elems.size(), unbound, unread);
+                "%d unbound-skipped, %d unread-skipped, %d save-carried)", sent, peerSlot, elems.size(), unbound,
+                unread, saved);
 }
 
 // Mirror identity and the materialisation window (see world_actor_sync.h).
@@ -659,6 +675,13 @@ MaterializeScope::~MaterializeScope() {
     --t_materializeDepth;
     t_materializeEid   = prevEid_;
     t_materializeActor = prevActor_;
+}
+
+unsigned int HostEidOf(void* actor) {
+    if (!actor) return 0;
+    std::lock_guard<std::mutex> lk(g_actorToWaIdMutex);
+    auto it = g_actorToWaId.find(actor);
+    return it == g_actorToWaId.end() ? 0u : static_cast<unsigned int>(it->second);
 }
 
 unsigned int HostEnrollExSpawn(void* actor) {

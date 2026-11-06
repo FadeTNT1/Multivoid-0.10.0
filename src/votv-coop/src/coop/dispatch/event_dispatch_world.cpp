@@ -17,6 +17,8 @@
 #include "coop/world/event_active_sync.h"
 #include "coop/world/event_cue_sync.h"
 #include "coop/world/event_fire_sync.h"
+#include "coop/world/event_scene_sync.h"
+#include "coop/world/event_sound_relay.h"
 #include "coop/world/explosion_sync.h"
 #include "coop/world/fuse_tower_ops.h"
 #include "coop/world/fuse_tower_rows.h"
@@ -143,6 +145,49 @@ bool HandleWorldEvent(const net::Session::ReliableMessage& msg) {
         net::AlarmStatePayload ap{};
         std::memcpy(&ap, msg.payload, sizeof(ap));
         coop::alarm_sync::OnReliable(ap, msg.senderPeerSlot);
+        break;
+    }
+    case net::ReliableKind::EventScenePhase: {
+        // HOST->CLIENT: a story scene's phase (coop::event_scene_sync). Host-authored only: a client's copy is
+        // refused at the host's receive edge (client_authorship.h); the slot check guards a relay bug, and the
+        // module applies it only on an active client session.
+        if (msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: EventScenePhase dropped (sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::EventScenePhasePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            UE_LOGW("event_feed: EventScenePhase payload %zu bytes, expected %zu -- dropping",
+                    static_cast<size_t>(msg.payloadLen), sizeof(p));
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::event_scene_sync::WellFormed(p)) {
+            UE_LOGW("event_feed: EventScenePhase scene=%u phase=%u ill-formed -- dropping", p.scene, p.phase);
+            break;
+        }
+        coop::event_scene_sync::OnPhase(p);
+        break;
+    }
+    case net::ReliableKind::EventSoundCue: {
+        // HOST->CLIENT: a host event actor's positional sound or burst (coop::event_sound_relay). Host-authored only
+        // (client_authorship.h); the module plays it only on an active client session.
+        if (msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: EventSoundCue dropped (sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::EventSoundCuePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            UE_LOGW("event_feed: EventSoundCue payload %zu bytes, expected %zu -- dropping",
+                    static_cast<size_t>(msg.payloadLen), sizeof(p));
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::event_sound_relay::WellFormed(p)) {
+            UE_LOGW("event_feed: EventSoundCue op=%u ill-formed -- dropping", p.op);
+            break;
+        }
+        coop::event_sound_relay::OnCue(p);
         break;
     }
     case net::ReliableKind::ChurchState: {

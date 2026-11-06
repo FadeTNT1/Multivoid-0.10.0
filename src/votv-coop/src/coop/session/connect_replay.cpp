@@ -58,6 +58,7 @@
 #include "coop/creatures/npc_sync.h"
 #include "coop/creatures/npc_world_enum.h"  // RegisterExistingWorldNpcs
 #include "coop/world/world_actor_sync.h"  // non-Character event-actor transform mirror (sibling of npc_sync)
+#include "coop/world/event_scene_sync.h"  // the story scenes the host runs, shown on every client
 #include "coop/creatures/piramid_sync.h"  // piramid event choreography lane (mirror brain suppression + PyramidGather)
 #include "coop/player/players_registry.h"
 #include "coop/props/prop_snapshot.h"
@@ -150,6 +151,7 @@ void ConnectReplayForSlot(int slot) {
     coop::npc_world_enum::RegisterExistingWorldNpcs(slot);  // pre-existing/level-load NPCs (the save's kerfur) -> the peers already in; the joiner (slot) is skipped, its connect broadcast below sends it and it adopts its twin
     coop::npc_sync::QueueConnectBroadcastForSlot(slot);  // existing NPCs -> joiner
     coop::world_actor_sync::QueueConnectBroadcastForSlot(slot);  // existing event WorldActors -> joiner
+    coop::event_scene_sync::QueueConnectBroadcastForSlot(slot);  // the live story scenes' phases, behind their spawns
     coop::balance_sync::SendCurrentToSlot(slot);  // host's current balance
     coop::upgrade_sync::SendCurrentToSlot(slot);  // and the upgrade levels: the joiner's save was taken at the handshake
     coop::daily_task_sync::SendCurrentToSlot(slot);  // and the daily task: a change in its load window was hashed but never sent to it

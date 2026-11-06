@@ -32,6 +32,11 @@ bool IsComponentSimulatingPhysics(void* component);
 // weld's. False for anything but a live primitive component or when it did not resolve, `out` left as it was.
 bool GetComponentCenterOfMass(void* component, FVector& out);
 
+// SetEnableGravity and IsGravityEnabled: whether the body falls. True when the call ran (the read: `enabled` written),
+// false for anything but a live primitive component or when the UFunction did not resolve.
+bool SetComponentEnableGravity(void* component, bool enabled);
+bool ReadComponentGravityEnabled(void* component, bool& enabled);
+
 // Every primitive component the actor's Blueprint chain declares as a member (a component variable) that
 // simulates is stopped; returns how many were. For an actor driven from elsewhere, which must not also
 // simulate. The members are found once per class name, a Blueprint's layout being the same in every world.

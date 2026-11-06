@@ -193,8 +193,9 @@ the creature: the host streams it on the driven-prop channel while the crawler's
 a client's cover takes the final pose and the release from Static at the end edge
 ([props.md](props.md), "The wall vent the crawler pulls down") `[RD]`. boarwar's controller (`boarInvasion_C`) has its own row:
 its two ariral shooters, minted a minute and two minutes in, cross on the character lane, and the
-boars it throws are props on the prop lane; its four closing fire tanks and the level UFO shader it
-lights stay the host's `[RD]`. The mothership flies a part of itself across the sky from its own tick, so its mirror
+boars it throws are props on the prop lane; its four closing fire tanks cross on the world-actor lane through
+the same row, their AI refused on a mirror, and the level UFO shader it lights and flies away is a scene phase
+(below) `[RD]`. The mothership flies a part of itself across the sky from its own tick, so its mirror
 keeps that tick, which changes nothing shared; a dropper's mirror still shows its saucer's descent
 on a player's walk-in, but its dropped prop and its kerfur kill are the host's and refused on a
 client (`coop/world/spawn_authority`) `[RD]`.
@@ -297,6 +298,30 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | `ChurchState` | the host to all | the church's broken, angry and struck flags and its harvest count |
 | `EmailAppend`, `EmailDelete`, `TaskNewState` | the host to all; either role; the host to all | an email; a deletion; the task |
 
+## Story scenes
+
+Four story events are scenes the host's world plays out, not flag flips a replay could repeat: the Warning
+Obelisk, Garage Soltomia, Hole Repair and the end of Gray Invasion, with the anti-gravity prank beside them
+(`coop/world/event_scene_sync`). Each scene's gameplay is the host's alone and reaches a client on the lanes
+that already carry it: the props it mints, the doors it closes and jams, the ATV it moves, the punches it
+lands. What a client sees of the scene is its own copy, given the host's phases:
+
+| Scene | What crosses | A client's copy |
+|---|---|---|
+| obelisk | `obelisk_C` on the world-actor lane (the obelisk box's `trigger_spawnProp_C` row); the landing phase; the rocks and the obelisk prop on the prop lane; the landing's punch of player 0 delivered to every client's own body, pushed away from the obelisk (`player_hit`) | its rise and fall run; the landing's body is refused, and the phase plays its sound, shake and swap |
+| soltoClean | `soltomiaCleaning_C` on the world-actor lane (the eventer's row); the reveal, montage and throw phases; the sponge on the prop lane | its begin-play, box overlap, completion and destroy are refused; the phases show it, start its talk, play its own montage (the face and voice notifies run) and stop it at the throw |
+| rozitalHole | `holeBottom_C` and `igetis_C` on the world-actor lane, `kavotia_C` on the character lane (the controller and patrol rows); the grate and beacons on the prop lane | the kavotia's and igetis' brains are refused, and so is a client's own controller's overlap and patrol begin-play |
+| boarwar | the four `firetank_C` on the world-actor lane; the UFO shader's shown, hidden and fly-away phases | a tank mirror builds its wheels and speaks, its AI, weapon, senses and death refused; the level shader runs its own verbs |
+| ventCrawler | the crawler on the character lane (the eventer's row); its footsteps and the vent's break, sound and burst, on the sound relay (`coop/world/event_sound_relay`, `EventSoundCue`); a client's player in its box is tested by the host, which runs the box's own handler once | its begin-play and box overlap are refused; it plays the host's one-shots at their places |
+| agrav | the cloak phase; the floating props on the prop lane, each stream's end carrying the body's gravity (`propspawn_flags::kNoGravity`) | the trigger's own shimmer and hover sound; the host floats the props near each client's puppet too, which the game's gather (centred on player 0) leaves out |
+
+The sound relay is generic: it is armed on the host only while an actor of a listed source class lives, and
+takes only the calls that class's own graph makes. A joiner gets the crawler's pose, never a sound already played.
+
+A joiner gets every live scene's newest phase after its world-actor spawns, as a snapshot: the end state, not
+the transition. The obelisk, the hole's room and the fire tanks are saved by the game, so a joiner's own load
+makes their copies and the connect snapshot leaves them out `[RD]`.
+
 ## Late join
 
 The clock streams from the connect, so a joiner's first sample once its world exists sets its time
@@ -324,7 +349,8 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | The deer, hexahive, walking-tree, dirt-hole, beehive, flora and mannequin spawners are not refused on a client, so each peer rolls its own; the host's walking mannequin still crosses to clients as a prop, and the client's copy grows a brain of its own | `[V]` no row of `coop/world/spawn_authority` names them; the table in `docs/npcs-and-kerfur.md`, "Which spawners a client refuses"; the walker's crossing was measured on the rig: one key on both peers, `pawn=1` on both |
 | Rain falls inside the base for a player standing indoors, the host included: the game's own effect, the same in single player. The rain emitter follows the player's camera and spawns its drops around it, below the roof's rain-collision mesh, which stops only drops falling onto it from above | `[V]` `coop/world/weather_rain` never moves the emitter or the camera; `[RD]` the decompiled day-night cycle's emitter move |
 | Trigger-volume fires (a bed event, a scare a player walks into) run per peer, as the single-player design intends | `[V]` by design, not a gap |
-| Host-only event scenes: soltoClean (its cleaner teleports the ATV, jams three doors and throws a sponge on a player's overlap, so a mirror needs a presentation relay first), rozitalHole (its controller's walk-in mints the hole's room, device and kavotia patrol, none with a lane), dreambase (`dreamer_dreambase_C` is unread), the obelisk (its level trigger's class is unread), salt, and boarwar's fire tanks and UFO shader (a fire tank mirror would arm five AI timers no row refuses) | `[RD]` `coop/world/event_fire_policy`, the bodies read from the 0.10.0 bytecode capture |
+| Host-only event scenes: dreambase (`dreamer_dreambase_C` is unread) and salt | `[RD]` `coop/world/event_fire_policy`, the bodies read from the 0.10.0 bytecode capture |
+| The story scenes (obelisk, soltoClean, rozitalHole, boarwar's end, agrav) have not been seen crossing in a play session yet. A client's hit on a fire tank or kavotia mirror does nothing (no intent carries it); a tank mirror shows no flame (its fire decision is the host's and not relayed); the kavotia's chatter and the igetis' beams are not heard or seen on a client (their begin-play is refused); `holeDevice_C`'s lane is unverified; the cleaner's ATV sound plays on the host's ATV only; a joiner during the obelisk's ten-second fall, or after the war with tanks alive, runs its own save-loaded copy | `[RD]` `coop/world/event_scene_sync`, `coop/world/event_scene_refuse` |
 | rockThrow's rock throwers aim at `getPlayerPawn(0)`, the host's player, and the alien jump at the host's camera: a client in their box is not targeted, though what they throw crosses as props | `[RD]` `rockThrower_C`, `alienJump_C` |
 | The arirShip, bedEvent, treehouseSleep and oil replays have not been seen in a play session yet; the sleep rows need a sleep and a wake on each peer | `[RD]` `coop/world/event_fire_policy` |
 | A client sees no church herbs and cannot pick them (the herbs are spawned inside the church's graph and no lane carries them yet); the striking client gets no camera turn or slow motion of its own | `[RD]` `coop/world/church_sync`; needs a plant lane and a per-striker cue |
@@ -341,6 +367,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | fireflies and the spawners | `coop/world/firefly_sync`, `coop/world/spawn_authority` |
 | events | `coop/world/event_fire_sync`, `coop/world/event_active_sync`, `coop/world/creature_event_relay`, `coop/world/event_cue_sync`, `coop/dev/event_trigger` |
 | event actors and the pyramid | `coop/world/world_actor_sync`, `coop/world/world_actor_mirror`, `coop/creatures/piramid_sync` |
+| the story scenes | `coop/world/event_scene_sync`, `coop/world/event_scene_refuse`, `coop/world/event_scene_agrav`, `coop/world/event_scene_crawler`, `coop/world/event_sound_relay`, `ue_wrap/actors/event_scenes` |
 | the church | `coop/world/church_sync` |
 | the alarm, emails, the task | `coop/world/alarm_sync`, `coop/world/email_sync`, `coop/world/daily_task_sync`, `ue_wrap/world/email` |
 | tests | `harness/autotest/autotest_weather.cpp`, `autotest_fog_probe.cpp`, `autotest_eventforce.cpp`, `autotest_alarmforce.cpp`, `autotest_piramidforce.cpp`; the event drill, `coop/dev/event_drill`; the world roll drill, `coop/dev/world_roll_drill` |

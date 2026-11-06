@@ -14,4 +14,8 @@ namespace ue_wrap::engine {
 bool SpawnEmitterAtLocation(void* worldContext, void* emitterTemplate, const FVector& location,
                             const FRotator& rotation, const FVector& scale);
 
+// What a spawned emitter component shows: its particle system (its `Template`) and its world place. False when
+// `component` is not live or its template does not read. Game thread.
+bool ReadEmitterComponent(void* component, void*& emitterTemplate, FVector& location, FRotator& rotation);
+
 }  // namespace ue_wrap::engine

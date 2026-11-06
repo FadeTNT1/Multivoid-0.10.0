@@ -161,6 +161,7 @@
 #include "coop/creatures/npc_mirror.h"
 #include "coop/creatures/npc_sync.h"
 #include "coop/world/world_actor_sync.h"  // non-Character event-actor transform mirror (sibling of npc_sync)
+#include "coop/world/event_scene_sync.h"  // the story scenes the host runs, shown on every client
 #include "coop/creatures/piramid_sync.h"  // piramid event choreography lane (mirror brain suppression + PyramidGather)
 #include "coop/creatures/geom_octa_sync.h"  // the Geom Octa's lane: its host decisions and each peer's look, observed
 #include "coop/creatures/geom_octa_relay.h"  // the Geom Octa's lane, the client's half: the host's decisions replayed
@@ -231,6 +232,7 @@ void Install(coop::net::Session& session) {
     coop::prop_lifecycle::Install(&session);
     coop::npc_sync::Install(&session);
     coop::world_actor_sync::Install(&session);  // non-Character event-actor mirror (2nd BeginDeferred interceptor, disjoint allowlist)
+    coop::event_scene_sync::Install(&session);  // the story scenes: the host's phase edges, a client's refused scene gameplay
     coop::piramid_sync::Install(&session);  // piramid event choreography lane (hooks arm lazily on the first piramid element)
     coop::geom_octa_sync::Install(&session);  // the Geom Octa's lane: the [OCTA] watches (live once the class loads)
     coop::item_activate::Install(&session);  // flashlight
@@ -448,6 +450,7 @@ DisconnectStats DisconnectAll() {
     coop::join_beacon::OnDisconnect();
     coop::npc_sync::OnDisconnect();
     coop::world_actor_sync::OnDisconnect();  // drain WorldActor mirrors (K2 client ones) + clear host reverse-map
+    coop::event_scene_sync::OnDisconnect();  // the scenes' phases; the props floated near the clients get their gravity
     coop::piramid_sync::OnDisconnect();  // drop pending gather + gather-edge map + restored-tick set (hooks stay latched)
     coop::geom_octa_sync::OnDisconnect();  // the host's verdict counts and the counters (the watches stay latched)
     coop::npc_adoption::OnSessionEnd();  // drop pending deferred adoptions + reset latches
@@ -695,6 +698,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:npc_client"}; coop::npc_mirror::TickClientNpcs(); }  // CLIENT: apply batch + drive mirror interp (client-only, no-op on host)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:worldactor_host"}; coop::world_actor_sync::TickPoseStream(); }  // HOST: read event WorldActors -> publish WorldActorPose batch (host-only, no-op on client)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:worldactor_client"}; coop::world_actor_sync::TickClientWorldActors(); }  // CLIENT: apply batch + drive WorldActor mirror interp (client-only, no-op on host)
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:event_scene"}; coop::event_scene_sync::Tick(); }  // HOST: scene phases to send; CLIENT: held level phases
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:octa_relay"}; coop::geom_octa_relay::Tick(); }  // CLIENT: the Octa's held Aggro and paired verdicts, replayed (a role test when idle)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:piramid"}; coop::piramid_sync::Tick(); }  // pre-arm probe (250 ms gate) / host gather-edge sweep (1 s) / client mirror restore + pending gather replay
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:trash_clump_pose"}; coop::trash_clump_pose_stream::TickApplyAndDrive(session); }  // CLIENT: apply host-auth carry/flight pose batch + per-eid interp (client-only, no-op on host)

@@ -41,6 +41,8 @@ Thunk g_setLinVel{P::name::SetPhysicsLinearVelocityFn, L"NewVel", L"BoneName"};
 Thunk g_setAngVel{P::name::SetPhysicsAngularVelocityInDegreesFn, L"NewAngVel", L"BoneName"};
 Thunk g_isSimulating{P::name::IsSimulatingPhysicsFn, L"BoneName", L"ReturnValue"};
 Thunk g_getCenterOfMass{P::name::GetCenterOfMassFn, L"BoneName", L"ReturnValue"};
+Thunk g_setGravity{P::name::SetEnableGravityFn, L"bGravityEnabled", nullptr};
+Thunk g_isGravity{P::name::IsGravityEnabledFn, L"ReturnValue", nullptr};
 
 // The class they are found on. A native class outlives every world, but the references are checked:
 // a freed one is found again, and each thunk, holding the class it resolved on by slot and serial,
@@ -144,6 +146,21 @@ bool GetComponentCenterOfMass(void* component, FVector& out) {
     *reinterpret_cast<R::FName*>(frame + g_getCenterOfMass.off0) = R::FName{0, 0};  // None: the whole body
     R::CallFunction(component, g_getCenterOfMass.fn, frame);
     out = *reinterpret_cast<FVector*>(frame + g_getCenterOfMass.off1);
+    return true;
+}
+
+bool SetComponentEnableGravity(void* component, bool enabled) {
+    if (!IsPrimitiveComponent(component) || !Resolve(g_setGravity)) return false;
+    unsigned char frame[kFrameBytes] = {};
+    *reinterpret_cast<bool*>(frame + g_setGravity.off0) = enabled;
+    return R::CallFunction(component, g_setGravity.fn, frame);
+}
+
+bool ReadComponentGravityEnabled(void* component, bool& enabled) {
+    if (!IsPrimitiveComponent(component) || !Resolve(g_isGravity)) return false;
+    unsigned char frame[kFrameBytes] = {};
+    if (!R::CallFunction(component, g_isGravity.fn, frame)) return false;
+    enabled = *reinterpret_cast<bool*>(frame + g_isGravity.off0);
     return true;
 }
 

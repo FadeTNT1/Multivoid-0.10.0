@@ -67,8 +67,9 @@ const NoReplayRow kNoReplayRows[] = {
     { "piramid", "piramid mirror lane (WA pose + piramid_sync brain/gather)" },
     // The obelisk's graph is not a bare flag flip: obelisk_C spawns prop_C/prop_obelisk_C actors
     // and punches getMainPlayer -- a replay would double-spawn the props client-local and hit the
-    // client's own player. Host-only until the scene gets a lane:
-    { "obelisk", "obelisk_C prop spawns + getMainPlayer punch (no lane)" },
+    // client's own player. The host's obelisk is mirrored, its landing relayed and its punch delivered to every
+    // client's own body (coop/world/event_scene_sync); its props ride the prop lane:
+    { "obelisk", "event scene lane (obelisk_C mirror + landing phase; props on the prop lane; punch on player_hit)" },
     // earthTp fires newsky_C.tp: the black hole, sky and ambience flip plus two 2D sounds and
     // emails. The emails ride the host's append feed, and a replay would add local copies; the sky
     // and the sounds ride SkyState (its black-hole state and tp count), a client's own tp refused:
@@ -84,12 +85,15 @@ const NoReplayRow kNoReplayRows[] = {
     // flag to every copy in the stamp's bit 4, so the event itself stays host-only (a client's car need not be the
     // host's), and the trap's blast is the host's (the ATV health drill's `trap` arm):
     { "atvExplode", "ATV lane (car.trap in the stamp's bit 4)" },
-    // Host-local by design:
-    { "agrav", "physics divergence (by-design host-local)" },
+    // The prank's physics is the host's (its props ride the prop lane with their gravity, the props near each
+    // client floated with the host's own); its shimmer and hover sound are relayed (coop/world/event_scene_sync).
+    // A replay would float a second, divergent set on the client:
+    { "agrav", "event scene lane (cloak phase) + prop lane (kNoGravity; props near clients floated by the host)" },
     // Creature and save-actor spawns, host-only until mirrored. The crawler, the egger's eggs, the
     // grays and the tentacle balls are mirrored; the eventer's other outputs are not (its catch
     // enrols only what a client's copy is kept inert for, npc_world_enum), so they stay host-only:
-    { "ventCrawler", "npc lane (allowlisted; eventer EX-catch)" },
+    { "ventCrawler", "npc lane (eventer EX-catch); a client's walk-in run on the host; its footsteps and vent "
+                     "break on the sound relay" },
     { "ventKnocker", "world-actor lane (eventer EX-catch: kocker_C)" },
     { "tentacleBalls", "npc lane (follower EX-catch)" },
     { "morningGay", "world-actor lane (eventer EX-catch: morningUfo_C)" },
@@ -102,18 +106,21 @@ const NoReplayRow kNoReplayRows[] = {
     // notebook are props the prop lane carries:
     { "arirBuster", "prop lane (arirBusterSpawner_C's crates, lamp and notebook)" },
     { "eggvasion", "npc and world-actor lanes (eventer and egger EX-catch)" },
-    // boarwar mints boarInvasion_C: its grayboar_C props ride the prop lane and its two ariral shooters the npc
-    // lane (its source row); its four end-of-war firetank_C and the level UFO shader it lights stay the host's.
-    { "boarwar", "prop lane (grayboar_C) and npc lane (boarInvasion_C EX-catch: npc_ariral_shooter_C)" },
+    // boarwar mints boarInvasion_C: its grayboar_C props ride the prop lane, its two ariral shooters the npc lane
+    // and its four end-of-war firetank_C the world-actor lane (its source row; a mirror's AI refused), and the level
+    // UFO shader it lights and flies away rides the event scene lane:
+    { "boarwar", "prop lane (grayboar_C), npc lane (npc_ariral_shooter_C), world-actor lane (firetank_C), "
+                 "event scene lane (ufoShieldShader_C)" },
     // soltoClean's soltomiaCleaning_C is hidden until a player's overlap, which then teleports the ATV, closes
-    // and jams three doors and later throws a sponge prop: a mirror would run all of it on the client, so it
-    // needs a presentation relay (its overlap and montage) before it can cross:
-    { "soltoClean", "world-actor spawn (no lane yet: soltomiaCleaning_C plays gameplay on a mirror)" },
+    // and jams three doors and later throws a sponge prop. The host's runs it all; a client's mirror has that
+    // gameplay refused and shows the reveal, the montage and the throw the host relays:
+    { "soltoClean", "event scene lane (soltomiaCleaning_C mirror + reveal/montage/throw phases)" },
     { "salt", "save-actor spawn (no lane)" },
     // rozitalHole's event_bottomHoleController_C (a save actor) waits for an overlap at the far hole, then mints
     // holeBottom_C, holeDevice_C and a kavotiaPatrolController_C (igetis_C, kavotia_C) beside prop swaps the
-    // prop lane would carry; none of the three has a lane:
-    { "rozitalHole", "save-actor spawn (no lane: holeBottom_C, holeDevice_C, kavotiaPatrolController_C)" },
+    // prop lane carries. The room and the igetis are world-actor mirrors, the kavotia npc mirrors, their brains
+    // refused on a client, as is a client's own controller's overlap (coop/world/event_scene_sync):
+    { "rozitalHole", "world-actor lane (holeBottom_C, igetis_C) + npc lane (kavotia_C), props on the prop lane" },
     // dreamer_dreambase_C is not loaded in the capture the 0.10.0 pass read; unread:
     { "dreambase", "save-actor spawn (no lane; dreamer_dreambase_C unread)" },
     { "fallbody_0", "world-actor lane (eventer EX-catch: ufoDropper_body_C; drop and kerfur kill refused)" },

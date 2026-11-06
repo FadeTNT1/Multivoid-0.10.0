@@ -150,20 +150,23 @@ coop::element::ElementId EnrollUntrackedNpcActor(void* obj, const std::wstring& 
 // spawners' creatures, and the gamemode's night roll (an Octa or an egg). Outputs still pass the allowlist gates in the queue branch below (NPC, else
 // world-actor), so no arbitrary EX spawn enrolls. `outputs` narrows a source to the outputs whose
 // client copies the spawn authority makes inert: the eventer also mints world actors whose BeginPlay
-// plays gameplay on a mirror (soltomiaCleaning_C writes the client's ATV and mints a sponge), so they
-// stay unmirrored, as before this source, until they have refusal rows.
+// plays gameplay on a mirror, so they stay unmirrored until they have refusal rows (the story scenes' rows are
+// coop/world/event_scene_refuse's: soltomiaCleaning_C's ATV write and sponge, the obelisk's landing, the hole's
+// patrol, the firetanks' AI).
 struct ExSpawnSource {
     const wchar_t* cls;
     const wchar_t* const* outputs;   // null-terminated; null: any allowlisted output
 };
 // The world actors are ventKnocker's, morningGay's, borgRozital's, the fallbody / fallcar droppers' and
 // graystank's tank or pig dropper (a dropper's kerfur kill and prop drop are refused on a client in
-// spawn_authority, and its generator break by the power grid).
+// spawn_authority, and its generator break by the power grid), and soltoClean's cleaner (its gameplay refused on a
+// mirror in event_scene_refuse, its reveal, montage and throw relayed by event_scene_sync).
 constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
                                               P::name::KockerClass, P::name::MorningUfoClass,
                                               P::name::RozitBorgClass, P::name::UfoDropperBodyClass,
                                               P::name::UfoDropperCarClass, P::name::UfoDropperTankClass,
-                                              P::name::UfoDropperPigClass, nullptr};
+                                              P::name::UfoDropperPigClass, P::name::SoltomiaCleaningClass,
+                                              nullptr};
 // The gamemode mints many classes besides these, and most of its other spawners are not refused on a client yet,
 // so its source is narrowed to the two outputs of the night roll (mainGamemode_C::CustomEvent_5, an Octa or a
 // night egg), whose client roll the spawn authority refuses.
@@ -172,8 +175,15 @@ constexpr const wchar_t* kUfoKnobOutputs[] = {P::name::UfoKnobClass, nullptr};
 constexpr const wchar_t* kUfoUkOutputs[] = {P::name::UfoUkClass, P::name::UfoUkEnemyClass, nullptr};
 constexpr const wchar_t* kSuperFogOutputs[] = {P::name::HoelUfoClass, nullptr};
 constexpr const wchar_t* kArirFollowerOutputs[] = {P::name::NpcClass_ArirFollower, nullptr};
-// boarwar's shooters only: its grayboar_C props ride the prop lane, and its firetank_C has no parked mirror.
-constexpr const wchar_t* kBoarInvasionOutputs[] = {P::name::NpcClass_AriralShooter, nullptr};
+// boarwar's shooters and its four closing firetanks: its grayboar_C props ride the prop lane; a firetank mirror's
+// AI timers are refused in event_scene_refuse.
+constexpr const wchar_t* kBoarInvasionOutputs[] = {P::name::NpcClass_AriralShooter, P::name::FiretankClass, nullptr};
+// The story scenes' sources (coop/world/event_scene_sync): the obelisk box's prop spawner mints the obelisk (and
+// props, which are the prop lane's); the hole controller mints the room (and holeDevice_C, a prop); the patrol
+// controller mints the kavotia rings and the igetis.
+constexpr const wchar_t* kSpawnPropOutputs[] = {P::name::ObeliskClass, nullptr};
+constexpr const wchar_t* kBottomHoleOutputs[] = {P::name::HoleBottomClass, nullptr};
+constexpr const wchar_t* kKavotiaPatrolOutputs[] = {P::name::NpcClass_Kavotia, P::name::IgetisClass, nullptr};
 constexpr ExSpawnSource kExSpawnSources[] = {
     {L"trigger_wispSwarm_C",     nullptr},          // the wisps event swarm
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
@@ -198,6 +208,11 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {P::name::TriggerSpawnFollowingArirClass, kArirFollowerOutputs},
     // boarwar: the controller the eventer mints throws its boars and, a minute in, mints two ariral shooters.
     {P::name::BoarInvasionClass, kBoarInvasionOutputs},
+    // obelisk: the obelisk box's trigger_spawnProp_C mints obelisk_C (the Warning Obelisk scene).
+    {P::name::TriggerSpawnPropClass, kSpawnPropOutputs},
+    // rozitalHole: the controller's walk-in mints the room; the patrol controller its kavotia and igetis.
+    {P::name::BottomHoleControllerClass, kBottomHoleOutputs},
+    {P::name::KavotiaPatrolControllerClass, kKavotiaPatrolOutputs},
 };
 
 // Whether `cls`'s own name is one of `names` (null-terminated). One render, then plain compares.
@@ -293,7 +308,10 @@ void InstallExSpawnCatch() {
                 "jellyfishPath_C -> jellyfish_C, trigger_eventer_C -> ventCrawler_C + superEgger_C, "
                 "trigger_eventer_C -> kocker_C + morningUfo_C + rozitBorg_C + ufoDropper_body_C + ufoDropper_car_C + "
                 "ufoDropper_tank_C + ufoDropper_pig_C, "
-                "trigger_spawnFollowingArir_C -> npc_arirFollower_C, boarInvasion_C -> npc_ariral_shooter_C, "
+                "trigger_eventer_C -> soltomiaCleaning_C, trigger_spawnProp_C -> obelisk_C, "
+                "event_bottomHoleController_C -> holeBottom_C, kavotiaPatrolController_C -> kavotia_C + igetis_C, "
+                "trigger_spawnFollowingArir_C -> npc_arirFollower_C, boarInvasion_C -> npc_ariral_shooter_C + "
+                "firetank_C, "
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
                 "mainGamemode_C -> geomOcta_C + eg_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
