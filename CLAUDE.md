@@ -28,6 +28,18 @@ Rules:
 - Delegate with a tight brief: goal, files, what is already ruled out, done-criteria.
 - One authority per task: do not run the same investigation twice in parallel.
 - A child never commits to `main`; work in a worktree/branch and report what changed.
+- Finished, built, gate-passing work lands on the current working branch (`port/0.10.0`) in the
+  main checkout. Do not leave it parked on side worktree branches.
+
+## Act, don't ask
+
+- "Investigate X" means investigate **and fix** X. When research finds the cause, spawn the fix
+  agent right away (cheapest model that can do it, per the policy above). Do not end with
+  "want me to fix it?" or "should I spawn an implementer?".
+- Ask only when a choice is genuinely the user's (gameplay design, destructive or outward-facing
+  actions). Otherwise pick the sensible default, say what you picked, and proceed.
+- Sequence agents that touch the same files or both bump `kProtocolVersion`; run independent ones
+  in parallel (worktrees), then merge into the working branch.
 
 ## Hard rules (from CONTRIBUTING.md, summarised)
 
