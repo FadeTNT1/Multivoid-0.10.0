@@ -189,6 +189,14 @@ void MirrorState(const coop::net::PosterStatePayload& p) {
 
 void MirrorTick() { RetryParked(); }
 
+void* MirrorPlaced(const std::wstring& key) { return ClientPlaced(key); }
+
+bool MirrorAdopt(const std::wstring& key, void* w) {
+    if (!PO::IsPlaced(w) || !PO::SetKey(w, key)) return false;
+    g_client[key].Set(w);
+    return true;
+}
+
 MirrorCounts Counts() { return g_counts; }
 
 void MirrorReset() {

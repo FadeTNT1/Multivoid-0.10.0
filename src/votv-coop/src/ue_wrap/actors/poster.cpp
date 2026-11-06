@@ -283,6 +283,8 @@ bool ReadPlacement(void* rolled, Placement& out) {
     return true;
 }
 
+bool CallPut(void* rolled) { return IsRolled(rolled) && CallNoArgs(rolled, P::name::PosterPutFn); }
+
 bool ReadTransform(void* placed, Placement& out) {
     if (!IsPlaced(placed)) return false;
     Placement p;

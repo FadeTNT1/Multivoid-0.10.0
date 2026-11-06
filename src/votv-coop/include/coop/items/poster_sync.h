@@ -7,7 +7,10 @@
 // PLACED (poster_C, an actor_save_C no other lane carries): the host names each by its actor_save key (minted when
 // it has none), watches setPoster and liveness, and sends PosterState (class, transform with scale, look; or gone).
 // A client's put, take-down (action 7) and custom picture are cancelled and sent as PosterIntent; the host checks
-// life and reach and runs the verb on its own copy. A client mirrors PosterState, adopting save-loaded posters by key.
+// life and reach and runs the verb on its own copy. A put is asked under a request id with the held poster's look (a
+// poster in a hand is no world prop), answered to that client alone as PosterState (accepted with the canonical key,
+// or refused), and finished on the client once by the game's own put(), whose wall poster takes the canonical key;
+// a put the client cannot finish is given back. A client mirrors PosterState, adopting save-loaded posters by key.
 // Late join: the save carries the keys; the ready edge sends every placed poster and an end marker, and the joiner
 // destroys any it was not named. A custom image is a file name only; a peer without the file draws the preset.
 // Game thread.
