@@ -7,8 +7,12 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/types.h"
+#include "ue_wrap/engine/engine.h"
 
 #include <chrono>
+#include <cmath>
+#include <cwchar>
 #include <cstdint>
 #include <vector>
 
@@ -197,6 +201,17 @@ bool CallAction(void* actor, void* player, uint8_t action) {
 std::wstring GetNameKey(void* actor) {
     if (!actor) return std::wstring();
     return R::ToString(R::NameOf(actor));
+}
+
+std::wstring GetPlacementIdentity(void* actor) {
+    const ClassDesc* d = DescOf(actor);
+    if (!d) return std::wstring();
+    FVector loc;
+    if (!ue_wrap::engine::TryGetActorLocation(actor, loc)) return std::wstring();
+    wchar_t buf[96];
+    swprintf(buf, 96, L"%ls@%ld,%ld,%ld", d == &g_locker ? L"locker" : L"console",
+             std::lround(loc.X), std::lround(loc.Y), std::lround(loc.Z));
+    return std::wstring(buf);
 }
 
 bool TryReadOpened(void* actor, bool& out) {

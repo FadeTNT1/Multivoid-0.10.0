@@ -168,9 +168,19 @@ const Adapter g_ovenAdapter = {
 };
 // The hinged-door boxes: the lockers (locker_C and its two subclasses) and the drone-console box.
 // Symmetric: nothing auto-reverts `opened` but the player toggle and the locker's own open().
-// Identity is the level-export FName (neither class has a save Key; placed-actor names are
-// deterministic cross-peer). The apply is the native verb or a write plus refresh per class, with
+// Identity is the box's family and placed position, hashed to the wire token. The generic portable
+// identity (the game's Key, else the level name) does not hold for lockers on 0.10.0: on the two-peer rig
+// the host and the client indexed 20 lockers each under different keys, 19 of the host's 20 states found no
+// device on the client, and a client's state found none on the host. A box never moves, so where it stands
+// is the same on every peer. The apply is the native verb or a write plus refresh per class, with
 // the verify-and-force-snap inside the wrapper (the swing timeline freezes outside tick range).
+std::wstring DoorBoxPlacementKey(void* box) {
+    const std::wstring readable = ue_wrap::door_box::GetPlacementIdentity(box);
+    if (readable.empty()) return std::wstring();
+    wchar_t buf[24];
+    swprintf(buf, 24, L"mv_%016llx", static_cast<unsigned long long>(coop::element::IdentityHash(readable)));
+    return std::wstring(buf);
+}
 const Adapter g_doorBoxAdapter = {
     "doorbox", coop::net::ReliableKind::LockerDoorState,
     &ue_wrap::door_box::EnsureResolved,
@@ -180,6 +190,8 @@ const Adapter g_doorBoxAdapter = {
     [](void* a, bool on) -> bool { return ue_wrap::door_box::ApplyOpened(a, on); },
     nullptr,
     &ue_wrap::door_box::ResolvedFamilyCount,
+    nullptr,
+    &DoorBoxPlacementKey,
 };
 // A security camera's two saved bits, one adapter each because the channel carries a bool. Host-authoritative:
 // four writers beside the player's use move `active` (a wisp, the gray events, the cursed camera's night roll,

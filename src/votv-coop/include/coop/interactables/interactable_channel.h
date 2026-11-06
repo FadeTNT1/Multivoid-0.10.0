@@ -78,6 +78,10 @@ struct Adapter {
     uint64_t (*ResolvedCount)();               // classes resolved one at a time; null = together (scan_hub)
     // The dev probe's view of the device's raw state for a SHADOW MISS line; null = the state bit only.
     void (*Describe)(void* actor, char* out, size_t n) = nullptr;
+    // The wire key this lane files the device under, when the generic portable identity (the game's Key, else
+    // the level name) does not name it the same on two peers; null = that identity. "" = no key: the device is
+    // left out of the index. Game thread.
+    std::wstring (*PortableKey)(void* actor) = nullptr;
 };
 
 // The engine.
@@ -398,6 +402,7 @@ public:
     std::wstring KeyOf(void* obj) const {
         std::wstring key = a_.GetKey(obj);
         if (key.empty() || key == L"None") return std::wstring();
+        if (a_.PortableKey) return a_.PortableKey(obj);
         std::wstring portable = coop::element::PortableWireKey(obj);
         return portable.empty() ? key : portable;
     }

@@ -5,8 +5,8 @@
 // force-snap. No network logic: coop::interactable_sync's door-box channel drives the mirror
 // through here.
 //
-// Both classes are plain AActor with no save Key, so identity is the level-export actor
-// FName, deterministic cross-peer. State is the `opened` bool; the swing is a 0.5 s Timeline
+// Both classes are plain AActor with no save Key, and on 0.10.0 the level-export FName is not the same on
+// two peers either (see GetPlacementIdentity), so identity is family plus placed position. State is the `opened` bool; the swing is a 0.5 s Timeline
 // that FREEZES outside the local player's tick range, which is why an apply is verified and
 // force-snapped through the timeline's alpha and direction fields plus a__UpdateFunc and
 // a__FinishedFunc. The locker has a full native verb Open(bool) -- sound, swing, collision,
@@ -40,6 +40,12 @@ bool IsDoorBox(void* obj);
 // The cross-peer identity: the level-export actor FName ("locker22",
 // "droneConsole_2", ...). Deterministic for placed actors. Empty on failure.
 std::wstring GetNameKey(void* actor);
+
+// The cross-peer identity the lane keys a box by: its family and its placed position (world cm, rounded),
+// e.g. "locker@-1234,5678,910". A locker's name and Key are not the same on two peers on 0.10.0 (the save's
+// load replaces the level's actor with a twin whose name and Key are per process), while a box never moves,
+// so where it stands is. Empty when the family or the location is unknown. Game thread.
+std::wstring GetPlacementIdentity(void* actor);
 
 // Read `actor`'s opened bool into `out`. False if unresolved / wrong class.
 bool TryReadOpened(void* actor, bool& out);
