@@ -449,7 +449,46 @@ progression through the existing lanes (the pile shape); a host corrector that r
 deterministic, clamped accrual when the game keeps re-enabling the tick (the tape reel, at one
 hertz); or an anchor, a start stamp every peer computes from, valid only while the rate is
 constant ([architecture.md](architecture.md), where the authority is going). The reel corrector
-is built; concrete and food are designed and not built.
+and the food lane (below) are built; concrete is designed and not built.
+
+### Food
+
+A food (`prop_food_C` and every class below it) is the second shape with a wire of its own
+(`coop/props/prop_food_state`). Its tick lerps `temperature` toward the room, derives `celsius`,
+shows its steam above 50 C, burns or freezes the actor into another at the ends of the range, and
+spends `freshnessAlpha` and the count `invRead_freshness` until it calls `setSpoiled`; a cooking
+food's tick (`prop_cookingFood_C`) adds `cookProgress` while it is at 51 C or more and calls
+`cookItem`, which spawns the cooked prop (a shrimp's resolves `shrimp_s` and spawns it at 363 K) and
+destroys the raw one; a fridge, a radiator and the microwave heat or cool it through
+`accumulateTemperature`, `addTemperature` and `microwave`; a bite takes one from `invRead_uses`.
+`[V]` the decoded prop_food, prop_cookingFood and prop_cookingFood_shrimp bodies.
+
+The food's save record cannot carry any of that: it is captured at one birth while the fields
+move, and its `loadData` catches up by the receiver's clock less the sender's `GetTimeSeconds`,
+which across two machines is not elapsed time. So the family stays claimed off the live record lane,
+and the state travels as `FoodState`, by the food's key: temperature, freshness, the freshness count,
+the bites left, `ignoreRotting`, spoiled, frozen and a cooking food's `cookProgress`.
+
+The host owns the progression. On a client every shared food's tick is cancelled at the
+script-body gate (the base tick, the cooking tick, and the blue brain cheese's and the coffee cup's,
+which replace it), as are its three heat verbs and `cookItem`; a food is shared when it is a tracked
+world prop, or keyed and not in a hand. The host runs them all as the game has them; a cooked or
+burnt replacement and the raw food's end are host births and deaths on the ordinary lifecycle. The
+host notes every food whose tick runs, reads them round the table, 48 a tick, and sends a food's
+state when it moved past a step (half a kelvin, a fiftieth of freshness, half a unit of
+`cookProgress`) at most once a second, and at once on an edge. A client writes the fields and draws
+what its tick would have: the celsius, the steam, and on an edge the game's own `setSpoiled` and
+`freezed` with the mesh's frozen data. A state for a key not here yet waits up to 15 s for the key
+index to move. A joiner gets every noted food's state at its world-ready edge, 24 a tick.
+
+A bite that does not finish a food runs on the client that took it, since the eating is its
+player's; the client then sends `FoodBiteIntent` with the bites left, and the host checks the reach
+and that the count is one under its own, writes it and publishes. The finishing bite destroys the
+food and is the take-or-use request's (`coop/props/prop_act_request`). `ReadFoodUse` reads
+`invRead_uses`, the count 0.10.0's food keeps (a `uses` only where a consumable keeps that instead).
+`[?]` until a two-peer run reads the `[FOOD]` lines; the burnt, frozen and steam drawing on a client,
+a coffee cup's spill and the blue brain cheese's hatch shown only on the host's copy, are read, not
+measured.
 
 ## Who owns what
 
@@ -464,6 +503,7 @@ is built; concrete and food are designed and not built.
 | a container's damage, break and spill | the host | a client's swing and contact are intents the host runs; the cues go to every client |
 | a stuck prop, and its unstick | the peer that sticks or frees it; every peer runs the component's own verb | one reliable message |
 | a self-changing prop's progression | the host | park, corrector or anchor, per prop |
+| a world food's temperature, freshness, bites and cooking | the host | its tick runs on the host alone; `FoodState` on a step or an edge; a client's partial bite is an intent |
 | notebook editor occupancy | the host arbitrates | a claim keyed by the owning prop |
 | notebook page text | the editing peer; the host takes it from the claim's holder, or from anyone while it is free | the notebook's own save record on the record lane, at the editor's commit and at the close |
 | a client's shared-world spawners | the host | refused on a client at the script-body gate; shared-world content arrives only from the host |
@@ -486,6 +526,8 @@ is built; concrete and food are designed and not built.
 | `PropImpactFx` | the host to all | a world container's impact, damaged or destroyed cue, with the point |
 | `MeleeFxRequest`, `MeleeFx` | a client to the host; the host to every other client | the sound and particles of a held prop's damaging knock or its break, found by the maker through the prop's own material and named by asset path; a container's sound is not among them ([players.md](players.md)) |
 | `InventoryPickup` | each peer, relayed | the pocket blip, so others hear a pickup |
+| `FoodState` | the host to all | a world food's temperature, freshness and its count, bites left, `ignoreRotting`, spoiled, frozen and `cookProgress`, by key |
+| `FoodBiteIntent` | a client to the host | a bite of a shared food that did not finish it, with the bites left |
 
 ## Late join
 
@@ -516,7 +558,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | A prop the toolgun freezes, unfreezes or makes static changes on the tool user's machine only; the next hold of it converges frozen and sleep, never static, and a copy static on one peer, without a wall-attach component's unstick, is not driven there while another peer holds the prop -- a refusal that lasts until a lane carries static | `[V]` no lane under `src/coop` catches `setPropProps`; `coop/props/remote_prop` refuses a stream for a copy static here |
 | Another peer's hold can carry away the chair this peer sits in at the laptop, which single player never allows: the laptop freezes the seat only on the machine whose player sits | `[V]` the laptop Blueprint: `stabilizeSeat` sets the seat frozen, and the exit's `setPropProps` clears it; `coop/props/remote_prop` unfreezes a held copy at the hold's first pose |
 | A keyed prop a client creates outside the intent door (a place after a pickup, the whitelisted births, a container extract, a player's own spawn verb) never reaches the host. It is logged now: the drain names its exit, and `[dev] prop_birth_key_probe` tallies every exit by name | `[V]` `coop/props/prop_drop_intent` drops it at the drain; `coop/dev/prop_birth_key_probe` |
-| Concrete, food and every other local-accumulator prop drift between peers; only the tape reel has its corrector | `[V]` `coop/interactables/tape_caddy_sync` is the only corrector |
+| Concrete and every other local-accumulator prop but food drift between peers; the tape reel has its corrector and food its lane | `[V]` `coop/interactables/tape_caddy_sync`, `coop/props/prop_food_state` |
 | A prop tied by any hook -- a player's, an anchored one, the level's own -- is parked on every client for as long as the tie holds, since the host streams it, so it cannot be grabbed there until the hook lets go. A joiner parks one at rest on the host's ready-edge re-send, a single unreliable datagram: lost, it leaves that prop unparked there until it moves | `[V]` `coop/items/hook_prop_claim` claims every tied prop on the host every pass; `coop/props/prop_drive_stream` parks it; `coop/props/prop_drive_host` re-sends at the ready edge |
 | A wall-attachable whose stick replay finds no surface here is frozen in place without the attach, so when the thing it stuck to is destroyed it stays in the air here while every other copy falls | `[V]` `coop/props/prop_stick_sync`'s fallback writes the flag without the component's attach or its destroy binding; `[RD]` the stick carries no parent |
 | A prop the driven-prop channel set coasting can come to rest a few centimetres from the host's copy: the host ends a coasting stream half a second after the prop stops moving, before its body sleeps, and the end edge sets the client's copy to the host's pose and hands it back its physics, so each copy settles on its own. The broom drill measured 0 to 6.4 cm, and 12.1 cm for a prop whose support another prop knocked away on the host | `[V]` `coop/props/prop_drive_host` (`kRestMs`), `coop/props/prop_drive_stream` (the end edge restores simulation per `coop/props/prop_wire_parity`); the broom drill's push and dispense phases |
@@ -540,6 +582,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a container's damage, break and cues | `coop/props/crate_break`, `coop/props/prop_impact_fx`, `coop/props/prop_damage_gate`, `coop/props/hit_target_prop`, `ue_wrap/actors/physics_impact` |
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
+| a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |
 | the pocket blip | `coop/items/inventory_pickup_sync` |
 | the join | `coop/props/prop_snapshot`, `coop/props/snapshot_census`, `coop/props/join_membership_sweep`, `coop/props/join_sweep_tally`, `coop/props/join_keyed_replay`, `coop/props/unresolved_pose_ledger` |

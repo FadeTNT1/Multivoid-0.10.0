@@ -6,6 +6,7 @@
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/reflection_props.h"
+#include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/engine/hit_result.h"
 
 #include <cstring>
@@ -14,6 +15,7 @@ namespace ue_wrap::prop_use {
 namespace {
 
 namespace R = ue_wrap::reflection;
+namespace P = ue_wrap::profile;
 
 // A bitfield bool read from the class of the instance it is asked with: the class is held by its slot and serial, so a
 // class a world reload re-created at the same address is asked again, and a class that does not declare the field
@@ -70,12 +72,14 @@ bool CallPlayerUsedOn(void* prop, void* player, void* hitComponent, const FVecto
 }
 
 bool ReadFoodUse(void* prop, int32_t& uses, bool& notEdible) {
-    static R::InstanceOffset sUses{L"uses"};
-    static BoolField sNotEdible{L"notEdible", {}};
+    static R::InstanceOffset sUses{P::name::FoodUsesProp};
+    static R::InstanceOffset sLegacyUses{P::name::LegacyUsesProp};
+    static BoolField sNotEdible{P::name::NotEdibleProp, {}};
     if (!prop || !R::IsLive(prop)) return false;
     int32_t u = 0;
     bool n = false;
-    if (!ReadAt(sUses, prop, u) || !ReadBool(sNotEdible, prop, n)) return false;
+    if (!ReadAt(sUses, prop, u) && !ReadAt(sLegacyUses, prop, u)) return false;
+    if (!ReadBool(sNotEdible, prop, n)) return false;
     uses = u;
     notEdible = n;
     return true;

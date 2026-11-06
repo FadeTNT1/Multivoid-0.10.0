@@ -20,7 +20,9 @@ bool CallActionOptionIndex(void* prop, void* player, void* hitComponent, const F
 bool CallPlayerUsedOn(void* prop, void* player, void* hitComponent, const FVector& hitLocation, void* lookAtComponent,
                       void* holdObject, ue_wrap::reflection::FName holdPropName);
 
-// prop_food_C's `uses` (int32) and `notEdible` (a bitfield bool); false when either is unreadable. Game thread.
+// A food's bites left and its `notEdible` (a bitfield bool); false when either is unreadable. 0.10.0's prop_food_C
+// keeps the count as `invRead_uses` (its actionOptionIndex takes one from it, its getData saves it); a consumable that
+// keeps a plain `uses` instead (prop_snack_C) is read from that. Game thread.
 bool ReadFoodUse(void* prop, int32_t& uses, bool& notEdible);
 // prop_food_soap_C's `soapAmount` (int32). Game thread.
 bool ReadSoapAmount(void* soap, int32_t& amount);

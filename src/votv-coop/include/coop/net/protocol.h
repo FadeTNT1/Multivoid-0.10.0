@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 275;
+inline constexpr uint16_t kProtocolVersion = 276;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1267,6 +1267,21 @@ enum class ReliableKind : uint8_t {
     // origin. The asset ids are asset paths, never an object index; a receiver that does not hold an asset skips that
     // effect. Never relayed; a client's copy is refused at the host's receive edge. Late join: none. MeleeFxPayload.
     MeleeFx = 215,
+
+    // HOST->ALL: a world food's progression as the host's own tick left it -- temperature, freshness, the freshness
+    // count, the bites left, ignoreRotting, spoiled and frozen, and a cooking food's cookProgress -- by the food's prop
+    // key (coop::props::prop_food_state). A client's own food tick, heating and cooking are cancelled on every shared
+    // food, so this is the only author there; the client writes the fields and draws what the tick would show. Sent
+    // when the state moved past a step, at most once a second a food, at once on a bite. Never relayed; a client's
+    // copy is refused at the host's receive edge. Late join: every world food's state to the joiner at its ready
+    // edge, paced. FoodStatePayload.
+    FoodState = 216,
+
+    // CLIENT->HOST: a bite this client's player took from a shared food that the bite did not finish (the finishing
+    // bite destroys the food and is the take-or-use request's), with the bites left after it. The host judges the
+    // sender's reach and that the count is one under its own, writes it and publishes the food's state. Never
+    // relayed; not pre-world. Late join: nothing to replay. FoodBiteIntentPayload.
+    FoodBiteIntent = 217,
 };
 
 #pragma pack(push, 1)
@@ -2328,6 +2343,38 @@ struct CoffeeActionIntentPayload {
 };
 static_assert(sizeof(CoffeeActionIntentPayload) == 32, "CoffeeActionIntentPayload must be 32 bytes");
 static_assert(sizeof(CoffeeActionIntentPayload) <= 256 - 20 - 8, "CoffeeActionIntentPayload must fit one datagram");
+
+// A world food's state (FoodState), by its prop key. `flags` carries ignoreRotting, spoiled, frozen and whether the
+// food is a cooking one (cookProgress is then its own); `portions` is a shrimp tray's count, -1 for any other food.
+namespace food_state_flags {
+constexpr uint8_t kIgnoreRotting = 1u << 0;
+constexpr uint8_t kSpoiled       = 1u << 1;
+constexpr uint8_t kFrozen        = 1u << 2;
+constexpr uint8_t kCooking       = 1u << 3;
+constexpr uint8_t kKnown         = kIgnoreRotting | kSpoiled | kFrozen | kCooking;
+}  // namespace food_state_flags
+struct FoodStatePayload {
+    WireKey key;            // 32 -- the food's prop key
+    float   temperature;    // 4  -- kelvin
+    float   freshness;      // 4  -- freshnessAlpha, 0..1
+    float   cookProgress;   // 4  -- a cooking food's; 0 otherwise
+    int16_t uses;           // 2  -- invRead_uses
+    int16_t freshnessLeft;  // 2  -- invRead_freshness
+    int16_t portions;       // 2  -- a shrimp tray's `shrimps`; -1 for any other food
+    uint8_t flags;          // 1  -- food_state_flags
+    uint8_t reserved;       // 1  -- zero
+};
+static_assert(sizeof(FoodStatePayload) == 52, "FoodStatePayload must be 52 bytes");
+static_assert(sizeof(FoodStatePayload) <= 256 - 20 - 8, "FoodStatePayload must fit one datagram");
+
+// A client's bite of a shared food (FoodBiteIntent): the food by its prop key and the bites left after it.
+struct FoodBiteIntentPayload {
+    WireKey key;          // 32
+    int16_t usesAfter;    // 2
+    uint8_t reserved[2];  // 2 -- zero
+};
+static_assert(sizeof(FoodBiteIntentPayload) == 36, "FoodBiteIntentPayload must be 36 bytes");
+static_assert(sizeof(FoodBiteIntentPayload) <= 256 - 20 - 8, "FoodBiteIntentPayload must fit one datagram");
 
 // A client's press of the tool gun's remover (RemoverRequest): the element it hit, the camera point it looked
 // from and the point its shot struck, in world centimetres. The host judges all three; none is trusted.

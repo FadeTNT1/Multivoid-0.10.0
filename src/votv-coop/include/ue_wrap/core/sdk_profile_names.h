@@ -1000,6 +1000,41 @@ inline constexpr const wchar_t* SatConsoleDeskPanelsProp   = L"consoles";
 inline constexpr const wchar_t* EditableTextBoxClass       = L"EditableTextBox";
 inline constexpr const wchar_t* EditableTextBoxSetTextFn   = L"SetText";
 inline constexpr const wchar_t* EditableTextBoxGetTextFn   = L"GetText";
+
+// The food family (ue_wrap/actors/food; 0.10.0 cook, read from prop_food_C's, prop_cookingFood_C's and
+// prop_food_shrimp_C's bytecode). prop_food_C::ReceiveTick lerps `temperature` (kelvin) toward the room, derives
+// `celsius` (temperature - 273), toggles the `eff_steam` component above 50 C, burns or freezes the actor at the
+// ends, and spends `freshnessAlpha`; at 0 it takes one from `invRead_freshness` and at none left calls
+// `setSpoiled(true)`. A bite takes one from `invRead_uses`. `ignoreRotting` is saved with the rest. Freezing writes
+// `tempLessThan0`, calls `freezed(frozen)` and writes custom primitive data 1 on the prop's `staticMesh`.
+inline constexpr const wchar_t* FoodClass = L"prop_food_C";
+inline constexpr const wchar_t* CookingFoodClass = L"prop_cookingFood_C";
+inline constexpr const wchar_t* FoodTemperatureProp = L"temperature";
+inline constexpr const wchar_t* FoodCelsiusProp = L"celsius";
+inline constexpr const wchar_t* FoodFreshnessProp = L"freshnessAlpha";
+inline constexpr const wchar_t* FoodFreshnessLeftProp = L"invRead_freshness";
+inline constexpr const wchar_t* FoodUsesProp = L"invRead_uses";
+inline constexpr const wchar_t* FoodIgnoreRottingProp = L"ignoreRotting";
+inline constexpr const wchar_t* FoodSpoiledProp = L"isSpoiled";
+inline constexpr const wchar_t* FoodFrozenProp = L"tempLessThan0";
+inline constexpr const wchar_t* FoodSteamComp = L"eff_steam";
+inline constexpr const wchar_t* FoodSetSpoiledFn = L"setSpoiled";
+inline constexpr const wchar_t* FoodSetSpoiledParam = L"isSpoiled";
+inline constexpr const wchar_t* FoodFreezedFn = L"freezed";
+inline constexpr const wchar_t* FoodFreezedParam = L"frozen";
+inline constexpr const wchar_t* PropStaticMeshComp = L"staticMesh";
+inline constexpr const wchar_t* SetCustomPrimitiveDataFloatFn = L"SetCustomPrimitiveDataFloat";
+// Freezing's custom primitive data: index 1, 0.5 frozen and 0 not (prop_food_C::ReceiveTick).
+inline constexpr int   FoodFrozenDataIndex = 1;
+inline constexpr float FoodFrozenDataValue = 0.5f;
+inline constexpr float FoodKelvinOffset = 273.0f;
+inline constexpr float FoodSteamCelsius = 50.0f;
+// prop_cookingFood_C::ReceiveTick adds to `cookProgress` while celsius >= 51 and calls `cookItem` at `cookFinal`.
+inline constexpr const wchar_t* FoodCookProgressProp = L"cookProgress";
+inline constexpr const wchar_t* FoodCookFinalProp = L"cookFinal";
+// The non-food `uses` counter some consumables keep instead (prop_snack_C), read where invRead_uses is absent.
+inline constexpr const wchar_t* LegacyUsesProp = L"uses";
+inline constexpr const wchar_t* NotEdibleProp = L"notEdible";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

@@ -34,6 +34,7 @@
 #include "coop/props/pack_trash_intent.h"  // CLIENT->HOST bagging of a pile or clump
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
+#include "coop/props/prop_food_state.h"  // HOST->CLIENT a world food's state; CLIENT->HOST a bite of one
 #include "coop/props/prop_act_host.h"  // CLIENT->HOST a take or use of a shared prop, and its commit
 #include "coop/props/prop_act_request.h"  // HOST->CLIENT its answer
 #include "coop/props/prop_drop_intent.h"  // CLIENT->HOST client-placed keyed prop
@@ -336,6 +337,46 @@ bool HandleIntentEvent(net::Session& session,
         std::memcpy(&p, msg.payload, sizeof(p));
         if (p.key.len > sizeof(p.key.data)) { coop::coffee_intent::CountDropped(coop::coffee_intent::Drop::Key); break; }
         coop::coffee_intent::OnAction(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::FoodState: {
+        // HOST->CLIENT: a world food's progression as the host's tick left it (coop::props::prop_food_state).
+        // Host-authored only: the receive edge refuses a client's copy.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: FoodState dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::FoodStatePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::props::prop_food_state::CountDropped(coop::props::prop_food_state::Drop::Size);
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::props::prop_food_state::WellFormed(p)) {
+            coop::props::prop_food_state::CountDropped(coop::props::prop_food_state::Drop::Malformed);
+            break;
+        }
+        coop::props::prop_food_state::OnState(p);
+        break;
+    }
+    case net::ReliableKind::FoodBiteIntent: {
+        // CLIENT->HOST: a bite a client took from a shared food that did not finish it; judged and written by the host
+        // (coop::props::prop_food_state). Never relayed.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: FoodBiteIntent dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::FoodBiteIntentPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::props::prop_food_state::CountDropped(coop::props::prop_food_state::Drop::Size);
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (p.key.len == 0 || p.key.len > sizeof(p.key.data) || p.usesAfter < 0 || p.reserved[0] || p.reserved[1]) {
+            coop::props::prop_food_state::CountDropped(coop::props::prop_food_state::Drop::Malformed);
+            break;
+        }
+        coop::props::prop_food_state::OnBite(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::RemoverRequest: {
