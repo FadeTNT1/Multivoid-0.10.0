@@ -140,6 +140,7 @@ std::unordered_map<uint32_t, uint32_t> g_merged;
 // The last stream ends applied here, a ring of kRecentEnds (prop_drive_stream.h).
 AppliedEnd g_ends[kRecentEnds];
 size_t g_endCount = 0;   // ends recorded since the session began; the newest is at (g_endCount - 1) % kRecentEnds
+std::unordered_map<uint32_t, uint64_t> g_lastEndMs;   // eid -> when its last End applied (GetTickCount64)
 
 // The end edge on a live prop: the final pose, then the host's physics flags through the same
 // parity restore the join's converge applies after its teleport, then the velocity -- only into
@@ -152,6 +153,7 @@ void ApplyEnd(void* actor, const coop::net::PropDriveEndPayload& p, bool parkedH
     on.gen = p.gen;
     on.actor.Set(actor);
     g_ends[g_endCount++ % kRecentEnds] = AppliedEnd{p.eid, ue_wrap::FVector{p.x, p.y, p.z}, ::GetTickCount64()};
+    g_lastEndMs[p.eid] = ::GetTickCount64();
     E::SetActorRotation(actor, ue_wrap::FRotator{p.pitch, p.yaw, p.roll});
     // The host's frozen and sleep at the end first: a hook that bites a frozen prop unfreezes it on
     // the host only (hook_C's attach_a runs setPropProps), so a copy still frozen here takes the
@@ -257,6 +259,11 @@ void ApplyPose(const coop::net::PropDriveRow& e, uint64_t nowMs, const char* who
 }
 
 }  // namespace
+
+uint64_t LastEndAgeMs(uint32_t eid) {
+    const auto it = g_lastEndMs.find(eid);
+    return it == g_lastEndMs.end() ? UINT64_MAX : ::GetTickCount64() - it->second;
+}
 
 size_t RecentEnds(AppliedEnd* out, size_t max) {
     const size_t have = g_endCount < kRecentEnds ? g_endCount : kRecentEnds;
@@ -463,6 +470,7 @@ void OnDisconnect() {
         g_merged.clear();
     }
     g_endCount = 0;
+    g_lastEndMs.clear();
     g_batch.clear();
 }
 

@@ -917,6 +917,14 @@ inline constexpr const wchar_t* GetCollisionResponseToChannelFn      = L"GetColl
 // UCharacterMovementComponent::bEnablePhysicsInteraction (a bool bitfield, resolved at run time through
 // FindBoolProperty): off, CapsuleTouched returns before it pushes any simulated body the capsule touches.
 inline constexpr const wchar_t* CmcEnablePhysicsInteractionProp      = L"bEnablePhysicsInteraction";
+// The other UCharacterMovementComponent knobs that set how hard a capsule pushes a simulated body (all float
+// properties, found by name and type through reflection::PropertyOffsetAndClass): the push force factor, the
+// initial push factor, the touch force factor, and the downward force a standing capsule puts on the body under
+// it. coop/player/local_push scales them on the local player's own pawn for the length of a session.
+inline constexpr const wchar_t* CmcPushForceFactorProp               = L"PushForceFactor";
+inline constexpr const wchar_t* CmcInitialPushForceFactorProp        = L"InitialPushForceFactor";
+inline constexpr const wchar_t* CmcTouchForceFactorProp              = L"TouchForceFactor";
+inline constexpr const wchar_t* CmcStandingDownwardForceScaleProp    = L"StandingDownwardForceScale";
 // The cap-mushroom class: it overrides Aprop_C::Init and its natural-spawn path
 // (AmushroomSpawner_C::Spawn -> spawnedNaturally()) sets its StaticMesh to NoCollision.
 // mushroom7_C grows into prop_puffballMature_C, a separate species.

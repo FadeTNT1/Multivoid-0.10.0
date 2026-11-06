@@ -51,6 +51,7 @@
 #include "coop/player/movement_ledger.h"
 #include "coop/player/run_end_travel.h"
 #include "coop/player/local_body.h"  // skins: local first-person body owner
+#include "coop/player/local_push.h"  // the local pawn's push on simulated props, held down for the session
 #include "coop/player/nameplate.h"  // plate-pref session wiring (Install)
 #include "coop/player/nick_color.h"  // nick-color session wiring (Install)
 #include "coop/player/puppet_identity.h"  // a puppet's touch never runs this machine's player's effects
@@ -128,6 +129,7 @@
 #include "coop/props/trash_sweep.h"
 #include "coop/props/prop_drive_host.h"    // HOST: the props a hook drags, streamed while they move
 #include "coop/props/prop_motion_scan.h"   // HOST: the props that move with no verb, fed to the driven-prop channel
+#include "coop/props/client_shove.h"       // CLIENT: a prop this body shoved becomes a prop this client syncs
 #include "coop/props/prop_drive_stream.h"  // park and drive those props (a client's, and the host's copies of a client's)
 #include "coop/props/prop_syncer_host.h"   // HOST: judge a syncing client's rows
 #include "coop/props/prop_park.h"  // the parks' held Characters, given back at session end
@@ -564,6 +566,8 @@ DisconnectStats DisconnectAll() {
     coop::trash_sweep::OnDisconnect();  // drop the swept clumps still rolling
     coop::trash_clump_pose_stream::OnDisconnect();  // drop all client per-eid carry drives
     coop::prop_motion_scan::OnDisconnect();  // the scan's candidate lists and baselines
+    coop::client_shove::OnDisconnect();  // the client shove scan's lists, baselines and pacing
+    coop::local_push::OnDisconnect();  // the local pawn's push values back to the game's own
     coop::prop_drive_host::OnDisconnect();  // drop the host's driven-prop set and the client syncers' table (prop_syncer_host)
     coop::element::bind_wait::Clear("disconnect");  // the messages waiting for a bind go with the session
     coop::props::bracket_position_wait::Reset();  // and the spawns waiting for a bracket that will not close
@@ -628,6 +632,8 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:hook"}; coop::hook_sync::Tick(); }  // hook: one activeHook read, then a gated 4/20 Hz head poll only while a hook exists
     if (isHost) { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:explosion_coast"}; coop::explosion_parking::Tick(&session); }  // HOST: the props a blast flung, handed to the driven-prop channel (before its tick below; an empty list costs one size check)
     if (isHost) { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:prop_motion_scan"}; coop::prop_motion_scan::Tick(session, isHost); }  // HOST: a budgeted read of its own props; one that moved with no verb's claim (a settle, a knock-on, a shove) coasts on the driven-prop channel below
+    if (isConnected) coop::local_push::Tick();  // the local pawn's push on simulated props, held at the configured fraction while a session runs
+    if (!isHost) { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:client_shove"}; coop::client_shove::Tick(session, isHost); }  // CLIENT: a prop this body shoved is claimed as this client's to sync (before the pump, whose syncer tick sends the claim's rows)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:prop_drive_host"}; coop::prop_drive_host::Pump(session, isHost); }  // the driven props, both roles: HOST judges a syncing client's rows, publishes the props that moved, closes the streams that rested (after the hook poll that feeds it); then both park + drive what the host streams (an empty set costs one size check)
     coop::dev::dev_lanes::TickDrills(session);  // [dev] the drills' and censuses' legs (a single read each when off)
     coop::player_damage::Tick();  // impact-entry PRE cancels lazy install (non-local bodies)

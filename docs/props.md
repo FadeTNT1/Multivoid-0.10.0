@@ -227,6 +227,28 @@ produced on this peer (`coop/props/prop_wire_parity`); a fresh mirror starts kin
 is remote-owned. A spawn or destroy the receiver applied is marked so the symmetric observer
 does not broadcast it back (`coop/props/prop_echo_suppress`).
 
+### Standing and walking on props
+
+A player's body pushes a simulated prop it walks into, and presses down on the one it stands on: the movement
+component's `PushForceFactor`, `InitialPushForceFactor`, `TouchForceFactor` and `StandingDownwardForceScale`. A
+remote puppet has none of it (every primitive ignores the physics-body channel and its movement component's physics
+interaction is off, `ue_wrap/actors/puppet_spawn`). The local player's own body is held down by `coop/player/local_push`
+for the length of a session on both roles: on every pawn generation it reads the four values by reflection (names in
+`sdk_profile_names.h`, found by name and type through `ue_wrap/actors/character_push`) and logs them (`[LOCAL-PUSH]`),
+then holds them at the fraction the config names -- `local_push_scale` (default 0.25) of the three push factors and
+`local_stand_force_scale` (default 0) of the standing force -- checked about once a second so an edit lands without a
+restart. `bEnablePhysicsInteraction` stays on, so a prop can still be pushed on purpose. The game's own values are written
+back when the session ends. Single-player is never touched.
+
+A client's push is still local: the host's motion scan reads the host's props only. `coop/props/client_shove` is the
+client's counterpart. Each client tick it reads a budgeted number of the host-allocated props it holds (those within 800 cm
+of its pawn first); a prop that simulates, moved more than 4 cm or 3 degrees since it last read it, lies within 300 cm of
+the pawn and is in no other lane's hands (a hand, the host's stream or the settling that follows its end edge, a throw's
+election, a claim already open) is claimed with `PropSyncReason::LocalShove` through the existing election above. At most
+3 claims go out a second and one per prop every 3 s, and the host judges each (a prop someone holds, a host verb's row,
+another client's row and a prop out of reach are refused there), so a shove never steals a prop. `client_shove=0` switches
+it off, `[dev] local_prop_push_log=1` logs every event (`[CLIENT-SHOVE]`).
+
 ### Sticking to a wall
 
 A prop sticks through its wall-attach component, which the wall-attachable props (the cameras, the
@@ -450,7 +472,7 @@ is built; concrete and food are designed and not built.
 | `PropRelease` | the holder to all | the prop's transform, its inherited linear and angular velocity and its frozen and sleep at the edge, the hold it closes and the throw sequence (0 = not a throw); a client's goes through the host, which clamps it and sends it on |
 | `PropDrivePose` (stream) | the host to all; a syncing client to the host | the poses of the props under a hook's drive or a broom's push that moved since their last one, with the claim generation; a client's rows of the prop its own interaction moves, which the host judges before it relays one `[?]` |
 | `PropDriveEnd` | the host to all; a syncing client to the host | the final pose and velocity of a driven prop that rested or that a hand took; closes its generation; a client's End is admitted when it is the row's syncer `[?]` |
-| `PropSyncClaim`, `PropSyncAnswer` | a client to the host; the host to that client | a client's request to sync a prop its interaction moves, and the host's grant, refusal (with the reason) or revoke (with the generation); the host also grants a thrown prop to its thrower unasked, `seq` being the throw sequence `[?]` |
+| `PropSyncClaim`, `PropSyncAnswer` | a client to the host; the host to that client | a client's request to sync a prop its interaction moves (its reason names the feeder: a dev drill, a swinger parent, a body shove), and the host's grant, refusal (with the reason) or revoke (with the generation); the host also grants a thrown prop to its thrower unasked, `seq` being the throw sequence `[?]` |
 | `PropDropIntent`, `ReelEjectIntent` | a client to the host | a place, a throw or an unavoidable birth, for the host to author, with the placed root's velocity and the throw sequence |
 | `PropStickState` | the peer that sticks or frees it, to all | frozen or static, the commit pose and the hold the stick ended; or an unstick, with the pose and velocity |
 | `PropSnapPos` | the host to one joiner | a position correction for a save-authoritative prop moved in the join window, with a keyed prop's frozen and sleep; it carries the host's drive context for the prop (claim generation and open), the client drops one older than a drive END still on its copy, and a prop a hand held after its correction went out gets a follow-up after the release `[?]` |
@@ -493,7 +515,8 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | A prop tied by any hook -- a player's, an anchored one, the level's own -- is parked on every client for as long as the tie holds, since the host streams it, so it cannot be grabbed there until the hook lets go. A joiner parks one at rest on the host's ready-edge re-send, a single unreliable datagram: lost, it leaves that prop unparked there until it moves | `[V]` `coop/items/hook_prop_claim` claims every tied prop on the host every pass; `coop/props/prop_drive_stream` parks it; `coop/props/prop_drive_host` re-sends at the ready edge |
 | A wall-attachable whose stick replay finds no surface here is frozen in place without the attach, so when the thing it stuck to is destroyed it stays in the air here while every other copy falls | `[V]` `coop/props/prop_stick_sync`'s fallback writes the flag without the component's attach or its destroy binding; `[RD]` the stick carries no parent |
 | A prop the driven-prop channel set coasting can come to rest a few centimetres from the host's copy: the host ends a coasting stream half a second after the prop stops moving, before its body sleeps, and the end edge sets the client's copy to the host's pose and hands it back its physics, so each copy settles on its own. The broom drill measured 0 to 6.4 cm, and 12.1 cm for a prop whose support another prop knocked away on the host | `[V]` `coop/props/prop_drive_host` (`kRestMs`), `coop/props/prop_drive_stream` (the end edge restores simulation per `coop/props/prop_wire_parity`); the broom drill's push and dispense phases |
-| A prop a client's own body or physics moves, with no verb, moves on that client only: the motion scan (`coop/props/prop_motion_scan`) reads the host's props, so a host-side settle or knock reaches every copy, but a client's shove or a client-only settle has no feeder until the prop is grabbed. A knocked prop on the host is found on the scan's next read of it, up to about a second in the near set and a few seconds in the far one, so its first centimetres of motion are not streamed | `[RD]` `coop/props/prop_motion_scan` reads only the host's own Prop elements; `coop/props/prop_syncer` has no body-push feeder |
+| A client's shove of a loose prop is claimed on the client's next read of it (up to a second in the near set, a few in the far one), so the first centimetres of a shove are not streamed, and a client-only settle with no body near it still has no feeder. A knocked prop on the host is found on the motion scan's next read of it, up to about a second in the near set and a few seconds in the far one | `[?]` `coop/props/client_shove` until a two-peer run reads its `[CLIENT-SHOVE]` lines; `[RD]` `coop/props/prop_motion_scan` reads only the host's own Prop elements |
+| A prop the stream's end edge puts back into simulation is not tested for overlap with scenery this client displaced locally (a door, a prop it still moves): if the final pose overlaps it PhysX ejects the prop, which can be a visible pop. No overlap query is wrapped yet | `[RD]` `coop/props/prop_drive_stream` ApplyEnd sets the pose, then the physics flags, then the velocity; nothing in `ue_wrap` queries an overlap |
 | A prop parked under the host's drive cannot be grabbed on a client while the drag lasts: the park turns the body kinematic and the game's grab needs a simulating one. It is grabbable again after the end edge | `[V]` `coop/props/prop_drive_stream` parks by switching the mesh's simulation off (`ue_wrap/engine/engine_physics`); `coop/props/prop_wire_parity` records why a kinematic mirror is ungrabbable |
 | A container's break is read, not measured: that `prop_C.addDamage` on a container reaches its component's `impactDamage` with the puppet as damager, that the actor a client's impact names is the thrown prop, which of the container's bodies spills, and that the material's break cues are named `sound_damaged` and `sound_destroyed` are taken from the pak's name maps. A container a client throws breaks only when it strikes something the contact intent names; fire never breaks a container a client holds | `[RD]` the pak's name maps of `comp_physicsImpact`, `prop_container` and `physSnd_wood_crate`; `[?]` until a two-peer run reads the `[CRATE]` lines |
 | A pose can arrive milliseconds before the spawn that names its prop; that is a race, not a defect, and a ledger tells the two apart instead of warning per packet | `[V]` `coop/props/unresolved_pose_ledger` |
@@ -505,6 +528,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | sleeping bag and mattress replacement | `coop/interactables/sleepingbag_sync`, `ue_wrap/actors/sleepingbag`, `coop/props/host_spawn_watcher`, `coop/props/prop_lifecycle` |
 | the birth and death seams | `coop/props/prop_lifecycle`, `coop/props/host_spawn_watcher`, `coop/props/prop_element_tracker`, `coop/props/prop_synth_key`, `coop/props/registry_reaper`, `coop/props/prop_echo_suppress` |
 | the receivers | `coop/props/remote_prop` (held), `coop/props/remote_prop_spawn` (birth: adopt, converge, create), `coop/props/prop_fresh_spawn` (the materialiser), `coop/props/prop_wire_parity`, `coop/props/active_drive`, `coop/props/prop_sound` |
+| a body's push on props | `coop/player/local_push` (the local pawn's push and standing force, held down in a session), `ue_wrap/actors/character_push` (the movement component's values by reflection), `coop/props/client_shove` (a client's shove becomes a claim) |
 | a client's intents | `coop/props/prop_drop_intent`; a thrown prop: `coop/props/prop_throw`, `coop/net/throw_bounds` |
 | the stick | `coop/props/prop_stick_sync` |
 | a prop under a hook's drive or a broom's push | `coop/props/prop_drive_host` (the host's set and stream), `coop/props/prop_drive_stream` (the receiver), `coop/items/hook_prop_claim` (the hook lane feeding it), `coop/items/hook_constraint` (the tie itself, host-only), `coop/items/broom_push` (the broom's push feeding it) |

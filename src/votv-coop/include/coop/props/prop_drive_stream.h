@@ -89,6 +89,10 @@ struct AppliedEnd {
 };
 size_t RecentEnds(AppliedEnd* out, size_t max);
 
+// Milliseconds since a host End was last applied to `eid`'s copy here, UINT64_MAX when none was this session. The
+// client shove scan reads it so the settling that follows an End is not taken for a shove. Game thread.
+uint64_t LastEndAgeMs(uint32_t eid);
+
 namespace dev {   // read only by src/coop/dev/ (the prop syncer drill); written only while the drill row is on
 struct DriveView {
     uint8_t          gen = 0;              // the generation of the last row applied (or End applied) for the eid
