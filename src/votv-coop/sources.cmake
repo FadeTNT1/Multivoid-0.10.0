@@ -49,6 +49,7 @@ set(VOTVCOOP_SOURCES
     src/coop/world/balance_sync.cpp
     src/coop/world/daily_task_sync.cpp
     src/coop/save/save_block.cpp
+    src/coop/save/save_player_filter.cpp
     src/ui/multiplayer_menu.cpp
     src/coop/player/nameplate.cpp
     src/coop/player/nick_color.cpp

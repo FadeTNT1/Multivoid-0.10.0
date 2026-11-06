@@ -38,6 +38,8 @@ struct Counts {
     int32_t carried = -1;    // canvasInventory
     int32_t hands = -1;      // SlotArray_A
     int32_t equipment = -1;  // SlotArray_B
+    int32_t slotC = -1;      // SlotArray_C
+    int32_t slotD = -1;      // SlotArray_D
 };
 Counts CountItems(void* player);
 

@@ -4,6 +4,9 @@
 
 #include "coop/comms/chat_feed.h"
 #include "coop/net/session.h"
+#include "coop/player/players_registry.h"
+#include "coop/save/save_player_filter.h"
+#include "ue_wrap/actors/inventory_component.h"
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -208,6 +211,13 @@ void OnSaveToSlotPost(const SG::Call& c) {
     UE_LOGI("save_block: world save written -- %ls entry '%ls' (%llu bytes)",
             autosave ? N::WorldEntryAutosave : N::WorldEntryMain, e.path.c_str(),
             static_cast<unsigned long long>(e.bytes));
+    // What the host carries now, beside the file: an empty inventory in a save that was written is the
+    // line to find when a reload comes back empty.
+    if (void* const local = coop::players::Registry::Get().Local()) {
+        const ue_wrap::inventory_component::Counts n = ue_wrap::inventory_component::CountItems(local);
+        UE_LOGI("save_block: the local player %p holds carried=%d hands=%d equipment=%d slotC=%d slotD=%d as the "
+                "save finished", local, n.carried, n.hands, n.equipment, n.slotC, n.slotD);
+    }
     if (g_written) g_written(c.object, autosave);
 }
 
@@ -238,6 +248,7 @@ void SetWritten(WrittenFn fn) { g_written = fn; }
 void Pump() {
     if (!g_watched || SG::PendingNameCount() == 0) return;
     SG::ResolvePendingNames();
+    coop::save_player_filter::Pump();
 }
 
 void Install(coop::net::Session* session) {
@@ -250,6 +261,7 @@ void Install(coop::net::Session* session) {
         else
             UE_LOGI("save_block: the world-save verbs are gated (a client's save is refused at the verb)");
     }
+    coop::save_player_filter::Install();  // a puppet or the preview mannequin is never written into the world
     ue_wrap::save_to_slot_hook::SetGate(&WorldSaveGate);
     ue_wrap::save_to_slot_hook::Install();
 }

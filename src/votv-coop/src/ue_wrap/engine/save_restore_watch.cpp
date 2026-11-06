@@ -2,6 +2,7 @@
 
 #include "ue_wrap/engine/save_restore_watch.h"
 
+#include "ue_wrap/actors/inventory_component.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
@@ -12,6 +13,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace N = ue_wrap::profile::name;
 
@@ -55,6 +57,15 @@ std::wstring g_levelAtEntry;
 bool g_levelNamed = false;
 WorldStamp g_playerWorld;
 
+// The players loadObjects has handed a record to in the pass that is running. A save made while a second
+// mainPlayer_C stood in the world (a peer's puppet, the skins preview's mannequin) carries one record per body,
+// all under the key "mainPlayer"; the loader hands every record of a key to the one live player, so the later,
+// empty record empties the inventory the first one just restored. The first record a player gets in a pass is the
+// player's own (the world's own player is enumerated before any body made later), so a second is refused.
+bool g_inObjects = false;
+std::vector<void*> g_loadedPlayers;
+int g_duplicatesRefused = 0;
+
 // The game instance's currentLevel, as text ("None" for NAME_None), or empty when unresolved.
 std::wstring ReadCurrentLevel(bool& named) {
     named = false;
@@ -70,10 +81,19 @@ std::wstring ReadCurrentLevel(bool& named) {
 
 SG::Verdict OnObjectsPre(const SG::Call&) {
     g_levelAtEntry = ReadCurrentLevel(g_levelNamed);
+    g_inObjects = true;
+    g_loadedPlayers.clear();
+    g_duplicatesRefused = 0;
     return SG::Verdict::Run;
 }
 
 void OnObjectsPost(const SG::Call& c) {
+    g_inObjects = false;
+    g_loadedPlayers.clear();
+    if (g_duplicatesRefused > 0)
+        UE_LOGW("save_restore: loadObjects refused %d extra player record(s) for a player that had already loaded "
+                "its own -- the save was written while another mainPlayer_C stood in the world",
+                g_duplicatesRefused);
     void* world = WI::WorldOf(c.object);
     g_objectsWorld.Set(world);
     if (g_levelNamed) {
@@ -89,7 +109,27 @@ void OnObjectsPost(const SG::Call& c) {
     }
 }
 
+SG::Verdict OnPlayerPre(const SG::Call& c) {
+    if (!g_inObjects) return SG::Verdict::Run;
+    for (void* seen : g_loadedPlayers) {
+        if (seen != c.object) continue;
+        ++g_duplicatesRefused;
+        UE_LOGW("save_restore: mainPlayer_C::betterLoadData on %p refused -- a second player record for a player that "
+                "already loaded one in this pass (it would overwrite the inventory and equipment just restored)",
+                c.object);
+        return SG::Verdict::Cancel;
+    }
+    g_loadedPlayers.push_back(c.object);
+    return SG::Verdict::Run;
+}
+
 void OnPlayerPost(const SG::Call& c) {
+    {
+        const inventory_component::Counts n = inventory_component::CountItems(c.object);
+        UE_LOGI("save_restore: betterLoadData on pawn %p (component %p) holds carried=%d hands=%d equipment=%d "
+                "slotC=%d slotD=%d", c.object, inventory_component::Of(c.object), n.carried, n.hands, n.equipment,
+                n.slotC, n.slotD);
+    }
     void* world = WI::WorldOf(c.object);
     const bool fresh = !g_playerWorld.IsCurrent() || g_playerWorld.world != world;
     g_playerWorld.Set(world);
@@ -102,7 +142,7 @@ void OnPlayerPost(const SG::Call& c) {
 
 void Arm(const char* who) {
     if (!g_objectsWatch) g_objectsWatch = SG::WatchName(kRowRestoreObjects, kTagObjects, &OnObjectsPre, &OnObjectsPost);
-    if (!g_playerWatch) g_playerWatch = SG::WatchName(kRowRestorePlayer, kTagPlayer, nullptr, &OnPlayerPost);
+    if (!g_playerWatch) g_playerWatch = SG::WatchName(kRowRestorePlayer, kTagPlayer, &OnPlayerPre, &OnPlayerPost);
     if (g_objectsWatch || g_playerWatch) SG::ResolvePendingNames();
     if (!g_held && g_objectsWatch) {
         SG::Acquire("save_restore_watch");

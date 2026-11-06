@@ -12,6 +12,7 @@
 #include "coop/player/client_model.h"
 #include "coop/player/local_body.h"
 #include "coop/player/players_registry.h"
+#include "coop/save/save_player_filter.h"
 #include "ue_wrap/actors/puppet.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -64,6 +65,9 @@ void SpawnMannequin() {
         return;
     }
     E::SetActorEnableCollision(m, false);  // display-only: no block, no pickup, no step-on
+    // A mainPlayer_C like the player, so the game's save walk would write it as a second "mainPlayer"
+    // record: the filter keeps it out, and needs the script gate held while the mannequin stands.
+    coop::save_player_filter::HoldForPreview(true);
     g_mannequin    = m;
     g_mannequinIdx = R::InternalIndexOf(m);
     g_appliedSkin.clear();  // force a fresh apply on the next Tick
@@ -76,6 +80,7 @@ void HideMannequin() {
     g_mannequin    = nullptr;
     g_mannequinIdx = -1;
     g_appliedSkin.clear();
+    coop::save_player_filter::HoldForPreview(false);
     UE_LOGI("skin_preview: mannequin hidden");
 }
 
@@ -100,6 +105,7 @@ void Tick() {
         return;
     }
     if (!g_mannequin) SpawnMannequin();
+    coop::save_player_filter::Pump();
     if (!g_mannequin || !R::IsLiveByIndex(g_mannequin, g_mannequinIdx)) return;
 
     // Apply the pending skin (hovered / current) if it changed.
