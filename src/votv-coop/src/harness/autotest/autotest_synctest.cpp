@@ -24,6 +24,7 @@
 #include "ue_wrap/world/jellyfish_path.h"
 #include "ue_wrap/world/world_singleton.h"
 #include "ue_wrap/world/directionalwind.h"
+#include "ue_wrap/devices/atv.h"
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
@@ -102,11 +103,20 @@ void Sample(const std::string& id, const std::string& name) {
     const bool sunOk = ue_wrap::bad_sun::ReadGamemodeCopy(nullptr, sun);
     ue_wrap::FVector wind{};
     const bool windOk = ue_wrap::directionalwind::ReadTarget(wind);
-    UE_LOGI("synctest: STATE id=%s name=%s weather=%d flags=%u fog=%u rain=%.3f sky=%d yaw=%.2f moon=%.3f eye=%d hole=%d red=%d sun=%d fish=%d wind=%d wx=%.1f wy=%.1f wz=%.1f",
+    // The gamemode's car, the ATV the atvExplode special arms: its trap bit (-1: no car or no read).
+    int trap = -1;
+    if (void* gm = ue_wrap::world_singleton::Gamemode()) {
+        static int32_t carOff = -1;
+        if (carOff < 0) carOff = R::FindPropertyOffset(R::ClassOf(gm), ue_wrap::profile::name::GamemodeCarProp);
+        void* car = carOff < 0 ? nullptr : *reinterpret_cast<void**>(static_cast<uint8_t*>(gm) + carOff);
+        bool armed = false;
+        if (car && R::IsLive(car) && ue_wrap::atv::ReadTrap(car, armed)) trap = armed ? 1 : 0;
+    }
+    UE_LOGI("synctest: STATE id=%s name=%s weather=%d flags=%u fog=%u rain=%.3f sky=%d yaw=%.2f moon=%.3f eye=%d hole=%d red=%d sun=%d fish=%d wind=%d wx=%.1f wy=%.1f wz=%.1f trap=%d",
             id.c_str(), name.c_str(), cycle ? 1 : 0, weather.flags, weather.flags2, weather.rainStrength,
             skyOk ? 1 : 0, sky.Yaw, moon, eyeOk ? int(eye) : -1, holeOk ? int(hole) : -1,
             redOk ? int(red) : -1, sunOk ? int(sun) : -1,
-            ue_wrap::jellyfish_path::ForEachFish(nullptr, nullptr), windOk ? 1 : 0, wind.X, wind.Y, wind.Z);
+            ue_wrap::jellyfish_path::ForEachFish(nullptr, nullptr), windOk ? 1 : 0, wind.X, wind.Y, wind.Z, trap);
 }
 
 DWORD WINAPI Driver(LPVOID) {

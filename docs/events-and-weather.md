@@ -158,7 +158,19 @@ refuses its own run; the host counts its runs into the sky state, so a client pl
 at the host's start and at the sequence's own offset, and the black-hole sky is sky state, asserted
 each second and seeded to a joiner; the emails ride the host's email feed (`coop/world/sky_sync`)
 `[RD]`. The alien sounds are replayed: three unseen walkers circle each machine's own player with
-alien noises, so each peer hears its own `[RD]`.
+alien noises, so each peer hears its own `[RD]`. Four more rows are replayed because their effect is
+each player's own: the ariral ship (0.10.0) is a level-placed apparition that fades in and fades out
+once the local camera has seen it, so each peer gets its own sighting, and the sixteen emails its
+fade-out mails are the host's, a client's own fade-out finish refused; bedEvent and treehouseSleep mint
+a save actor that waits for its machine's wake-up and teleports that machine's player (bedEvent first
+sets the bed to its own transform, the same on every peer); and the oil special leaves one grime decal
+at each of seven fixed traced spots once unseen, the same spots on every peer, so the grime lane
+keys each by position `[RD]`. The prank specials that throw props (the food, the drives, the poison
+food, the cookie and bomb boxes, the bego spikeballs) and arirBuster's crates, lamp and notebook
+ride the prop lane; the overlap-armed pranks (the trash piles, the vaccine, the gas cans, the hill
+roller, the alien jump) throw theirs when any pawn on the host, a puppet included, walks into their
+box; atvFuel's and atvFix's fuel and health ride the ATV condition lane, and atvExplode's trap the ATV
+stamp `[RD]`.
 
 ### The actors an event flies in
 
@@ -175,8 +187,11 @@ capsule), so the pose drive alone moves it `[V]`. A heading
 that lives outside the actor's rotation streams as an auxiliary yaw. The eventer's own spawns cross
 the same way, through its row of the source-gated catch: the vent crawler and the egger, the
 knocker in the vent, the morning UFO, the Rozital mothership and the falling body and car
-droppers, and the arirFollower event's follower crosses on the character lane through its spawner's
-row `[RD]`. The mothership flies a part of itself across the sky from its own tick, so its mirror
+droppers and graystank's tank or pig dropper, and the arirFollower event's follower crosses on the
+character lane through its spawner's row `[RD]`. boarwar's controller (`boarInvasion_C`) has its own row:
+its two ariral shooters, minted a minute and two minutes in, cross on the character lane, and the
+boars it throws are props on the prop lane; its four closing fire tanks and the level UFO shader it
+lights stay the host's `[RD]`. The mothership flies a part of itself across the sky from its own tick, so its mirror
 keeps that tick, which changes nothing shared; a dropper's mirror still shows its saucer's descent
 on a player's walk-in, but its dropped prop and its kerfur kill are the host's and refused on a
 client (`coop/world/spawn_authority`) `[RD]`.
@@ -306,6 +321,9 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | The deer, hexahive, walking-tree, dirt-hole, beehive, flora and mannequin spawners are not refused on a client, so each peer rolls its own; the host's walking mannequin still crosses to clients as a prop, and the client's copy grows a brain of its own | `[V]` no row of `coop/world/spawn_authority` names them; the table in `docs/npcs-and-kerfur.md`, "Which spawners a client refuses"; the walker's crossing was measured on the rig: one key on both peers, `pawn=1` on both |
 | Rain falls inside the base for a player standing indoors, the host included: the game's own effect, the same in single player. The rain emitter follows the player's camera and spawns its drops around it, below the roof's rain-collision mesh, which stops only drops falling onto it from above | `[V]` `coop/world/weather_rain` never moves the emitter or the camera; `[RD]` the decompiled day-night cycle's emitter move |
 | Trigger-volume fires (a bed event, a scare a player walks into) run per peer, as the single-player design intends | `[V]` by design, not a gap |
+| Host-only event scenes: soltoClean (its cleaner teleports the ATV, jams three doors and throws a sponge on a player's overlap, so a mirror needs a presentation relay first), rozitalHole (its controller's walk-in mints the hole's room, device and kavotia patrol, none with a lane), dreambase (`dreamer_dreambase_C` is unread), the obelisk (its level trigger's class is unread), salt, and boarwar's fire tanks and UFO shader (a fire tank mirror would arm five AI timers no row refuses) | `[RD]` `coop/world/event_fire_policy`, the bodies read from the 0.10.0 bytecode capture |
+| rockThrow's rock throwers aim at `getPlayerPawn(0)`, the host's player, and the alien jump at the host's camera: a client in their box is not targeted, though what they throw crosses as props | `[RD]` `rockThrower_C`, `alienJump_C` |
+| The arirShip, bedEvent, treehouseSleep and oil replays have not been seen in a play session yet; the sleep rows need a sleep and a wake on each peer | `[RD]` `coop/world/event_fire_policy` |
 | A client sees no church herbs and cannot pick them (the herbs are spawned inside the church's graph and no lane carries them yet); the striking client gets no camera turn or slow motion of its own | `[RD]` `coop/world/church_sync`; needs a plant lane and a per-striker cue |
 | The eventer's world actors (the knocker, the morning UFO, the mothership, the droppers) and the arirFollower event's follower have not been seen crossing in a play session yet. A joiner's mothership mirror restarts its flight from the beginning (its progress is not on the wire), and a morning UFO or a dropper shows on a peer only once a player, or a puppet, walks into it there | `[RD]` `coop/creatures/npc_world_enum`, `coop/world/world_actor_mirror` |
 | The UK ships' shots, a crashed ship's wreck and crater, and the calvine saucer's fall are not mirrored: the host's run only | `[RD]` `coop/world/spawn_authority` refuses them on a client; the wreck's and crater's base classes are unverified |

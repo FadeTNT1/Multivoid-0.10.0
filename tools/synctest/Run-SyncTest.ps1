@@ -263,7 +263,12 @@ try {
             Write-Command client "$tag|$($case.Name)"
             Wait-Log $peers.client.Log "synctest: BEGIN id=$tag " 15
             Write-Command host "$tag|$($case.Name)"
-            $caseSeconds = if ($case.Name -eq 'earthTp') { [Math]::Max(120,$ObserveSeconds) } else { $ObserveSeconds }
+            # earthTp's sequence runs two minutes; boarwar's first ariral shooter is minted 60 s in.
+            $caseSeconds = switch ($case.Name) {
+                'earthTp' { [Math]::Max(120,$ObserveSeconds) }
+                'boarwar' { [Math]::Max(75,$ObserveSeconds) }
+                default { $ObserveSeconds }
+            }
             $deadline = [DateTime]::UtcNow.AddSeconds($caseSeconds)
             do { Check-Peers; Start-Sleep -Milliseconds 500 } while ([DateTime]::UtcNow -lt $deadline)
             $h = (Read-Log $peers.host.Log).Substring($hBefore)

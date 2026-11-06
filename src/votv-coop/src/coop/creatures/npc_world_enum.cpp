@@ -156,12 +156,14 @@ struct ExSpawnSource {
     const wchar_t* cls;
     const wchar_t* const* outputs;   // null-terminated; null: any allowlisted output
 };
-// The world actors are ventKnocker's, morningGay's, borgRozital's and the fallbody / fallcar droppers'
-// (a dropper's kerfur kill and prop drop are refused on a client in spawn_authority).
+// The world actors are ventKnocker's, morningGay's, borgRozital's, the fallbody / fallcar droppers' and
+// graystank's tank or pig dropper (a dropper's kerfur kill and prop drop are refused on a client in
+// spawn_authority, and its generator break by the power grid).
 constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
                                               P::name::KockerClass, P::name::MorningUfoClass,
                                               P::name::RozitBorgClass, P::name::UfoDropperBodyClass,
-                                              P::name::UfoDropperCarClass, nullptr};
+                                              P::name::UfoDropperCarClass, P::name::UfoDropperTankClass,
+                                              P::name::UfoDropperPigClass, nullptr};
 // The gamemode mints many classes besides these, and most of its other spawners are not refused on a client yet,
 // so its source is narrowed to the two outputs of the night roll (mainGamemode_C::CustomEvent_5, an Octa or a
 // night egg), whose client roll the spawn authority refuses.
@@ -170,6 +172,8 @@ constexpr const wchar_t* kUfoKnobOutputs[] = {P::name::UfoKnobClass, nullptr};
 constexpr const wchar_t* kUfoUkOutputs[] = {P::name::UfoUkClass, P::name::UfoUkEnemyClass, nullptr};
 constexpr const wchar_t* kSuperFogOutputs[] = {P::name::HoelUfoClass, nullptr};
 constexpr const wchar_t* kArirFollowerOutputs[] = {P::name::NpcClass_ArirFollower, nullptr};
+// boarwar's shooters only: its grayboar_C props ride the prop lane, and its firetank_C has no parked mirror.
+constexpr const wchar_t* kBoarInvasionOutputs[] = {P::name::NpcClass_AriralShooter, nullptr};
 constexpr ExSpawnSource kExSpawnSources[] = {
     {L"trigger_wispSwarm_C",     nullptr},          // the wisps event swarm
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
@@ -192,6 +196,8 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {P::name::SuperFogClass, kSuperFogOutputs},
     // The arirFollower event: the spawner's runTrigger mints the follower; an npc-lane mirror.
     {P::name::TriggerSpawnFollowingArirClass, kArirFollowerOutputs},
+    // boarwar: the controller the eventer mints throws its boars and, a minute in, mints two ariral shooters.
+    {P::name::BoarInvasionClass, kBoarInvasionOutputs},
 };
 
 // Whether `cls`'s own name is one of `names` (null-terminated). One render, then plain compares.
@@ -285,8 +291,9 @@ void InstallExSpawnCatch() {
         UE_LOGI("npc-sync[ex-spawn]: Func-thunk catch installed on BeginDeferred (source-gated: "
                 "trigger_wispSwarm_C -> wisp_C, piramidSpawner_C -> killerwisp_C + piramid2_C, "
                 "jellyfishPath_C -> jellyfish_C, trigger_eventer_C -> ventCrawler_C + superEgger_C, "
-                "trigger_eventer_C -> kocker_C + morningUfo_C + rozitBorg_C + ufoDropper_body_C + ufoDropper_car_C, "
-                "trigger_spawnFollowingArir_C -> npc_arirFollower_C, "
+                "trigger_eventer_C -> kocker_C + morningUfo_C + rozitBorg_C + ufoDropper_body_C + ufoDropper_car_C + "
+                "ufoDropper_tank_C + ufoDropper_pig_C, "
+                "trigger_spawnFollowingArir_C -> npc_arirFollower_C, boarInvasion_C -> npc_ariral_shooter_C, "
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
                 "mainGamemode_C -> geomOcta_C + eg_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "

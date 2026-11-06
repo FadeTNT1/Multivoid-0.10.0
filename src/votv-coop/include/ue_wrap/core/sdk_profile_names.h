@@ -81,6 +81,8 @@ inline constexpr const wchar_t* SaveSlotPrimitivesDataLegacy    = L"primitivesDa
 // the current name first, so a reader resolves it on either build.
 inline constexpr const wchar_t* GamemodeSaveSlotProp       = L"save_slot";
 inline constexpr const wchar_t* GamemodeSaveSlotPropLegacy = L"saveSlot";
+// mainGamemode_C::car: the world's ATV, the one the atvExplode special sets `trap` on.
+inline constexpr const wchar_t* GamemodeCarProp            = L"car";
 
 // The per-item save record struct (a BP UserDefinedStruct): struct_save1 on 0.10.0, struct_save
 // before. Its layout is MEASURED through reflection (ue_wrap/actors/save_record); the names are only
@@ -226,7 +228,8 @@ inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcA
 inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     L"ufoDropper_body_C",          // ufoDropper delivery saucer body (the gray "drop pod")
     L"ufoDropper_car_C",           // ufoDropper car variant
-    L"ufoDropper_tank_C",          // ufoDropper tank variant
+    L"ufoDropper_tank_C",          // ufoDropper tank variant (graystank with the eventer's `combat` set)
+    L"ufoDropper_pig_C",           // ufoDropper pig variant (graystank otherwise)
     L"rozitBorg_C",                // Rozital mothership (borgRozital event)
     L"arirShip_C",                 // ariral ship
     L"skyUfo_C",                   // high-altitude sky UFO
@@ -272,6 +275,18 @@ inline constexpr const wchar_t* MorningUfoClass     = L"morningUfo_C";
 inline constexpr const wchar_t* RozitBorgClass      = L"rozitBorg_C";
 inline constexpr const wchar_t* UfoDropperBodyClass = L"ufoDropper_body_C";
 inline constexpr const wchar_t* UfoDropperCarClass  = L"ufoDropper_car_C";
+// graystank's droppers (runEvent('graystank'): the tank when the eventer's `combat` is set, else the pig).
+// Both are ufoDropper_C children whose BeginPlay runs the parent's and then breaks generator 0: on a
+// client mirror the parent's kerfur kill and drop are refused (spawn_authority) and the break is the
+// power grid's to refuse (coop/world/power_grid), so a mirror is the saucer alone.
+inline constexpr const wchar_t* UfoDropperTankClass = L"ufoDropper_tank_C";
+inline constexpr const wchar_t* UfoDropperPigClass  = L"ufoDropper_pig_C";
+// boarwar's controller (runEvent('boarwar') mints it above the treehouse): its ubergraph throws grayboar_C
+// props (the prop lane carries them), mints two npc_ariral_shooter_C 60 s and 120 s in, and four firetank_C
+// once the boars are spent, all under EX_CallMath, so its creatures cross only through its source row in
+// npc_world_enum. The firetanks stay out of that row: a firetank_C mirror's BeginPlay arms five AI timers
+// (update, senseupdate, fire, speak, makehealthnoise) that no row refuses yet.
+inline constexpr const wchar_t* BoarInvasionClass = L"boarInvasion_C";
 // The arirFollower event's spawner: runTrigger mints npc_arirFollower_C at its own transform
 // (EX_CallMath), so the npc lane sees it only through a source row.
 inline constexpr const wchar_t* TriggerSpawnFollowingArirClass = L"trigger_spawnFollowingArir_C";
