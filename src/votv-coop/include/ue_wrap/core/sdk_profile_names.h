@@ -1380,6 +1380,8 @@ inline constexpr const wchar_t* AddLocalRotationFn = L"K2_AddLocalRotation";
 // (what the look follows), `empty` (the tipped-over / nothing-in-it flag the tap's tick clears) and its no-arg upd().
 inline constexpr const wchar_t* SinkClass = L"sink_C";
 inline constexpr const wchar_t* ShowerClass = L"prop_shower_C";
+// The toilet has the same `clean` and upd(); unlike the other two its own graph also lowers `clean` (use dirties it).
+inline constexpr const wchar_t* ToiletClass = L"toilet_C";
 inline constexpr const wchar_t* BucketClass = L"prop_bucket_C";
 inline constexpr const wchar_t* SurfaceCleanProp = L"clean";
 inline constexpr const wchar_t* SurfaceUpdFn = L"upd";

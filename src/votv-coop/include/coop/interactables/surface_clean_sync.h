@@ -1,5 +1,5 @@
-// coop/interactables/surface_clean_sync.h -- the dirt of the kitchen sink and the shower cubicle (sink_C /
-// prop_shower_C `clean`, 0 filthy .. 1 spotless), on ReliableKind::SurfaceCleanState. Gameplay/network layer
+// coop/interactables/surface_clean_sync.h -- the dirt of the kitchen sink, the shower cubicle and the toilet
+// (sink_C / prop_shower_C / toilet_C `clean`, 0 filthy .. 1 spotless), on ReliableKind::SurfaceCleanState. Gameplay/network layer
 // (principle 7): the wire, the sponge watch, the apply, the Key->actor index, the deferred retry and the connect
 // snapshot; the engine is reached only through ue_wrap::surface_clean.
 //
@@ -14,7 +14,9 @@
 // cleanSponge -- so it plays no sound, moves no wipe cursor and credits no advancement, and is never heard back as a
 // wipe. The host's relay carries a client's wipe to the other clients. When a joiner's world is ready the host sends
 // each surface's current value with adopt=1, applied AS SENT so the joiner takes the host's world even where its own
-// save was dirtier or cleaner -- which is why an adopt counts only from the host.
+// save was dirtier or cleaner -- which is why an adopt counts only from the host. Known limit: the toilet's own
+// graph lowers `clean` when it is used, on the peer where that runs; a max register does not carry that, so a used
+// toilet shows dirtier there until a wipe, and a joiner takes the host's.
 
 #pragma once
 

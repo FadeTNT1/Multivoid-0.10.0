@@ -26,7 +26,7 @@ struct Desc {
     bool           resolved = false;
     bool           unusable = false;
 };
-Desc g_descs[] = {{P::name::SinkClass, {}}, {P::name::ShowerClass, {}}};
+Desc g_descs[] = {{P::name::SinkClass, {}}, {P::name::ShowerClass, {}}, {P::name::ToiletClass, {}}};
 constexpr int kNum = sizeof(g_descs) / sizeof(g_descs[0]);
 
 void* ClassFor(Desc& d) {
