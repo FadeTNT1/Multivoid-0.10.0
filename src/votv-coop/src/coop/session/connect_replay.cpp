@@ -27,7 +27,7 @@
 #include "coop/interactables/portable_pc_lid.h"  // the portable PC's lid lane
 #include "coop/interactables/floppy_slot_sync.h"
 #include "coop/interactables/floppybox_sync.h"  // the disc crate LIFO lane
-#include "coop/props/container_contents_sync.h"  // the world-container GObjStack slice
+#include "coop/props/storage_contents.h"  // every world storage's contents
 #include "coop/interactables/signal_catch_sync.h"
 #include "coop/interactables/signal_sync.h"
 #include "coop/player/hand_item.h"  // hotbar hand-item display axis (connect replay)
@@ -135,7 +135,7 @@ void ConnectReplayForSlot(int slot) {
     coop::laptop_tab::QueueConnectBroadcastForSlot(slot);  // the tab the PC's user is on
     coop::portable_pc_lid::QueueConnectBroadcastForSlot(slot);  // every open portable PC lid
     coop::floppybox_sync::QueueConnectBroadcastForSlot(slot);  // one canonical per live box
-    coop::props::container_contents_sync::QueueConnectBroadcastForSlot(slot);  // one slice per live world container (principle 8 anchor over the join snapshot)
+    coop::props::storage_contents::QueueConnectBroadcastForSlot(slot);  // every world storage's rows, the empty ones too (principle 8 anchor over the join snapshot)
     coop::dish_sync::QueueConnectBroadcastForSlot(slot);  // the dish snapshot -- AFTER the desk rows + the catch seed (same ordered lane)
     coop::download_arm_sync::QueueConnectArmForSlot(slot);  // an armed machine's ARM row, after the catch's seed and the dish snapshot
     coop::dish_calib_sync::QueueConnectBroadcastForSlot(slot);  // every dish's precision, the joiner's seed

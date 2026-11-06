@@ -42,7 +42,8 @@
 #include "coop/interactables/floppybox_sync.h"  // the disc crate LIFO lane
 #include "coop/props/container_birth.h"
 #include "coop/props/prop_key_index.h"  // Begin/End at the gate hold
-#include "coop/props/container_contents_sync.h"  // the world-container GObjStack slice
+#include "coop/props/storage_contents.h"  // a world storage's contents, published by the host
+#include "coop/props/storage_act.h"  // a client's transfer with a world storage, asked of the host
 #include "coop/props/container_view_close.h"  // a view into a container ends where the player's reach does
 #include "coop/props/prop_food_state.h"  // the food family's live state and who authors it
 #include "coop/props/prop_record_refresh.h"  // a drive box or reel case republishes its record in place
@@ -77,8 +78,6 @@
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/props/fire_extinguisher_sync.h"  // a fire extinguisher's burst is the host's, and its record carries it
 #include "coop/props/prop_impact_fx.h"  // a container's hit, damage and break cues on every peer
-#include "coop/props/container_act_host.h"  // a client's take of a record out of a world container, judged and held on the host
-#include "coop/props/container_act_request.h"  // a client's take of a record out of a world container, asked of the host first
 #include "coop/props/prop_act_host.h"  // a client's take or use of a shared prop, judged and committed on the host
 #include "coop/props/prop_act_request.h"  // a client's take or use of a shared prop, asked first and replayed on a grant
 #include "coop/props/prop_spawn_authoring.h"  // a PLAYER's spawn verb vs the world's own spawns
@@ -282,7 +281,7 @@ void Install(coop::net::Session& session) {
     coop::sleepingbag_sync::Install(&session);  // sleepingbag transitions use host-authored prop births
     coop::laptop_buffer_sync::Install(&session);  // the PC buffer quad
     coop::floppybox_sync::Install(&session);  // the disc crate stack
-    coop::props::container_contents_sync::Install(&session);  // container contents
+    coop::props::storage_contents::Install(&session);  // world storages' contents: HOST publishes, CLIENT applies
     coop::props::prop_record_refresh::Install(&session);  // drive box + reel case republish their own record
     coop::props::prop_food_state::Install();  // the food family claims its own live state off the record lane
     coop::desk_cursor_sync::Install(&session);  // coords-panel live-cursor unreliable motion stream (interpolated mirror)
@@ -334,9 +333,8 @@ void Install(coop::net::Session& session) {
     coop::melee_fx::Install(&session);  // BOTH: the swing and held-contact watches make effects; the host judges a client's
     coop::props::fire_extinguisher_sync::Install(&session);  // BOTH: the shoot and extinguishRay watches and the record rules; HOST: its bursts, published
     coop::props::prop_impact_fx::Install(&session);  // HOST: a container's cue, sent before impactDamage's body runs
-    coop::props::container_act_host::Install(&session);  // HOST: the judge of a client's take of a record out of a world container
     coop::prop_act_host::Install(&session);  // HOST: the judge of a client's take or use of a shared prop
-    coop::props::container_act_request::Install(&session);  // the take watch (CLIENT asks the host first); CLIENT: takes its answer and replays a grant
+    coop::props::storage_act::Install(&session);  // CLIENT: a storage's verbs gated, a transfer asked of the host; HOST: judged and held
     coop::prop_act_request::Install(&session);  // the six take-or-use watches (CLIENT asks the host, HOST honours a reservation); CLIENT: the host's answer, and the replay of a grant
     coop::kerfur_menu_input::Install(&session);  // client radial-menu verb detect (InpActEvt_use PRE -- the actionName dispatch is PE-invisible) -> kerfur_command relay
     coop::kerfur_form_assembler::Install(&session);  // script-body gate consumer: watch the two conversion verbs
@@ -384,7 +382,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::sat_console_sync::OnPeerGone(static_cast<uint8_t>(slot));  // its terminal kept, running its command, for its return
     coop::daily_task_sync::OnPeerGone(static_cast<uint8_t>(slot));  // a departed slot is owed no task
     coop::props::container_birth::OnPeerGone(static_cast<uint8_t>(slot));  // a container transfer it had in flight
-    coop::props::container_act_host::OnPeerGone(static_cast<uint8_t>(slot));  // a record it held in escrow goes back
+    coop::props::storage_act::OnPeerGone(static_cast<uint8_t>(slot));  // a row it was taking goes back
     coop::prop_act_host::OnPeerGone(static_cast<uint8_t>(slot));  // a take or use it had reserved
     coop::signal_sync::OnDisconnectSlot(slot);
     coop::email_sync::OnDisconnectSlot(slot);
@@ -465,9 +463,8 @@ DisconnectStats DisconnectAll() {
     coop::melee_fx::OnDisconnect();  // drop the pace and the ids, say the counts
     coop::props::fire_extinguisher_sync::OnDisconnect();  // drop the marked bursts and the replayed set, say the counts
     coop::props::prop_impact_fx::OnDisconnect();  // drop the cue pace, say the counts
-    coop::props::container_act_host::OnDisconnect();  // restore the records held in escrow, drop the tallies and refusals
     coop::prop_act_host::OnDisconnect();  // drop the take-or-use tallies, refusals and reservations
-    coop::props::container_act_request::OnDisconnect();  // drop the pending container act, its expired records and unsent commits
+    coop::props::storage_act::OnDisconnect();  // HOST: the rows being taken go back; CLIENT: the pending act and unsent commits
     coop::prop_act_request::OnDisconnect();  // drop the pending take or use, its latch and its expired records
     coop::kerfur_menu_input::OnDisconnect();  // drop the cached session (the InpActEvt_use observer stays registered)
     coop::prop_stick_sync::OnDisconnect();  // drop commit-pending stick records
@@ -522,7 +519,7 @@ DisconnectStats DisconnectAll() {
     coop::portable_pc_lid::OnDisconnect();
     coop::laptop_buffer_sync::OnDisconnect();  // quad shadow + assembler
     coop::floppybox_sync::OnDisconnect();  // box shadows + taken-ring + canonical retries
-    coop::props::container_contents_sync::OnDisconnect();  // dirty set + retry + parked + assembler
+    coop::props::storage_contents::OnDisconnect();  // revisions, the dirty set, the waiting sets, the assembler
     coop::props::prop_record_refresh::OnDisconnect();  // session release, counters, the drill red's map
     coop::dev::dev_lanes::RearmSelftests();  // [dev] the selftests re-arm for the next session
     coop::desk_cursor_sync::OnDisconnect();
@@ -651,7 +648,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:pc_lid"}; coop::portable_pc_lid::Tick(); }  // the lid's watch until live, then the held lid edges (1 Hz while any)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:laptop_quad"}; coop::laptop_buffer_sync::Tick(); }  // quad int pre-filter poll (4 Hz)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:floppybox"}; coop::floppybox_sync::Tick(); }  // box sweep (1 Hz)
-    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:containerContents"}; coop::props::container_contents_sync::Tick(); }  // edge-driven dirty drain (4 Hz gate)
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:storageContents"}; coop::props::storage_contents::Tick(); }  // HOST: the dirty drain (4 Hz) and the drone read (1 Hz); CLIENT: waiting sets
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:containerView"}; coop::props::container_view_close::Tick(); }  // a client's view into a container, closed out of reach
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:desk_cursor"}; coop::desk_cursor_sync::Tick(); }  // coords-panel live cursor -- holder streams viewCoordinate / mirror interpolates (50ms) + WriteCursorOnly
     { PP::Scope _s{PP::Bucket::Interactable}; coop::desk_ping_sync::Tick(); }  // the ping lane's watches until live
@@ -703,9 +700,8 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::melee_fx::Tick(); }  // the swing and contact watches' settle, a stale swing scope
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::fire_extinguisher_sync::Tick(); }  // the two burst watches' settle; HOST: each burst claimed and its record published
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::prop_impact_fx::Tick(); }  // the cue watch's settle
-    { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::container_act_host::Tick(); }  // HOST: each sender's queued container act, judged and paced; the holds' deadline
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::prop_act_host::Tick(); }  // HOST: each sender's queued take or use, judged and paced
-    { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::container_act_request::Tick(); }  // the take watch's settle; CLIENT: the pending container act's wait bound and the commits to resend
+    { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::storage_act::Tick(); }  // HOST: the holds' deadline; CLIENT: the pending act's wait bound and the commits to resend
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::prop_act_request::Tick(); }  // the take-or-use watches' settle; CLIENT: the pending take or use's wait bound
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::kerfur_convert_host::Tick(); }  // HOST: each sender's queued kerfur conversion, paced
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::prop_stick_sync::Tick(); }  // broadcast recorded stick commits NOW -- must precede local_streams' release edge (net_pump runs TickGameplay first)

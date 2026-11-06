@@ -58,6 +58,7 @@ ALLOWLIST = [
     "src/coop/player/nick_color.cpp",
     "src/coop/player/sleep_sync.cpp",
     "src/coop/props/container_act_request.cpp",
+    "src/coop/props/storage_act_client.cpp",
     "src/coop/props/prop_act_request.cpp",
     "src/coop/props/remover_request.cpp",
     "src/coop/session/player_handshake.cpp",

@@ -95,7 +95,6 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::MeadowOrder:
     case ReliableKind::LaptopQuad:
     case ReliableKind::FloppyBoxState:
-    case ReliableKind::ContainerContents:
     case ReliableKind::CoinGunSell:
     case ReliableKind::CoinCollect:
     case ReliableKind::AuthHello:
@@ -231,6 +230,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::RemoverResult:
     case ReliableKind::PropActReply:
     case ReliableKind::ContainerActReply:
+    case ReliableKind::ContainerContents:
     case ReliableKind::CameraActiveState:
     case ReliableKind::CameraLightState:
     case ReliableKind::LaptopTabState:
