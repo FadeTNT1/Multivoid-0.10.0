@@ -381,6 +381,31 @@ host re-publishes. The far side applies it through the prop's `loadData`, whose 
 the reel case; the drive box's look follows its name, which a record does not carry, so the
 receiver re-derives it from `opened` (`coop/props/prop_record_refresh`).
 
+The drive box's rows are not in the game's own record. Putting a drive in copies the drive's
+`data_0` into the box's `drives[i]` and sets `drives_in[i]`; 0.10.0's `getData` and `loadData` carry
+the occupancy (the bools) and the lid, and the level and the zip text, and no rows, and the record
+struct has no `signals` member to put them in. A box that crossed therefore arrived with its slots
+flagged occupied and empty, and the host's sold as empty: the daily task counted no signals, because
+the grader reads boxed rows only (a loose drive sells through the ordinary sell verb whatever it holds).
+The rows now ride the record's flat `signals` sidecar, which the wire already serialises: one row per
+slot in slot order, an unoccupied slot as a blank row (so an emptied box is a sidecar of blanks, and a
+record with no sidecar at all leaves the slots as they are). The capture happens in
+`ue_wrap/actors/save_record` right after the game's `getData`, and only where the running record struct
+has no `signals` member of its own; the apply runs right after `loadData`, which has just set the
+receiver's `drives_in` from the record, and writes the rows into exactly the slots that flag, clears the
+others (a taken drive's row is left behind by the game), and calls `upd()` last so the lights and the
+colour read them (`ue_wrap/actors/drive_bank`; the arithmetic is `drive_bank_rows.h`). The class and the
+two arrays are checked by reflection before anything is read or written (`drives` must be an array of
+the measured signal row at the engine's own element size, `drives_in` an array of bools), and the host,
+which applies a client's record, judges every row first and refuses a bank whole: a row count that is
+not the box's slot count, a level outside 0..3, a non-finite number, an occupied slot with no data, a
+`None` name leaf. The logs are `[DRIVE-BOX] captured N row(s) key=...` and `[DRIVE-BOX] applied N
+row(s) key=...`, each with a line per occupied slot (id, level, quality, template), and a refusal is a
+warning. `[V]` `putDriveIn`, `getData`, `loadData` and `upd` of `prop_box_C` in the bytecode capture;
+`[V]` `.github/ci/drive_bank_rows_drill.py` round-trips distinct ids, templates, levels and qualities,
+occupied and empty slots, stale rows and every refusal through the production record wire; `[?]` the
+sale of a client-filled box on the host in play.
+
 ### Notebook
 
 A notebook's pages are `text` on the prop, which its own `getData` and `loadData` save, so the
@@ -651,6 +676,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
 | a shrimp tray's portions | `coop/props/shrimp_tray_sync`, `ue_wrap/actors/shrimp_tray`, `coop/props/prop_food_state` (the count's carrier) |
+| the drive box's signal rows | `ue_wrap/actors/drive_bank` (the live arrays), `ue_wrap/actors/drive_bank_rows.h` (pack, judge, plan), `ue_wrap/actors/save_record` (the hooks), `coop/items/save_record_wire` (the sidecar) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |
 | the pocket blip | `coop/items/inventory_pickup_sync` |
 | the join | `coop/props/prop_snapshot`, `coop/props/snapshot_census`, `coop/props/join_membership_sweep`, `coop/props/join_sweep_tally`, `coop/props/join_keyed_replay`, `coop/props/unresolved_pose_ledger` |

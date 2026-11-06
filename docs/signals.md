@@ -168,6 +168,15 @@ rename as a delete and an append with the order line that keeps the row in its p
 simulation is host-owned: a client refuses its boxes' break and fix verbs, its player's repair runs
 on the host, and the state comes back as rows (`coop/interactables/serverbox_sync`).
 
+A drive put into a drive box (`prop_box_C`) is stored as a typed row in the box's `drives` array and
+the drive is destroyed, so the box's record is the only place the signal lives, and it is what the
+daily task and the sale read. The record the game files for a box (0.10.0) holds the occupancy and not
+the rows, so the rows ride the record's `signals` sidecar, one per slot, and the receiver writes them
+back into the slots its own `drives_in` flags (see the drive box under "A record that changes in
+place" in [props.md](props.md); `ue_wrap/actors/drive_bank`). The sale grader counts a boxed row with
+data whose id is not in the sold list, per level; a loose drive is not graded that way, so a drive
+selling as "X0001 |Drive| for 1 points" on its own is the ordinary sell and not this lane.
+
 ### The SAT console
 
 A machine has one SAT console terminal, the widget every SAT console panel in the world shows; a
@@ -303,6 +312,7 @@ arrive with the save and never again.
 | The signal camera's trigger runs on each peer, as its arm's `begin` does; the main map's one, the locker looker, watches that peer's own camera and ends that player's game as in single player | `[RD]` `mainGamemode.deleteActiveSignal`, `objectRenderer.begin`, `trigger_lockerLooker`; by design until decided |
 | The desk cursor has degraded to a few frames per second mid-session; two mechanisms were removed, and a warning names an occupancy flap if it recurs | `[?]` `coop/interactables/desk_cursor_sync`; not reproduced since |
 | A level-3 refiner completion's world trigger (the evil's spawn, the rozship's, the deer's) runs on the host alone; a client sees what that object's own lane carries | `[V]` `coop/interactables/comp_sync`: the host is the one simulator; `[?]` each object's lane |
+| The host takes a client's drive-box rows as it takes every other leaf of a client's record: structurally judged (slot count, level, finite numbers, data) and not checked against any drive the host saw go in, so a forged row would be boxed | `[V]` `ue_wrap/actors/drive_bank_rows.h`; by the same trust as the rest of the record |
 | The red phone's ring is per-peer randomness with no lane | `[V]` no lane exists |
 | A client's own write to a drive whose row is still its class default is neither put back nor sent; no client-side writer of such a drive exists in the game (every writer is a verb the host runs, or a drive the client brings in) | `[RD]` the writer census of `prop_drive_C.data_0`; `coop/interactables/drive_payload_sync` |
 | A SAT console command that spawns or destroys a class no lane carries (the rufus, the thiccfus, the llama's soul, the madness, the centipede, the murder kerfur) acts in the host's world only; its typist does not see it | `[V]` no lane exists for those classes |
@@ -318,6 +328,7 @@ arrive with the save and never again.
 | the desk | `coop/interactables/desk_input_sync`, `coop/interactables/desk_sim_sync`, `coop/interactables/desk_ping_sync`, `coop/interactables/desk_cursor_sync`, `coop/interactables/desk_snd_fx`, `coop/interactables/console_state_sync` |
 | signals, the catch, the dishes | `coop/interactables/signal_sync`, `coop/interactables/signal_wire`, `coop/interactables/signal_catch_sync`, `coop/interactables/dish_sync`, `coop/interactables/dish_calib_sync`, `coop/interactables/download_arm_sync` |
 | the deck and the refiner | `coop/interactables/deck_play_sync`, `coop/interactables/comp_sync` |
+| a drive box's rows | `ue_wrap/actors/drive_bank`, `ue_wrap/actors/save_record` |
 | drives, racks, modules, tapes | `coop/interactables/drive_sync`, `coop/interactables/drive_payload_sync`, `coop/interactables/eraser_press_intent`, `coop/interactables/drive_rack_sync`, `coop/interactables/physmods_sync`, `coop/interactables/tape_caddy_sync` |
 | the laptop, the crate, the database, the servers | `coop/interactables/laptop_sync`, `coop/interactables/floppy_slot_sync`, `coop/interactables/laptop_buffer_sync`, `coop/interactables/floppybox_sync`, `coop/interactables/meadow_db_sync`, `coop/interactables/serverbox_sync` |
 | the SAT console | `coop/interactables/sat_console_sync`, `coop/interactables/sat_console_table` |
