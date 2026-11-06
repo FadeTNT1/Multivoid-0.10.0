@@ -778,6 +778,21 @@ inline constexpr const wchar_t* TickerPlayerFlashlightClass = L"ticker_playerFla
 // timeline observers fire without a real E press); ProcessEvent-dispatched.
 inline constexpr const wchar_t* TimelineComponentClass       = L"TimelineComponent";
 inline constexpr const wchar_t* TimelinePlayFromStartFn      = L"PlayFromStart";
+// UTimelineComponent's playback verbs, which the garage's settle drives (ue_wrap/devices/garage):
+// Stop(), IsPlaying() -> bool, GetTimelineLength() / GetPlaybackPosition() -> float, and
+// SetPlaybackPosition(NewPosition, bFireEvents, bFireUpdate), which fires the timeline's update
+// delegate without waiting for a tick.
+inline constexpr const wchar_t* TimelineStopFn               = L"Stop";
+inline constexpr const wchar_t* TimelineIsPlayingFn          = L"IsPlaying";
+inline constexpr const wchar_t* TimelineGetLengthFn          = L"GetTimelineLength";
+inline constexpr const wchar_t* TimelineGetPositionFn        = L"GetPlaybackPosition";
+inline constexpr const wchar_t* TimelineSetPositionFn        = L"SetPlaybackPosition";
+inline constexpr const wchar_t* TimelineNewPositionParam     = L"NewPosition";
+inline constexpr const wchar_t* TimelineFireEventsParam      = L"bFireEvents";
+inline constexpr const wchar_t* TimelineFireUpdateParam      = L"bFireUpdate";
+// garage_C's swing timeline (a UTimelineComponent member named `move`, as door_C's) and its mid-swing flag.
+inline constexpr const wchar_t* GarageMoveTimelineProp       = L"move";
+inline constexpr const wchar_t* GarageMovingProp             = L"mov";
 
 // The Aprop_C BP class name (the prop registry's GUObjectArray scan).
 inline constexpr const wchar_t* PropClass             = L"prop_C";

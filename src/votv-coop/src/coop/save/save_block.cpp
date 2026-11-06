@@ -125,6 +125,12 @@ SG::Verdict OnSavePre(const SG::Call& c) {
 // one it left alone. 0 outside a call. saveToSlot does not nest.
 uint64_t g_saveToSlotStart = 0;
 
+// Which entry the running saveToSlot writes: saveToSlot(asBackup, asAutosave) puts the autosave
+// into autosave.sav of the same folder, from the same save object that owns main.sav. Unknown
+// when the parameter did not resolve; the post then accepts whichever of the two files was written.
+enum class WrittenEntry : uint8_t { Unknown, Main, Autosave };
+WrittenEntry g_saveToSlotEntry = WrittenEntry::Unknown;
+
 uint64_t NowFileTime() {
     FILETIME ft{};
     ::GetSystemTimeAsFileTime(&ft);
@@ -134,38 +140,75 @@ uint64_t NowFileTime() {
 SG::Verdict OnSaveToSlotPre(const SG::Call& c) {
     const SG::Verdict v = OnSavePre(c);
     g_saveToSlotStart = v == SG::Verdict::Run ? NowFileTime() : 0;
+    g_saveToSlotEntry = WrittenEntry::Unknown;
+    if (v == SG::Verdict::Run) {
+        const int32_t autoOff = R::FindParamOffset(c.function, N::MainGamemodeSaveAutosaveParam);
+        if (autoOff >= 0)
+            g_saveToSlotEntry = c.locals[autoOff] != 0 ? WrittenEntry::Autosave : WrittenEntry::Main;
+        else
+            UE_LOGW("save_block: saveToSlot has no '%ls' parameter -- the entry it wrote is read off "
+                    "the files", N::MainGamemodeSaveAutosaveParam);
+    }
     return v;
 }
 
+struct EntryFile {
+    std::wstring path;
+    uint64_t     written = 0;  // FILETIME of its last write
+    uint64_t     bytes = 0;
+    bool         exists = false;
+};
+
+EntryFile StatEntry(void* saveObject, const wchar_t* entry) {
+    EntryFile e;
+    e.path = ue_wrap::world_folder::SaveObjectFile(saveObject, entry);
+    WIN32_FILE_ATTRIBUTE_DATA fa{};
+    if (e.path.empty() || !::GetFileAttributesExW(e.path.c_str(), GetFileExInfoStandard, &fa)) return e;
+    e.exists = true;
+    e.written = (static_cast<uint64_t>(fa.ftLastWriteTime.dwHighDateTime) << 32) | fa.ftLastWriteTime.dwLowDateTime;
+    e.bytes = (static_cast<uint64_t>(fa.nFileSizeHigh) << 32) | fa.nFileSizeLow;
+    return e;
+}
+
+// Rewritten since the call began, and not empty. Two seconds of slack for the file system's
+// timestamp resolution.
+bool Rewritten(const EntryFile& e, uint64_t started) {
+    constexpr uint64_t kSlack = 2ull * 10000000ull;
+    return e.exists && e.bytes != 0 && !(started && e.written + kSlack < started);
+}
+
 // The body returning is not the file being written: saveToSlot's own return value is never assigned
-// by its body, and SaveGameCompressed's result is only printed. The entry file it names is read
-// instead: rewritten since the call began, and not empty.
+// by its body, and SaveGameCompressed's result is only printed. The entry file it wrote is read
+// instead: main.sav, or autosave.sav when the call was an autosave -- rewritten since the call
+// began, and not empty.
 void OnSaveToSlotPost(const SG::Call& c) {
     const uint64_t started = g_saveToSlotStart;
+    const WrittenEntry want = g_saveToSlotEntry;
     g_saveToSlotStart = 0;
+    g_saveToSlotEntry = WrittenEntry::Unknown;
     if (MustNotSave()) return;
-    const std::wstring file = ue_wrap::world_folder::SaveObjectFile(c.object);
-    WIN32_FILE_ATTRIBUTE_DATA fa{};
-    if (file.empty() || !::GetFileAttributesExW(file.c_str(), GetFileExInfoStandard, &fa)) {
-        UE_LOGE("save_block: saveToSlot on %p returned but its file '%ls' %s -- not counted as a world save",
-                c.object, file.empty() ? L"<unresolved>" : file.c_str(), file.empty() ? "is not named" : "does not exist");
+    const EntryFile mainFile = StatEntry(c.object, N::WorldEntryMain);
+    const EntryFile autoFile = StatEntry(c.object, N::WorldEntryAutosave);
+    bool autosave = want == WrittenEntry::Autosave;
+    if (want == WrittenEntry::Unknown) autosave = !Rewritten(mainFile, started) && Rewritten(autoFile, started);
+    const EntryFile& e = autosave ? autoFile : mainFile;
+    if (e.path.empty() || !e.exists) {
+        UE_LOGE("save_block: saveToSlot on %p returned but its %ls file '%ls' %s -- not counted as a world save",
+                c.object, autosave ? N::WorldEntryAutosave : N::WorldEntryMain,
+                e.path.empty() ? L"<unresolved>" : e.path.c_str(), e.path.empty() ? "is not named" : "does not exist");
         return;
     }
-    const uint64_t written = (static_cast<uint64_t>(fa.ftLastWriteTime.dwHighDateTime) << 32) |
-                             fa.ftLastWriteTime.dwLowDateTime;
-    const uint64_t bytes = (static_cast<uint64_t>(fa.nFileSizeHigh) << 32) | fa.nFileSizeLow;
-    // Two seconds of slack for the file system's timestamp resolution.
-    constexpr uint64_t kSlack = 2ull * 10000000ull;
-    if (bytes == 0 || (started && written + kSlack < started)) {
+    if (!Rewritten(e, started)) {
         UE_LOGE("save_block: saveToSlot on %p returned but '%ls' was not rewritten (%llu bytes, last written "
-                "%llu ms before the call) -- not counted as a world save", c.object, file.c_str(),
-                static_cast<unsigned long long>(bytes),
-                static_cast<unsigned long long>(started > written ? (started - written) / 10000ull : 0ull));
+                "%llu ms before the call) -- not counted as a world save", c.object, e.path.c_str(),
+                static_cast<unsigned long long>(e.bytes),
+                static_cast<unsigned long long>(started > e.written ? (started - e.written) / 10000ull : 0ull));
         return;
     }
-    UE_LOGI("save_block: world save written -- '%ls' (%llu bytes)", file.c_str(),
-            static_cast<unsigned long long>(bytes));
-    if (g_written) g_written(c.object);
+    UE_LOGI("save_block: world save written -- %ls entry '%ls' (%llu bytes)",
+            autosave ? N::WorldEntryAutosave : N::WorldEntryMain, e.path.c_str(),
+            static_cast<unsigned long long>(e.bytes));
+    if (g_written) g_written(c.object, autosave);
 }
 
 // The gate on the engine's SaveGameToSlot (ue_wrap/engine/save_to_slot_hook): a flat-slot write of

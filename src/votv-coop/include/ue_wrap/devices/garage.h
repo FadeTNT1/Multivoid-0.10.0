@@ -46,6 +46,24 @@ bool TryReadOpen(void* g, bool& open);
 // and runs on. Must run on the game thread. False on null or an unresolved UFunction.
 bool ApplyOpen(void* g, bool open);
 
+// What NormalizeOpen found and did.
+enum class Settled : uint8_t {
+    Unavailable,  // the timeline (or one of its verbs) did not resolve: nothing was moved
+    Already,      // at rest, flag and timeline agree
+    Busy,         // mid-swing (`mov` or the timeline playing): left to finish
+    Snapped,      // at rest but off its end: the timeline put at the end `open` names, its update fired
+};
+
+// Reconcile a garage that is AT REST with `open`, for a load or a join snapshot: the `Open` flag alone
+// agreeing is not enough, because the native settime jumps the timeline and a load can leave Open=true
+// with the move timeline (and so the mesh) at its closed end, after which the next press animates the
+// wrong way. Unless the door is mid-swing, writes Open := open, stops the move timeline and puts it at
+// its far end (the full length when open, 0 when closed -- acivae plays forward for open, as door_C's
+// dir 0 does) with its update fired, so the mesh lands, and clears `mov`. Never touches a door that is
+// swinging, so a live toggle's echo cannot cut an animation short. `before` / `after` (optional)
+// receive the timeline position read before and after. Game thread.
+Settled NormalizeOpen(void* g, bool open, float* before = nullptr, float* after = nullptr);
+
 // Whether the garage is mid-swing, its `mov`: its runTrigger ignores a call then. False if the read
 // could not be made (null, or the field did not resolve). Game thread.
 bool TryReadMoving(void* g, bool& moving);

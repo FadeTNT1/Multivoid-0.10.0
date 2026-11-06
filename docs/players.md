@@ -223,8 +223,10 @@ item twice after a host restart, and an older one would lose it. A host that qui
 saving takes its players' profiles back to its last save together with its world. The copy that
 is written is the one taken when the game gathered the world into its save object, which during
 a game event is not the moment of the save (see [join.md](join.md), the save transfer). The
-profiles are keyed by the file the world is in: they stand under `coop_players/<save slot>/` in the
-mod's own folder (`Mods\Multivoid`), and one world is written under more than one name: a quicksave writes a new subsave file,
+profiles are keyed by the file the world is in: they stand under `coop_players/<folder>/` for a world's main entry and
+`coop_players/<folder>/autosave/` for its autosave in the mod's own folder (`Mods\Multivoid`), each cut beside the file
+that was written, so reloading main gives main's profiles and not the autosave's. An autosave with no directory of its own
+yet (a world saved by an older build, which shared one) reads the folder's set read-only until its first save seeds one. And one world is written under more than one name: a quicksave writes a new subsave file,
 and a plain save made after loading a subsave writes the main slot, so a save to another slot
 first copies the whole set beside that file. A profile reaches the host up to a second after the
 pickup it reports, so a save inside that second holds a profile one pickup behind its world. That identity is

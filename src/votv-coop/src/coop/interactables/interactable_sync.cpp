@@ -135,6 +135,17 @@ const Adapter g_garageAdapter = {
     &ue_wrap::garage::GetNameKey,
     &ue_wrap::garage::TryReadOpen,
     [](void* a, bool on) -> bool { return ue_wrap::garage::ApplyOpen(a, on); },
+    nullptr, nullptr, nullptr, nullptr,  // no per-tick apply, own resolve count, probe describe or portable key
+    // A garage at rest is brought to the end its Open names even when the flag already matches: a load can
+    // leave Open set with the move timeline (and the mesh) at the other end.
+    [](void* a, bool on) -> bool {
+        float before = 0.f, after = 0.f;
+        if (ue_wrap::garage::NormalizeOpen(a, on, &before, &after) != ue_wrap::garage::Settled::Snapped)
+            return false;
+        UE_LOGI("garage: '%ls' settled to %s -- Open already matched but its move timeline stood at %.2f s, "
+                "now %.2f s", ue_wrap::garage::GetNameKey(a).c_str(), on ? "OPEN" : "CLOSED", before, after);
+        return true;
+    },
 };
 // The appliance family (six Aactor_save_C descendants: faucet, sink, shower, kitchen oven,
 // serverBox, wall-unit tapes), symmetric single-bool toggles with no auto-revert. One adapter:

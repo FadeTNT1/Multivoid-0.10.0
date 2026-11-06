@@ -133,6 +133,16 @@ bool Capture(void* player, std::vector<uint8_t>& out) {
     f.GetRaw(fn->params[2].name.c_str(), &bytes, sizeof(bytes));
     if (bytes.data && bytes.num > 0) out.assign(bytes.data, bytes.data + bytes.num);
     if (bytes.data) R::EngineFree(bytes.data);  // the native allocated it into our frame
+    // The native ran but produced nothing: not an inventory (even an empty one serialises its own
+    // header), so it is a failed capture, never a profile that holds no items -- that would be
+    // published over the stored one and restored as a wipe.
+    if (out.empty()) {
+        static uint32_t s_zero = 0;
+        if (++s_zero <= 3 || s_zero % 60 == 0)
+            UE_LOGW("inventory_component: the native capture of %p returned zero bytes (#%u) -- treated as "
+                    "a failed capture, nothing is published", comp, s_zero);
+        return false;
+    }
     return true;
 }
 

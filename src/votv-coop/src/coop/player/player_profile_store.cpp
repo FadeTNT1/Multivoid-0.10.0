@@ -10,6 +10,8 @@
 #include "coop/text/utf8_codec.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"
+#include "ue_wrap/core/sdk_profile_names.h"  // the world entries' names
+#include "ue_wrap/engine/world_folder.h"      // SplitKey, MakeKey
 
 #include <algorithm>
 #include <chrono>
@@ -61,30 +63,63 @@ void DropHeldOfAnotherWorld() {
     g_heldForSerial = serial;
 }
 
-// <mod data dir>/coop_players/<slot>, empty if a piece is missing. The slot name is the game's and
-// becomes ONE path component, so a name that could be more than one is refused. A world key names
-// its folder first ("<folder>/autosave", ue_wrap/engine/world_folder): the players belong to the
-// world, so both of its entries share the folder's directory.
+// <mod data dir>/coop_players/<folder> for a world's main entry and
+// <mod data dir>/coop_players/<folder>/autosave for its autosave, empty if a piece is missing. The
+// key is a world key ("<folder>" or "<folder>/autosave", ue_wrap/engine/world_folder). Each entry
+// holds the profiles that were cut beside ITS file: main.sav and autosave.sav are two moments of
+// the world, so a player loading one must get the items of that moment, not of the other's. The
+// folder becomes ONE path component, so a name that could be more than one is refused; the
+// autosave's directory sits inside the main's, which only ever lists regular <guid>.json files.
 fs::path SlotDir(const std::wstring& key) {
-    const std::wstring slot = key.substr(0, key.find(L'/'));
-    if (slot.empty() || slot == L"." || slot == L".." ||
-        slot.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos)
+    std::wstring slot, entry;
+    if (!ue_wrap::world_folder::SplitKey(key, slot, entry)) return {};
+    if (slot == L"." || slot == L".." || slot.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos)
         return {};
     const std::wstring base = ue_wrap::paths::ModDataDir();
     if (base.empty()) return {};
-    return fs::path(base) / L"coop_players" / slot;
+    fs::path dir = fs::path(base) / L"coop_players" / slot;
+    if (entry == ue_wrap::profile::name::WorldEntryAutosave) dir /= entry;
+    return dir;
+}
+
+bool IsAutosaveKey(const std::wstring& key) {
+    std::wstring folder, entry;
+    return ue_wrap::world_folder::SplitKey(key, folder, entry) &&
+           entry == ue_wrap::profile::name::WorldEntryAutosave;
+}
+
+// The directory a set is READ from. An autosave key whose own directory does not exist yet is a
+// world saved by a build that kept one set per folder: its profiles are the shared directory's, read
+// from there (never written to) until the first save of the autosave seeds its own (CutToDisk).
+fs::path ReadDir(const std::wstring& key) {
+    const fs::path dir = SlotDir(key);
+    if (dir.empty() || !IsAutosaveKey(key)) return dir;
+    std::error_code ec;
+    if (fs::is_directory(dir, ec)) return dir;
+    std::wstring folder, entry;
+    ue_wrap::world_folder::SplitKey(key, folder, entry);
+    const fs::path shared = SlotDir(folder);
+    if (shared.empty() || !fs::is_directory(shared, ec)) return dir;
+    static std::unordered_set<std::wstring> sTold;
+    if (sTold.insert(key).second)
+        UE_LOGI("player_profile: '%ls' has no profile set of its own yet -- reading the folder's shared "
+                "set at '%ls' (read-only) until its first save writes one", key.c_str(), shared.c_str());
+    return shared;
 }
 
 // <mod data dir>/coop_players/<the set's slot>/<guid>.json, empty if any piece is missing.
-fs::path PlayerFilePath(const std::string& guid) {
+fs::path PlayerFilePathIn(const fs::path& dir, const std::string& guid) {
     // Defence in depth (the wire boundary already validates): a GUID that is not exactly 32 hex
     // characters never becomes a path component; an empty path makes every write no-op, so a
     // non-hex GUID cannot traverse.
     if (!coop::player_handshake::IsValidGuid(guid)) return {};
-    const fs::path dir = SlotDir(g_setSlot);
     if (dir.empty()) return {};
     return dir / (std::wstring(guid.begin(), guid.end()) + L".json");
 }
+
+// Where the set is written, and where it is read.
+fs::path PlayerFilePath(const std::string& guid) { return PlayerFilePathIn(SlotDir(g_setSlot), guid); }
+fs::path PlayerReadPath(const std::string& guid) { return PlayerFilePathIn(ReadDir(g_setSlot), guid); }
 
 // Is this one of the set's files: <32 hex>.json, or the .bak of one?
 bool IsProfileFile(const fs::path& file) {
@@ -189,7 +224,7 @@ bool ParseBlobFile(const fs::path& file, std::vector<uint8_t>& outBlob) {
 }
 
 bool ReadFile(const std::string& guid, std::vector<uint8_t>& outBlob) {
-    const fs::path file = PlayerFilePath(guid);
+    const fs::path file = PlayerReadPath(guid);
     if (file.empty()) return false;
     if (ParseBlobFile(file, outBlob)) return true;
     const fs::path bak = fs::path(file).concat(L".bak");
@@ -246,7 +281,13 @@ bool WriteFile(const std::string& guid, const std::vector<uint8_t>& blob, const 
 // the lineage is unknown too, so the directory beside the written file is taken as it stands; a
 // save the host picker creates is cleared where it is created (ForgetSlot).
 bool FollowWrittenSlot(const std::wstring& written) {
-    if (written == g_setSlot) return true;
+    if (written == g_setSlot) {
+        // An autosave that was loaded from a folder's shared set has no directory of its own yet:
+        // its first cut seeds one from the shared set, so the profiles it was not handed again are
+        // not left behind in a directory that now holds only the changed ones.
+        const fs::path own = SlotDir(written);
+        if (own.empty() || ReadDir(written) == own) return true;
+    }
     const fs::path to = SlotDir(written);
     std::error_code ec;
     if (!to.empty()) fs::create_directories(to, ec);
@@ -262,7 +303,7 @@ bool FollowWrittenSlot(const std::wstring& written) {
         g_setSlot = written;
         return true;
     }
-    const fs::path from = SlotDir(g_setSlot);
+    const fs::path from = ReadDir(g_setSlot);
     const fs::file_type fromIs = from.empty() ? fs::file_type::not_found : fs::status(from, ec).type();
     if (fromIs != fs::file_type::directory && fromIs != fs::file_type::not_found) {
         UE_LOGE("player_profile: '%ls' could not be asked about (%s) -- nothing cut, everything "
@@ -361,7 +402,7 @@ Found Get(const std::string& guid, std::vector<uint8_t>& outBlob) {
     const auto it = g_held.find(guid);
     if (it != g_held.end()) { outBlob = it->second.blob; return Found::Yes; }
     if (ReadFile(guid, outBlob)) return Found::Yes;
-    const fs::path file = PlayerFilePath(guid);
+    const fs::path file = PlayerReadPath(guid);
     std::error_code ec;
     const bool onDisk = !file.empty() &&
                         (fs::exists(file, ec) || fs::exists(fs::path(file).concat(L".bak"), ec));
@@ -382,15 +423,20 @@ void NoteLegacyFolder() {
 }
 
 size_t ForgetSlot(const std::wstring& slot) {
-    const fs::path dir = SlotDir(slot);
+    // A world's two entries each hold a set (SlotDir), and a deleted world leaves both.
+    std::wstring folder, entry;
+    if (!ue_wrap::world_folder::SplitKey(slot, folder, entry)) return 0;
     size_t removed = 0;
     std::error_code ec;
-    // A listing cut short still names files that are there, and every one of them is a stranger
-    // to a save that was just created: what it did list goes.
-    std::vector<fs::path> files;
-    if (!dir.empty() && fs::is_directory(dir, ec)) ProfileFilesIn(dir, files);
-    for (const fs::path& file : files)
-        if (fs::remove(file, ec)) ++removed;
+    for (const wchar_t* e : {ue_wrap::profile::name::WorldEntryMain, ue_wrap::profile::name::WorldEntryAutosave}) {
+        const fs::path dir = SlotDir(ue_wrap::world_folder::MakeKey(folder, e));
+        // A listing cut short still names files that are there, and every one of them is a stranger
+        // to a save that was just created: what it did list goes.
+        std::vector<fs::path> files;
+        if (!dir.empty() && fs::is_directory(dir, ec)) ProfileFilesIn(dir, files);
+        for (const fs::path& file : files)
+            if (fs::remove(file, ec)) ++removed;
+    }
     if (removed)
         UE_LOGI("player_profile: the save '%ls' is new -- %zu profile file(s) a deleted save of that "
                 "name had left beside it removed", slot.c_str(), removed);

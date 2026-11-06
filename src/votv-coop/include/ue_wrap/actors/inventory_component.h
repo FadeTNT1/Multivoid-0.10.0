@@ -21,7 +21,8 @@ namespace ue_wrap::inventory_component {
 void* Of(void* player);
 
 // The component as the game's own save serializes it. False when the component or the natives do
-// not resolve.
+// not resolve, and when the native hands back zero bytes: that is a failed capture, not an
+// inventory that holds nothing, so a caller never publishes it over a stored profile.
 bool Capture(void* player, std::vector<uint8_t>& out);
 
 // Replace what the player carries, holds and wears with `bytes` (a Capture): the three item arrays

@@ -19,6 +19,7 @@
 #include "ue_wrap/actors/vitals.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/sdk_profile_names.h"  // the start point
+#include "ue_wrap/engine/world_folder.h"  // the world key of the entry written
 #include "ue_wrap/engine/save_capture.h"  // the moment the world is gathered into the save object
 #include "coop/save/save_block.h"  // the moment the host's world is saved
 #include "coop/save/save_transfer.h"  // the hosted world's key
@@ -112,6 +113,9 @@ bool g_subAfterLoad = false;  // the join's loadObjects returned with no local p
 // if that load does come late in the same world appearance, until this moment.
 Clock::time_point g_subRepeatUntil{};
 bool g_subFromProfile = false;
+// The host's profile said "this player's items" and carried none: not an inventory to put in, and
+// emptying the player for it would be a wipe. The substitution is skipped and the stream stays shut.
+bool g_subRefuseEmpty = false;
 std::vector<uint8_t> g_subBytes;
 // Client: 0.10.0 keeps health, food, sleep, coffee and gasoline on the pawn, which does not exist
 // when the save object is prepared. The numbers wait here and are applied once, when the local
@@ -285,6 +289,7 @@ void OnSaveObjectReady(void* saveSlotObject) {
     // loads into its inventory component (OnPlayerLoaded). With no profile the host's are emptied.
     g_subPending = true;
     g_subFromProfile = false;
+    g_subRefuseEmpty = false;
     g_subBytes.clear();
     if (!g_hasPendingApply.load(std::memory_order_acquire)) {
         ue_wrap::vitals::Snapshot fresh;
@@ -304,13 +309,18 @@ void OnSaveObjectReady(void* saveSlotObject) {
                 vitals ? "fresh" : "NOT written (the host's)");
         return;
     }
-    if (g_pendingApply.hasItems) {
+    if (g_pendingApply.hasItems && g_pendingApply.items.empty()) {
+        g_subRefuseEmpty = true;
+        UE_LOGW("player_inventory[client]: the host's profile says it holds this player's items but carries "
+                "zero bytes of them -- NOT applied (no wipe); the inventory stays as the load left it and "
+                "nothing is reported back this session");
+    } else if (g_pendingApply.hasItems) {
         g_subBytes = g_pendingApply.items;
     } else if (!ue_wrap::inventory_component::ArmStartupKit(saveSlotObject)) {
         UE_LOGE("player_inventory[client]: the starting kit could not be armed -- this first join "
                 "starts with nothing");
     }
-    g_subFromProfile = true;
+    g_subFromProfile = !g_subRefuseEmpty;
     // A player who left dead, whose numbers are not numbers, or whose profile holds no vitals
     // starts a fresh life at the start point: health 0 applied as stored would kill them again on
     // the first frame.
@@ -372,6 +382,12 @@ void ApplyPendingPawnVitals(const char* when) {
 void Substitute(void* player, const char* when) {
     g_subPending = false;
     ApplyPendingPawnVitals(when);
+    if (g_subRefuseEmpty) {  // stays set for the repeat window: a later pass must not wipe either
+        g_profileApplied = false;
+        UE_LOGW("player_inventory[client]: the inventory substitution was skipped %s -- the host's profile "
+                "held no item bytes, and the stream stays shut so it is not overwritten", when);
+        return;
+    }
     namespace IC = ue_wrap::inventory_component;
     const IC::Counts before = IC::CountItems(player);
     const bool ok = IC::Restore(player, g_subBytes);
@@ -426,11 +442,16 @@ void OnWorldGather() {
 // Host: saveSlot_C::saveToSlot wrote a world entry (coop/save/save_block, on the game thread). Only
 // THE world counts: the live save object. The save-slot menu writes regenerated and copied save
 // objects of its own; the join capture writes through SaveGameToSlot and never reaches this. The
-// profiles are cut beside the hosted world's key (coop/save/save_transfer).
-void OnWorldSaveWritten(void* saveObject) {
+// profiles are cut beside the entry that was written: the hosted world's folder, with the entry
+// the call named (main.sav or autosave.sav), so each entry keeps the profiles of its own moment.
+void OnWorldSaveWritten(void* saveObject, bool autosave) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running() || s->role() != coop::net::Role::Host) return;
-    const std::wstring& world = coop::save_transfer::HostSlot();
+    std::wstring world = coop::save_transfer::HostSlot();
+    std::wstring folder, entry;
+    if (ue_wrap::world_folder::SplitKey(world, folder, entry))
+        world = ue_wrap::world_folder::MakeKey(
+            folder, autosave ? ue_wrap::profile::name::WorldEntryAutosave : ue_wrap::profile::name::WorldEntryMain);
     const wchar_t* slotName = world.c_str();
     if (void* live = ue_wrap::inventory::ResolveSaveSlot(); saveObject != live) {
         // The save-slot menu writes save objects of its own; a mismatch that is NOT that would be a
@@ -583,6 +604,14 @@ void OnReliable(const coop::net::BlobChunkPayload& p, uint8_t senderPeerSlot) {
                 senderPeerSlot);
         return;
     }
+    // A client's stream always carries the items it holds. One that parses to none, or does not
+    // parse, is not a newer profile of this player: the stored one stays, whatever it holds.
+    coop::player_profile::Profile streamed;
+    if (!coop::inventory_wire::Deserialize(blob, streamed) || !streamed.hasItems || streamed.items.empty()) {
+        UE_LOGW("player_inventory: slot %u streamed a profile with no item bytes (%zu-byte blob) -- "
+                "dropped, the stored profile is not overwritten", senderPeerSlot, blob.size());
+        return;
+    }
     // Held in memory, by GUID; the disk copy is cut with the host's world save (the store's header
     // says why no other moment will do).
     coop::player_profile_store::Put(guid, std::move(blob),
@@ -612,8 +641,16 @@ bool SendInventoryToSlot(int peerSlot) {
     // one cannot parse, a 0.9.0n profile of save records) is a RETURNING player: they get the kit
     // for this session, and the store quarantines what is on disk rather than misread it.
     coop::player_profile::Profile parsed;
-    const bool usable = found == PS::Found::Yes && coop::inventory_wire::Deserialize(blob, parsed);
-    if (!usable && found != PS::Found::Absent) PS::Quarantine(guid);
+    bool usable = found == PS::Found::Yes && coop::inventory_wire::Deserialize(blob, parsed);
+    // A stored profile that parses and holds zero item bytes (an older build wrote them) is not a
+    // wipe to hand out: the player gets the starting kit for this session, the file is left alone.
+    const bool storedEmpty = usable && parsed.hasItems && parsed.items.empty();
+    if (storedEmpty) {
+        UE_LOGW("player_inventory: slot %d guid=%s -- the stored profile holds zero item bytes, not "
+                "applied as an empty inventory; the starting kit is sent instead", peerSlot, guid.c_str());
+        usable = false;
+    }
+    if (!usable && !storedEmpty && found != PS::Found::Absent) PS::Quarantine(guid);
     if (!usable) {
         // First join (nothing held and no stored file), or the quarantined case above: a profile
         // with no items, which the joiner answers with the game's own starting kit
@@ -684,6 +721,7 @@ void OnDisconnect() {
     g_subAfterLoad = false;
     g_subRepeatUntil = {};
     g_subFromProfile = false;
+    g_subRefuseEmpty = false;
     g_subBytes.clear();
     g_pendingApply = coop::player_profile::Profile{};
     g_clientAssembler.Clear();

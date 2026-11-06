@@ -51,8 +51,9 @@ std::wstring MetadataStarterMap(void* metadata);
 
 // The file a saveSlot_C's saveToSlot writes: <savepath>/<slotName>.sav, its own folder stamped at
 // creation (a relative one is taken under SaveGamesDir). Empty when either field is empty or does not
-// resolve. Game thread.
-std::wstring SaveObjectFile(void* saveSlot);
+// resolve. With `entry` ("main" or "autosave") the file of THAT entry in the same folder instead:
+// saveToSlot(asAutosave) writes autosave.sav from the same save object, never main.sav. Game thread.
+std::wstring SaveObjectFile(void* saveSlot, const wchar_t* entry = nullptr);
 
 // Put the metadata's rules in force: copied over mainGameInstance.gameRules, which the game's own
 // launch does, and over the save object's localGameRules, the copy a joiner's transferred save

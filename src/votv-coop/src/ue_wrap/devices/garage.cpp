@@ -10,19 +10,23 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 
 namespace ue_wrap::garage {
 namespace {
 
 namespace R = reflection;
+namespace N = ue_wrap::profile::name;
 
 std::atomic<bool> g_resolved{false};
 
 int32_t g_openOff   = -1;       // Agarage_C::Open
-int32_t g_movOff    = -1;       // Agarage_C::mov, true mid-swing (optional: only a drill reads it)
+int32_t g_movOff    = -1;       // Agarage_C::mov, true mid-swing (a drill reads it; NormalizeOpen clears it)
+int32_t g_moveTlOff = -1;       // Agarage_C::move, the swing UTimelineComponent* (optional: NormalizeOpen)
 // The verbs, resolved per instance (Verb below): runTrigger(owner, index), the wall button's call (a drill's),
 // and acivae() -- the NATIVE animated swing (the montage from position 0 at half rate, and the move timeline
 // over its full length). NOT settime, which runs the same timeline and then JUMPS it: the montage at full
@@ -68,11 +72,15 @@ bool EnsureResolved() {
     }
 
     g_openOff   = openOff;
-    g_movOff    = R::FindPropertyOffset(cls, L"mov");
+    g_movOff    = R::FindPropertyOffset(cls, N::GarageMovingProp);
+    g_moveTlOff = R::FindPropertyOffset(cls, N::GarageMoveTimelineProp);
     void* const runTriggerFn = R::FindFunction(cls, L"runTrigger");  // asked here only to say its absence
     g_resolved.store(true, std::memory_order_release);
     UE_LOGI("garage: resolved garage_C=%p Open@0x%04X acivae=%p (identity=level-export FName)",
             cls, openOff, acivaeFn);
+    if (g_moveTlOff < 0)
+        UE_LOGW("garage: the move timeline (%ls@%d) did not resolve -- a load or join cannot normalise a garage "
+                "whose Open flag already matches", N::GarageMoveTimelineProp, g_moveTlOff);
     if (g_movOff < 0 || !runTriggerFn)
         UE_LOGW("garage: mov@%d runTrigger=%p did not both resolve -- a drill cannot wait for a garage's rest "
                 "or toggle it", g_movOff, runTriggerFn);
@@ -127,6 +135,85 @@ bool ApplyOpen(void* g, bool open) {
     ParamFrame f(acivae);  // acivae() takes no params -- it reads the Open field for direction
     if (!f.valid()) return false;
     return Call(g, f);
+}
+
+namespace {
+
+// The garage's move timeline, or null when it does not resolve or is not live.
+void* MoveTimeline(void* g) {
+    if (!g || g_moveTlOff < 0) return nullptr;
+    void* tl = *reinterpret_cast<void* const*>(reinterpret_cast<const char*>(g) + g_moveTlOff);
+    return (tl && R::IsLive(tl)) ? tl : nullptr;
+}
+
+// A timeline verb on this component, by name; null when its class does not have it.
+void* TimelineVerb(void* tl, const wchar_t* name) {
+    void* cls = R::ClassOf(tl);
+    return cls ? R::FindDispatchFunctionCached(cls, name) : nullptr;
+}
+
+bool TimelineFloat(void* tl, const wchar_t* verb, float& out) {
+    void* fn = TimelineVerb(tl, verb);
+    if (!fn) return false;
+    ParamFrame f(fn);
+    if (!f.valid() || !Call(tl, f)) return false;
+    out = f.Get<float>(L"ReturnValue");
+    return std::isfinite(out);
+}
+
+}  // namespace
+
+Settled NormalizeOpen(void* g, bool open, float* before, float* after) {
+    void* const tl = MoveTimeline(g);
+    if (!tl) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGW("garage: NormalizeOpen has no move timeline to read (offset %d) -- a garage whose Open flag "
+                    "already matches is left as it stands", g_moveTlOff);
+        }
+        return Settled::Unavailable;
+    }
+    void* const stopFn = TimelineVerb(tl, N::TimelineStopFn);
+    void* const setFn = TimelineVerb(tl, N::TimelineSetPositionFn);
+    void* const playingFn = TimelineVerb(tl, N::TimelineIsPlayingFn);
+    float length = 0.f, pos = 0.f;
+    if (!stopFn || !setFn || !playingFn || !TimelineFloat(tl, N::TimelineGetLengthFn, length) ||
+        !TimelineFloat(tl, N::TimelineGetPositionFn, pos) || length <= 0.f) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGW("garage: the move timeline's verbs did not resolve or read (Stop=%p SetPlaybackPosition=%p "
+                    "IsPlaying=%p length=%.2f) -- a garage whose Open flag already matches is left as it stands",
+                    stopFn, setFn, playingFn, length);
+        }
+        return Settled::Unavailable;
+    }
+    if (before) *before = pos;
+    if (after) *after = pos;
+    bool moving = false;
+    TryReadMoving(g, moving);
+    ParamFrame playing(playingFn);
+    const bool timelinePlaying = playing.valid() && Call(tl, playing) && playing.Get<bool>(L"ReturnValue");
+    if (moving || timelinePlaying) return Settled::Busy;
+    const float target = open ? length : 0.f;
+    // The flag is written either way: a snapshot's state is the authority's, and a native load may have
+    // left the other value.
+    if (g_openOff >= 0) *reinterpret_cast<bool*>(reinterpret_cast<char*>(g) + g_openOff) = open;
+    constexpr float kEps = 0.01f;
+    if (std::fabs(pos - target) <= kEps) return Settled::Already;
+    ParamFrame stop(stopFn);
+    if (stop.valid()) Call(tl, stop);
+    ParamFrame set(setFn);
+    if (!set.valid() || !set.Set<float>(N::TimelineNewPositionParam, target) ||
+        !set.Set<bool>(N::TimelineFireEventsParam, false) || !set.Set<bool>(N::TimelineFireUpdateParam, true) ||
+        !Call(tl, set))
+        return Settled::Unavailable;
+    if (g_movOff >= 0) *reinterpret_cast<bool*>(reinterpret_cast<char*>(g) + g_movOff) = false;
+    float now = target;
+    TimelineFloat(tl, N::TimelineGetPositionFn, now);
+    if (after) *after = now;
+    return Settled::Snapped;
 }
 
 bool TryReadMoving(void* g, bool& moving) {

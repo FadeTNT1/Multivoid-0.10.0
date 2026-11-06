@@ -82,6 +82,12 @@ struct Adapter {
     // the level name) does not name it the same on two peers; null = that identity. "" = no key: the device is
     // left out of the index. Game thread.
     std::wstring (*PortableKey)(void* actor) = nullptr;
+    // Optional: bring a device that is AT REST into the state `on` all the way, for a state whose bool
+    // already matches but whose body may not (a garage a load left with Open set and its timeline at the
+    // other end). The channel runs it where it would otherwise skip a matching state, and once on every
+    // indexed instance when a world's index first settles. It must leave a device that is mid-swing
+    // alone, and it moves no device whose body already agrees. True when it moved something. Game thread.
+    bool (*Settle)(void* actor, bool on) = nullptr;
 };
 
 // The engine.
@@ -266,6 +272,21 @@ public:
         if (peerSlot < 0 || peerSlot >= static_cast<int>(coop::players::kMaxPeers)) return;
         // No forced rebuild: the hub's 2 s pass keeps the index fresh, and a swinger spawned inside
         // that window reaches the joiner on its next state change.
+        // The snapshot is the indexed instances, so one asked for before this world's index holds any
+        // (a join that connects while the hub has not completed its first pass, or on a stale one) would
+        // be empty and never repeated: it waits for the first complete index pass (Tick) and goes then.
+        if (!IndexCurrent() || IndexEmpty()) {
+            snapshotWait_.insert(peerSlot);
+            UE_LOGI("%s: connect-snapshot for slot %d deferred -- this world's index is not complete yet "
+                    "(%s), sent after its first pass", a_.name, peerSlot,
+                    IndexCurrent() ? "no instance indexed" : "index of another world");
+            return;
+        }
+        SendSnapshotToSlot(s, peerSlot);
+    }
+
+    // The host's current state of every indexed instance to one joiner. Game thread.
+    void SendSnapshotToSlot(coop::net::Session* s, int peerSlot) {
         std::vector<std::pair<std::wstring, Ref>> items;
         {
             std::lock_guard<std::mutex> lk(indexMutex_);
@@ -290,6 +311,43 @@ public:
         }
         UE_LOGI("%s: connect-snapshot -- sent %d full state(s) to slot %d (of %zu indexed)",
                 a_.name, sent, peerSlot, items.size());
+    }
+
+    bool IndexEmpty() const {
+        std::lock_guard<std::mutex> lk(indexMutex_);
+        return byKey_.empty();
+    }
+
+    // Tick's two once-per-world index duties: the connect snapshots that waited for a complete pass, and
+    // the adapter's settle over what the world loaded. Game thread.
+    void IndexDuties() {
+        if (!IndexCurrent()) return;
+        if (!snapshotWait_.empty() && passes_ > 0 && (!IndexEmpty() || stablePasses_ >= kSettlePassesForExpiry)) {
+            auto* s = session_.load(std::memory_order_acquire);
+            const std::vector<int> slots(snapshotWait_.begin(), snapshotWait_.end());
+            snapshotWait_.clear();
+            if (s && s->role() == coop::net::Role::Host)
+                for (int slot : slots)
+                    if (s->IsSlotConnected(slot)) SendSnapshotToSlot(s, slot);
+        }
+        if (a_.Settle && settledGen_ != indexGen_ && stablePasses_ >= 2 && !IndexEmpty()) {
+            settledGen_ = indexGen_;
+            std::vector<std::pair<std::wstring, Ref>> items;
+            {
+                std::lock_guard<std::mutex> lk(indexMutex_);
+                items.assign(byKey_.begin(), byKey_.end());
+            }
+            int moved = 0;
+            echo_.store(true, std::memory_order_release);
+            for (auto& d : items) {
+                if (!R::IsLiveByIndex(d.second.actor, d.second.idx)) continue;
+                bool on = false;
+                if (a_.ReadState(d.second.actor, on) && a_.Settle(d.second.actor, on)) ++moved;
+            }
+            echo_.store(false, std::memory_order_release);
+            UE_LOGI("%s: world index settled -- %d of %zu instance(s) brought fully to the state they read",
+                    a_.name, moved, items.size());
+        }
     }
 
     void Tick() {
@@ -340,6 +398,7 @@ public:
                             "%d still pending", a_.name, applied, expired, backstopped, still);
             }
         }
+        IndexDuties();
         RetryRefused();
         if (ShadowProbe()) ShadowProbeTick();
     }
@@ -382,6 +441,7 @@ public:
         unindexedEdges_ = 0;
         probeLast_.clear();
         probeTrace_.clear();
+        snapshotWait_.clear();
         std::lock_guard<std::mutex> lk(stateMutex_);
         const size_t n = lastKnown_.size();
         lastKnown_.clear();
@@ -583,7 +643,17 @@ private:
             bool cur = false;
             if (a_.ReadState(actor, cur) && cur == want) {
                 { std::lock_guard<std::mutex> lk(stateMutex_); lastKnown_[key] = want; }
-                if (ProbeLog()) UE_LOGI("%s: apply key='%ls' already %s -- idempotent skip", a_.name, key.c_str(), want ? "ON" : "OFF");
+                // The bool agreeing is not the body agreeing: a device at rest is brought all the way
+                // (the adapter leaves one mid-swing alone), so a snapshot or a load is not skipped.
+                bool settled = false;
+                if (a_.Settle) {
+                    echo_.store(true, std::memory_order_release);
+                    settled = a_.Settle(actor, want);
+                    echo_.store(false, std::memory_order_release);
+                }
+                if (ProbeLog() || settled)
+                    UE_LOGI("%s: apply key='%ls' already %s -- %s", a_.name, key.c_str(), want ? "ON" : "OFF",
+                            settled ? "its body was off the state and was settled" : "idempotent skip");
                 return;
             }
         }
@@ -664,6 +734,8 @@ private:
     std::unordered_set<std::wstring> sendRefused_;               // GT-only: refused sends, retried each tick
 
     std::unordered_map<std::wstring, Pending> pending_;            // GT-only
+    std::unordered_set<int> snapshotWait_;                         // GT-only: joiner slots whose snapshot waits for the index
+    uint32_t settledGen_ = 0;                                      // GT-only: the world gen a_.Settle last ran over
     std::vector<std::pair<std::wstring, Ref>> pollScratch_;       // GT-only: the dev probe's snapshot buffer
     std::unordered_map<std::wstring, bool> probeLast_;           // GT-only: the dev probe's own baseline
     // GT-only: the keys a SHADOW MISS put under trace, with the instance and the trace's end.
