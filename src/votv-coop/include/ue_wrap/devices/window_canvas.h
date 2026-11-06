@@ -15,14 +15,23 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace ue_wrap::window_canvas {
+
+// Which cleaner drew a dab: the class of the prop_sponge_C whose brush material it painted with.
+// Each draws with its own class default's brush, so a replay picks the brush by this.
+enum class DabSource : uint8_t { Sponge = 0, Washer = 1, Pour = 2, Mop = 3 };
+inline constexpr uint8_t kDabSourceCount = 4;
+const char* DabSourceName(DabSource s);
 
 // One dab, in the render target's pixel space.
 struct Dab {
-    float x = 0.f, y = 0.f;  // top-left corner (the window's field A)
-    float size = 0.f;        // edge length
+    float x = 0.f, y = 0.f;  // top-left corner (the draw's ScreenPosition, the window's field A)
+    float size = 0.f;        // edge length (the draw's ScreenSize)
     float opac = 0.f;        // brush material scalar "opac"
     float col = 0.f;         // brush material scalar "col" (0 = paint clean)
+    DabSource source = DabSource::Sponge;
 };
 
 // Resolve d_window_C (fields A, canv, cv; the Canvas event) and UCanvas::K2_DrawMaterial.
@@ -36,13 +45,13 @@ bool IsWindow(void* obj);
 // stroke session. Raw field reads only, so it is safe inside the Func hook.
 bool IsStrokeDraw(void* sourceObject);
 
-// The last stroke's top-left corner (field A). Raw field read.
-bool ReadStrokeCorner(void* window, float& x, float& y);
-
-// The brush the player's held sponge (or mop) paints with: its size and the brush material's
-// current opac/col, which the sponge rewrites right before each dab. False when the player holds
-// no sponge. Game thread (reads the material parameters through UFunctions).
-bool ReadHeldBrush(void* mainPlayer, float& size, float& opac, float& col);
+// The dab a stroke draw is about to paint, read from the K2_DrawMaterial call itself: `parms` is the
+// call's parameter block (a ufunction_hook pre callback's), so position, size and the brush material are
+// the ones the stroke passed, whoever drew it -- the held sponge, the mop, a thrown sponge, a bucket pour
+// or the pressure washer's shot. opac/col are read from that material (two engine dispatches); the
+// source from the material's outer, the cleaner that made it. False when `sourceObject` is not a stroke
+// draw or a parameter does not read. Game thread.
+bool ReadStrokeDraw(void* sourceObject, const uint8_t* parms, Dab& out);
 
 // Signal playback owns the world's render-target canvas; the window refuses to draw meanwhile.
 bool IsSignalPlaying();

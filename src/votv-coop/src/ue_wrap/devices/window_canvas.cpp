@@ -8,7 +8,9 @@
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/gc_pin.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/engine/engine_component.h"
 #include "ue_wrap/world/world_singleton.h"
 #include "ue_wrap/core/types.h"
@@ -39,15 +41,15 @@ T ReadField(void* obj, int32_t off) {
     return v;
 }
 
-// ---- lazily resolved: sponge brush, material parameters, the signal-playback gate ----
-void*   g_spongeCls     = nullptr;  // prop_sponge_C (prop_mop_C derives from it)
-int32_t g_offSize       = -1;       // float size
-int32_t g_offStrength   = -1;       // float strength
-int32_t g_offSoap       = -1;       // float soapAmount
-int32_t g_offDynmat     = -1;       // MaterialInstanceDynamic* dynmat
+// ---- lazily resolved: the cleaner classes, material parameters, the signal-playback gate ----
+namespace PN = ue_wrap::profile::name;
+
+// One entry per DabSource, in its order: the class whose default `drawmat` is that source's brush.
+const wchar_t* const kSourceClass[kDabSourceCount] = {PN::SpongeClass, PN::SpongeShotClass,
+                                                      PN::SpongePourClass, PN::MopClass};
+void*   g_sourceCls[kDabSourceCount] = {};
+void*   g_spongeCls     = nullptr;  // prop_sponge_C: every cleaner derives from it
 int32_t g_offDrawmat    = -1;       // MaterialInterface* drawmat (the brush parent material)
-void*   g_playerCls     = nullptr;
-int32_t g_offHolding    = -1;       // mainPlayer_C::holding_actor -- the item in hand
 void*   g_setScalarFn   = nullptr;  // MaterialInstanceDynamic::SetScalarParameterValue
 void*   g_matLibCdo     = nullptr;  // Default__KismetMaterialLibrary
 void*   g_createMidFn   = nullptr;  // KismetMaterialLibrary::CreateDynamicMaterialInstance
@@ -57,22 +59,31 @@ int32_t g_playingByte   = -1;
 uint8_t g_playingMask   = 0;
 bool    g_drawSigChecked = false;
 bool    g_drawSigOk      = false;
+// K2_DrawMaterial's parameter offsets, read in a pre callback.
+int32_t g_parMaterial = -1, g_parPos = -1, g_parSize = -1;
 
-ue_wrap::GcPin g_brush;  // our brush MaterialInstanceDynamic (outer = transient package)
+// Our brush MaterialInstanceDynamics, one per source (outer = transient package).
+ue_wrap::GcPin g_brush[kDabSourceCount];
 
 bool EnsureSponge() {
     if (g_spongeCls) return true;
-    void* cls = R::FindClass(L"prop_sponge_C");
+    void* cls = R::FindClass(PN::SpongeClass);
     if (!cls) return false;
-    g_offSize     = R::FindPropertyOffset(cls, L"size");
-    g_offStrength = R::FindPropertyOffset(cls, L"strength");
-    g_offSoap     = R::FindPropertyOffset(cls, L"soapAmount");
-    g_offDynmat   = R::FindPropertyOffset(cls, L"dynmat");
-    g_offDrawmat  = R::FindPropertyOffset(cls, L"drawmat");
+    g_offDrawmat = R::FindPropertyOffset(cls, PN::SpongeDrawMatProp);
     g_spongeCls = cls;
-    UE_LOGI("window_canvas: sponge resolved size@0x%X strength@0x%X soap@0x%X dynmat@0x%X drawmat@0x%X",
-            g_offSize, g_offStrength, g_offSoap, g_offDynmat, g_offDrawmat);
+    UE_LOGI("window_canvas: sponge resolved drawmat@0x%X", g_offDrawmat);
     return true;
+}
+
+// The cleaner class `cls` is (or derives from), most derived first; Sponge for any other sponge.
+DabSource SourceOfClass(void* cls) {
+    for (uint8_t i = 1; i < kDabSourceCount; ++i) {
+        if (!g_sourceCls[i]) g_sourceCls[i] = object_index::ClassByName(kSourceClass[i]);  // one lookup
+        if (!g_sourceCls[i]) continue;
+        void* bases[1] = {g_sourceCls[i]};
+        if (R::IsDescendantOfAny(cls, bases, 1)) return static_cast<DabSource>(i);
+    }
+    return DabSource::Sponge;
 }
 
 bool EnsureMaterialFns() {
@@ -101,10 +112,12 @@ bool SetScalar(void* mid, R::FName name, float value) {
     return Call(mid, f);
 }
 
-// The brush parent material: the sponge class default's drawmat, else the asset by name.
-void* FindBrushParent() {
+// A source's brush parent material: its class default's drawmat, else the sponge's, else the asset by name.
+void* FindBrushParent(DabSource src) {
     if (EnsureSponge() && g_offDrawmat >= 0) {
-        if (void* cdo = R::FindClassDefaultObject(L"prop_sponge_C")) {
+        for (const wchar_t* cls : {kSourceClass[static_cast<uint8_t>(src)], PN::SpongeClass}) {
+            void* cdo = R::FindClassDefaultObject(cls);
+            if (!cdo) continue;
             void* m = ReadField<void*>(cdo, g_offDrawmat);
             if (m && R::IsLive(m)) return m;
         }
@@ -112,14 +125,15 @@ void* FindBrushParent() {
     return R::FindObject(L"mat_cleanBrush_Inst", L"MaterialInstanceConstant");
 }
 
-void* EnsureBrush(void* worldContext) {
-    if (g_brush.Held() && R::IsLive(g_brush.Raw())) return g_brush.Raw();
+void* EnsureBrush(void* worldContext, DabSource src) {
+    ue_wrap::GcPin& pin = g_brush[static_cast<uint8_t>(src) % kDabSourceCount];
+    if (pin.Held() && R::IsLive(pin.Raw())) return pin.Raw();
     if (!g_matLibCdo) g_matLibCdo = R::FindClassDefaultObject(L"KismetMaterialLibrary");
     if (!g_createMidFn) {
         if (void* lib = R::FindClass(L"KismetMaterialLibrary"))
             g_createMidFn = R::FindFunction(lib, L"CreateDynamicMaterialInstance");
     }
-    void* parent = FindBrushParent();
+    void* parent = FindBrushParent(src);
     if (!g_matLibCdo || !g_createMidFn || !parent) return nullptr;
     ParamFrame f(g_createMidFn);
     if (!f.valid() || f.ParamOffset(L"Parent") < 0 || f.ParamOffset(L"ReturnValue") < 0) return nullptr;
@@ -127,8 +141,8 @@ void* EnsureBrush(void* worldContext) {
     f.Set<void*>(L"Parent", parent);
     if (!Call(g_matLibCdo, f)) return nullptr;
     void* mid = f.Get<void*>(L"ReturnValue");
-    if (!mid || !g_brush.Pin(mid)) return nullptr;
-    UE_LOGI("window_canvas: brush material instance %p created from %p", mid, parent);
+    if (!mid || !pin.Pin(mid)) return nullptr;
+    UE_LOGI("window_canvas: %s brush material instance %p created from %p", DabSourceName(src), mid, parent);
     return mid;
 }
 
@@ -146,6 +160,9 @@ bool DrawSignatureOk() {
             g_drawSigOk = false;
         }
     }
+    g_parMaterial = R::FindParamOffset(g_drawFn, L"RenderMaterial");
+    g_parPos      = R::FindParamOffset(g_drawFn, L"ScreenPosition");
+    g_parSize     = R::FindParamOffset(g_drawFn, L"ScreenSize");
     return g_drawSigOk;
 }
 
@@ -199,39 +216,35 @@ bool IsStrokeDraw(void* sourceObject) {
     return (b & g_cvMask) != 0;
 }
 
-bool ReadStrokeCorner(void* window, float& x, float& y) {
-    if (!window || !g_resolved.load(std::memory_order_acquire)) return false;
-    const FVector2D a = ReadField<FVector2D>(window, g_offA);
-    x = a.X;
-    y = a.Y;
-    return true;
+const char* DabSourceName(DabSource s) {
+    switch (s) {
+        case DabSource::Sponge: return "sponge";
+        case DabSource::Washer: return "washer";
+        case DabSource::Pour:   return "pour";
+        case DabSource::Mop:    return "mop";
+    }
+    return "sponge";
 }
 
-bool ReadHeldBrush(void* mainPlayer, float& size, float& opac, float& col) {
-    if (!mainPlayer || !R::IsLive(mainPlayer) || !EnsureSponge()) return false;
-    if (g_playerCls != R::ClassOf(mainPlayer)) {
-        g_playerCls = R::ClassOf(mainPlayer);
-        g_offHolding = R::FindPropertyOffset(g_playerCls, L"holding_actor");
-    }
-    if (g_offHolding < 0 || g_offSize < 0) return false;
-    void* held = ReadField<void*>(mainPlayer, g_offHolding);
-    if (!held || !R::IsLive(held)) return false;
-    void* bases[1] = {g_spongeCls};
-    if (!R::IsDescendantOfAny(R::ClassOf(held), bases, 1)) return false;
-
-    size = ReadField<float>(held, g_offSize);
-    // The sponge rewrote its material's opac right before the dab; read it back. If the material
-    // cannot be read, fall back to the held-sponge formula: 0.4 x strength, doubled with soap.
-    void* mid = g_offDynmat >= 0 ? ReadField<void*>(held, g_offDynmat) : nullptr;
-    if (mid && R::IsLive(mid) &&
-        ue_wrap::engine::GetScalarParameterValue(mid, NameOnce(g_nOpac, L"opac"), opac) &&
-        ue_wrap::engine::GetScalarParameterValue(mid, NameOnce(g_nCol, L"col"), col)) {
-        return true;
-    }
-    const float strength = g_offStrength >= 0 ? ReadField<float>(held, g_offStrength) : 1.5f;
-    const float soap = g_offSoap >= 0 ? ReadField<float>(held, g_offSoap) : 0.f;
-    opac = 0.4f * strength * (soap > 0.f ? 2.f : 1.f);
-    col = 0.f;
+bool ReadStrokeDraw(void* sourceObject, const uint8_t* parms, Dab& out) {
+    if (!parms || !IsStrokeDraw(sourceObject) || !DrawSignatureOk()) return false;
+    if (g_parMaterial < 0 || g_parPos < 0 || g_parSize < 0) return false;
+    void* mat = ReadField<void*>(const_cast<uint8_t*>(parms), g_parMaterial);
+    const FVector2D pos = ReadField<FVector2D>(const_cast<uint8_t*>(parms), g_parPos);
+    const FVector2D size = ReadField<FVector2D>(const_cast<uint8_t*>(parms), g_parSize);
+    out.x = pos.X;
+    out.y = pos.Y;
+    out.size = size.X;
+    out.opac = 0.4f;  // the sponge's own still-held value, for a material that does not read
+    out.col = 0.f;
+    out.source = DabSource::Sponge;
+    if (!mat || !R::IsLive(mat)) return true;
+    // The cleaner's wash() set opac on this material right before the draw; read it back.
+    float v = 0.f;
+    if (ue_wrap::engine::GetScalarParameterValue(mat, NameOnce(g_nOpac, L"opac"), v)) out.opac = v;
+    if (ue_wrap::engine::GetScalarParameterValue(mat, NameOnce(g_nCol, L"col"), v)) out.col = v;
+    void* owner = R::OuterOf(mat);
+    if (owner && R::IsLive(owner)) out.source = SourceOfClass(R::ClassOf(owner));
     return true;
 }
 
@@ -254,7 +267,7 @@ bool IsSignalPlaying() {
 bool DrawDab(void* window, const Dab& d) {
     if (!window || !R::IsLive(window) || !g_resolved.load(std::memory_order_acquire)) return false;
     if (!DrawSignatureOk() || !EnsureMaterialFns()) return false;
-    void* brush = EnsureBrush(window);
+    void* brush = EnsureBrush(window, d.source);
     if (!brush) return false;
 
     ParamFrame open(g_canvasEvent);
@@ -276,7 +289,7 @@ bool DrawDab(void* window, const Dab& d) {
 }
 
 void ReleaseBrush() {
-    g_brush.Release();
+    for (ue_wrap::GcPin& pin : g_brush) pin.Release();
 }
 
 }  // namespace ue_wrap::window_canvas

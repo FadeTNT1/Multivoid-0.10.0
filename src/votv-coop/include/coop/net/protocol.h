@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 302;
+inline constexpr uint16_t kProtocolVersion = 303;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -3187,17 +3187,20 @@ struct BroomStrokePayload {
     float fwdX, fwdY, fwdZ;         // 12 -- the holder's actor forward, a unit vector
     float velX, velY, velZ;         // 12 -- the holder's velocity, cm/s
 };
-// One sponge dab on the bay window's 1645x512 dirt render target (WindowStroke). The window is a
-// singleton, so no identity travels. x/y is the dab's top-left pixel as the stroke computed it from
-// its own hit, size the dab's edge, and opac/col the brush material scalars the sponge set for that
-// dab (col 0 paints clean). A receiver draws the same dab through the window's canvas session.
+// One cleaning dab on the bay window's 1645x512 dirt render target (WindowStroke). The window is a
+// singleton, so no identity travels. x/y is the dab's top-left pixel and size its edge, both as the
+// stroke passed them to its draw, and opac/col the brush material scalars the cleaner set for that
+// dab (col 0 paints clean). source is the cleaner (ue_wrap::window_canvas::DabSource: 0 sponge,
+// 1 pressure washer, 2 bucket pour, 3 mop), whose brush the receiver draws with. A receiver draws the
+// same dab through the window's canvas session.
 struct WindowStrokePayload {
     float    x;          // 4 -- dab top-left, render-target pixels
     float    y;          // 4
     float    size;       // 4 -- dab edge, pixels
     float    opac;       // 4 -- brush "opac"
     float    col;        // 4 -- brush "col"
-    uint8_t  _pad[4];    // 4 -- alignment / reserved
+    uint8_t  source;     // 1 -- the cleaner (DabSource)
+    uint8_t  _pad[3];    // 3 -- alignment / reserved
 };
 static_assert(sizeof(WindowStrokePayload) == 24, "WindowStrokePayload must be 24 bytes");
 static_assert(sizeof(WindowStrokePayload) <= 256 - 20 - 8,
