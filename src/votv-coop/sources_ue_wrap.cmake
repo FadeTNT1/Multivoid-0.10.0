@@ -77,6 +77,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/devices/cord.cpp
     src/ue_wrap/devices/base_window.cpp
     src/ue_wrap/devices/surface_clean.cpp
+    src/ue_wrap/devices/water_container.cpp
     src/ue_wrap/devices/window_canvas.cpp
     src/ue_wrap/devices/grime.cpp
     src/ue_wrap/world/daynightcycle.cpp

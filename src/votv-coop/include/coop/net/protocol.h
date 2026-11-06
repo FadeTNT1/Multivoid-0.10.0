@@ -1311,6 +1311,13 @@ enum class ReliableKind : uint8_t {
     // ready edge is adopt 1: the joiner takes the host's value as sent, an adopt counted from slot 0 only.
     // KeyedScalarPayload.
     SurfaceCleanState = 221,
+
+    // HOST->ALL: a world bucket's water (prop_bucket_C `height`, and its `empty` flag), keyed by the prop's key
+    // (coop::water_fill_sync). A tap's tick fills a bucket under it on every peer independently, so on a client that
+    // fill is suppressed and the host's level is the one that travels: about twice a second while it changes, and to a
+    // joiner at its ready edge for every bucket holding water. Never relayed; a client's copy is refused at the host's
+    // receive edge. BucketFillStatePayload.
+    BucketFillState = 222,
 };
 
 #pragma pack(push, 1)
@@ -2759,6 +2766,20 @@ struct KeyedScalarPayload {
 static_assert(sizeof(KeyedScalarPayload) == 40, "KeyedScalarPayload must be 40 bytes");
 static_assert(sizeof(KeyedScalarPayload) <= 256 - 20 - 8,
               "KeyedScalarPayload must fit in one reliable datagram");
+
+// A world bucket's water (BucketFillState), by its prop key.
+namespace bucket_fill_flags {
+constexpr uint8_t kEmpty = 1u << 0;   // the bucket's `empty` flag
+constexpr uint8_t kKnown = kEmpty;
+}  // namespace bucket_fill_flags
+struct BucketFillStatePayload {
+    WireKey key;          // 32 -- the bucket's prop key
+    float   height;       // 4  -- prop_bucket_C::height, finite and 0..1000
+    uint8_t flags;        // 1  -- bucket_fill_flags
+    uint8_t reserved[3];  // 3  -- zero
+};
+static_assert(sizeof(BucketFillStatePayload) == 40, "BucketFillStatePayload must be 40 bytes");
+static_assert(sizeof(BucketFillStatePayload) <= 256 - 20 - 8, "BucketFillStatePayload must fit one datagram");
 
 // A dispenser pile's counters (TrashPileState): the displayed count is their sum. adopt 1 writes as
 // is; 0 applies the per-component minimum, so concurrent collects converge.

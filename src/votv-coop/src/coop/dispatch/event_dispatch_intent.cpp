@@ -36,6 +36,7 @@
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
 #include "coop/props/prop_food_state.h"  // HOST->CLIENT a world food's state; CLIENT->HOST a bite of one
+#include "coop/props/water_fill_sync.h"  // HOST->CLIENT a world bucket's water level
 #include "coop/props/shrimp_tray_sync.h"  // CLIENT->HOST a press on a shared shrimp tray
 #include "coop/props/prop_act_host.h"  // CLIENT->HOST a take or use of a shared prop, and its commit
 #include "coop/props/prop_act_request.h"  // HOST->CLIENT its answer
@@ -440,6 +441,26 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::microwave_sync::OnState(p);
+        break;
+    }
+    case net::ReliableKind::BucketFillState: {
+        // HOST->CLIENT: a world bucket's water level (coop::water_fill_sync). Host-authored only: the receive edge
+        // refuses a client's copy.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: BucketFillState dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::BucketFillStatePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::water_fill_sync::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::water_fill_sync::WellFormed(p)) {
+            coop::water_fill_sync::CountDropped();
+            break;
+        }
+        coop::water_fill_sync::OnState(p);
         break;
     }
     case net::ReliableKind::RemoverRequest: {

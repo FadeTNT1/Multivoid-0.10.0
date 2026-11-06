@@ -175,6 +175,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::MeleeFx:
     case ReliableKind::FoodState:
     case ReliableKind::MicrowaveState:
+    case ReliableKind::BucketFillState:
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:
