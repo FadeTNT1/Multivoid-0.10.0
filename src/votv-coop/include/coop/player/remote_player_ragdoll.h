@@ -31,6 +31,12 @@ public:
     // latch so a recycled puppet re-converges). Returns true when a STOP ran
     // this call: the owner re-bases its presentation yaw on the wire truth
     // (the get-up is a visual discontinuity anyway).
+    //
+    // One ragdoll episode is one Start and one Stop. A repeated true bit while the body is live
+    // is an update (counted, never a respawn), so the pose packet's level-triggered resend, a
+    // snapshot re-seed and the host relay of a client's pose are all idempotent. A true bit with no
+    // live body (a Start that failed, or a body GC-reaped mid-episode) retries on a short throttle
+    // within the same episode.
     bool OnWireBit(bool ragdollBit, void* puppetActor, int32_t puppetIdx);
 
     // Ragdoll PHYSICS sync (RemotePlayer::SetRagdollPose): slave the live body's
@@ -54,6 +60,10 @@ public:
                     // healed (kel un-hidden, detach, clear) -- owner re-bases
                     // its yaw and falls through to normal pose-drive THIS tick
     };
+    //
+    // Also the sim watchdog: the body's physics is re-asserted if the engine reports its mesh no
+    // longer simulating, so a body that was left frozen at the spawn transform (the upright,
+    // rigid plushie) cannot stay that way for the episode.
     Drive DriveAttached(void* puppetActor, int32_t puppetIdx);
 
     // RemotePlayer::Destroy teardown: destroy the BODY only (the puppet actor
@@ -66,6 +76,7 @@ public:
     bool Active() const { return active_; }
     void* Body() const { return body_; }
     int32_t BodyIdx() const { return bodyIdx_; }
+    uint32_t EpisodeId() const { return episode_; }
 
 private:
     void Start(void* puppetActor, int32_t puppetIdx);
@@ -81,6 +92,20 @@ private:
     // (IsLiveByIndex safety across ticks). null/-1 when not ragdolled.
     void*   body_ = nullptr;
     int32_t bodyIdx_ = -1;
+
+    // Episode bookkeeping, for the log line that proves one episode = one Start + one Stop.
+    // episode_ counts rising edges of the wire bit (never reset); the counters below are per
+    // episode and reset on the rising edge.
+    uint32_t episode_ = 0;
+    uint32_t starts_ = 0;       // bodies spawned this episode (1 expected; >1 = a heal restart)
+    uint32_t stops_ = 0;        // recovers this episode (1 expected)
+    uint32_t updates_ = 0;      // repeated true bits absorbed without a respawn
+    uint32_t velApplied_ = 0;   // pelvis velocity writes
+    uint32_t velSkipped_ = 0;   // stream packets skipped because the sender was at rest
+    uint32_t simRearms_ = 0;    // sim watchdog re-asserts
+    uint32_t startFails_ = 0;   // failed spawn attempts this episode
+    uint64_t nextRetryMs_ = 0;  // throttle for a Start retry
+    uint64_t nextSimCheckMs_ = 0;
 };
 
 }  // namespace coop

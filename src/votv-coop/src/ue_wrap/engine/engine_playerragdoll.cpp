@@ -15,6 +15,7 @@
 // never touches the owner's dead or isRagdoll fields. coop/remote_player owns the lifecycle.
 
 #include "ue_wrap/engine/engine.h"
+#include "ue_wrap/engine/engine_physics.h"
 
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/log.h"
@@ -183,9 +184,23 @@ void* SpawnPlayerRagdollBody(void* ownerPlayer, const FVector& location, const F
     // instead of coupling them, so there is no double image and no skeleton mapping at all.
     void* comp = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(body) + kAragdoll_SkeletalMesh);
     if (comp && R::IsLive(comp)) StartBodySim(comp);
-    UE_LOGI("ragdoll_body: spawned VISIBLE playerRagdoll_C flop body @%p (owner=%p) at (%.0f,%.0f,%.0f), sim started",
-            body, ownerPlayer, location.X, location.Y, location.Z);
+    // Verify instead of assuming: the calls above return no result, and a body whose sim did not
+    // take stays frozen at the spawn transform (an upright, rigid plushie).
+    const bool simulating = comp && R::IsLive(comp) && IsComponentSimulatingPhysics(comp);
+    UE_LOGI("ragdoll_body: spawned VISIBLE playerRagdoll_C flop body @%p (owner=%p) at (%.0f,%.0f,%.0f), sim %s",
+            body, ownerPlayer, location.X, location.Y, location.Z,
+            simulating ? "started (verified simulating)" : "REQUESTED BUT NOT SIMULATING -- the watchdog re-arms it");
     return body;
+}
+
+bool EnsureRagdollBodySimulating(void* body, bool* rearmed) {
+    if (rearmed) *rearmed = false;
+    void* mesh = RagdollMeshOf(body);
+    if (!mesh) return false;
+    if (IsComponentSimulatingPhysics(mesh)) return true;
+    StartBodySim(mesh);
+    if (rearmed) *rearmed = true;
+    return false;
 }
 
 // Attach `actor` (its RootComponent) to the ragdoll `body`'s mesh (kAragdoll_SkeletalMesh) at the
