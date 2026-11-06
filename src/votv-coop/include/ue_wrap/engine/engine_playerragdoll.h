@@ -14,6 +14,16 @@ namespace ue_wrap::engine {
 // starts. Death-free, since ragdollMode would kill the host. The AActor*, or nullptr. Game thread.
 void* SpawnPlayerRagdollBody(void* ownerPlayer, const FVector& location, const FRotator& rotation);
 
+// The native ragdollMode kickoff on a freshly spawned, simulating body: SetPhysicsLinearVelocity on the
+// "chest" bone with `chestImpulse` (cm/s) added to the current velocity -- the native recipe uses the
+// actor forward vector at -100 cm/s -- and, when `fallVeloc` is non-null, that velocity added to every
+// body (fallImpulse's follow-up). False when the mesh or the chest bone is unavailable. Game thread.
+bool KickoffRagdollBody(void* body, const FVector& chestImpulse, const FVector* fallVeloc);
+
+// The body's pelvis WORLD rotation (GetSocketRotation "pelvis"); false on a dead body. Used to prove a
+// mirror fell over, never to drive it. Game thread.
+bool ReadRagdollBodyPelvisRotation(void* body, FRotator& out);
+
 // Attach `actor` to `body`'s mesh at the pelvis bone (KeepWorld), so it follows the flop; Detach
 // reverses it. Game thread.
 bool AttachActorToRagdollBody(void* actor, void* body);

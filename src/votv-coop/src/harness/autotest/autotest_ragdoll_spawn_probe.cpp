@@ -22,6 +22,7 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflected_offset.h"
 
 #include <atomic>
 #include <cmath>
@@ -36,10 +37,12 @@ namespace R = ue_wrap::reflection;
 namespace GT = ue_wrap::game_thread;
 namespace E = ue_wrap::engine;
 
-// Offsets from the SDK header dump (a raw diagnostic).
-constexpr size_t kAragdoll_SkeletalMesh = 0x0230;  // Aragdoll_C::SkeletalMesh (USkeletalMeshComponent*)
-constexpr size_t kPlayerRagdoll_Player  = 0x0248;  // AplayerRagdoll_C::Player (AmainPlayer_C*)
-constexpr size_t kMainPlayer_ragdollActor = 0x0C40;  // AmainPlayer_C::ragdollActor (AplayerRagdoll_C*)
+// The ragdoll fields, resolved through reflection (the hard-coded 0x230 / 0x248 / 0xC40 went stale in
+// 0.10.0: ragdollActor moved to 0xCB0 and Player to 0x258). A negative offset (class not loaded) reads
+// as "no field": every use below tests for it.
+inline int32_t OffRagdollMesh()   { return ue_wrap::reflected_offset::Ragdoll_SkeletalMesh(); }    // Aragdoll_C::SkeletalMesh
+inline int32_t OffRagdollPlayer() { return ue_wrap::reflected_offset::PlayerRagdoll_Player(); }    // AplayerRagdoll_C::Player
+inline int32_t OffRagdollActor()  { return ue_wrap::reflected_offset::MainPlayer_ragdollActor(); } // AmainPlayer_C::ragdollActor
 constexpr size_t kUSkinnedMesh_SkeletalMesh = 0x0480;  // USkinnedMeshComponent::SkeletalMesh (the skin asset)
 
 std::string ReadEnv(const char* name) {
@@ -88,7 +91,9 @@ void StartBodySim(void* comp) {
 // The skeletal mesh component on a ragdoll actor.
 void* RagdollMeshComp(void* actor) {
     if (!actor || !R::IsLive(actor)) return nullptr;
-    void* c = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(actor) + kAragdoll_SkeletalMesh);
+    const int32_t off = OffRagdollMesh();
+    if (off < 0) return nullptr;
+    void* c = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(actor) + off);
     return (c && R::IsLive(c)) ? c : nullptr;
 }
 
@@ -104,8 +109,8 @@ void DumpRagdollActor(void* actor, const char* tag) {
     const char* aNote = E::TryGetActorLocation(actor, aLoc) ? "" : " (unread)";
     void* comp = RagdollMeshComp(actor);
     if (!comp) {
-        UE_LOGW("ragdollspawn[%s]: actor '%ls' has NO live SkeletalMesh @0x230 (actorZ=%.0f%s)",
-                tag, cls.c_str(), aLoc.Z, aNote);
+        UE_LOGW("ragdollspawn[%s]: actor '%ls' has NO live SkeletalMesh @0x%X (actorZ=%.0f%s)",
+                tag, cls.c_str(), static_cast<unsigned>(OffRagdollMesh()), aLoc.Z, aNote);
         return;
     }
     void* meshAsset = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(comp) + kUSkinnedMesh_SkeletalMesh);
@@ -203,7 +208,11 @@ void* SpawnManualRagdoll(void* local) {
         if (!actor) { UE_LOGW("ragdollspawn[manual]: BeginDeferredSpawn returned null"); done->store(1); return; }
         // Expose-on-spawn: set the owning player before the finish runs BeginPlay, so the actor's
         // own BeginPlay sees it.
-        *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(actor) + kPlayerRagdoll_Player) = local;
+        const int32_t offPlayer = OffRagdollPlayer();
+        if (offPlayer < 0) { UE_LOGW("ragdollspawn[manual]: playerRagdoll_C.Player offset unresolved -- skipping the write"); done->store(1); return; }
+        UE_LOGI("ragdollspawn[manual]: ragdoll offsets ragdollActor=0x%X Player=0x%X Mesh=0x%X",
+                static_cast<unsigned>(OffRagdollActor()), static_cast<unsigned>(offPlayer), static_cast<unsigned>(OffRagdollMesh()));
+        *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(actor) + offPlayer) = local;
         E::FinishDeferredSpawn(actor, loc, rot);
         // Root it for the probe's lifetime so an incidental GC pass cannot reap the body
         // mid-experiment and turn a working spawn into a false null-or-dead dump. Rooted for the
@@ -332,13 +341,14 @@ void RunRealExperiment(void* local) {
     {
         auto done = std::make_shared<std::atomic<int>>(0);
         GT::Post([local, real, done] {
-            void* ra = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(local) + kMainPlayer_ragdollActor);
+            const int32_t offRa = OffRagdollActor();
+            void* ra = offRa >= 0 ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(local) + offRa) : nullptr;
             if (ra && R::IsLive(ra)) {
                 *real = ra;
                 DumpRagdollActor(ra, "real");
                 AimLocalAt(local, ra);
             } else {
-                UE_LOGW("ragdollspawn[real]: mainPlayer.ragdollActor @0xC40 null/dead after ragdollMode");
+                UE_LOGW("ragdollspawn[real]: mainPlayer.ragdollActor (reflected @0x%X) null/dead after ragdollMode", static_cast<unsigned>(offRa));
             }
             bool dead = false, isRag = false;
             if (ReadDeadRagdoll(local, dead, isRag))
@@ -422,7 +432,7 @@ void RunRagdollSpawnProbe() {
     // load lazily; running manual first risks a silent class-not-found false negative). It also
     // yields the ground-truth dump.
     RunRealExperiment(*local);
-    ::Sleep(2500);  // let forceGetUp recovery settle + ragdollActor@0xC40 clear
+    ::Sleep(2500);  // let forceGetUp recovery settle + ragdollActor clear
     RunManualExperiment(*local);
 
     UE_LOGI("ragdollspawn: DONE -- compare [manual] vs [real] dumps above. Manual viable iff its "

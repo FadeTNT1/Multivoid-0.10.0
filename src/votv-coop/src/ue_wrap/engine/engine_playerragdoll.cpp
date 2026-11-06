@@ -21,6 +21,8 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflected_offset.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 
 #include <cstdint>
 #include <cstring>
@@ -31,13 +33,34 @@ namespace {
 
 namespace R = reflection;
 
-// The three fields this file reads raw, from the CXX dump and confirmed by
-// autotest_ragdoll_spawn_probe.cpp: AplayerRagdoll_C::Player (AmainPlayer_C*),
-// Aragdoll_C::SkeletalMesh (the body mesh), and AmainPlayer_C::ragdollActor -- the NATIVE ragdoll
-// the C key or a faint spawns, whose pelvis physics the sender samples.
-constexpr size_t kPlayerRagdoll_Player  = 0x0248;
-constexpr size_t kAragdoll_SkeletalMesh = 0x0230;
-constexpr size_t kMainPlayer_ragdollActor = 0x0C40;
+namespace RO = ue_wrap::reflected_offset;
+namespace PN = ue_wrap::profile::name;
+
+// The three fields this file reads raw, each resolved by name through reflection and cached:
+// AplayerRagdoll_C::Player (AmainPlayer_C*), Aragdoll_C::SkeletalMesh (the body mesh), and
+// AmainPlayer_C::ragdollActor -- the NATIVE ragdoll the C key or a faint spawns, whose pelvis physics
+// the sender samples. They were hard-coded (0x248 / 0x230 / 0xC40) until 0.10.0 moved two of them:
+// ragdollActor left 0xC40 (the sender's pelvis read dereferenced a delegate and the RagdollPose
+// stream never started) and Player left 0x248 (a write there landed on the `savebones` array header).
+// -1 until the class loads; every use refuses a negative offset.
+struct RagdollOffsets { int32_t ragdollActor = -1, player = -1, mesh = -1; };
+
+// Resolve the three offsets (each cached by its accessor), logging the triple once the first time all
+// resolve. False while any is unresolved.
+bool ResolveRagdollOffsets(RagdollOffsets& o) {
+    o.ragdollActor = RO::MainPlayer_ragdollActor();
+    o.player       = RO::PlayerRagdoll_Player();
+    o.mesh         = RO::Ragdoll_SkeletalMesh();
+    const bool ok = o.ragdollActor >= 0 && o.player >= 0 && o.mesh >= 0;
+    static bool sLogged = false;
+    if (ok && !sLogged) {
+        sLogged = true;
+        UE_LOGI("ragdoll: offsets ragdollActor=0x%X Player=0x%X Mesh=0x%X (reflected)",
+                static_cast<unsigned>(o.ragdollActor), static_cast<unsigned>(o.player),
+                static_cast<unsigned>(o.mesh));
+    }
+    return ok;
+}
 
 // Cached UClass + sim UFunctions (resolve once; playerRagdoll_C loads with
 // gameplay and is always resident per the probe's residency check). Plain void*
@@ -157,11 +180,30 @@ bool ResolvePhysicsFns() {
            g_getLinVelFn && g_getAngVelFn && g_setLinVelFn && g_setAngVelFn;
 }
 
-// Resolve a ragdoll actor's body SkeletalMesh (kAragdoll_SkeletalMesh, live-checked). null on miss.
+// Resolve a ragdoll actor's body SkeletalMesh (ragdoll_C.SkeletalMesh, live-checked). null on miss.
 void* RagdollMeshOf(void* ragdollActor) {
     if (!ragdollActor || !R::IsLive(ragdollActor)) return nullptr;
-    void* mesh = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(ragdollActor) + kAragdoll_SkeletalMesh);
+    const int32_t off = RO::Ragdoll_SkeletalMesh();
+    if (off < 0) return nullptr;
+    void* mesh = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(ragdollActor) + off);
     return (mesh && R::IsLive(mesh)) ? mesh : nullptr;
+}
+
+// The native ragdoll actor mainPlayer_C.ragdollActor holds; null when the player is not ragdolling.
+void* NativeRagdollActorOf(void* mainPlayer) {
+    if (!mainPlayer || !R::IsLive(mainPlayer)) return nullptr;
+    RagdollOffsets o;
+    if (!ResolveRagdollOffsets(o)) return nullptr;
+    return *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(mainPlayer) + o.ragdollActor);
+}
+
+// The chest bone FName, resolved once from any ragdoll body (one GNames entry, like pelvis).
+uint8_t g_chestFName[8] = {};
+bool g_haveChestFName   = false;
+bool EnsureChestFName(void* mesh) {
+    if (g_haveChestFName) return true;
+    g_haveChestFName = FindBoneFName(mesh, PN::RagdollChestBone, g_chestFName);
+    return g_haveChestFName;
 }
 
 }  // namespace
@@ -170,11 +212,18 @@ void* SpawnPlayerRagdollBody(void* ownerPlayer, const FVector& location, const F
     if (!ownerPlayer || !R::IsLive(ownerPlayer)) return nullptr;
     void* cls = ResolveRagdollClass();
     if (!cls) { UE_LOGW("ragdoll_body: playerRagdoll_C class unresolved -- cannot spawn"); return nullptr; }
+    // A negative offset would write outside the object, so an unresolved Player slot refuses the spawn.
+    RagdollOffsets offs;
+    if (!ResolveRagdollOffsets(offs)) {
+        UE_LOGW("ragdoll_body: ragdoll offsets unresolved (ragdollActor=%d Player=%d Mesh=%d) -- cannot spawn",
+                offs.ragdollActor, offs.player, offs.mesh);
+        return nullptr;
+    }
     void* body = BeginDeferredSpawn(cls, location, rotation);
     if (!body) { UE_LOGW("ragdoll_body: BeginDeferredSpawn returned null"); return nullptr; }
-    // Expose-On-Spawn: stamp Player (kPlayerRagdoll_Player) BEFORE FinishDeferredSpawn runs
-    // BeginPlay, so the BP's construction sees the owner it expects.
-    *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(body) + kPlayerRagdoll_Player) = ownerPlayer;
+    // Expose-On-Spawn: stamp Player (the reflected playerRagdoll_C.Player) BEFORE FinishDeferredSpawn
+    // runs BeginPlay, so the BP's construction sees the owner it expects.
+    *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(body) + offs.player) = ownerPlayer;
     FinishDeferredSpawn(body, location, rotation);
     if (!R::IsLive(body)) { UE_LOGW("ragdoll_body: body died during FinishDeferredSpawn"); return nullptr; }
     // BeginPlay built the rigid bodies but left them frozen -- start the sim so it actually flops
@@ -182,11 +231,11 @@ void* SpawnPlayerRagdollBody(void* ownerPlayer, const FVector& location, const F
     // game's own plushie ragdoll with its six-bone chain natively rigged to the physics, exactly
     // what single-player shows in mirrors. The caller hides the puppet's kel meshes for the flop
     // instead of coupling them, so there is no double image and no skeleton mapping at all.
-    void* comp = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(body) + kAragdoll_SkeletalMesh);
-    if (comp && R::IsLive(comp)) StartBodySim(comp);
+    void* comp = RagdollMeshOf(body);
+    if (comp) StartBodySim(comp);
     // Verify instead of assuming: the calls above return no result, and a body whose sim did not
     // take stays frozen at the spawn transform (an upright, rigid plushie).
-    const bool simulating = comp && R::IsLive(comp) && IsComponentSimulatingPhysics(comp);
+    const bool simulating = comp && IsComponentSimulatingPhysics(comp);
     UE_LOGI("ragdoll_body: spawned VISIBLE playerRagdoll_C flop body @%p (owner=%p) at (%.0f,%.0f,%.0f), sim %s",
             body, ownerPlayer, location.X, location.Y, location.Z,
             simulating ? "started (verified simulating)" : "REQUESTED BUT NOT SIMULATING -- the watchdog re-arms it");
@@ -203,12 +252,12 @@ bool EnsureRagdollBodySimulating(void* body, bool* rearmed) {
     return false;
 }
 
-// Attach `actor` (its RootComponent) to the ragdoll `body`'s mesh (kAragdoll_SkeletalMesh) at the
+// Attach `actor` (its RootComponent) to the ragdoll `body`'s mesh (ragdoll_C.SkeletalMesh) at the
 // named socket, so it rides the simulated bones.
 bool AttachActorToRagdollBody(void* actor, void* body) {
     if (!actor || !R::IsLive(actor) || !body || !R::IsLive(body)) return false;
-    void* mesh = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(body) + kAragdoll_SkeletalMesh);
-    if (!mesh || !R::IsLive(mesh)) return false;
+    void* mesh = RagdollMeshOf(body);
+    if (!mesh) return false;
     void* fn = R::FindFunction(R::FindClass(L"Actor"), L"K2_AttachToComponent");
     if (!fn) { UE_LOGW("ragdoll_body: K2_AttachToComponent unresolved"); return false; }
     uint8_t socket[8] = {};                            // pelvis FName, or NAME_None on miss
@@ -242,10 +291,7 @@ void* GetRagdollBodyMesh(void* ragdollActor) {
 }
 
 void* GetLocalRagdollBodyMesh(void* mainPlayer) {
-    if (!mainPlayer || !R::IsLive(mainPlayer)) return nullptr;
-    void* ragdollActor =
-        *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(mainPlayer) + kMainPlayer_ragdollActor);
-    return RagdollMeshOf(ragdollActor);
+    return RagdollMeshOf(NativeRagdollActorOf(mainPlayer));
 }
 
 bool ReadLocalRagdollPelvisPhysics(void* mainPlayer, FVector& outLoc, FRotator& outRot,
@@ -254,9 +300,7 @@ bool ReadLocalRagdollPelvisPhysics(void* mainPlayer, FVector& outLoc, FRotator& 
     if (!mainPlayer || !R::IsLive(mainPlayer)) return false;
     // The native ragdoll the C-key/faint spawned. Null until the player ragdolls;
     // cleared on recover -- so a non-null + live value IS the "is ragdolling" signal.
-    void* ragdollActor =
-        *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(mainPlayer) + kMainPlayer_ragdollActor);
-    void* mesh = RagdollMeshOf(ragdollActor);
+    void* mesh = RagdollMeshOf(NativeRagdollActorOf(mainPlayer));
     if (!mesh) return false;
     if (!ResolvePhysicsFns()) return false;
     if (!EnsurePelvisFName(mesh)) return false;
@@ -292,6 +336,48 @@ void DriveRagdollBodyPelvisVelocity(void* body, const FVector& linVel, const FVe
       f.Set<bool>(L"bAddToCurrent", false);
       f.SetRaw(L"BoneName", g_pelvisFName, sizeof(g_pelvisFName));
       Call(mesh, f); }
+}
+
+bool ReadRagdollBodyPelvisRotation(void* body, FRotator& out) {
+    out = FRotator{};
+    void* mesh = RagdollMeshOf(body);
+    if (!mesh) return false;
+    if (!ResolvePhysicsFns()) return false;
+    if (!EnsurePelvisFName(mesh)) return false;
+    ParamFrame f(g_getSocketRotFn);
+    f.SetRaw(L"InSocketName", g_pelvisFName, sizeof(g_pelvisFName));
+    if (!Call(mesh, f)) return false;
+    out = f.Get<FRotator>(L"ReturnValue");
+    return true;
+}
+
+bool KickoffRagdollBody(void* body, const FVector& chestImpulse, const FVector* fallVeloc) {
+    void* mesh = RagdollMeshOf(body);
+    if (!mesh) return false;
+    if (!ResolvePhysicsFns() || !EnsureChestFName(mesh)) return false;
+    // ragdollMode's recipe: SetPhysicsLinearVelocity(chestImpulse, bAddToCurrent=true, "chest").
+    {
+        ParamFrame f(g_setLinVelFn);
+        f.Set<FVector>(L"NewVel", chestImpulse);
+        f.Set<bool>(L"bAddToCurrent", true);
+        f.SetRaw(L"BoneName", g_chestFName, sizeof(g_chestFName));
+        if (!Call(mesh, f)) return false;
+    }
+    // fallImpulse's follow-up: the saved fall velocity added to every body of the skeleton.
+    if (fallVeloc) {
+        static void* sAllLinVelFn = nullptr;
+        if (!sAllLinVelFn) {
+            if (void* sk = R::FindClass(L"SkeletalMeshComponent"))
+                sAllLinVelFn = R::FindFunction(sk, L"SetAllPhysicsLinearVelocity");
+        }
+        if (sAllLinVelFn) {
+            ParamFrame f(sAllLinVelFn);
+            f.Set<FVector>(L"NewVel", *fallVeloc);
+            f.Set<bool>(L"bAddToCurrent", true);
+            Call(mesh, f);
+        }
+    }
+    return true;
 }
 
 }  // namespace ue_wrap::engine

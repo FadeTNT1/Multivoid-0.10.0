@@ -950,6 +950,16 @@ inline constexpr const wchar_t* MainPlayerForceGetUpFn  = L"forceGetUp";
 // respawn calls this one.
 inline constexpr const wchar_t* MainPlayerForceWakeupFn = L"forceWakeup";
 
+// The plushie ragdoll the game spawns for a faint or the C key. playerRagdoll_C derives from
+// ragdoll_C, which owns the body `SkeletalMesh`; `Player` (the owning mainPlayer_C, Expose On Spawn)
+// is playerRagdoll_C's own, and mainPlayer_C keeps the live one in `ragdollActor`. The offsets of all
+// three are reflected (ue_wrap/core/reflected_offset.h): a hard-coded 0xC40 for ragdollActor went stale
+// in 0.10.0 (the field moved to a different slot) and 0x248 for Player landed inside an array header.
+// The kickoff bone is the one ragdollMode's native recipe adds its -100 cm/s forward impulse to.
+inline constexpr const wchar_t* PlayerRagdollClass     = L"playerRagdoll_C";
+inline constexpr const wchar_t* RagdollBaseClass       = L"ragdoll_C";
+inline constexpr const wchar_t* RagdollChestBone       = L"chest";
+
 // The primary player-damage entry: addDamage and punch end in it on the owning peer's own possessed
 // mainPlayer_C, so a delivered hit runs through that peer's armour and inventory BP and drops its
 // saveSlot.health; coop/player/player_damage refuses it on a peer's puppet. The FName keeps its

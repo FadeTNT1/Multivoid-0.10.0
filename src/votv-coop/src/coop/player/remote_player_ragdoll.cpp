@@ -9,7 +9,9 @@
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/types.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace coop {
 
@@ -43,6 +45,14 @@ constexpr uint64_t kSimCheckMs = 250;       // sim watchdog cadence
 // A sender at rest streams ~0 velocity; see SetPose.
 constexpr float kRestLinCmS = 5.f;
 constexpr float kRestAngDegS = 5.f;
+// The native ragdollMode kickoff: -100 cm/s along the actor forward vector, added to the chest body.
+constexpr float kChestKickCmS = -100.f;
+// A streamed velocity this fresh counts as the sender's fall velocity at Start.
+constexpr uint64_t kFreshPoseMs = 1000;
+// The puppet capsule's half-height when it will not read (the player capsule's).
+constexpr float kDefaultHalfHeightCm = 88.f;
+// "Fell over": the pelvis pitch or roll changed this far from its standing rotation.
+constexpr float kFellOverDeg = 45.f;
 
 }  // namespace
 
@@ -54,6 +64,8 @@ bool RagdollDisplay::OnWireBit(bool ragdollBit, void* puppetActor, int32_t puppe
             ++episode_;
             starts_ = stops_ = updates_ = velApplied_ = velSkipped_ = simRearms_ = startFails_ = 0;
             nextRetryMs_ = nextSimCheckMs_ = 0;
+            haveStartRot_ = false;
+            peakTiltDeg_ = 0.f;
             UE_LOGI("RagdollDisplay: episode %u BEGIN (wire bit rose)", episode_);
             Start(puppetActor, puppetIdx);
             return false;
@@ -77,16 +89,29 @@ bool RagdollDisplay::OnWireBit(bool ragdollBit, void* puppetActor, int32_t puppe
     }
     if (!wireState_) return false;
     wireState_ = false;
+    // The pelvis rotation the plushie ends on, read BEFORE the recover destroys the body.
+    ue_wrap::FRotator endRot{};
+    const bool haveEndRot = active_ && body_ && R::IsLiveByIndex(body_, bodyIdx_) &&
+                            E::ReadRagdollBodyPelvisRotation(body_, endRot);
+    if (haveEndRot) SampleTilt();
     // Falling edge: ALWAYS run the recover, even when no body is live -- it un-hides the kel
     // meshes and detaches, both safe no-ops on a puppet Start never touched.
     Stop(puppetActor, puppetIdx);
     UE_LOGI("RagdollDisplay: episode %u END starts=%u stops=%u updates=%u velApplied=%u velSkippedAtRest=%u "
-            "simRearms=%u startFails=%u",
-            episode_, starts_, stops_, updates_, velApplied_, velSkipped_, simRearms_, startFails_);
+            "simRearms=%u startFails=%u pelvis pitch=%.0f roll=%.0f%s peakTilt=%.0fdeg %s",
+            episode_, starts_, stops_, updates_, velApplied_, velSkipped_, simRearms_, startFails_,
+            static_cast<double>(haveEndRot ? ue_wrap::NormalizeAxis(endRot.Pitch) : 0.f),
+            static_cast<double>(haveEndRot ? ue_wrap::NormalizeAxis(endRot.Roll) : 0.f),
+            haveEndRot ? "" : " (unread)", static_cast<double>(peakTiltDeg_),
+            peakTiltDeg_ > kFellOverDeg ? "FELL-OVER" : "STAYED-UPRIGHT");
     return true;
 }
 
 bool RagdollDisplay::SetPose(const coop::net::RagdollPoseSnapshot& snap) {
+    // Remember the velocity whether or not a body is live yet: a packet that races ahead of the
+    // rising edge is the fall velocity the Start kickoff adds.
+    lastLinVel_[0] = snap.linVelX; lastLinVel_[1] = snap.linVelY; lastLinVel_[2] = snap.linVelZ;
+    lastPoseMs_ = NowMs();
     // Velocity half of the pose stream only: slave the plushie's pelvis rigid body to the sender so
     // the visible flop TRACKS the real ragdoll. The streamed pelvis ROTATION is unused since the
     // visible-plushy rework -- it existed to tumble the kel-attached actor -- and stays on the wire
@@ -123,6 +148,7 @@ RagdollDisplay::Drive RagdollDisplay::DriveAttached(void* puppetActor, int32_t p
             nextSimCheckMs_ = now + kSimCheckMs;
             bool rearmed = false;
             E::EnsureRagdollBodySimulating(body_, &rearmed);
+            SampleTilt();
             if (rearmed) {
                 ++simRearms_;
                 if (simRearms_ <= 3)
@@ -179,8 +205,12 @@ void RagdollDisplay::Start(void* puppetActor, int32_t puppetIdx) {
         ++startFails_;
         return;
     }
-    // Spawn upright: after a KeepWorld detach the puppet's pitch and roll are the previous flop's
-    // leftovers, and mean nothing for a fresh body.
+    // Spawn where the native ragdollMode does: at the FEET (the actor location minus the capsule
+    // half-height, not the capsule centre) and facing the actor's yaw. After a KeepWorld detach the
+    // puppet's pitch and roll are the previous flop's leftovers and mean nothing for a fresh body.
+    float halfHeight = E::GetActorCharacterHalfHeight(puppetActor);
+    if (!(halfHeight > 1.f)) halfHeight = kDefaultHalfHeightCm;
+    loc.Z -= halfHeight;
     rot.Pitch = 0.f;
     rot.Roll = 0.f;
     void* body = E::SpawnPlayerRagdollBody(puppetActor, loc, rot);
@@ -191,6 +221,31 @@ void RagdollDisplay::Start(void* puppetActor, int32_t puppetIdx) {
     }
     body_ = body;
     bodyIdx_ = R::InternalIndexOf(body);
+
+    // The native kickoff, once, then the body simulates freely: -100 cm/s along the actor forward
+    // vector added to the chest body, plus the sender's fall velocity on every body when a streamed
+    // pelvis velocity arrived within the last second.
+    {
+        const float yawRad = rot.Yaw * 0.01745329252f;
+        const ue_wrap::FVector chest{std::cos(yawRad) * kChestKickCmS, std::sin(yawRad) * kChestKickCmS, 0.f};
+        const bool fresh = lastPoseMs_ != 0 && NowMs() - lastPoseMs_ <= kFreshPoseMs;
+        const ue_wrap::FVector fall{lastLinVel_[0], lastLinVel_[1], lastLinVel_[2]};
+        const bool kicked = E::KickoffRagdollBody(body, chest, fresh ? &fall : nullptr);
+        UE_LOGI("RagdollDisplay: episode %u kickoff chest v=(%.0f, %.0f, %.0f) fallVeloc=(%.0f, %.0f, %.0f)%s "
+                "feet=(%.0f, %.0f, %.0f) yaw=%.0f%s",
+                episode_, static_cast<double>(chest.X), static_cast<double>(chest.Y), static_cast<double>(chest.Z),
+                static_cast<double>(fresh ? fall.X : 0.f), static_cast<double>(fresh ? fall.Y : 0.f),
+                static_cast<double>(fresh ? fall.Z : 0.f), fresh ? "" : " (none streamed)",
+                static_cast<double>(loc.X), static_cast<double>(loc.Y), static_cast<double>(loc.Z),
+                static_cast<double>(rot.Yaw), kicked ? "" : " -- KICKOFF FAILED (chest bone or mesh unavailable)");
+        ue_wrap::FRotator pr{};
+        haveStartRot_ = E::ReadRagdollBodyPelvisRotation(body, pr);
+        if (haveStartRot_) {
+            startPitch_ = ue_wrap::NormalizeAxis(pr.Pitch);
+            startRoll_ = ue_wrap::NormalizeAxis(pr.Roll);
+            peakTiltDeg_ = 0.f;
+        }
+    }
 
     // PELVIS-attach the puppet actor to the body: the position anchor (nameplate +
     // recover hand-off follow the flop). The puppet itself goes INVISIBLE next -- the
@@ -213,6 +268,15 @@ void RagdollDisplay::Start(void* puppetActor, int32_t puppetIdx) {
     nextSimCheckMs_ = NowMs() + kSimCheckMs;
     UE_LOGI("RagdollDisplay::Start: VISIBLE plushie body=%p spawned, puppet pelvis-attached + kel meshes hidden "
             "(episode %u, starts=%u stops=%u updates=%u)", body, episode_, starts_, stops_, updates_);
+}
+
+void RagdollDisplay::SampleTilt() {
+    if (!haveStartRot_ || !body_ || !R::IsLiveByIndex(body_, bodyIdx_)) return;
+    ue_wrap::FRotator pr{};
+    if (!E::ReadRagdollBodyPelvisRotation(body_, pr)) return;
+    const float dp = std::fabs(ue_wrap::NormalizeAxis(ue_wrap::NormalizeAxis(pr.Pitch) - startPitch_));
+    const float dr = std::fabs(ue_wrap::NormalizeAxis(ue_wrap::NormalizeAxis(pr.Roll) - startRoll_));
+    peakTiltDeg_ = (std::max)(peakTiltDeg_, (std::max)(dp, dr));
 }
 
 void RagdollDisplay::Stop(void* puppetActor, int32_t puppetIdx) {
