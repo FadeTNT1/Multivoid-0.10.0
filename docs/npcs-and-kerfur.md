@@ -97,6 +97,15 @@ simulation mutates shared props, eating food and destroying what it empties. A c
 own would diverge the shared food, so the host runs it and clients mirror a paged snapshot; a
 roach a client stomps or eats is a consumed intent to the host (`coop/creatures/roach_sync`).
 
+The intent is sent at the call, not found afterwards: a script-gate watch on the master's
+`deleteRoach` (which both the eat, `actionOptionIndex` to `addFood`, and the stomp, `dedt`, run)
+sends it as the roach is removed. The client then holds that roach pending for two seconds: a host
+snapshot taken before the host acted still lists it, so the client applies the snapshot with the
+entry hidden instead of rebuilding the population and bringing the roach back. The host deletes on
+the intent and publishes the new population at once, which clears the pending entry; an intent
+that never lands lets the host's roach return after the timeout. The tracked set keeps a tombstone
+in the removed roach's place so the pose stream's ordinals stay the host's.
+
 A roach is a bare static mesh: the host's script moves and turns it with `K2_SetWorldLocation` and
 `K2_SetWorldRotation` each tick, and there is no skeletal mesh, animation or velocity to mirror. The
 crawl a client sees is therefore the pose it is sent. The snapshot is one a second, which as a
