@@ -96,6 +96,15 @@ inline constexpr const wchar_t* BetterSaveStruct = L"struct_betterSave";
 // signalObjectImageName member mid-struct; its layout is measured (ue_wrap/desk/signal_dynamic.h).
 inline constexpr const wchar_t* SignalDynamicStruct = L"struct_signalDataDynamic";
 
+// The drive box (Aprop_box_C, the "data case"): `drives` is its TArray of signal rows (one per slot,
+// copied from the drive's data_0 when it is put in), `drives_in` its TArray<bool> occupancy, and upd() the
+// repaint that reads both. 0.10.0's getData/loadData carry the occupancy and NOT the rows
+// (ue_wrap/actors/drive_bank).
+inline constexpr const wchar_t* DriveBoxClass       = L"prop_box_C";
+inline constexpr const wchar_t* DriveBoxDrivesProp  = L"drives";
+inline constexpr const wchar_t* DriveBoxDrivesInProp = L"drives_in";
+inline constexpr const wchar_t* DriveBoxUpdFn       = L"upd";
+
 // 0.10.0's container inventory: prop_container_C.inventoryComponent (an inventoryComponent_C, the
 // grid inventory that replaced propInventory_C + saveSlot.GObjStack), whose `owner` its BeginPlay
 // (makeOwner) sets to the container -- the "this container has started" mark the host's world

@@ -2,6 +2,7 @@
 
 #include "ue_wrap/actors/save_record.h"
 
+#include "ue_wrap/actors/drive_bank.h"
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/fstring_utils.h"
@@ -192,6 +193,13 @@ const Resolved* DefaultResolved() {
     g_defaultStride = stride;
     const Resolved& r = Measure(script, stride);
     return r.ok ? &r : nullptr;
+}
+
+// Whether the running record struct has a `signals` member of its own (0.9.0n yes, 0.10.0 no). Where it
+// does, the game's getData/loadData move the flat rows themselves and no sidecar is needed.
+bool RecordCarriesSignals() {
+    const Resolved* r = DefaultResolved();
+    return r && r->off[F_signals] >= 0;
 }
 
 // The layout of the record a UFunction's `data` parameter holds, with the parameter's own extent:
@@ -687,7 +695,11 @@ bool CaptureRecord(void* actor, SaveRecord& out) {
     // Measured before the first record of this class ever leaves: a class that fails the splice
     // convention must not be published, or every receiver would drop what it sent.
     if (!EnsureConventionChecked(actor, cls)) return false;
-    return CallForRecord(actor, v->getData, out);
+    if (!CallForRecord(actor, v->getData, out)) return false;
+    // A drive box's rows ride the record's flat sidecar when the running struct has no member of its own
+    // for them (0.10.0): its getData files the occupancy and leaves the rows behind.
+    if (!RecordCarriesSignals() && out.signals.empty()) ue_wrap::drive_bank::Capture(actor, out);
+    return true;
 }
 
 bool CaptureOwnRecord(void* actor, SaveRecord& out) {
@@ -745,7 +757,11 @@ bool ApplyRecord(void* actor, const SaveRecord& r, ClassResolver resolve) {
     if (!f.valid() || f.ParamOffset(L"data") != off || off + L->pub.span > f.FrameSize()) return false;
     // The frame arrives zeroed, which is WriteWith's stated precondition.
     if (!WriteWith(*L, static_cast<uint8_t*>(f.data()) + off, merged, resolve)) return false;
-    return Call(actor, f);
+    if (!Call(actor, f)) return false;
+    // The rows after the record's own loadData, which sets drives_in from the record: they go into the
+    // slots it flagged, and upd() runs last so the lights and colours read them.
+    if (!RecordCarriesSignals() && !r.signals.empty()) ue_wrap::drive_bank::Apply(actor, r);
+    return true;
 }
 
 bool CaptureRecordVia(void* actor, void* recordFn, SaveRecord& out) {
@@ -775,6 +791,7 @@ void ResetCodecCache() {
     g_baseGetData = nullptr;
     g_nextPropTryMs = 0;
     g_verbs.clear();
+    ue_wrap::drive_bank::Reset();
     ResetGObjStackCache();
 }
 
