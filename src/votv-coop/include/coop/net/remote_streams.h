@@ -36,6 +36,7 @@ struct HostStreams {
     StreamSlot<DeskSimSnapshot>                     deskSim;
     StreamSlot<DishPoseBody>                        dish;
     StreamSlot<ReelPosePayload>                     reel;
+    StreamSlot<RoachPoseBody>                       roach;
     StreamSlot<std::vector<EntityPoseSnapshot>>     npcBatch;
     StreamSlot<std::vector<WorldActorPoseSnapshot>> worldActorBatch;
     EidPoseMerge<TrashClumpPoseSnapshot>            trashCarry;

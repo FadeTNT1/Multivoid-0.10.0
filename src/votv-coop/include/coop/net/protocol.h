@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 293;
+inline constexpr uint16_t kProtocolVersion = 294;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -118,6 +118,11 @@ enum class MsgType : uint8_t {
     // interaction moves (PropSyncClaim) sends the same batch to the host alone, which judges every
     // row by the sender, the eid's row and its generation before it relays one.
     PropDrivePose = 41,
+
+    // Host to all: the roaches near a player, about 12 Hz while any moves -- ordinal, location and
+    // rotation. Newest wins; the client interpolates between them. The population, the scale and
+    // the far roaches stay on the reliable RoachState. RoachPosePacket.
+    RoachPose = 42,
 
     // One 20 ms Opus frame: a stream, not a state. The receiver queues every arrival per sender
     // and the payload's own seq orders the jitter buffer, so the newest-wins drop of the pose kinds
@@ -4400,6 +4405,38 @@ struct ReelPosePacket {
     ReelPosePayload body;    // 8
 };
 static_assert(sizeof(ReelPosePacket) == 28, "ReelPosePacket must be 28 bytes");
+
+// The roach pose stream (MsgType::RoachPose): the roaches within reach of a player, nearest first, at
+// about 12 Hz while any of them moves. Newest wins by header seq, so one datagram carries the whole
+// near set and a lost one costs one sample. `ordinal` is the roach's place among the host's valid
+// roaches in array order, the same key RoachState applies by; `total` is the host's count, and a
+// client whose own count differs ignores the datagram until the next RoachState converges it.
+// Rotation rides as QuantDeg centidegrees (pitch, yaw, roll): a roach turns on a floor, a wall and a
+// ceiling, so all three channels are real.
+inline constexpr int kRoachPoseMax = 40;
+struct RoachPoseRow {
+    uint8_t  ordinal;      // 1
+    uint8_t  _pad;         // 1
+    uint16_t pitchCdeg;    // 2
+    uint16_t yawCdeg;      // 2
+    uint16_t rollCdeg;     // 2
+    float    x, y, z;      // 12 -- component world location
+};
+static_assert(sizeof(RoachPoseRow) == 20, "RoachPoseRow must be 20 bytes");
+
+struct RoachPoseBody {
+    uint8_t      total;    // 1 -- the host's valid roach count (the ordinal domain)
+    uint8_t      count;    // 1 -- used rows
+    uint8_t      _pad[2];  // 2
+    RoachPoseRow rows[kRoachPoseMax];  // 800
+};
+static_assert(sizeof(RoachPoseBody) == 804, "RoachPoseBody must be 804 bytes");
+
+struct RoachPosePacket {
+    PacketHeader  header;  // 20
+    RoachPoseBody body;    // 804
+};
+static_assert(sizeof(RoachPosePacket) == 824, "RoachPosePacket must be 824 bytes");
 
 // TaskNewStatePayload (ReliableKind::TaskNewState=103) -- the HOST's saveSlot.taskNew mirror.
 // Serialized field-by-field (the struct holds three engine TArrays -- never byte-copied). Counts

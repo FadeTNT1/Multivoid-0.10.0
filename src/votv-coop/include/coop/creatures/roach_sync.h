@@ -27,17 +27,23 @@ namespace coop::roach_sync {
 // Cache the session pointer (boot-lifetime; the session_holder pattern).
 void Install(coop::net::Session* session);
 
-// 1 Hz driver (TickGameplay, game thread).
+// Driver (TickGameplay, game thread, every frame; each lane keeps its own clock).
 //
-// HOST: poll the roaches array and broadcast a PAGED full snapshot -- RoachState carries a seq, a
-// page, and per roach a location and scale -- on a population change, on drift, and as a periodic
-// keepalive.
+// HOST: at 1 Hz poll the roaches array and broadcast a PAGED full snapshot -- RoachState carries a
+// seq, a page, and per roach a location and scale -- on a population change, on drift, and as a
+// periodic keepalive. At ~12 Hz publish RoachPose, an unreliable newest-wins datagram holding the
+// roaches within reach of a player (nearest first, at most kRoachPoseMax), each with its ordinal,
+// location and rotation. The snapshot alone moved a client's roach once a second, as a teleport.
 //
-// CLIENT: liveness-scan the tracked mirror set and send a RoachConsumed intent for a roach eaten or
-// stomped locally. Client SUPPRESSION itself lives in coop/world/spawn_authority: it refuses the
-// cockroachMaster_C and ticker_roachSummoner_C ticks, summonRoach, and the three looping timer
-// delegates, which fire independently of the tick. Interaction events, an eat or a stomp, are not
-// tick-driven and stay native.
+// CLIENT: every frame take the newest RoachPose and glide each roach to it over the shared
+// LerpWindow (location linear, rotation slerp; a jump past 300 units snaps). The roach is a bare
+// UStaticMeshComponent: the host's script calc() moves and turns it with K2_SetWorldLocation and
+// K2_SetWorldRotation, with no skeletal mesh, AnimBP, movement component or velocity, so the
+// location and rotation are the whole of the crawl. At 1 Hz liveness-scan the tracked mirror set
+// and send a RoachConsumed intent for a roach eaten or stomped locally. Client SUPPRESSION itself
+// lives in coop/world/spawn_authority: it refuses the cockroachMaster_C and ticker_roachSummoner_C
+// ticks, summonRoach, and the three looping timer delegates, which fire independently of the
+// tick. Interaction events, an eat or a stomp, are not tick-driven and stay native.
 void Tick();
 
 // CLIENT receive: assemble the pages of one snapshot seq and apply when complete, checked to have

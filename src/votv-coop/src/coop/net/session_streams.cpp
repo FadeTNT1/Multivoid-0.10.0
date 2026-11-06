@@ -81,6 +81,11 @@ void Session::SetHostReelPose(const ReelPosePayload& body) {
     outbound_.samples.reel.Put(body);
 }
 
+void Session::SetHostRoachPose(const RoachPoseBody& body) {
+    std::lock_guard<std::mutex> lk(localMutex_);
+    outbound_.samples.roach.Put(body);
+}
+
 void Session::ResetOutboundStreams() {
     {
         std::lock_guard<std::mutex> lk(localMutex_);
@@ -129,6 +134,10 @@ bool Session::TryGetHostDeskSim(DeskSimSnapshot& out, bool* outIsNew) {
 
 bool Session::TryGetHostReelPose(ReelPosePayload& out, bool* outIsNew) {
     return ReadHost(&HostStreams::reel, out, outIsNew);
+}
+
+bool Session::TryGetHostRoachPose(RoachPoseBody& out, bool* outIsNew) {
+    return ReadHost(&HostStreams::roach, out, outIsNew);
 }
 
 bool Session::TryGetHostDishPose(DishPoseBody& out, bool* outIsNew) {
@@ -376,6 +385,16 @@ void Session::StoreStreamPacket(MsgType type, int routeSlot, int peerSlot,
         host_.reel.Offer(seq, pkt.body);  // an older or duplicate one keeps the newer one
         break;
     }
+    case MsgType::RoachPose: {  // HOST->all near-roach pose batch (newest-wins)
+        if (len < static_cast<int>(sizeof(RoachPosePacket))) return;
+        if (cfg_.role == Role::Host) break;  // host-originated; never applied locally
+        RoachPosePacket pkt;
+        std::memcpy(&pkt, data, sizeof(pkt));
+        if (pkt.body.count > kRoachPoseMax) return;
+        std::lock_guard<std::mutex> lk(remoteMutex_);
+        host_.roach.Offer(seq, pkt.body);  // an older or duplicate batch keeps the newer one
+        break;
+    }
     default:
         break;
     }
@@ -399,13 +418,15 @@ void Session::SendStreamsTick(std::chrono::steady_clock::time_point now,
         { std::lock_guard<std::mutex> lk(localMutex_);
           local = outbound_.samples;
           // The one-shot samples are taken here; the lanes that publish them own the cadence.
-          outbound_.samples.clock.due = outbound_.samples.dish.due = outbound_.samples.reel.due = false; }
+          outbound_.samples.clock.due = outbound_.samples.dish.due = outbound_.samples.reel.due =
+              outbound_.samples.roach.due = false; }
         const bool isHost = cfg_.role == Role::Host;
         const bool have = local.pose.set, haveProp = local.prop.set, haveRagdoll = local.ragdoll.set,
                    haveHand = local.hand.set, haveDeskCursor = local.deskCursor.set;
         const bool clockDue = local.clock.due && isHost;
         const bool dishPoseDue = local.dish.due && isHost;
         const bool reelPoseDue = local.reel.due && isHost;
+        const bool roachPoseDue = local.roach.due && isHost;
         const bool deskSimDue = local.deskSim.set && isHost && now >= nextDeskSimSend;
         // Serialize the live NPC pose batch ONCE (same body for every peer; only the per-peer
         // header seq differs). SerializeLocalNpcBatch (session_npc.cpp) reads outbound_.npcBatch under
@@ -427,7 +448,7 @@ void Session::SendStreamsTick(std::chrono::steady_clock::time_point now,
         uint8_t pdBuf[kPropDrivePoseDatagramMax];
         const int pdMsgLen = SerializeLocalPropDriveBatch(pdBuf);
         if (have || haveProp || haveRagdoll || haveHand || haveDeskCursor || clockDue || deskSimDue ||
-            dishPoseDue || reelPoseDue || npcMsgLen > 0 || waMsgLen > 0 || tcMsgLen > 0 ||
+            dishPoseDue || reelPoseDue || roachPoseDue || npcMsgLen > 0 || waMsgLen > 0 || tcMsgLen > 0 ||
             pdMsgLen > 0) {
             for (int i = 0; i < kMaxPeers; ++i) {
                 const uint32_t hConn = peerConns_[i].load();
@@ -579,6 +600,18 @@ void Session::SendStreamsTick(std::chrono::steady_clock::time_point now,
                     ReelPosePacket pkt{};
                     WriteHeader(pkt.header, MsgType::ReelPose, sendSeq_.fetch_add(1), ownEpoch_);
                     pkt.body = local.reel.value;
+                    const EResult rc = sockets->SendMessageToConnection(
+                        hConn, &pkt, sizeof(pkt),
+                        k_nSteamNetworkingSend_UnreliableNoDelay, nullptr);
+                    noteSent(rc, static_cast<int>(sizeof(pkt)));
+                }
+                // HOST near-roach pose batch -- same body to every ready peer. A joiner still loading
+                // gets none: its roach set is rebuilt by the connect snapshot, and the batch names
+                // ordinals of a set it does not have yet.
+                if (roachPoseDue && IsSlotWorldReady(i)) {
+                    RoachPosePacket pkt{};
+                    WriteHeader(pkt.header, MsgType::RoachPose, sendSeq_.fetch_add(1), ownEpoch_);
+                    pkt.body = local.roach.value;
                     const EResult rc = sockets->SendMessageToConnection(
                         hConn, &pkt, sizeof(pkt),
                         k_nSteamNetworkingSend_UnreliableNoDelay, nullptr);

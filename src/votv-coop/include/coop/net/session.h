@@ -174,6 +174,12 @@ public:
     // Client: the latest reel corrector plus isNew.
     bool TryGetHostReelPose(ReelPosePayload& out, bool* outIsNew = nullptr);
 
+    // Host: the near roaches' pose batch, one unreliable RoachPose datagram per publish (the roach lane
+    // owns the cadence). Game thread.
+    void SetHostRoachPose(const RoachPoseBody& body);
+    // Client: the latest roach pose batch; isNew once per arrival. Newest wins by header seq.
+    bool TryGetHostRoachPose(RoachPoseBody& out, bool* outIsNew = nullptr);
+
     // Client: swap out the latest NPC pose batch, consumed once (false when nothing new arrived);
     // `out` keeps its capacity, and a reader that keeps it allocates nothing.
     bool TakeRemoteNpcBatch(std::vector<EntityPoseSnapshot>& out);
