@@ -1716,6 +1716,10 @@ msgstr ""
 msgid "You can't do that with this item."
 msgstr ""
 
+#: src/coop/props/prop_act_request.cpp
+msgid "You can't pick that up right now."
+msgstr ""
+
 #: src/coop/props/remover_request.cpp
 msgid "You can't see that from there"
 msgstr ""

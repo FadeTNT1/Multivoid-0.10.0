@@ -1,6 +1,6 @@
 // ue_wrap/actors/prop_gather.cpp -- see ue_wrap/actors/prop_gather.h.
 //
-// Every read here is pure: the BP functions it calls (canBeCollected, canBePickedUp, ignoreSave, Get Volume)
+// Every read here is pure: the BP functions it calls (canBeCollectedOrPickedUp, ignoreSave, Get Volume)
 // only answer, and getData, which can add components or write save state, is never called. A frozen prop's
 // flags come from its list_props row, the row the game's init() resets a frozen prop from before it reads them.
 
@@ -35,8 +35,10 @@ namespace ue_wrap::prop_gather {
 
 // The functions the reads call on the prop: a Dispatch row is resolved on the prop's own class, so an override
 // (a battery that is plugged in, a pot with a plant) answers instead of prop_C's.
-UE_FACT_FN(kRowCanBeCollected, "prop_act", L"prop_C", L"canBeCollected", Dispatch);
-UE_FACT_FN(kRowCanBePickedUp, "prop_act", L"prop_C", L"canBePickedUp", Dispatch);
+// 0.10.0 has one take predicate, canBeCollectedOrPickedUp, which the inventory and the hotbar route both ask; the 0.9
+// canBeCollected and canBePickedUp are gone.
+// (A row's class and function are literals: the fact-row gate reads them from the source.)
+UE_FACT_FN(kRowCanBeCollectedOrPickedUp, "prop_act", L"prop_C", L"canBeCollectedOrPickedUp", Dispatch);
 UE_FACT_FN(kRowIgnoreSave, "prop_act", L"prop_C", L"ignoreSave", Dispatch);
 // lib_C's pure volume lookup by mesh, the call addObject makes for the volume it adds.
 UE_FACT_FN(kRowGetVolume, "prop_act", L"lib_C", L"Get Volume", Declared);
@@ -257,15 +259,51 @@ bool HasEquipRow(const std::wstring& name, bool* has) {
 // ---- the BP answers ----------------------------------------------------------------------------
 
 // A BP function with one out bool, called on the prop through its row: TRUE refuses. False when it did not run or
-// its out param is not in the frame (an unread fact is never "not refused").
-bool AskRefusal(const facts::Function& row, void* prop, const wchar_t* outName, bool& refused) {
+// its out param is not in the frame (an unread fact is never "not refused"); the read that failed is named in `why`.
+bool AskRefusal(const facts::Function& row, void* prop, const wchar_t* outName, bool& refused,
+                const char*& why) {
     void* const fn = DispatchFn(row, prop);
-    if (!fn) return false;
+    if (!fn) {
+        why = "function not found on the prop's class";
+        return false;
+    }
     ParamFrame f(fn);
+    if (!f.valid()) {
+        why = "parameter frame did not build";
+        return false;
+    }
+    if (!Call(prop, f)) {
+        why = "call did not run";
+        return false;
+    }
     bool out = false;
-    if (!f.valid() || !Call(prop, f) || !f.GetRaw(outName, &out, static_cast<int32_t>(sizeof out))) return false;
+    if (!f.GetRaw(outName, &out, static_cast<int32_t>(sizeof out))) {
+        why = "out parameter not in the frame";
+        return false;
+    }
     refused = out;
     return true;
+}
+
+// The prop's attach parent actor is valid: the third term of the game's refusal in addItemAsObject (a prop attached
+// to something is not taken). `read` is false when the engine call did not run.
+bool AttachedToActor(void* prop, bool& read) {
+    void* parent = nullptr;
+    read = engine::GetAttachParentActor(prop, parent);
+    return read && parent != nullptr && R::IsLive(parent);
+}
+
+// A pocket read that failed, said once per (class, fact) with the fact's name so the refusal that follows is not a
+// bare "wrong-family". Throttled by the key: a class that cannot be read costs one line per session.
+void SayUnread(void* prop, const char* fact, const char* why) {
+    static std::unordered_set<std::wstring> said;
+    const std::wstring cls = R::ToString(R::NameOf(R::ClassOf(prop)));
+    std::wstring key = cls;
+    key += L'|';
+    for (const char* c = fact; *c; ++c) key += static_cast<wchar_t>(*c);
+    if (said.insert(std::move(key)).second)
+        UE_LOGW("prop_gather: cannot read %s on %ls (%s) -- the act facts of that class are unread", fact, cls.c_str(),
+                why);
 }
 
 // ---- the root's mesh and the volume ------------------------------------------------------------
@@ -462,24 +500,46 @@ bool ReadPocketFacts(void* prop, PocketFacts& out) {
     out = PocketFacts{};
     if (!LiveProp(prop)) return false;
     PocketFacts f{};
-    if (!AskRefusal(kRowCanBeCollected, prop, L"ignore", f.collectRefused)) return false;
+    const char* why = "";
+    // The game's refusal in addItemAsObject (0.10.0): ignoreSave, a child actor, a valid attach parent, or the prop's own
+    // canBeCollectedOrPickedUp answering true. The physics state, the root's mesh and the volume are no term of it: the
+    // volume is the taker's own inventory's (addItemAdvanced against its maxVolume), which the client's replay owns.
+    if (!AskRefusal(kRowIgnoreSave, prop, P::name::PropIgnoreSaveOutParam, f.ignoreSave, why)) {
+        SayUnread(prop, "ignoreSave", why);
+        return false;
+    }
+    if (!AskRefusal(kRowCanBeCollectedOrPickedUp, prop, P::name::PropRefusedOutParam, f.collectRefused, why)) {
+        SayUnread(prop, "canBeCollectedOrPickedUp", why);
+        return false;
+    }
     bool childRead = false;
     f.child = engine::IsChildActor(prop, childRead);
-    if (!childRead) return false;
+    if (!childRead) {
+        SayUnread(prop, "IsChildActor", "the engine call did not run");
+        return false;
+    }
+    bool attachRead = false;
+    f.attached = AttachedToActor(prop, attachRead);
+    if (!attachRead) {
+        SayUnread(prop, "GetAttachParentActor", "the engine call did not run");
+        return false;
+    }
+    // Named only when the predicate refused, to say which row flag did it; an unreadable row says nothing here.
     f.frozen = prop::IsFrozen(prop);
-    void* root = engine::RootComponentOf(prop);   // read once: the physics test and the mesh both use it
-    f.simulating = root && engine::IsComponentSimulatingPhysics(root);
-    PropDataFlags flags;
-    void* mesh = nullptr;
-    const std::wstring name = f.frozen ? Lower(prop::GetPropNameString(prop)) : std::wstring();
-    if (!FlagsAndMesh(prop, f.frozen, root, name, flags, mesh)) return false;
-    f.canCollect = flags.canCollect;
-    f.heavy = flags.heavy;
-    f.meshRoot = IsStaticMeshComponent(root);
-    float volume = 0.f, bound = 0.f;
-    if (!VolumeOfMesh(prop, mesh, volume) || !Bound(bound)) return false;
-    f.volumeFits = volume <= bound;
-    f.saveClass = !IsEmptySaveClass(prop) && !IsHosePlacing(prop);
+    f.simulating = engine::IsActorRootSimulatingPhysics(prop);
+    if (f.collectRefused) {
+        PropDataFlags flags{};
+        void* mesh = nullptr;
+        const std::wstring name = f.frozen ? Lower(prop::GetPropNameString(prop)) : std::wstring();
+        if (FlagsAndMesh(prop, f.frozen, nullptr, name, flags, mesh)) {
+            f.canCollect = flags.canCollect;
+            f.heavy = flags.heavy;
+        } else {
+            f.canCollect = true;
+        }
+    } else {
+        f.canCollect = true;
+    }
     out = f;
     return true;
 }
@@ -489,22 +549,37 @@ bool ReadHoldFacts(void* prop, HoldFacts& out) {
     out = HoldFacts{};
     if (!LiveProp(prop)) return false;
     HoldFacts f{};
-    if (!AskRefusal(kRowCanBePickedUp, prop, L"ignore", f.pickupRefused) ||
-        !AskRefusal(kRowIgnoreSave, prop, L"ignoreSave", f.ignoreSave))
+    const char* why = "";
+    if (!AskRefusal(kRowCanBeCollectedOrPickedUp, prop, P::name::PropRefusedOutParam, f.pickupRefused, why)) {
+        SayUnread(prop, "canBeCollectedOrPickedUp", why);
         return false;
+    }
+    if (!AskRefusal(kRowIgnoreSave, prop, P::name::PropIgnoreSaveOutParam, f.ignoreSave, why)) {
+        SayUnread(prop, "ignoreSave", why);
+        return false;
+    }
     bool childRead = false;
     f.child = engine::IsChildActor(prop, childRead);
-    if (!childRead) return false;
+    if (!childRead) {
+        SayUnread(prop, "IsChildActor", "the engine call did not run");
+        return false;
+    }
     f.frozen = prop::IsFrozen(prop);
     f.simulating = engine::IsActorRootSimulatingPhysics(prop);
     PropDataFlags flags;
     void* mesh = nullptr;
     const std::wstring name = Lower(prop::GetPropNameString(prop));   // once: the row lookup and the equip row use it
-    if (!FlagsAndMesh(prop, f.frozen, nullptr, name, flags, mesh)) return false;
+    if (!FlagsAndMesh(prop, f.frozen, nullptr, name, flags, mesh)) {
+        SayUnread(prop, "list_props row", "the table or the live propData did not read");
+        return false;
+    }
     f.canHold = flags.canHold;
     f.heavy = flags.heavy;
     f.saveClass = !IsEmptySaveClass(prop) && !IsHosePlacing(prop);
-    if (!HasEquipRow(name, &f.equipRow)) return false;
+    if (!HasEquipRow(name, &f.equipRow)) {
+        SayUnread(prop, "list_weapons/list_props", "a table did not read");
+        return false;
+    }
     out = f;
     return true;
 }

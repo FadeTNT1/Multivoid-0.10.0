@@ -99,9 +99,13 @@ ue_wrap::CachedObjRef g_useDenied[std::size(kUseDenied)];
 // Classes whose act facts could not be read, said once each per session.
 std::unordered_set<std::wstring> g_unreadSaid;
 
-void NoteUnread(void* actor) {
+// The fact that failed is named by the reader's own line (prop_gather: "cannot read <fact> on <class> (<why>)"), said
+// once per class and fact; this line says which verb the unread refused, once per class and verb.
+void NoteUnread(void* actor, uint8_t family) {
     const std::wstring name = R::ToString(R::NameOf(R::ClassOf(actor)));
-    if (g_unreadSaid.insert(name).second) UE_LOGW("prop_act: cannot read %ls's act facts -- refusing it", name.c_str());
+    if (g_unreadSaid.insert(name + L'|' + std::to_wstring(family)).second)
+        UE_LOGW("prop_act: cannot read %ls's act facts for verb %u -- refusing it (a pocket or hold names the unread "
+                "fact in the prop_gather line before this one; a use is the food read)", name.c_str(), static_cast<unsigned>(family));
 }
 
 // Reads the facts of the pocket (or hold) verb into the pure traits; `read` says whether they could be read.
@@ -110,14 +114,13 @@ void PocketTraits(void* actor, internal::ActTraits& t) {
     t.read = ue_wrap::prop_gather::ReadPocketFacts(actor, f);
     if (!t.read) return;
     t.collectRefused = f.collectRefused;
+    t.ignoreSave = f.ignoreSave;
     t.child = f.child;
+    t.attached = f.attached;
     t.frozen = f.frozen;
     t.simulating = f.simulating;
     t.canCollect = f.canCollect;
     t.heavy = f.heavy;
-    t.meshRoot = f.meshRoot;
-    t.volumeFits = f.volumeFits;
-    t.saveClass = f.saveClass;
 }
 
 void HoldTraits(void* actor, internal::ActTraits& t) {
@@ -189,7 +192,7 @@ bool FitCensus(void* actor, uint8_t family, std::optional<Tally>& why) {
         if (family == static_cast<uint8_t>(PropActFamily::Pocket)) PocketTraits(actor, t);
         else HoldTraits(actor, t);
     }
-    if (!t.read) NoteUnread(actor);
+    if (!t.read) NoteUnread(actor, family);
     const bool fits = use ? internal::UseFits(t)
                           : family == static_cast<uint8_t>(PropActFamily::Pocket) ? internal::PocketFits(t)
                                                                                  : internal::HoldFits(t);
@@ -302,8 +305,9 @@ bool KnownFamily(uint8_t family) {
 }
 
 bool PocketFits(const ActTraits& t) {
-    return t.read && !t.collectRefused && !t.child && (t.frozen || t.simulating || t.driven) && t.canCollect &&
-           !t.heavy && t.meshRoot && t.volumeFits && t.saveClass;
+    // 0.10.0's addItemAsObject: ignoreSave, a child actor, a valid attach parent or the prop's own refusal. The physics
+    // state, the root's mesh, the save class and the volume are no term of it (the volume is the taker's own).
+    return t.read && !t.ignoreSave && !t.child && !t.attached && !t.collectRefused;
 }
 
 bool HoldFits(const ActTraits& t) {
@@ -318,14 +322,15 @@ std::optional<Tally> FirstRefusal(uint8_t family, const ActTraits& t) {
     if (!KnownFamily(family)) return Tally::FitBadFamily;
     if (!t.read) return Tally::FitUnread;
     if (family == static_cast<uint8_t>(PropActFamily::Pocket)) {
-        if (t.collectRefused) return Tally::FitCollectRefused;
+        // The game's order; the predicate's own refusal is named by the row flag that tripped it when one did.
+        if (t.ignoreSave) return Tally::FitIgnoreSave;
         if (t.child) return Tally::FitChild;
-        if (!(t.frozen || t.simulating || t.driven)) return Tally::FitPhysics;
-        if (!t.canCollect) return Tally::FitCanCollect;
-        if (t.heavy) return Tally::FitHeavy;
-        if (!t.meshRoot) return Tally::FitMeshRoot;
-        if (!t.volumeFits) return Tally::FitVolume;
-        if (!t.saveClass) return Tally::FitSaveClass;
+        if (t.attached) return Tally::FitAttached;
+        if (t.collectRefused) {
+            if (t.heavy) return Tally::FitHeavy;
+            if (!t.canCollect) return Tally::FitCanCollect;
+            return Tally::FitCollectRefused;
+        }
     } else if (family == static_cast<uint8_t>(PropActFamily::Hold)) {
         if (t.pickupRefused) return Tally::FitPickupRefused;
         if (!t.frozen) {
@@ -500,8 +505,8 @@ const char* TallyName(Tally t) {
         "target_gone", "bad_commit", "held_at_disconnect", "destroy_failed", "queue_full_unready", "bad_sender",
         "grant_unsent", "fit_unread", "fit_bad_family", "fit_trash", "fit_not_prop", "fit_denied", "fit_no_use_row",
         "fit_collect_refused", "fit_pickup_refused", "fit_ignore_save", "fit_child", "fit_physics",
-        "fit_can_collect", "fit_can_hold", "fit_heavy", "fit_mesh_root", "fit_volume", "fit_save_class",
-        "fit_equip_row", "fit_not_edible"};
+        "fit_can_collect", "fit_can_hold", "fit_heavy", "fit_save_class", "fit_equip_row", "fit_not_edible",
+        "fit_attached"};
     static_assert(std::size(kNames) == static_cast<size_t>(Tally::kCount), "a name for every tally");
     return t < Tally::kCount ? kNames[static_cast<int>(t)] : "";
 }

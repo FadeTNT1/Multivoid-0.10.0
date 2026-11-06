@@ -36,9 +36,8 @@ void RunSelftest();                               // the pure decisions, once pe
 enum class Tally : uint8_t { TargetGone, BadCommit, HeldAtDisconnect, DestroyFailed, QueueFullUnready, BadSender,
                              GrantUnsent, FitUnread, FitBadFamily, FitTrash, FitNotProp, FitDenied, FitNoUseRow,
                              FitCollectRefused, FitPickupRefused, FitIgnoreSave, FitChild, FitPhysics, FitCanCollect,
-                             FitCanHold, FitHeavy, FitMeshRoot, FitVolume, FitSaveClass, FitEquipRow, FitNotEdible,
-                             kCount };
-const char* TallyName(Tally t);   // "target_gone" ... "fit_not_edible"; "" past kCount
+                             FitCanHold, FitHeavy, FitSaveClass, FitEquipRow, FitNotEdible, FitAttached, kCount };
+const char* TallyName(Tally t);   // "target_gone" ... "fit_attached"; "" past kCount
 
 namespace internal {   // pure, no engine call: prop_act_selftest drives these (NOT the game thread)
 enum class ActVerdict : uint8_t { Wait, Gone, WrongFamily, Held, Reach, Grant };
@@ -53,12 +52,12 @@ ActVerdict Decide(const ActInputs& in);
 
 // The facts one act is judged on. `read` is false when a fact could not be read, and then nothing fits.
 struct ActTraits {
-    bool read, collectRefused, pickupRefused, ignoreSave, child, frozen, simulating, driven, canCollect, canHold,
-         heavy, meshRoot, volumeFits, saveClass, equipRow, offered, foodBody, notEdible;
+    bool read, collectRefused, pickupRefused, ignoreSave, child, attached, frozen, simulating, driven, canCollect,
+         canHold, heavy, saveClass, equipRow, offered, foodBody, notEdible;
 };
 // The requester's own state (room, hunger) is no term of a fit: MTA's pickup reads the requester's health and armor on
 // the server (CPickup.cpp:384-396), but a peer's inventory is not replicated here, so its replay refuses and aborts.
-bool PocketFits(const ActTraits& t);   // putObjectInventory2 and addObject
+bool PocketFits(const ActTraits& t);   // addObjectToInventory (0.10.0): the inventory's addItemAsObject refusal
 bool HoldFits(const ActTraits& t);     // Hold Object and updateHold
 bool UseFits(const ActTraits& t);      // the use verbs the lane carries
 bool KnownFamily(uint8_t family);      // 1..3

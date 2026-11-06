@@ -262,6 +262,27 @@ since a crowbar's pry frees a pryable sign with nobody holding it: the script ga
 component's unstick on every route, the unsticking peer broadcasts the prop's pose and velocity, and
 a receiver runs the same unstick with the tool and lets its copy go.
 
+### A client's take of a shared prop
+
+On 0.10.0 one verb takes a prop into an inventory: `mainPlayer_C::addObjectToInventory(object, out success)`, which
+the pocket key (R), the hold timer and the hand take all end in. A client's take of a shared prop is cancelled at its
+entry and asked of the host (`coop/props/prop_act_request`); the host judges it on its own copy and grants or refuses
+(`coop/props/prop_act_host`); a grant replays the game's own take on the client under a latch, and the client's commit
+makes the host destroy its copy. The host's judge is the game's refusal in the inventory's `addItemAsObject`: the prop's
+`ignoreSave`, a child actor, a valid attach parent, or the prop's own `canBeCollectedOrPickedUp` answering true (heavy,
+static, frozen, a row that cannot be collected or held, a row that ignores interactions) `[RD]`. It reads no physics
+state, root mesh, save class or volume: the volume is the taker's own inventory's (`addItemAdvanced` against its
+`maxVolume`), so the client's replay owns capacity and a full inventory is the replay's refusal. `canBeCollected` and
+`canBePickedUp` are the 0.9 names and no longer exist; a fact that cannot be read is logged once per class and fact
+(`prop_gather: cannot read <fact> on <class> (<why>)`) and the request is refused as WrongFamily.
+
+The cancelled body leaves its out `success` false, and the game's callers (the R release, the hold timer) answer a false
+with `lib_C::addHint("Cannot collect")` on the spot, before the host has replied and again on every repeat of a held key.
+The PRE therefore writes `success` true in the caller's storage for the take it sent and for a repeat while it is pending,
+and the caller says nothing. A real refusal still shows: the host's reason as one mod line (shown at most once per five
+seconds per kind), and a replay the game refuses as its own line (`You can't pick that up right now.`). `[RD]` for the
+callers' bytecode; `[?]` until a two-peer run reads a client's R tap and hold on a coal piece.
+
 ### Containers
 
 A container's contents are not on the container: every container reads them from one global
