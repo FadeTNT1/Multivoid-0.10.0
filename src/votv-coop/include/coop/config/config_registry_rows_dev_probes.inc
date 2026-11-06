@@ -65,3 +65,5 @@ CFG_FLAG(server_breaker_census, "server_breaker_census", "dev", false, "VOTVCOOP
     "Diagnostic census (BOTH peers): every 30 s the server breaker's inputs in one line (its ticker, the game mode byte, the difficulty, the day, the server list against the live boxes, the broken count against the boxes actually broken), and a line per breakServer, fix and break_type. Read-only.")
 CFG_FLAG(leak_probe, "leak_probe", "dev", false, nullptr,
     "Diagnostic probe: object/memory leak counters.")
+CFG_FLAG(sat_console_trace, "sat_console_trace", "dev", false, "VOTVCOOP_SAT_CONSOLE_TRACE",
+    "Diagnostic logging (BOTH peers): every shared SAT console screen revision the host sends, every one a client receives and applies or holds back, the live input packets, and a count of why a line ran where it was typed. Off, only the first of each refusal and a summary at the session's end are logged.")

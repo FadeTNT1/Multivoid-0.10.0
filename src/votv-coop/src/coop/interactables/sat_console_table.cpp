@@ -73,4 +73,10 @@ bool SpawnsEveryCall(const std::wstring& line) {
     return Listed(command, kSpawnEveryCall);
 }
 
+bool ClearsScreen(const std::wstring& line) {
+    std::wstring command, arg;
+    Split(line, command, arg);
+    return EqualsNoCase(command, L"clr");
+}
+
 }  // namespace coop::sat_console_table

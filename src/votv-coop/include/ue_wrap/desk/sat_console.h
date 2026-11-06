@@ -12,12 +12,6 @@
 
 namespace ue_wrap::sat_console {
 
-inline constexpr const wchar_t* kTerminalClass = L"ui_console_C";
-inline constexpr const wchar_t* kEnterCommand  = L"enterCommand";
-inline constexpr const wchar_t* kWriteToLog    = L"writeToLog";
-inline constexpr const wchar_t* kInit          = L"init";
-inline constexpr const wchar_t* kUbergraph     = L"ExecuteUbergraph_ui_console";
-
 // Resolve the terminal's members and verbs, the atlas's terminal slot, the desk's panel list and the
 // widget library's Create; a throttled lazy retry that latches off after a few passes with the classes
 // loaded. Game thread.
@@ -51,6 +45,21 @@ bool  WriteUsed(void* term, void* panel);
 void* ReadActiveDish(void* term);            // the dish init pointed it at, or null (ROOT)
 bool  ReadName(void* term, std::wstring& out);
 bool  ReadLog(void* term, std::wstring& out);  // the printed lines, the last 3000 characters (fixLog)
+
+// The screen, as two peers show it alike. The live input is the text box's text, or `command` when the
+// alternate keyboard path typed into it instead; a shown input is written to both and redrawn. A shown log
+// is written to consoleLine and repainted through the terminal's own fixLog, which also keeps its
+// rightmost 3000 characters. None of these runs a command, and none prints through writeToLog.
+// ScreenReady: the members these need are all resolved (the miss is logged once).
+bool ScreenReady();
+bool ReadInput(void* term, std::wstring& out);
+bool WriteInput(void* term, const std::wstring& text);
+bool WriteLog(void* term, const std::wstring& text);
+
+// Whether one of this terminal's own bodies (enterCommand, or its ubergraph, which carries the latent
+// continuations) is running on this thread: a line printed inside one belongs to a command, and one printed
+// outside any is the world's own alert.
+bool InTerminalBody(void* term);
 
 // The terminal's verbs, as the game calls them. RunCommand runs a line as the input's commit does:
 // the input `command` holds the line, then enterCommand(line), which echoes `command`.

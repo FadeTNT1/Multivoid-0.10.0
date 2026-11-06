@@ -944,6 +944,37 @@ inline constexpr const wchar_t* UfoUkControllerEnemyClass = L"ufo_UK_controller_
 inline constexpr const wchar_t* UfoKnobClass            = L"ufo_knob_C";
 inline constexpr const wchar_t* UfoUkClass              = L"ufo_UK_C";
 inline constexpr const wchar_t* UfoUkEnemyClass         = L"ufo_UK_enemy_C";
+
+// The SAT console's terminal, ui_console_C (0.10.0 bytecode capture). One instance per machine is the desk
+// atlas's umg_console; the host also makes hidden ones, one per typist. enterCommand(c) runs a line,
+// writeToLog(B, bracketsType) appends a printed line to consoleLine, fixLog keeps its rightmost 3000
+// characters and repaints, upd redraws the input (text_command = command + "|"), init(name, hide, dish)
+// points it at a dish. The live input is the EditableTextBox's text; the alternate keyboard path
+// (OnKeyDown_0 -> typeSymbol) appends to `command` instead. Every property is resolved by name AND type
+// (reflection::PropertyOffsetAndClass) and logged once on a miss; the watched function names are rows in
+// coop/interactables/sat_console_sync, whose strings must be literals.
+inline constexpr const wchar_t* SatConsoleClass            = L"ui_console_C";
+inline constexpr const wchar_t* SatConsoleEnterCommandFn   = L"enterCommand";
+inline constexpr const wchar_t* SatConsoleWriteToLogFn     = L"writeToLog";
+inline constexpr const wchar_t* SatConsoleInitFn           = L"init";
+inline constexpr const wchar_t* SatConsoleUbergraphFn      = L"ExecuteUbergraph_ui_console";
+inline constexpr const wchar_t* SatConsoleFixLogFn         = L"fixLog";
+inline constexpr const wchar_t* SatConsoleUpdFn            = L"upd";
+inline constexpr const wchar_t* SatConsoleProcessingProp   = L"processing";
+inline constexpr const wchar_t* SatConsolePanelProp        = L"panel";
+inline constexpr const wchar_t* SatConsoleUsedProp         = L"used";
+inline constexpr const wchar_t* SatConsoleActiveDishProp   = L"activeDish";
+inline constexpr const wchar_t* SatConsoleNameProp         = L"name";
+inline constexpr const wchar_t* SatConsoleCommandProp      = L"command";       // FString: the typed line
+inline constexpr const wchar_t* SatConsoleTextBoxProp      = L"EditableTextBox";
+inline constexpr const wchar_t* SatConsoleLogProp          = L"consoleLine";   // FString: the printed history
+inline constexpr const wchar_t* SatConsoleAtlasClass       = L"ui_consolesAtlas_C";
+inline constexpr const wchar_t* SatConsoleAtlasTerminalProp = L"umg_console";
+inline constexpr const wchar_t* SatConsoleDeskClass        = L"analogDScreenTest_C";
+inline constexpr const wchar_t* SatConsoleDeskPanelsProp   = L"consoles";
+inline constexpr const wchar_t* EditableTextBoxClass       = L"EditableTextBox";
+inline constexpr const wchar_t* EditableTextBoxSetTextFn   = L"SetText";
+inline constexpr const wchar_t* EditableTextBoxGetTextFn   = L"GetText";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

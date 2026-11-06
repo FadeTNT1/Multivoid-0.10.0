@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 272;
+inline constexpr uint16_t kProtocolVersion = 273;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -886,11 +886,15 @@ enum class ReliableKind : uint8_t {
     // Never relayed. ServerUpgradeStatePayload.
     ServerUpgradeState = 156,
 
-    // The SAT console's shared commands. Client to host: a typed line whose command rests on the shared
-    // world, with its terminal's context (its dish or ROOT, its name, the panel last used); the host
-    // runs the line on a terminal it keeps for that client. Host to that client alone: each line that
-    // terminal prints, and each change of its busy flag. Never relayed; a joiner
-    // has nothing to replay. BlobChunkPayload: [u8 op] then the op's fields (sat_console_sync).
+    // The SAT console: one screen every peer shows, the host's. Client to host: a typed line whose command
+    // rests on the shared world, with its terminal's context (its dish or ROOT, its name, the panel last
+    // used), which the host runs on a terminal it keeps for that client; the holder's live input line; and
+    // what a command the holder ran at its own terminal printed (or its `clr`). Host to client: the whole
+    // screen (history, prompt, input, busy, the claim's holder and generation) on each change and to a peer
+    // whose world is ready, the holder's input line to the others, and the typist's own busy flag. Input
+    // and prints are taken only from the claim table's holder, newest claim and sequence first. Never relayed
+    // by the host as a client's blob. BlobChunkPayload: [u8 op] then the op's fields
+    // (coop/interactables/sat_console_wire, sat_console_sync).
     SatConsole = 157,
 
     // Client to host: the dishes whose precision this client's player just set with a verb of its

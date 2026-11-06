@@ -20,4 +20,8 @@ Runs Classify(const std::wstring& line);
 // box, a rufus, a thiccfus): the host holds a typist to its own budget of these.
 bool SpawnsEveryCall(const std::wstring& line);
 
+// The line that empties the screen (`clr`): it runs where it was typed, and being a reset of the shared
+// history it is also sent to the host, which empties the shared screen.
+bool ClearsScreen(const std::wstring& line);
+
 }  // namespace coop::sat_console_table
