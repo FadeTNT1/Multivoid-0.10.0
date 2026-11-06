@@ -361,7 +361,11 @@ void Tick() {
     }
 
     void* w = DS::ReadActiveInterface(local);
-    if (w == g_localWidget && !g_holdPending) return;  // no edge -- the per-tick steady state
+    // No edge -- the per-tick steady state. One widget can carry more than one claim (the SAT console shows every
+    // panel's terminal), so for such a widget the edge is the resolved key, not the pointer.
+    if (w == g_localWidget && !g_holdPending &&
+        (!w || g_localKey.empty() || !DS::ClaimKeyMayMove(w) || DS::ClassifyWidgetClaimKey(w) == g_localKey))
+        return;
 
     // The falling edge (or a direct widget switch): release what we held, unless a lane asks the release to
     // wait. g_localWidget stays, so the edge is read again on the next tick; the claim stays ours meanwhile.

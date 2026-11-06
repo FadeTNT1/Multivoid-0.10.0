@@ -6,8 +6,9 @@
 // save-denied fail sound. Mirroring what is ON those screens is a separate concern, owned by the
 // state lanes.
 //
-// Claim keys are SHARED-WIDGET identities ("desk", "sat", "radar", "reactor", "laptop"), a per-instance
-// "tfm_<posKey>" / "arc_<posKey>", and a per-prop "note_<hash>" / "draw_<hash>". Five device families
+// Claim keys are SHARED-WIDGET identities ("desk", "radar", "reactor", "laptop"), a per-panel "sat_<id>" (the
+// SAT console's one widget shows a screen per panel, coop/interactables/sat_console_sync), a per-instance
+// "tfm_<posKey>" / "arc_<posKey>", and a per-prop "note_<hash>" / "draw_<hash>". Four device families
 // render ONE shared widget instance each, so a per-widget claim is correctness rather than
 // simplification: two peers in "different" laptops would type into one screen (ue_wrap/device_screen).
 //
