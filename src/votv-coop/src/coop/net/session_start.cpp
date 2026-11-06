@@ -314,6 +314,11 @@ bool Session::StartLanDirect() {
         SteamNetworkingIPAddr addr{};
         addr.Clear();
         addr.m_port = cfg_.port;
+        // The explicit local harness never exposes its listener on a LAN interface.
+        if (coop::config::ReadEnv("VOTVCOOP_SCENARIO") == "synctest") {
+            addr.SetIPv4(0x7f000001, cfg_.port);
+            UE_LOGI("synctest: listener bound to 127.0.0.1:%u", cfg_.port);
+        }
         const HSteamListenSocket hListen = sockets->CreateListenSocketIP(addr, 0, nullptr);
         if (hListen == k_HSteamListenSocket_Invalid) {
             UE_LOGE("net: CreateListenSocketIP(port=%u) failed", cfg_.port);

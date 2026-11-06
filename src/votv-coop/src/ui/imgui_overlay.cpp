@@ -8,6 +8,7 @@
 // The diagnostics live in ui/overlay_diag.cpp, the test-only env arming in ui/overlay_test_arm.cpp.
 
 #include "ui/imgui_overlay.h"
+#include "harness/autotest/synctest.h"
 #include "ui/native_text_field.h"   // a focused native field claims the key first
 
 #include "ui/overlay_backend.h"
@@ -501,7 +502,7 @@ bool Init() {
     if (!ui::overlay_seams::Install(seamsArmed, seamsTotal)) return false;
     // Hook user32!SetCursorPos to neutralise UE4's cursor recentre while a surface captures;
     // non-fatal, the cursor just tracks less cleanly.
-    if (HMODULE u32 = ::GetModuleHandleW(L"user32.dll")) {
+    if (HMODULE u32 = harness::autotest::SyncTestNoInputCapture() ? nullptr : ::GetModuleHandleW(L"user32.dll")) {
         g_setCursorPosTarget = reinterpret_cast<void*>(::GetProcAddress(u32, "SetCursorPos"));
         if (g_setCursorPosTarget &&
             ue_wrap::hook::Install(g_setCursorPosTarget, &SetCursorPosDetour,

@@ -23,6 +23,7 @@
 #include "coop/version.h"
 #include "harness/compat_boot.h"  // the compat report's boot sections
 #include "harness/harness.h"
+#include "harness/autotest/synctest.h"
 #include "ue_wrap/core/caller_locals.h"
 #include "ue_wrap/core/game_build.h"
 #include "ue_wrap/core/game_thread.h"
@@ -301,6 +302,7 @@ DWORD WINAPI BootThread(LPVOID rawTag) {
 // every Blueprint call faulted. The detours stay inert until the boot thread's health check arms them.
 // Under the proxy the game's start waits for this, so the line reports how long it took.
 void PatchEngine() {
+    harness::autotest::InstallSyncTestInputGuard();
     LARGE_INTEGER freq{}, t0{}, t1{}, t2{}, t3{};
     ::QueryPerformanceFrequency(&freq);
     ::QueryPerformanceCounter(&t0);
