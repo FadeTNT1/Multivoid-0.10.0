@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace coop::net {
@@ -45,6 +46,12 @@ void OnState(const coop::net::PosterStatePayload& p);
 bool WellFormed(const coop::net::PosterIntentPayload& p);
 bool WellFormed(const coop::net::PosterStatePayload& p);
 void CountDropped();
+
+// HOST: an intent that decoded but is not well-formed, or came at the wrong size. Said (rate-limited, with the reason
+// and the request id) and counted; a put that carries a request id is answered refused, so its client keeps the poster
+// in its hand at once instead of timing out.
+void OnMalformedIntent(coop::net::Session& session, const coop::net::PosterIntentPayload& p, uint8_t senderSlot);
+void OnBadIntentSize(uint8_t senderSlot, size_t len);
 
 // Net disconnect: the tables, queues and counters go, with one summary line. The placed posters stay where they are.
 void OnDisconnect();
