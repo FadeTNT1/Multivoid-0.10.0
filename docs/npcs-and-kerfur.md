@@ -112,6 +112,14 @@ crawl a client sees is therefore the pose it is sent. The snapshot is one a seco
 teleport reads as standing still and jumping; a near roach also rides an unreliable pose stream, and
 the client glides between its samples (the shared `LerpWindow`, a slerp for the rotation).
 
+The snapshot does not fight the glide. A roach the pose stream sampled in the last three seconds keeps
+its location: the snapshot never writes it (the client counts these as `snapshot location write(s)
+skipped (glided)` in its minute line). The snapshot's scale is eased in, not set: a roach grows about
+0.1 a second while it eats, and a hard set each second read as a chop. The host sends the reliable
+snapshot only for a population change, a scale change over 0.2, or a roach the pose stream does not
+carry (far from every player, or past its 40-row cap, where grown roaches rank nearer) that moved
+over 25 units, plus a ten-second keepalive. Each one logs `reason=count|scale|far|keepalive|consumed`.
+
 ### The kerfur
 
 There are two robots. The regular one, the kerfus, is a corded prop with three radial actions: its

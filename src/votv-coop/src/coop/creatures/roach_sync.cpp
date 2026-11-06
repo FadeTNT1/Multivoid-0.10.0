@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -49,7 +50,8 @@ std::atomic<bool> g_watched{false};
 
 constexpr long long kPollIntervalMs     = 1000;   // host population poll + client liveness scan
 constexpr long long kKeepaliveMs        = 10000;  // periodic full resend (join/loss convergence)
-constexpr float     kDriftResendDist    = 25.f;   // any roach moved this far -> resend
+constexpr float     kDriftResendDist    = 25.f;   // a roach the pose lane does NOT carry moved this far -> resend
+constexpr float     kScaleResendDelta   = 0.2f;   // any roach's scale moved this far since the last send -> resend
 constexpr float     kApplyMoveEpsilon   = 1.f;    // skip SetWorldLocation under this delta
 constexpr float     kApplyScaleEpsilon  = 0.05f;
 constexpr float     kAdjudicateRadius   = 200.f;  // RoachConsumed nearest-match cap
@@ -65,6 +67,11 @@ constexpr int       kLerpWindowMs       = 100;    // one send interval and a bit
 constexpr float     kSnapDist           = 300.f;  // a sample this far from where the roach is -> snap, no glide
 constexpr long long kTrackStaleMs       = 700;    // no sample for this long -> the glide state is dropped
 constexpr float     kPoseApplyEps       = 0.05f;  // skip a SetWorldLocation under this delta
+constexpr long long kSnapshotYieldMs    = 3000;   // a roach the pose lane sampled this recently keeps its glide:
+                                                  // the snapshot never writes its location
+constexpr float     kScaleGlideTauMs    = 250.f;  // client scale ease toward the host's value
+constexpr float     kScaleSnapDiff      = 1.5f;   // a scale error this big is set outright, not eased
+constexpr float     kScaleDoneEps       = 0.004f; // the ease lands on the target under this error
 constexpr long long kSummaryIntervalMs  = 60000;  // the one-line lane summary
 
 // ---- resolution (lazy, 2 s retry, capped LOUD latch -- the serverbox pattern) ----
@@ -290,10 +297,11 @@ long long g_lastPollMs = 0;
 struct Stats {
     long long sinceMs = 0;
     // host
-    uint32_t poseSent = 0, poseRowsSent = 0, snapshotsSent = 0, snapshotLogsLeft = 3;
+    uint32_t poseSent = 0, poseRowsSent = 0, snapshotsSent = 0;
+    uint32_t snapCount = 0, snapScale = 0, snapFar = 0, snapKeep = 0, snapOther = 0;  // why a snapshot went out
     int      lastTotal = 0, lastNear = 0;
     // client
-    uint32_t poseRx = 0, poseIgnored = 0, snaps = 0, poseRowsRx = 0;
+    uint32_t poseRx = 0, poseIgnored = 0, snaps = 0, poseRowsRx = 0, locSkipped = 0;
     uint64_t depthSum = 0, depthFrames = 0;  // open glide windows per driven frame
 };
 Stats g_stats;
@@ -321,14 +329,40 @@ bool ReadSnapshot(void* master, std::vector<SnapEntry>& out) {
     return true;
 }
 
-bool SnapshotChanged(const std::vector<SnapEntry>& cur) {
-    if (cur.size() != g_lastSent.size()) return true;
+// Why the snapshot must go out now. A roach the pose lane carries is moved by that lane alone, so its
+// drift is not a reason: counting it re-sent the whole population every second for as long as one roach
+// crawled. Left are a population change, a scale change (a roach grows while it eats), and a roach
+// the lane does not carry (far from every player, or past the row cap) that moved.
+enum : uint8_t { kReasonCount = 1, kReasonScale = 2, kReasonFar = 4 };
+
+bool g_poseCarried[coop::net::kRoachSnapshotCap] = {};  // by ordinal: the last pose tick listed this roach
+
+void ClearPoseCarried() { std::memset(g_poseCarried, 0, sizeof(g_poseCarried)); }
+
+uint8_t SnapshotChangeReasons(const std::vector<SnapEntry>& cur) {
+    if (cur.size() != g_lastSent.size()) return kReasonCount;
+    uint8_t r = 0;
     const float d2 = kDriftResendDist * kDriftResendDist;
     for (size_t i = 0; i < cur.size(); ++i) {
-        if (Dist2(cur[i].loc, g_lastSent[i].loc) > d2) return true;
-        if (std::fabs(cur[i].scale - g_lastSent[i].scale) > kApplyScaleEpsilon) return true;
+        if (std::fabs(cur[i].scale - g_lastSent[i].scale) > kScaleResendDelta) r |= kReasonScale;
+        const bool carried = i < static_cast<size_t>(coop::net::kRoachSnapshotCap) && g_poseCarried[i];
+        if (!carried && Dist2(cur[i].loc, g_lastSent[i].loc) > d2) r |= kReasonFar;
     }
-    return false;
+    return r;
+}
+
+const char* ReasonText(uint8_t reasons, bool keepalive, char* buf, size_t cap) {
+    buf[0] = 0;
+    size_t used = 0;
+    auto add = [&](const char* w) {
+        const int n = std::snprintf(buf + used, cap - used, "%s%s", used ? "|" : "", w);
+        if (n > 0) used = std::min(cap - 1, used + static_cast<size_t>(n));
+    };
+    if (reasons & kReasonCount) add("count");
+    if (reasons & kReasonScale) add("scale");
+    if (reasons & kReasonFar)   add("far");
+    if (keepalive && !reasons)  add("keepalive");
+    return buf;
 }
 
 // Send the full snapshot as pages; toSlot < 0 broadcasts to every client.
@@ -369,9 +403,9 @@ coop::net::RoachPoseBody g_lastPoseBody{};
 bool g_havePoseBody = false;
 
 void HostPublishPose(coop::net::Session* s) {
-    if (!s->AnyWorldReadyPeer()) return;
+    if (!s->AnyWorldReadyPeer()) { ClearPoseCarried(); return; }
     void* master = Master();
-    if (!master) return;
+    if (!master) { ClearPoseCarried(); return; }
 
     Vec3 players[coop::players::kMaxPeers];
     int np = 0;
@@ -381,11 +415,11 @@ void HostPublishPose(coop::net::Session* s) {
         ue_wrap::FVector v;
         if (ue_wrap::engine::TryGetActorLocation(bodies[i], v)) players[np++] = {v.X, v.Y, v.Z};
     }
-    if (np == 0) return;
+    if (np == 0) { ClearPoseCarried(); return; }
 
     std::vector<RoachSlot> slots;
     ReadRoaches(master, slots);
-    struct Cand { int ordinal; void* comp; Vec3 loc; float d2; };
+    struct Cand { int ordinal; void* comp; Vec3 loc; float d2; float rank; };
     std::vector<Cand> cands;
     int ordinal = 0;
     const float r2 = kPoseCullRadius * kPoseCullRadius;
@@ -395,13 +429,21 @@ void HostPublishPose(coop::net::Session* s) {
         const int ord = ordinal++;
         float best = r2 + 1.f;
         for (int p = 0; p < np; ++p) best = std::min(best, Dist2(loc, players[p]));
-        if (best <= r2) cands.push_back({ord, sl.comp, loc, best});
+        if (best <= r2) {
+            // Past the row cap the nearest win -- but a grown roach is the one a player sees, so its
+            // distance counts shorter. The scale is the host's last snapshot value: no extra engine call.
+            const float sc = (ord < static_cast<int>(g_lastSent.size())) ? std::max(1.f, g_lastSent[ord].scale) : 1.f;
+            cands.push_back({ord, sl.comp, loc, best, best / (sc * sc)});
+        }
     }
     g_stats.lastTotal = ordinal;
     g_stats.lastNear  = static_cast<int>(cands.size());
-    if (cands.empty()) { g_havePoseBody = false; return; }
-    std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) { return a.d2 < b.d2; });
+    if (cands.empty()) { g_havePoseBody = false; ClearPoseCarried(); return; }
+    std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) { return a.rank < b.rank; });
     if (cands.size() > static_cast<size_t>(coop::net::kRoachPoseMax)) cands.resize(coop::net::kRoachPoseMax);
+    ClearPoseCarried();
+    for (const auto& c : cands)
+        if (c.ordinal < coop::net::kRoachSnapshotCap) g_poseCarried[c.ordinal] = true;
 
     coop::net::RoachPoseBody body{};
     body.total = static_cast<uint8_t>(ordinal);
@@ -463,6 +505,10 @@ struct RoachGlide {
     float alpha = 0.f;
     bool  haveCur = false;      // cur/qCur mirror the component
     long long lastRxMs = 0;     // when the newest sample landed
+    // Scale is eased on its own, apart from the location window: RoachState carries it, and it must
+    // never move the roach.
+    float scaleCur = 0.f, scaleTo = 0.f;
+    bool  scaleActive = false;
 };
 RoachGlide g_glide[coop::net::kRoachSnapshotCap];
 
@@ -470,9 +516,19 @@ void ResetGlides() {
     for (auto& g : g_glide) g = RoachGlide{};
 }
 
-bool GlideFresh(int ordinal, long long now) {
+// The pose lane sampled this roach recently enough that its glide, not the snapshot, owns its location.
+bool PoseOwnsLocation(int ordinal, long long now) {
     return ordinal >= 0 && ordinal < coop::net::kRoachSnapshotCap && g_glide[ordinal].haveCur &&
-           now - g_glide[ordinal].lastRxMs < kTrackStaleMs;
+           now - g_glide[ordinal].lastRxMs < kSnapshotYieldMs;
+}
+
+// Drop the location glide of one roach, keeping its scale ease.
+void DropLocationGlide(int ordinal) {
+    if (ordinal < 0 || ordinal >= coop::net::kRoachSnapshotCap) return;
+    RoachGlide& g = g_glide[ordinal];
+    RoachGlide fresh{};
+    fresh.scaleCur = g.scaleCur; fresh.scaleTo = g.scaleTo; fresh.scaleActive = g.scaleActive;
+    g = fresh;
 }
 
 // ---- pending removal (client prediction) ----
@@ -647,25 +703,38 @@ void ApplySnapshot(const SnapEntry* hostEntries, int hostTotal) {
     auto hostOrd = [&](int i) { return ord.empty() ? i : ord[static_cast<size_t>(i)]; };
 
     if (static_cast<int>(slots.size()) == total) {
-        // Ordinal drive: k-th local valid slot <- k-th snapshot entry. A roach the pose lane is
-        // gliding keeps its glide: the snapshot is up to a second old, and teleporting the roach to
-        // it would undo the smoothing every second. Far off (a roach the lane lost) still snaps.
+        // Ordinal drive: k-th local valid slot <- k-th snapshot entry. The snapshot NEVER writes the
+        // location of a roach the pose lane is gliding: it is up to a second old, and teleporting the
+        // roach to it undid the smoothing every second (and on a roach that grows, every scale change).
+        // Only a roach the lane lost, or one far off its glide, is placed from the snapshot. Scale is
+        // eased in ClientDrivePose, and written outright only on a big jump.
         for (int i = 0; i < total; ++i) {
             Vec3 cur{};
             const int ho = hostOrd(i);
             const Vec3 want{entries[i].loc.x, entries[i].loc.y, entries[i].loc.z};
             if (GetCompLocation(slots[i].comp, cur) &&
                 Dist2(cur, want) > kApplyMoveEpsilon * kApplyMoveEpsilon) {
-                const bool gliding = GlideFresh(ho, now) && Dist2(cur, want) < kSnapDist * kSnapDist;
-                if (!gliding) {
+                const bool glided = PoseOwnsLocation(ho, now) && Dist2(cur, want) < kSnapDist * kSnapDist;
+                if (glided) {
+                    ++g_stats.locSkipped;
+                } else {
                     SetCompLocation(slots[i].comp, want);
-                    if (ho < coop::net::kRoachSnapshotCap) g_glide[ho] = RoachGlide{};
+                    DropLocationGlide(ho);
                 }
             }
             Vec3 sc{1.f, 1.f, 1.f};
             if (GetCompScale(slots[i].comp, sc) &&
                 std::fabs(sc.x - entries[i].scale) > kApplyScaleEpsilon) {
-                SetCompScale(slots[i].comp, entries[i].scale);
+                const bool tracked = ho >= 0 && ho < coop::net::kRoachSnapshotCap;
+                if (tracked && std::fabs(sc.x - entries[i].scale) <= kScaleSnapDiff) {
+                    RoachGlide& g = g_glide[ho];
+                    if (!g.scaleActive) g.scaleCur = sc.x;
+                    g.scaleTo = entries[i].scale;
+                    g.scaleActive = true;
+                } else {
+                    SetCompScale(slots[i].comp, entries[i].scale);
+                    if (tracked) g_glide[ho].scaleActive = false;
+                }
             }
         }
     } else {
@@ -723,16 +792,16 @@ void ClientIngestPose(coop::net::Session* s, long long now) {
         const Vec3 toPyr{coop::net::DequantDeg(row.pitchCdeg), coop::net::DequantDeg(row.yawCdeg),
                          coop::net::DequantDeg(row.rollCdeg)};
         const Quat qTo = QuatFromPyr(toPyr);
-        if (!g.haveCur) {
-            // First sample for this roach (or after a drop): read where the component is.
+        if (!g.haveCur || now - g.lastRxMs > kTrackStaleMs) {
+            // First sample, or the lane went quiet (the host roach held still): read where the
+            // component actually is and glide from there. Only a real jump snaps.
             GetCompLocation(t.comp, g.cur);
             Vec3 pyr{0.f, 0.f, 0.f};
             if (GetCompRotation(t.comp, pyr)) g.qCur = QuatFromPyr(pyr);
             g.haveCur = true;
-            g.lastRxMs = 0;  // forces the snap/glide decision below to treat it as stale
+            g.win.Close();
         }
-        const bool stale = now - g.lastRxMs > kTrackStaleMs;
-        if (stale || Dist2(g.cur, to) > kSnapDist * kSnapDist) {
+        if (Dist2(g.cur, to) > kSnapDist * kSnapDist) {
             SetCompLocation(t.comp, to);
             if (HaveRot()) SetCompRotation(t.comp, toPyr);
             g.cur = to; g.qCur = qTo; t.loc = to;
@@ -757,9 +826,23 @@ void ClientDrivePose(long long now) {
     if (!g_haveApplied || g_tracked.empty()) return;
     if (Master() != g_trackedMaster) return;
     uint32_t open = 0;
+    static long long sLastDriveMs = 0;
+    const float dtMs = sLastDriveMs ? static_cast<float>(std::clamp<long long>(now - sLastDriveMs, 1, 100)) : 16.f;
+    sLastDriveMs = now;
+    const float easeK = 1.f - std::exp(-dtMs / kScaleGlideTauMs);
     const size_t n = std::min<size_t>(g_tracked.size(), coop::net::kRoachSnapshotCap);
     for (size_t k = 0; k < n; ++k) {
         RoachGlide& g = g_glide[k];
+        if (g.scaleActive) {
+            TrackedRoach& ts = g_tracked[k];
+            if (!ts.comp || !R::IsLiveByIndex(ts.comp, ts.idx)) {
+                g.scaleActive = false;
+            } else {
+                g.scaleCur += (g.scaleTo - g.scaleCur) * easeK;
+                if (std::fabs(g.scaleTo - g.scaleCur) < kScaleDoneEps) { g.scaleCur = g.scaleTo; g.scaleActive = false; }
+                SetCompScale(ts.comp, g.scaleCur);
+            }
+        }
         if (!g.win.IsOpen()) continue;
         TrackedRoach& t = g_tracked[k];
         if (!t.comp || !R::IsLiveByIndex(t.comp, t.idx)) { g.win.Close(); continue; }
@@ -841,21 +924,21 @@ void HostPoll(coop::net::Session* s, long long now) {
         g_lastSendMs = now;
         return;
     }
-    const bool changed   = SnapshotChanged(snap);
+    const uint8_t reasons = SnapshotChangeReasons(snap);
     const bool keepalive = (now - g_lastSendMs >= kKeepaliveMs) &&
                            (!snap.empty() || !g_lastSent.empty());
-    if (!changed && !keepalive) return;
+    if (!reasons && !keepalive) return;
     g_lastSent = snap;
     g_lastSendMs = now;
     SendSnapshot(s, snap, -1);
     ++g_stats.snapshotsSent;
-    // The line used to print on every broadcast, once a second for as long as a roach walked. The
-    // first few prove the lane; the minute summary carries the rate after that.
-    if (changed && g_stats.snapshotLogsLeft > 0) {
-        --g_stats.snapshotLogsLeft;
-        UE_LOGI("roach_sync: host broadcast %zu roach(es) (seq=%u)%s", snap.size(), g_seq,
-                g_stats.snapshotLogsLeft == 0 ? " -- further broadcasts summarised per minute" : "");
-    }
+    if (reasons & kReasonCount) ++g_stats.snapCount;
+    if (reasons & kReasonScale) ++g_stats.snapScale;
+    if (reasons & kReasonFar)   ++g_stats.snapFar;
+    if (!reasons)               ++g_stats.snapKeep;
+    char why[40];
+    UE_LOGI("roach_sync: host snapshot seq=%u reason=%s roaches=%zu", g_seq,
+            ReasonText(reasons, keepalive, why, sizeof(why)), snap.size());
 }
 
 // HOST: publish the population now (after an accepted removal), not at the next 1 Hz poll, so a client's
@@ -868,6 +951,8 @@ void HostBroadcastNow(coop::net::Session* s, void* master) {
     g_lastSendMs = NowMs();
     SendSnapshot(s, snap, -1);
     ++g_stats.snapshotsSent;
+    ++g_stats.snapOther;
+    UE_LOGI("roach_sync: host snapshot seq=%u reason=consumed roaches=%zu", g_seq, snap.size());
 }
 
 void MaybeSummary(bool isHost, long long now) {
@@ -878,21 +963,21 @@ void MaybeSummary(bool isHost, long long now) {
     if (isHost) {
         if (g_stats.poseSent || g_stats.snapshotsSent || g_stats.lastTotal)
             UE_LOGI("roach_sync: host %.0fs -- pose %u datagram(s) (%.1f Hz, %.1f row(s) avg), %d roach(es) "
-                    "(%d near a player), %u reliable snapshot(s)", sec, g_stats.poseSent,
-                    g_stats.poseSent / sec,
+                    "(%d near a player), %u reliable snapshot(s) (count %u, scale %u, far %u, keepalive %u, other %u)",
+                    sec, g_stats.poseSent, g_stats.poseSent / sec,
                     g_stats.poseSent ? static_cast<double>(g_stats.poseRowsSent) / g_stats.poseSent : 0.0,
-                    g_stats.lastTotal, g_stats.lastNear, g_stats.snapshotsSent);
+                    g_stats.lastTotal, g_stats.lastNear, g_stats.snapshotsSent, g_stats.snapCount,
+                    g_stats.snapScale, g_stats.snapFar, g_stats.snapKeep, g_stats.snapOther);
     } else {
         if (g_stats.poseRx || g_stats.poseIgnored || !g_tracked.empty())
             UE_LOGI("roach_sync: client %.0fs -- pose rx %u (%.1f Hz, %.1f row(s) avg, %u ignored), %zu roach(es) "
-                    "tracked, %u snap(s), glide depth %.2f open/frame", sec, g_stats.poseRx, g_stats.poseRx / sec,
+                    "tracked, %u snap(s), %u snapshot location write(s) skipped (glided), glide depth %.2f open/frame",
+                    sec, g_stats.poseRx, g_stats.poseRx / sec,
                     g_stats.poseRx ? static_cast<double>(g_stats.poseRowsRx) / g_stats.poseRx : 0.0,
-                    g_stats.poseIgnored, g_tracked.size(), g_stats.snaps,
+                    g_stats.poseIgnored, g_tracked.size(), g_stats.snaps, g_stats.locSkipped,
                     g_stats.depthFrames ? static_cast<double>(g_stats.depthSum) / g_stats.depthFrames : 0.0);
     }
-    const uint32_t keepLogs = g_stats.snapshotLogsLeft;
     g_stats = Stats{};
-    g_stats.snapshotLogsLeft = keepLogs;
     g_stats.sinceMs = now;
 }
 
@@ -1033,6 +1118,7 @@ void OnDisconnect() {
     g_lastSent.clear();
     g_lastSendMs = 0; g_lastPollMs = 0; g_lastPoseMs = 0;
     g_havePoseBody = false;
+    ClearPoseCarried();
     g_asmSeq = 0; g_asmPagesGot = 0; g_asmPageCount = 0; g_asmTotal = 0;
     g_tracked.clear();
     g_pending.clear();

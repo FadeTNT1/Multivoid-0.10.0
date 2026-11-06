@@ -30,8 +30,8 @@ void Install(coop::net::Session* session);
 // Driver (TickGameplay, game thread, every frame; each lane keeps its own clock).
 //
 // HOST: at 1 Hz poll the roaches array and broadcast a PAGED full snapshot -- RoachState carries a
-// seq, a page, and per roach a location and scale -- on a population change, on drift, and as a
-// periodic keepalive. At ~12 Hz publish RoachPose, an unreliable newest-wins datagram holding the
+// seq, a page, and per roach a location and scale -- on a population change, a scale change, drift of
+// a roach the pose lane does not carry, and as a periodic keepalive (each logs its reason). At ~12 Hz publish RoachPose, an unreliable newest-wins datagram holding the
 // roaches within reach of a player (nearest first, at most kRoachPoseMax), each with its ordinal,
 // location and rotation. The snapshot alone moved a client's roach once a second, as a teleport.
 //
