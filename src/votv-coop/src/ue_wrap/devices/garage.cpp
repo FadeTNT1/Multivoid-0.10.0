@@ -7,9 +7,11 @@
 
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/call.h"
+#include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/sdk_profile_names.h"
 
 #include <atomic>
@@ -26,6 +28,9 @@ std::atomic<bool> g_resolved{false};
 
 int32_t g_openOff   = -1;       // Agarage_C::Open
 int32_t g_movOff    = -1;       // Agarage_C::mov, true mid-swing (a drill reads it; NormalizeOpen clears it)
+int32_t g_meshOff   = -1;       // Agarage_C::SkeletalMesh, the door mesh the swing montage plays on (optional: SeedTo)
+int32_t g_loopOff   = -1;       // Agarage_C::loop, the swing sound (optional)
+int32_t g_navOff    = -1;       // Agarage_C::navmodifier (optional)
 int32_t g_moveTlOff = -1;       // Agarage_C::move, the swing UTimelineComponent* (optional: NormalizeOpen)
 // The verbs, resolved per instance (Verb below): runTrigger(owner, index), the wall button's call (a drill's),
 // and acivae() -- the NATIVE animated swing (the montage from position 0 at half rate, and the move timeline
@@ -74,6 +79,9 @@ bool EnsureResolved() {
     g_openOff   = openOff;
     g_movOff    = R::FindPropertyOffset(cls, N::GarageMovingProp);
     g_moveTlOff = R::FindPropertyOffset(cls, N::GarageMoveTimelineProp);
+    g_meshOff   = R::FindPropertyOffset(cls, N::GarageMeshProp);
+    g_loopOff   = R::FindPropertyOffset(cls, N::GarageLoopSoundProp);
+    g_navOff    = R::FindPropertyOffset(cls, N::GarageNavModifierProp);
     void* const runTriggerFn = R::FindFunction(cls, L"runTrigger");  // asked here only to say its absence
     g_resolved.store(true, std::memory_order_release);
     UE_LOGI("garage: resolved garage_C=%p Open@0x%04X acivae=%p (identity=level-export FName)",
@@ -228,6 +236,231 @@ bool CallRunTrigger(void* g, void* owner, int32_t index) {
     ParamFrame f(fn);
     if (!f.valid() || !f.Set<void*>(L"owner", owner) || !f.Set<int32_t>(L"index", index)) return false;
     return Call(g, f);
+}
+
+namespace {
+
+namespace P = ue_wrap::profile;
+
+constexpr uint32_t kSeedDriven = 1u;   // SeedTo has driven the door to its seed
+
+void WriteOpen(void* g, bool open) {
+    if (g_openOff >= 0) *reinterpret_cast<bool*>(reinterpret_cast<char*>(g) + g_openOff) = open;
+}
+
+// A component this garage holds at `off`, or null when the offset did not resolve or it is not live.
+void* ComponentAt(void* g, int32_t off) {
+    if (!g || off < 0) return nullptr;
+    void* c = *reinterpret_cast<void* const*>(reinterpret_cast<const char*>(g) + off);
+    return (c && R::IsLive(c)) ? c : nullptr;
+}
+
+// The door mesh's live animation instance, or null while it has none (the mesh not initialised yet, or a world's
+// first frames): the seed waits for it, since a montage played before it exists plays nowhere.
+void* DoorAnimInstance(void* g) {
+    void* const mesh = ComponentAt(g, g_meshOff);
+    if (!mesh) return nullptr;
+    void* const anim = *reinterpret_cast<void* const*>(reinterpret_cast<const char*>(mesh) +
+                                                       P::off::USkeletalMesh_AnimScriptInstance);
+    return (anim && R::IsLive(anim)) ? anim : nullptr;
+}
+
+void* AnimVerb(void* anim, const wchar_t* name) {
+    void* cls = R::ClassOf(anim);
+    return cls ? R::FindDispatchFunctionCached(cls, name) : nullptr;
+}
+
+void SaidOnce(bool& said, const wchar_t* verb) {
+    if (said) return;
+    said = true;
+    UE_LOGW("garage: UAnimInstance::%ls did not resolve -- the door mesh is left as the swing montage puts it", verb);
+}
+
+// The montage the door mesh is playing (the swing proxy's), or null.
+void* ActiveMontage(void* anim) {
+    static bool s_said = false;
+    void* const fn = AnimVerb(anim, N::AnimGetActiveMontageFn);
+    if (!fn) { SaidOnce(s_said, N::AnimGetActiveMontageFn); return nullptr; }
+    ParamFrame f(fn);
+    if (!f.valid() || !Call(anim, f)) return nullptr;
+    void* const m = f.Get<void*>(L"ReturnValue");
+    return (m && R::IsLive(m)) ? m : nullptr;
+}
+
+bool JumpToSectionsEnd(void* anim, void* montage, bool open) {
+    static bool s_said = false;
+    void* const fn = AnimVerb(anim, N::AnimJumpToSectionsEndFn);
+    if (!fn) { SaidOnce(s_said, N::AnimJumpToSectionsEndFn); return false; }
+    ParamFrame f(fn);
+    R::FName section = ue_wrap::fname_utils::StringToFName(open ? N::GarageOpenSection : N::GarageCloseSection);
+    return f.valid() && f.SetRaw(L"SectionName", &section, sizeof(section)) && f.Set<void*>(L"Montage", montage) &&
+           Call(anim, f);
+}
+
+bool MontagePosition(void* anim, void* montage, float& pos) {
+    static bool s_said = false;
+    void* const fn = AnimVerb(anim, N::AnimMontageGetPositionFn);
+    if (!fn) { SaidOnce(s_said, N::AnimMontageGetPositionFn); return false; }
+    ParamFrame f(fn);
+    if (!f.valid() || !f.Set<void*>(L"Montage", montage) || !Call(anim, f)) return false;
+    pos = f.Get<float>(L"ReturnValue");
+    return std::isfinite(pos);
+}
+
+bool SetMontagePosition(void* anim, void* montage, float pos) {
+    static bool s_said = false;
+    void* const fn = AnimVerb(anim, N::AnimMontageSetPositionFn);
+    if (!fn) { SaidOnce(s_said, N::AnimMontageSetPositionFn); return false; }
+    ParamFrame f(fn);
+    return f.valid() && f.Set<void*>(L"Montage", montage) && f.Set<float>(L"NewPosition", pos) && Call(anim, f);
+}
+
+void SetComponentActive(void* comp, bool active) {
+    void* cls = R::ClassOf(comp);
+    void* const fn = cls ? R::FindDispatchFunctionCached(cls, N::ComponentSetActiveFn) : nullptr;
+    if (!fn) return;
+    ParamFrame f(fn);
+    if (f.valid() && f.Set<bool>(L"bNewActive", active) && f.Set<bool>(L"bReset", false)) Call(comp, f);
+}
+
+// The blocking nav area the finished closing swing sets (the opening one clears it, and settime does the same).
+void SetClosedNavArea(void* g) {
+    void* const nav = ComponentAt(g, g_navOff);
+    if (!nav) return;
+    static void* s_areaCls = nullptr;
+    if (!s_areaCls) s_areaCls = R::FindClass(N::GarageClosedNavAreaClass);
+    void* cls = R::ClassOf(nav);
+    void* const fn = cls ? R::FindDispatchFunctionCached(cls, N::NavModifierSetAreaClassFn) : nullptr;
+    if (!s_areaCls || !fn) return;
+    ParamFrame f(fn);
+    if (f.valid() && f.Set<void*>(N::NavModifierAreaClassParam, s_areaCls)) Call(nav, f);
+}
+
+// The move timeline and where it stands; false when it, or one of its reads, did not resolve.
+bool TimelineReads(void* g, void*& tl, float& length, float& pos, bool& playing) {
+    tl = MoveTimeline(g);
+    if (!tl) return false;
+    void* const playingFn = TimelineVerb(tl, N::TimelineIsPlayingFn);
+    if (!playingFn || !TimelineFloat(tl, N::TimelineGetLengthFn, length) ||
+        !TimelineFloat(tl, N::TimelineGetPositionFn, pos) || length <= 0.f)
+        return false;
+    ParamFrame f(playingFn);
+    playing = f.valid() && Call(tl, f) && f.Get<bool>(L"ReturnValue");
+    return true;
+}
+
+bool TimelineSeek(void* tl, float to) {
+    void* const setFn = TimelineVerb(tl, N::TimelineSetPositionFn);
+    if (!setFn) return false;
+    ParamFrame set(setFn);
+    return set.valid() && set.Set<float>(N::TimelineNewPositionParam, to) &&
+           set.Set<bool>(N::TimelineFireEventsParam, false) && set.Set<bool>(N::TimelineFireUpdateParam, true) &&
+           Call(tl, set);
+}
+
+void TimelineCall(void* tl, const wchar_t* name) {
+    void* const fn = TimelineVerb(tl, name);
+    if (!fn) return;
+    ParamFrame f(fn);
+    if (f.valid()) Call(tl, f);
+}
+
+float Clamp01(float v) { return std::fmin(1.f, std::fmax(0.f, v)); }
+
+// Drive a door that stood at rest on the authority to its end, all of it. The game's own load verb, settime, plays the
+// mesh montage and moves the timeline and the box; what it leaves mid-way is finished here: the montage put at the end
+// of its section, the timeline stopped at its end with its update fired (settime sets it a second in and runs it on,
+// so the box would shrink and grow back), `mov` cleared, the swing sound out and the nav area set.
+bool DriveToRest(void* g, bool open) {
+    void* const settime = Verb(g, N::GarageSetTimeFn);
+    void* tl = nullptr;
+    float length = 0.f, pos = 0.f;
+    bool playing = false;
+    if (!settime || !TimelineReads(g, tl, length, pos, playing)) return false;
+    WriteOpen(g, open);
+    {
+        ParamFrame f(settime);
+        if (!f.valid() || !f.Set<bool>(N::GarageSetTimeOpenParam, open) || !Call(g, f)) return false;
+    }
+    TimelineCall(tl, N::TimelineStopFn);
+    TimelineSeek(tl, open ? length : 0.f);
+    if (g_movOff >= 0) *reinterpret_cast<bool*>(reinterpret_cast<char*>(g) + g_movOff) = false;
+    if (void* const loop = ComponentAt(g, g_loopOff)) SetComponentActive(loop, false);
+    if (!open) SetClosedNavArea(g);
+    if (void* const anim = DoorAnimInstance(g))
+        if (void* const montage = ActiveMontage(anim)) JumpToSectionsEnd(anim, montage, open);
+    return true;
+}
+
+// Start the animated swing toward `open` and put the timeline and the mesh at the authority's place in it.
+bool DriveMidSwing(void* g, bool open, float fraction) {
+    void* const acivae = Verb(g, L"acivae");
+    void* tl = nullptr;
+    float length = 0.f, pos = 0.f;
+    bool playing = false;
+    if (!acivae || !TimelineReads(g, tl, length, pos, playing)) return false;
+    WriteOpen(g, open);
+    {
+        // acivae takes its direction from the flag just written; ApplyOpen is not used since it returns early
+        // on a flag that already matches.
+        ParamFrame f(acivae);
+        if (!f.valid() || !Call(g, f)) return false;
+    }
+    const float frac = Clamp01(fraction);
+    TimelineSeek(tl, frac * length);
+    // A reverse started at the closed end finishes on the spot, so the seek leaves the timeline stopped mid-way.
+    if (TimelineReads(g, tl, length, pos, playing) && !playing)
+        TimelineCall(tl, open ? N::TimelinePlayFn : N::TimelineReverseFn);
+    void* const anim = DoorAnimInstance(g);
+    void* const montage = anim ? ActiveMontage(anim) : nullptr;
+    float start = 0.f, end = 0.f;
+    // The section's length is not read by name: its start is where the swing's montage stands now, its end where a jump
+    // to the section's end puts it, and the mesh goes the timeline's progress along that.
+    if (montage && MontagePosition(anim, montage, start) && JumpToSectionsEnd(anim, montage, open) &&
+        MontagePosition(anim, montage, end))
+        SetMontagePosition(anim, montage, start + (end - start) * (open ? frac : 1.f - frac));
+    return true;
+}
+
+}  // namespace
+
+bool TryReadTravel(void* g, bool& moving, float& fraction) {
+    void* tl = nullptr;
+    float length = 0.f, pos = 0.f;
+    bool playing = false;
+    if (!TimelineReads(g, tl, length, pos, playing)) return false;
+    bool mov = false;
+    TryReadMoving(g, mov);
+    moving = mov || playing;
+    fraction = Clamp01(pos / length);
+    return true;
+}
+
+Seeded SeedTo(void* g, bool open, bool moving, float fraction, uint32_t& cookie) {
+    if (!g || !g_resolved.load(std::memory_order_acquire)) return Seeded::Failed;
+    void* tl = nullptr;
+    float length = 0.f, pos = 0.f;
+    bool playing = false;
+    if (!TimelineReads(g, tl, length, pos, playing)) return Seeded::Failed;
+    // The door mesh needs its animation instance before a montage means anything. A garage whose mesh offset did not
+    // resolve is driven without that gate, since settime and acivae play the montage themselves.
+    if (g_meshOff >= 0 && !DoorAnimInstance(g)) return Seeded::Working;
+    bool mov = false, curOpen = open;
+    TryReadMoving(g, mov);
+    TryReadOpen(g, curOpen);
+    if (cookie & kSeedDriven) {
+        if (curOpen == open) {
+            if (mov || playing) return Seeded::Working;
+            // At rest: the timeline ends where the flag says, and anything short of it (a swing that stopped early, a
+            // save's late settime) is brought there.
+            NormalizeOpen(g, open);
+            return Seeded::Rest;
+        }
+        cookie = 0;  // the flag was rewritten behind the seed (a late save load): drive it again
+    }
+    if (!(moving ? DriveMidSwing(g, open, fraction) : DriveToRest(g, open))) return Seeded::Failed;
+    cookie |= kSeedDriven;
+    return Seeded::Working;
 }
 
 }  // namespace ue_wrap::garage

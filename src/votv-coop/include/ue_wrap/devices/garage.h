@@ -64,6 +64,32 @@ enum class Settled : uint8_t {
 // receive the timeline position read before and after. Game thread.
 Settled NormalizeOpen(void* g, bool open, float* before = nullptr, float* after = nullptr);
 
+// The garage's swing as a peer would send it: whether it is mid-swing (`mov` or the timeline playing) and how far
+// along the timeline it stands, 0 (closed end) to 1 (open end). False when the timeline did not resolve or read;
+// the outputs are then untouched. Game thread.
+bool TryReadTravel(void* g, bool& moving, float& fraction);
+
+// What a SeedTo call found.
+enum class Seeded : uint8_t {
+    Working,  // not there yet: the door is not ready (its mesh has no animation instance yet), or is mid-swing toward
+              // the seed; call again
+    Rest,     // the door stands at the seed's end, its flag, timeline, collision and mesh all driven there
+    Failed,   // the verbs this needs did not resolve: nothing was driven, a live apply is the fallback
+};
+
+// Put the garage where its authority stood, for a joiner's snapshot: `open` is the authority's Open, `moving` and
+// `fraction` (the timeline's place, 0..1) say whether it was mid-swing and how far.
+//   At rest: the game's own load verb, settime, runs once -- it plays the door-mesh montage (the one thing that moves
+//   the mesh; the timeline moves only the collision box) and sets the timeline -- then the montage is put at the end of
+//   its open or close section, the timeline stopped at its end with its update fired, `mov` cleared, the swing sound
+//   put out and the nav area set as the finished swing sets it.
+//   Mid-swing: the animated swing (acivae) starts toward `open`, and the timeline and the mesh montage are put at the
+//   authority's place in it, so the door finishes with the authority's.
+// `cookie` is the caller's per-seed memory, zero at the start: it records that the door has been driven, so a repeat
+// call neither restarts the swing nor replays the montage, only watches the door settle and drives it again if
+// something rewrote the flag (a save's late load). Never replays the wall button. Game thread.
+Seeded SeedTo(void* g, bool open, bool moving, float fraction, uint32_t& cookie);
+
 // Whether the garage is mid-swing, its `mov`: its runTrigger ignores a call then. False if the read
 // could not be made (null, or the field did not resolve). Game thread.
 bool TryReadMoving(void* g, bool& moving);

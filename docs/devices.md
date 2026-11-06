@@ -108,6 +108,16 @@ puppet counts in that list exactly when the client's own player counts in the cl
 it. A device with no auto-revert (the garage, an appliance, an oven's repair, a locker, a lid) is
 symmetric: any peer's edge is the state.
 
+A garage has three bodies that the one `Open` bool does not describe: the collision box and the timeline that drives
+it, and the door mesh, which only the swing montage moves. The host's connect snapshot of a garage is therefore a
+seed (`kSeedFlagSeed`, with `travel` and `kSeedFlagMoving` for a door that is mid-swing), not a toggle. A joiner keeps the
+newest seed per garage (`coop/interactables/interactable_seed`) and `ue_wrap::garage::SeedTo` drives it: at rest the
+game's own load verb `settime` plays the montage, then the montage is put at the end of its open or close section, the
+timeline stopped at its end, `mov`, the swing sound and the nav area set; mid-swing the animated swing starts and the
+timeline and montage are put at the host's place in it. The seed is retried every 250 ms until the door's mesh has an
+animation instance and the door has converged, then watched 15 s so a save's late load that rewrites `Open` is driven
+back. A live state for the garage, or the joiner's own press, drops the seed.
+
 ### Security cameras
 
 A camera has two saved bits, each its own lane keyed by the lane's key for the camera (its portable

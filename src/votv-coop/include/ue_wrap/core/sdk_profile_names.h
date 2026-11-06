@@ -966,12 +966,37 @@ inline constexpr const wchar_t* TimelineIsPlayingFn          = L"IsPlaying";
 inline constexpr const wchar_t* TimelineGetLengthFn          = L"GetTimelineLength";
 inline constexpr const wchar_t* TimelineGetPositionFn        = L"GetPlaybackPosition";
 inline constexpr const wchar_t* TimelineSetPositionFn        = L"SetPlaybackPosition";
+inline constexpr const wchar_t* TimelinePlayFn              = L"Play";
+inline constexpr const wchar_t* TimelineReverseFn           = L"Reverse";
 inline constexpr const wchar_t* TimelineNewPositionParam     = L"NewPosition";
 inline constexpr const wchar_t* TimelineFireEventsParam      = L"bFireEvents";
 inline constexpr const wchar_t* TimelineFireUpdateParam      = L"bFireUpdate";
 // garage_C's swing timeline (a UTimelineComponent member named `move`, as door_C's) and its mid-swing flag.
 inline constexpr const wchar_t* GarageMoveTimelineProp       = L"move";
 inline constexpr const wchar_t* GarageMovingProp             = L"mov";
+// garage_C's door mesh (the skeletal mesh the swing montage plays on), its looping swing sound and its nav
+// modifier, and the verb the game's own load runs to put the door at its end (it plays the montage and the timeline).
+inline constexpr const wchar_t* GarageMeshProp               = L"SkeletalMesh";
+inline constexpr const wchar_t* GarageLoopSoundProp          = L"loop";
+inline constexpr const wchar_t* GarageNavModifierProp        = L"navmodifier";
+inline constexpr const wchar_t* GarageSetTimeFn              = L"settime";
+inline constexpr const wchar_t* GarageSetTimeOpenParam       = L"open";
+// The nav area a closed garage blocks with, set by the timeline's finish; the open end clears it.
+inline constexpr const wchar_t* GarageClosedNavAreaClass     = L"NavArea_Null";
+inline constexpr const wchar_t* NavModifierSetAreaClassFn    = L"SetAreaClass";
+inline constexpr const wchar_t* NavModifierAreaClassParam    = L"NewAreaClass";
+// UAnimInstance's montage verbs, which put the garage's door mesh at a place in its swing: the montage the instance
+// is playing, a jump to the end of a named section, and the montage's position read and set. The section names
+// are the montage's own: "open" and "close".
+inline constexpr const wchar_t* AnimInstanceClass            = L"AnimInstance";
+inline constexpr const wchar_t* AnimGetActiveMontageFn       = L"GetCurrentActiveMontage";
+inline constexpr const wchar_t* AnimJumpToSectionsEndFn      = L"Montage_JumpToSectionsEnd";
+inline constexpr const wchar_t* AnimMontageGetPositionFn     = L"Montage_GetPosition";
+inline constexpr const wchar_t* AnimMontageSetPositionFn     = L"Montage_SetPosition";
+inline constexpr const wchar_t* GarageOpenSection            = L"open";
+inline constexpr const wchar_t* GarageCloseSection           = L"close";
+// UActorComponent::SetActive(bNewActive, bReset), which turns the garage's swing sound off at rest.
+inline constexpr const wchar_t* ComponentSetActiveFn         = L"SetActive";
 
 // The Aprop_C BP class name (the prop registry's GUObjectArray scan).
 inline constexpr const wchar_t* PropClass             = L"prop_C";
