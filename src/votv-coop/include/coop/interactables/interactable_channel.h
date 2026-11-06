@@ -409,9 +409,14 @@ public:
                     } else if (WaitSettled(it->second.queuedAt)) {
                         // The world settled and it is still not here: the count that grades this
                         // lane.
-                        if (ProbeLog())
-                            UE_LOGI("%s: deferred '%ls' expired (index settled %d passes, still "
-                                    "not present on this peer)", a_.name, it->first.c_str(), stablePasses_);
+                        // A state that never landed is a lane that silently lost an edge: said for the first few of
+                        // each lane whatever the probe flag, the rest counted by the retry line below.
+                        if (ProbeLog() || expiredSaid_ < 8) {
+                            ++expiredSaid_;
+                            UE_LOGW("%s: deferred %s for '%ls' expired (index settled %d passes, still "
+                                    "not present on this peer)", a_.name, it->second.want ? "ON" : "OFF",
+                                    it->first.c_str(), stablePasses_);
+                        }
                         it = pending_.erase(it);
                         ++expired;
                     } else if (now >= it->second.deadline) {
@@ -789,6 +794,7 @@ private:
     uint64_t passes_ = 0;                                  // hub passes completed (GT-only)
     bool saidUnresolved_ = false, saidDeferred_ = false, saidUnindexed_ = false, saidRead_ = false,
          saidApplyFailed_ = false, saidNoKey_ = false, saidEmptyIndex_ = false;  // one WARN per reason (GT-only)
+    int expiredSaid_ = 0;                                  // deferred states that expired, said (GT-only)
     uint64_t unindexedEdges_ = 0;                          // edges on a device the index did not hold (GT-only)
     std::vector<std::pair<std::wstring, Ref>> scanFound_;  // hub-pass scratch (GT-only)
     uint32_t indexGen_ = 0;   // world gen of the last completed hub pass (GT-write, GT-read)

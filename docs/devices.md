@@ -108,6 +108,16 @@ puppet counts in that list exactly when the client's own player counts in the cl
 it. A device with no auto-revert (the garage, an appliance, an oven's repair, a locker, a lid) is
 symmetric: any peer's edge is the state.
 
+A client's apply of a door state (`ue_wrap::door::SmartApply`) runs the door's own `doorOpen(true)` or `doorClose(true)`.
+The bypassed verbs are guarded only by `jammed` and `superclosed` (open) and `cantclose` (close); `active`, `isMoving`
+and `isOpened` gate the press path alone. The apply clears a stale one of those flags, then reads the door at once (the
+verb is synchronous): a door that neither set `isMoving` nor reached the state was left where it was, and is
+force-snapped to the host's state in that call. The log says `door: applied ON key=.. via doorOpen`, or `via
+fallback(<guard>)` with the swing's fields. After it lands the apply stays a watch for eight seconds (past the door's
+own five-second autoclose delay) and puts back a settled door found off the host's state (`door: key=.. drifted
+off ..`), at most three times. A state that never landed because the client's index does not hold the key is said
+as `door: deferred ON for '..' expired`.
+
 A hit that does not open a door still moves it: `addDamage` nudges the two leaf roots (`door_r_root`, `door_l_root`)
 toward their open places and begins the swing only past a threshold, so the open bool alone left a client's copy shut
 while the host's showed the crack. The host watches `addDamage` after its body and the door adapter carries the roots'
