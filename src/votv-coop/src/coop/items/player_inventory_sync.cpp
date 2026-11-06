@@ -19,6 +19,7 @@
 #include "ue_wrap/actors/vitals.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/sdk_profile_names.h"  // the start point
+#include "ue_wrap/engine/world_folder.h"  // the world key of the entry written
 #include "ue_wrap/engine/save_capture.h"  // the moment the world is gathered into the save object
 #include "coop/save/save_block.h"  // the moment the host's world is saved
 #include "coop/save/save_transfer.h"  // the hosted world's key
@@ -426,11 +427,16 @@ void OnWorldGather() {
 // Host: saveSlot_C::saveToSlot wrote a world entry (coop/save/save_block, on the game thread). Only
 // THE world counts: the live save object. The save-slot menu writes regenerated and copied save
 // objects of its own; the join capture writes through SaveGameToSlot and never reaches this. The
-// profiles are cut beside the hosted world's key (coop/save/save_transfer).
-void OnWorldSaveWritten(void* saveObject, bool /*autosave*/) {
+// profiles are cut beside the entry that was written: the hosted world's folder, with the entry
+// the call named (main.sav or autosave.sav), so each entry keeps the profiles of its own moment.
+void OnWorldSaveWritten(void* saveObject, bool autosave) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running() || s->role() != coop::net::Role::Host) return;
-    const std::wstring& world = coop::save_transfer::HostSlot();
+    std::wstring world = coop::save_transfer::HostSlot();
+    std::wstring folder, entry;
+    if (ue_wrap::world_folder::SplitKey(world, folder, entry))
+        world = ue_wrap::world_folder::MakeKey(
+            folder, autosave ? ue_wrap::profile::name::WorldEntryAutosave : ue_wrap::profile::name::WorldEntryMain);
     const wchar_t* slotName = world.c_str();
     if (void* live = ue_wrap::inventory::ResolveSaveSlot(); saveObject != live) {
         // The save-slot menu writes save objects of its own; a mismatch that is NOT that would be a
