@@ -64,12 +64,60 @@ std::atomic<bool> g_spawnPostObserverInstalled{false};
 // install never leaks Npc Elements, allocated by PRE and never bound or destroyed.
 std::atomic<bool> g_npcSyncDisabledThisProcess{false};
 
+namespace {
+
+// True while an installed lane still has allowlisted classes that had not loaded yet. Install's
+// retry pump then re-resolves just those entries until each binds; the lane itself is already live.
+std::atomic<bool> g_lateResolvePending{false};
+
+// One resolve pass over the allowlist: binds every still-null entry whose class is loaded now and
+// returns how many entries remain null. A class binds independently of the others, so one class
+// the level has not loaded never holds the rest back. The entries are aligned pointer stores read
+// by the interceptor with IsDescendantOfAny, which skips null bases; a store is atomic on x64, so a
+// reader sees either null (not allowlisted yet) or the class.
+size_t ResolveAllowlistPass(bool logLateBinds) {
+    size_t unresolved = 0;
+    for (size_t i = 0; i < P::name::kNpcAllowlistSize; ++i) {
+        if (g_npcAllowlist[i]) continue;
+        void* cls = R::FindClass(P::name::kNpcAllowlist[i]);
+        if (cls) {
+            g_npcAllowlist[i] = cls;
+            if (logLateBinds) {
+                UE_LOGI("npc-suppress: allowlist class '%ls' loaded late and is now synced (%p)",
+                        P::name::kNpcAllowlist[i], cls);
+            }
+        } else {
+            ++unresolved;
+        }
+    }
+    return unresolved;
+}
+
+// The post-install tail of the retry pump: re-resolve the classes that had not loaded when the
+// lane went live (a story-event class the level loads late), at the install throttle's cadence,
+// since every miss walks the object array.
+void ResolveLateClasses() {
+    static int s_lateCountdown = 0;
+    if (s_lateCountdown > 0) {
+        --s_lateCountdown;
+        return;
+    }
+    s_lateCountdown = 60;
+    if (ResolveAllowlistPass(true) == 0) {
+        g_lateResolvePending.store(false, std::memory_order_release);
+        UE_LOGI("npc-suppress: every allowlisted NPC class is now resolved");
+    }
+}
+
+}  // namespace
+
 bool IsInstalled() {
-    // True once Install's attempt completed, so it stops retrying. On the happy path the latch is
-    // set only after every allowlisted class resolves (a partial resolve early-returns without
-    // latching), so a latched install resolved all of it and the allowlist test is fully usable.
-    // On a broken build (the deferred-spawn UFunction or its params unresolvable) it latches with
-    // a null allowlist to stop retrying, and the reconcile sweep safely no-ops. Deliberately
+    // True once Install's attempt completed, so it stops retrying. The latch is set once the
+    // spawn path resolves and at least one allowlisted class has loaded; classes still unloaded at
+    // that point are bound lazily by the pump (ResolveLateClasses) and are simply not allowlisted
+    // until they bind, so one class the level has not loaded never gates the lane. On a broken
+    // build (the deferred-spawn UFunction or its params unresolvable) it latches with a null
+    // allowlist to stop retrying, and the reconcile sweep safely no-ops. Deliberately
     // ignores the disabled flag (the interceptor disabled but the allowlist resolved): callers
     // must not block unrelated prop or door replay on the NPC interceptor being live.
     return g_installed.load(std::memory_order_acquire);
@@ -77,7 +125,10 @@ bool IsInstalled() {
 
 void Install(coop::net::Session* session) {
     SetSession(session);  // cache (caller guarantees outlives us)
-    if (g_installed.load(std::memory_order_acquire)) return;
+    if (g_installed.load(std::memory_order_acquire)) {
+        if (g_lateResolvePending.load(std::memory_order_acquire)) ResolveLateClasses();
+        return;
+    }
     // The throttle guard: every Find call below walks the object array with a string allocation
     // per entry, so retries are bounded to about one per half second during the unresolved window.
     static int s_installRetryCountdown = 0;
@@ -164,27 +215,31 @@ void Install(coop::net::Session* session) {
     const int32_t retOff = g_npcSpawnReturnParamOff;
     const int32_t xformOff = g_npcSpawnXformParamOff;
 
-    // Resolve the NPC classes. A partial resolution is fine here, since a missing class is simply
-    // not suppressed yet; most of the game's NPC classes are loaded on gameplay-level entry.
-    // Already-resolved entries skip the lookup, and the unresolved walks are bounded by the
-    // throttle gate at the top.
-    size_t resolved = 0;
-    for (size_t i = 0; i < P::name::kNpcAllowlistSize; ++i) {
-        if (!g_npcAllowlist[i]) {
-            g_npcAllowlist[i] = R::FindClass(P::name::kNpcAllowlist[i]);
-        }
-        if (g_npcAllowlist[i]) ++resolved;
-    }
-    if (resolved < P::name::kNpcAllowlistSize) {
-        // Not installed yet: every class must be cached before going live, or some NPCs would be
-        // suppressed and others not, depending on resolve timing. Throttle the next attempt.
+    // Resolve the NPC classes, each on its own. The lane goes live as soon as one class has loaded:
+    // a class the level has not loaded yet (a story-event creature, say) cannot spawn, so nothing
+    // is missed by leaving it out for now, and it is bound lazily after install. Already-resolved
+    // entries skip the lookup, and the unresolved walks are bounded by the throttle gate at the
+    // top. Waiting for every class would let a single missing one stop all creature sync.
+    const size_t unresolved = ResolveAllowlistPass(false);
+    const size_t resolved = P::name::kNpcAllowlistSize - unresolved;
+    if (resolved == 0) {
+        // Nothing has loaded yet (the menu, or a level mid-load). Throttle the next attempt.
         s_installRetryCountdown = 60;
-        UE_LOGI("npc-suppress: NPC class load partial (%zu/%zu) -- throttled retry in ~0.5s",
-                resolved, P::name::kNpcAllowlistSize);
+        UE_LOGI("npc-suppress: no NPC class loaded yet (0/%zu) -- throttled retry in ~0.5s",
+                P::name::kNpcAllowlistSize);
         return;
     }
+    if (unresolved > 0) {
+        // Logged once, here, at the moment the lane goes live without them.
+        UE_LOGI("npc-suppress: %zu/%zu NPC classes loaded; the lane goes live now, the rest bind "
+                "lazily as the level loads them:", resolved, P::name::kNpcAllowlistSize);
+        for (size_t i = 0; i < P::name::kNpcAllowlistSize; ++i) {
+            if (!g_npcAllowlist[i]) UE_LOGI("npc-suppress:   pending '%ls'", P::name::kNpcAllowlist[i]);
+        }
+        g_lateResolvePending.store(true, std::memory_order_release);
+    }
 
-    // Every class resolved. Cache the function pointer and the offsets. The lifecycle observers go
+    // Cache the function pointer and the offsets. The lifecycle observers go
     // in first: if either registration fails (the observer table full), the disabled flag is set
     // and the interceptor registration below is skipped, so a permanent interceptor slot is not
     // burnt for a system that cannot function.
@@ -262,7 +317,7 @@ void Install(coop::net::Session* session) {
     UE_LOGI("npc-suppress: installed interceptor on %ls.%ls @ %p (ActorClass@%d, ReturnValue@%d, SpawnTransform@%d, %zu/%zu NPC classes resolved + lifecycle observers live)",
             P::name::GameplayStaticsClass, P::name::BeginDeferredSpawnFn,
             fn, classOff, retOff, xformOff,
-            P::name::kNpcAllowlistSize, P::name::kNpcAllowlistSize);
+            resolved, P::name::kNpcAllowlistSize);
     // The EX_CallMath spawn catch (the Func thunk, source-gated), installed under the same
     // lifecycle gate as the interceptor: an Element it enrols gets the identical destroy close.
     // Idempotent across retries.

@@ -261,9 +261,10 @@ inline constexpr const wchar_t* NpcClass_GeomOcta     = L"geomOcta_C";
 // loads with the level as the other story creatures do.
 inline constexpr const wchar_t* NpcClass_Kavotia      = L"kavotia_C";
 
-// The allowlist array: resolved once at install through R::FindClass and cached. The classes load
-// on the first gameplay-level transition, not at the menu, so the install retries until every
-// entry resolves. sizeof-derived, so a new entry binds everywhere.
+// The allowlist array: resolved through R::FindClass and cached per entry. The classes load on the
+// first gameplay-level transition, not at the menu: the install waits for the first one to load,
+// then goes live, and any entry the level has not loaded yet binds lazily later, so one missing
+// class never gates the rest. sizeof-derived, so a new entry binds everywhere.
 inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_Zombie,
     NpcClass_KerfurOmega,
