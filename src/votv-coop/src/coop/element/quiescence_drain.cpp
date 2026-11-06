@@ -567,6 +567,10 @@ void ApplyPendingPosCorrections() {
         // Then the host's stuck state, frozen and sleep, where it moved a keyed prop through a verb
         // that changed them: the extinguisher it took off a mount is not frozen at its new place, and
         // a sign it pried off its wall is not stuck there.
+        // A prop the host pried free (a plank, an asologo piece) is Static here until this row says otherwise; the
+        // correction is the host's word, so it takes the release the stuck/frozen converge below leaves alone.
+        coop::prop_wire_parity::ConvergeStaticRelease(actor, c.physFlags, /*hostAuthored=*/true,
+                                                      /*restorePhysics=*/true);
         coop::prop_stick_sync::ConvergeStuck(actor, c.physFlags);
         coop::prop_wire_parity::ConvergeFrozenSleep(actor, c.physFlags);
         ue_wrap::FVector got{};

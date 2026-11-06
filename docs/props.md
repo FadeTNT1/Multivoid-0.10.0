@@ -254,8 +254,20 @@ on the driven-prop channel (an explicit claim, which has no condition on kinemat
 releases it. The stream publishes the pose whenever it moved; the end edge carries the final pose and the
 host's flags. A client's copy is moved by the lerp, left kinematic (Static is one of `PhysicsStaysOff`'s
 terms), and its end takes the one release a converge makes from Static, `ConvergeStaticRelease`, which
-runs the game's base `setPropProps` with Static off and the host's frozen and sleep. The release is gated
-to `prop_vent_C`: no other class changes Static through a converge `[RD]`.
+runs the game's base `setPropProps` with Static off and the host's frozen and sleep `[RD]`.
+
+### A prop the host pried free
+
+The same release serves every prop whose host copy has cleared Static, not only the vent: a plank, banister,
+pillar or `prop_asologoPiece_C` piece (the radiator) a crowbar pries off. The pry runs on the host alone
+([tool-actions.md](tool-actions.md)), the piece's `breakingSequence` ends with Static off, and the client's copy,
+still Static, was ungrabbable (a Static body refuses the native grab, so no hold ever started) and kinematic. Static
+is released on the host's word only (`hostAuthored`): a drive end the host sent, a spawn or snapshot row and its
+join correction from slot 0, the end of a hold from slot 0, and the first pose of a host hold on a copy that is
+Static here (the host held it, so its copy is free). A client-authored flag never releases a Static; a wall-attachable
+keeps its component's unstick (`prop_stick_sync`) and a trash clump its own lane. The log says `static released for eid
+X class Y` and `physics restored: yes|no`. `[?]` Whether the game keeps a second native "pryable" state that the
+prompt reads has not been confirmed in a two-peer run.
 
 ### The vent-cover census
 

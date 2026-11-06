@@ -21,6 +21,8 @@
 #include "coop/props/prop_element_tracker.h"
 #include "coop/props/prop_key_index.h"  // a key on the wire to a live actor
 #include "coop/props/prop_stick_sync.h"  // the stuck wall-attachable gates
+#include "coop/props/prop_wire_parity.h"  // ConvergeStaticRelease, FrozenSleepBitsOf: a host hold frees a Static copy
+#include "coop/net/protocol.h"            // propspawn_flags
 #include "coop/props/unresolved_pose_ledger.h"  // a pose-before-spawn race vs a sustained identity gap
 #include "coop/props/bracket_position_wait.h"  // KeepIfWaiting: a pose for a key whose spawn waits
 #include "coop/props/trash_channel.h"  // the per-eid sync-time context; stale carry and release drops
@@ -228,6 +230,18 @@ void ResolveAndStartDrive(int slot, const coop::net::PropPoseSnapshot& pose) {
     if (LocalDragsDoor(prop, slot, pose.holdGen)) return;
     if (ue_wrap::prop::IsDescendantOfProp(prop)) {
         const bool attachable = coop::prop_stick_sync::IsWallAttachable(prop);
+        // The host holds it, and a Static body cannot be held there, so the host's copy is free of Static: this copy
+        // (a pried prop whose release edge did not reach it) takes the release before the refusal below judges it.
+        if (slot == 0 && ue_wrap::prop::IsStatic(prop) && !attachable) {
+            const uint8_t hostFlags = static_cast<uint8_t>(coop::net::propspawn_flags::kLiveState |
+                                                           coop::prop_wire_parity::FrozenSleepBitsOf(prop));
+            if (coop::prop_wire_parity::ConvergeStaticRelease(prop, hostFlags, /*hostAuthored=*/true,
+                                                              /*restorePhysics=*/false)) {
+                UE_LOGI("remote_prop: slot 0 key '%ls' hold %u -- the host holds a prop that was Static here: static "
+                        "released; the drive parks it below (physics restored on its release)", keyW.c_str(),
+                        static_cast<unsigned>(pose.holdGen));
+            }
+        }
         if (ue_wrap::prop::IsStatic(prop) && !attachable) {
             if (hold.refusedGen != pose.holdGen) {
                 hold.refusedGen = pose.holdGen;

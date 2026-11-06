@@ -5,7 +5,9 @@
 
 #include "coop/props/prop_wire_parity.h"
 
+#include "coop/element/registry.h"   // EidForActor, the release's log line
 #include "coop/net/protocol.h"
+#include "coop/props/prop_stick_sync.h"  // IsWallAttachable
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/reflection.h"
@@ -117,22 +119,36 @@ void ConvergeFrozenSleep(void* actor, uint8_t physFlags) {
     }
 }
 
-bool ConvergeStaticRelease(void* actor, uint8_t physFlags) {
+bool ConvergeStaticRelease(void* actor, uint8_t physFlags, bool hostAuthored, bool restorePhysics) {
     namespace pf = coop::net::propspawn_flags;
+    // Only the host's word releases a Static: a flag a client authored is that client's own copy, never ours to adopt.
+    if (!hostAuthored) return false;
     if (!(physFlags & pf::kLiveState) || (physFlags & pf::kStatic)) return false;  // the host's copy is still Static
     if (!actor || !ue_wrap::prop::IsDescendantOfProp(actor)) return false;
-    if (R::ClassNameOf(actor) != ue_wrap::profile::name::PropVentClass) return false;
     if (!ue_wrap::prop::IsStatic(actor)) return false;                              // already released
+    // A wall-attachable's stuck state belongs to its component: the stick lane's unstick (and ConvergeStuck on a
+    // snapshot) frees it through the component's own verb, which a bare setter would bypass.
+    if (coop::prop_stick_sync::IsWallAttachable(actor)) return false;
+    // A trash clump or pile is host-authored through its own convert lane, and a pile is Static by design.
+    if (ue_wrap::prop::IsGarbageClump(actor)) return false;
     const bool wantFrozen = (physFlags & pf::kFrozen) != 0;
     const bool wantSleep  = (physFlags & pf::kSleep) != 0;
     const bool ok = ue_wrap::prop::CallBaseSetPropProps(actor, /*isStatic=*/false, wantFrozen, wantSleep);
-    if (ok) {
-        UE_LOGI("prop_wire_parity: %p released from Static (frozen=%d sleep=%d) -- the host's vent was pulled down",
-                actor, wantFrozen ? 1 : 0, wantSleep ? 1 : 0);
-    } else {
-        UE_LOGW("prop_wire_parity: %p Static -> off: the game's setter did not dispatch; the copy stays Static", actor);
+    const coop::element::ElementId eid = coop::element::Registry::Get().EidForActor(actor);
+    const std::wstring cls = R::ClassNameOf(actor);
+    if (!ok) {
+        UE_LOGW("prop_wire_parity: static release FAILED for eid %u class %ls actor %p -- the game's setter did not "
+                "dispatch; the copy stays Static", static_cast<unsigned>(eid), cls.c_str(), actor);
+        return false;
     }
-    return ok;
+    UE_LOGI("prop_wire_parity: static released for eid %u class %ls actor %p (frozen=%d sleep=%d)",
+            static_cast<unsigned>(eid), cls.c_str(), actor, wantFrozen ? 1 : 0, wantSleep ? 1 : 0);
+    if (restorePhysics) {
+        RestoreSpParityPhysicsAfterConverge(actor, physFlags);
+        UE_LOGI("prop_wire_parity: eid %u class %ls physics restored: %s", static_cast<unsigned>(eid), cls.c_str(),
+                SpParitySimulate(physFlags) ? "yes (simulating)" : "no (host copy frozen or asleep, stays kinematic)");
+    }
+    return true;
 }
 
 bool SpParitySimulate(uint8_t physFlags) {

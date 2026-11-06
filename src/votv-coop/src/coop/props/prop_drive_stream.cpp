@@ -146,7 +146,9 @@ std::unordered_map<uint32_t, uint64_t> g_lastEndMs;   // eid -> when its last En
 // parity restore the join's converge applies after its teleport, then the velocity -- only into
 // a body this module parked and the flags leave simulating, and only when it is not zero, since
 // assigning a velocity wakes a body at rest.
-void ApplyEnd(void* actor, const coop::net::PropDriveEndPayload& p, bool parkedHere) {
+// `hostAuthored`: the end is the host's word (a client applying the host's End), so its Static-cleared flag may release
+// this copy's Static; the host applying a client syncer's end passes false, a client's flags never release a Static.
+void ApplyEnd(void* actor, const coop::net::PropDriveEndPayload& p, bool parkedHere, bool hostAuthored) {
     E::SetActorLocation(actor, ue_wrap::FVector{p.x, p.y, p.z});
     if (dev::DriveView* v = DevViewOf(p.eid, p.gen)) v->endApplied = true;
     EndOnActor& on = g_endOnActor[p.eid];
@@ -158,10 +160,16 @@ void ApplyEnd(void* actor, const coop::net::PropDriveEndPayload& p, bool parkedH
     // The host's frozen and sleep at the end first: a hook that bites a frozen prop unfreezes it on
     // the host only (hook_C's attach_a runs setPropProps), so a copy still frozen here takes the
     // host's flags before the physics decision reads them.
-    // A wall vent the ventCrawler pulled down ends Static-cleared: this copy takes the release first, so the
+    // A prop the host freed from Static (a wall vent the ventCrawler pulled down, a pried plank, banister or asologo
+    // piece) ends Static-cleared: this copy takes the release first, through the game's base setter, so the
     // frozen/sleep step below and the physics decision read the flags the host's copy has.
-    coop::prop_wire_parity::ConvergeStaticRelease(actor, p.physFlags);
+    const bool staticReleased = coop::prop_wire_parity::ConvergeStaticRelease(actor, p.physFlags, hostAuthored,
+                                                                              /*restorePhysics=*/false);
     coop::prop_wire_parity::ConvergeFrozenSleep(actor, p.physFlags);
+    if (staticReleased) {
+        UE_LOGI("[PROP-DRIVE] eid=%u static released at the end edge -- physics restored: %s", p.eid,
+                PhysicsStaysOff(actor) ? "no (still frozen here)" : "yes (the decision below)");
+    }
     if (!PhysicsStaysOff(actor)) {
         coop::prop_wire_parity::RestoreSpParityPhysicsAfterConverge(actor, p.physFlags);
         const float lin2 = p.linVelX * p.linVelX + p.linVelY * p.linVelY + p.linVelZ * p.linVelZ;
@@ -290,7 +298,7 @@ void ReleaseHost(const coop::net::PropDriveEndPayload& end) {
                 // The same yield as the client's: a hand owns the copy, and this player's own gets its physics back.
                 YieldToHand(end.eid, end.gen, &dr, actor);
             } else {
-                ApplyEnd(actor, end, dr.physicsParked);
+                ApplyEnd(actor, end, dr.physicsParked, /*hostAuthored=*/false);
                 dr.physicsParked = false;
             }
         }
@@ -298,7 +306,7 @@ void ReleaseHost(const coop::net::PropDriveEndPayload& end) {
     } else if (void* actor = coop::remote_prop::ResolveLiveActorByEid(end.eid)) {
         // Nothing was admitted, so the copy was never parked: it takes the End as a receiver that never saw the gen.
         if (PR::IsDescendantOfProp(actor) && !coop::prop_drive_host::InAHand(actor))
-            ApplyEnd(actor, end, /*parkedHere=*/false);
+            ApplyEnd(actor, end, /*parkedHere=*/false, /*hostAuthored=*/false);
     }
     UE_LOGI("[PROP-DRIVE] HOST release eid=%u gen=%u -> (%.1f,%.1f,%.1f) flags=0x%02x", end.eid,
             static_cast<unsigned>(end.gen), end.x, end.y, end.z, static_cast<unsigned>(end.physFlags));
@@ -396,7 +404,7 @@ void OnEnd(const coop::net::PropDriveEndPayload& p) {
         void* actor = coop::remote_prop::ResolveLiveActorByEid(p.eid);
         if (actor) {
             if (PR::IsDescendantOfProp(actor) && !coop::prop_drive_host::InAHand(actor)) {
-                ApplyEnd(actor, p, /*parkedHere=*/false);
+                ApplyEnd(actor, p, /*parkedHere=*/false, /*hostAuthored=*/true);
                 UE_LOGI("[PROP-DRIVE] CLIENT END eid=%u gen=%u -> (%.1f,%.1f,%.1f) (never parked here)",
                         p.eid, static_cast<unsigned>(p.gen), p.x, p.y, p.z);
             }
@@ -418,7 +426,7 @@ void OnEnd(const coop::net::PropDriveEndPayload& p) {
             UE_LOGI("[PROP-DRIVE] CLIENT END eid=%u gen=%u -- a held-prop stream owns the actor; "
                     "row dropped, nothing touched", p.eid, static_cast<unsigned>(p.gen));
         } else {
-            ApplyEnd(actor, p, dr.physicsParked);
+            ApplyEnd(actor, p, dr.physicsParked, /*hostAuthored=*/true);
             dr.physicsParked = false;
             UE_LOGI("[PROP-DRIVE] CLIENT END eid=%u gen=%u -> (%.1f,%.1f,%.1f) flags=0x%02x",
                     p.eid, static_cast<unsigned>(p.gen), p.x, p.y, p.z,

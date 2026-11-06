@@ -126,7 +126,8 @@ loaded or arrives as the host's births and deaths.
 
 - A client's snap plays its break sounds on the host only; the client sees the crowbar or gibs arrive. `[RD]`
 - `prop_asologoPiece_C`'s breaking sequence runs on the host's copy; a client's copy follows the host's physics on the
-  prop lanes, and its constraint state is not carried. `[?]`
+  prop lanes, and its constraint state is not carried. Its Static clear is: the client's copy takes the release on the
+  host's drive end, snapshot row or hold (`ConvergeStaticRelease`, [props.md](props.md)), so the piece can be grabbed. `[?]`
 - The host's cut measure needs the mesh's volume through `BPCodeLib::MeshConvexVolume2` and the material's density;
   when either cannot be read it takes the sender's time and leaves one scrap, and says so. `[?]`
 - The heavy and simulating checks of the cut are the sender's own; the host checks the prop's identity, its
