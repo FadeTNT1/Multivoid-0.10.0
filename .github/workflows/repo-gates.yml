@@ -186,6 +186,12 @@ jobs:
       - name: Fact rows gate (every watched or hooked game function is a well-formed row with a reference)
         run: python3 .github/ci/fact_rows_gate.py
 
+      - name: Script gate capacity gate drill
+        run: python3 .github/ci/script_gate_capacity_gate.py --drill
+
+      - name: Script gate capacity gate (the watch tables hold every fact row with a quarter to spare)
+        run: python3 .github/ci/script_gate_capacity_gate.py
+
       - name: Data paths gate drill
         run: python3 .github/ci/data_paths_gate.py --drill
 

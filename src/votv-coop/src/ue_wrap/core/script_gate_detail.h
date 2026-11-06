@@ -19,15 +19,21 @@ namespace R = ue_wrap::reflection;
 // Fixed open-addressing tables, never rehashed and never freed: a slot's key is published last
 // with release, so the loop's reader sees an empty slot or a whole entry, and a retired watch
 // only clears its enabled flag, leaving the probe chain intact. Two key spaces, two tables: an
-// exact watch keys on the UFunction pointer, a name watch on the FName's two indices (its
-// unresolved placeholder holds a second slot). What fills a table is its KEYED slots, retired
-// ones included, so the cap counts those: at most 3/8 of a table, the load at which a miss
-// probes under two slots. A name watch, class-scoped or not, holds two keyed slots, so the name table
-// takes 384 name watches: each peer of a two-peer smoke held 163-166, eighteen of them one lane's
-// device entries, and every polled state moved onto a watch adds its own.
-constexpr int kSlotBits = 11;
+// exact watch keys on the UFunction pointer, a name watch on the FName's two indices. A name watch
+// waiting for its FName is NOT in the table: it waits in the names unit's pending list, which the
+// call path never reads and which frees its record once the name resolves, so one name watch holds
+// one keyed slot for the life of the process, however often it is retired and watched again. What
+// fills a table is its KEYED slots, retired ones included, so the cap counts those: at most 3/8 of
+// a table, the load at which a miss probes under two slots. At 4096 slots the name table takes 1536
+// name watches; a 0.10.0 peer installs about 420, and the b288 log of a 2048-slot table whose
+// placeholders each held a second slot ran out at 384, killing every door, toggle and keypad gate.
+constexpr int kSlotBits = 12;
 constexpr int kSlots = 1 << kSlotBits;
 constexpr int kMaxKeyed = kSlots * 3 / 8;
+// Name watches waiting for their FName (or dead before they reached the table) at once.
+constexpr int kMaxPending = kMaxKeyed;
+// The load past which the settle summary is an error: a quarter of the headroom is left.
+constexpr int kKeyedWarn = kMaxKeyed * 3 / 4;
 
 struct Entry {
     std::atomic<std::uint64_t> key{0};
@@ -38,15 +44,15 @@ struct Entry {
     const wchar_t* name = nullptr;   // a name watch's registered literal; null for an exact one
     const wchar_t* className = nullptr;  // a class-scoped name watch's class literal, else null
     std::uint64_t classKey = 0;       // that class's FName key once resolved; 0 matches any owner
-    std::atomic<bool> resolved{true}; // a name watch is inert until its FName is known
-    std::atomic<bool> dead{false};    // a name watch that can never fire: a full table, or its class has no such body
+    std::atomic<bool> resolved{true}; // always true in the tables now; kept so the reader's test stays explicit
+    std::atomic<bool> dead{false};    // a name watch that can never fire: its class has no such body
     std::atomic<bool> unjudged{false};  // a class-scoped watch whose class was not loaded when it resolved
 };
 extern Entry g_fnTable[kSlots];
 extern Entry g_nameTable[kSlots];
 extern std::atomic<int> g_fnWatches;      // enabled exact watches
-extern std::atomic<int> g_nameWatches;    // enabled name watches, placeholders included
-extern std::atomic<int> g_namesPending;
+extern std::atomic<int> g_nameWatches;    // enabled name watches in the table (a pending one is not counted)
+extern std::atomic<int> g_namesPending;   // name watches waiting for their FName
 extern std::atomic<int> g_unjudged;       // class-scoped watches waiting for their class to load
 extern std::uint64_t g_judgedAtClassSet; // the class set's number at the last judging pass; game thread
 extern int g_fnKeyed;                    // keyed slots, under the registration mutex
