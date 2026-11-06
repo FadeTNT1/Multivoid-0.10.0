@@ -25,8 +25,9 @@ enum class Cue {
 // unresolved, the call fails, or the audio material has no such cue.
 void* CueFromPhysicalMaterial(void* physMat, void* worldCtx, Cue which);
 
-// The cue of the material a prop_C's physicsImpact component holds (physmat_override when valid,
-// else physmat). Null for an actor with no such component, or on any miss as above.
+// The cue of the material a prop_C's physicsImpact component plays from (its own pick: physmat_override when valid, else
+// physmat when customPhysmat is set, else its hit component's first material's physical material). Null for an actor
+// with no such component, or on any miss as above.
 void* CueFromPropImpactComponent(void* propActor, Cue which);
 
 // The impact, damage or break particle system of a material's audio object (kSoft is not a particle cue and yields null),

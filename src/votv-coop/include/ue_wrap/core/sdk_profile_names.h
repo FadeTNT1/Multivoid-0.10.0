@@ -913,6 +913,11 @@ inline constexpr const wchar_t* PropPhysicsImpactProp        = L"physicsImpact";
 inline constexpr const wchar_t* PhysImpactMatOverrideProp    = L"physmat_override";   // comp_physicsImpact_C UPhysicalMaterial*, wins when valid
 inline constexpr const wchar_t* PhysImpactMatProp            = L"physmat";            // comp_physicsImpact_C UPhysicalMaterial*
 inline constexpr const wchar_t* PhysImpactDamageFn           = L"impactDamage";       // comp_physicsImpact_C (damage, impact, hit, actor)
+// comp_physicsImpact_C's own pick of the material it plays from: physmat_override when valid, else physmat when its
+// customPhysmat flag is set, else the physical material of its hit component's first material (an ordinary prop sets
+// neither, so reading the two properties alone finds none). Returns that UPhysicalMaterial*.
+inline constexpr const wchar_t* PhysImpactCompMatFn          = L"getComponentPhysMat";
+inline constexpr const wchar_t* PhysImpactCompMatOutParam    = L"ReturnValue";
 
 // mainPlayer_C drives every ragdoll cause through `ragdollMode(bool ragdoll, bool passOut, bool
 // death)` (mainPlayer.hpp:484) and recovers through `forceGetUp()` (line 641). On an unpossessed puppet

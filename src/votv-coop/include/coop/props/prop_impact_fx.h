@@ -14,7 +14,10 @@
 // breaks it from any cause (a fall, a throw, a bump, a swing), and a client's copy runs none of that body, so its damaged
 // and destroyed particles and cues are sent too, and the receiver spawns the material's particle of that kind. A prop the
 // receiver authors itself ran its own body and is skipped; a prop a client drives is that client's (its held-contact
-// event, coop/player/melee_fx_contact). Game thread.
+// event, coop/player/melee_fx_contact). The receiver finds a prop's material as the component does (its own
+// getComponentPhysMat: an ordinary prop sets no physmat property, its material is its mesh's), else a mannequin's cue and
+// particles resolve to nothing. Each class's first cues are logged on both sides ("host fx", "client fx ... played
+// particle=1"), and a summary line of the counts by kind once a minute. Game thread.
 
 #pragma once
 

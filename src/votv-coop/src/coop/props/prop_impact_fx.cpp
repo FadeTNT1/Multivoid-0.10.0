@@ -15,6 +15,7 @@
 
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/obj_keyed_cache.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/types.h"
@@ -43,7 +44,9 @@ constexpr int kTag = 0x50494658;   // 'PIFX'
 std::atomic<coop::net::Session*> g_session{nullptr};
 coop::net::Session* LoadSession() { return g_session.load(std::memory_order_acquire); }
 
-constexpr int kMaxSaid = 20;
+// Each prop class's first few cues are said on each side, then a one-line summary of the counts once a minute.
+constexpr int kClassSaid = 3;
+constexpr uint64_t kSummaryMs = 60000;
 
 // A container's impact and damage cues at most once in this; its break once; all of them at this pace.
 constexpr uint64_t kMinGapMs = 80;
@@ -62,12 +65,40 @@ coop::net::IntentBucket g_bucket;
 
 uint32_t g_sent = 0;
 uint32_t g_capped = 0;
-int      g_sentSaid = 0;
-int      g_playedSaid = 0;
 bool     g_noActorSaid = false;
 bool     g_emitterFailedSaid = false;
 bool     g_authoredSaid = false;
 bool     g_noCueSaid[coop::net::kPropImpactFxCount] = {};
+
+// What this window (since the last summary line) did, by kind: the host's sends and the cues it held back, the
+// client's plays (a cue played and, of those, a particle played) and the cues it skipped, by reason.
+constexpr size_t kKinds = coop::net::kPropImpactFxCount;
+struct Window {
+    uint32_t sent[kKinds] = {};
+    uint32_t held[kKinds] = {};   // not sent: a repeat inside the gap, a second break, or over the pace
+    uint32_t played[kKinds] = {};
+    uint32_t particle[kKinds] = {};
+    uint32_t noParticle[kKinds] = {};   // a damage or break whose material has no particle, or whose spawn failed
+    uint32_t skipNoActor = 0;
+    uint32_t skipAuthored = 0;
+    uint32_t skipNoCue = 0;
+    bool any() const {
+        for (size_t k = 0; k < kKinds; ++k)
+            if (sent[k] || held[k] || played[k] || particle[k] || noParticle[k]) return true;
+        return skipNoActor || skipAuthored || skipNoCue;
+    }
+};
+Window   g_window;
+uint64_t g_summaryDueMs = 0;
+ue_wrap::ObjKeyedCache<int, 32> g_hostSaid;     // the prop classes the host has said, by count
+ue_wrap::ObjKeyedCache<int, 32> g_clientSaid;   // the same for the cues this client played
+
+// True for the first kClassSaid cues of `cls` in `said`.
+bool SayFirst(ue_wrap::ObjKeyedCache<int, 32>& said, void* cls) {
+    int* n = said.Find(cls);
+    if (!n) n = &said.Insert(cls, 0);
+    return (*n)++ < kClassSaid;
+}
 
 R::ParamOffset g_hitOff{L"hit"};
 
@@ -77,18 +108,26 @@ const char* KindName(uint8_t kind) {
                                                      : "impact";
 }
 
-// True when the cue may go now: not a second break of one container, not within kMinGapMs of its last, and under
-// the total pace. Records it.
+// True when the cue may go now: not a second break of one prop, not within kMinGapMs of its last, and under the
+// total pace. Records it; a cue it refuses is counted as held back.
 bool Admit(uint32_t eid, uint8_t kind, uint64_t now) {
+    const size_t k = kind < kKinds ? kind : 0;
     if (kind == coop::net::kPropImpactFxDestroyed) {
         for (uint32_t b : g_broken)
-            if (b == eid) return false;
+            if (b == eid) {
+                ++g_window.held[k];
+                return false;
+            }
     } else {
         for (const Recent& r : g_recent)
-            if (r.eid == eid && now - r.ms < kMinGapMs) return false;
+            if (r.eid == eid && now - r.ms < kMinGapMs) {
+                ++g_window.held[k];
+                return false;
+            }
     }
     if (!g_bucket.Take(kBudget, now)) {
         ++g_capped;
+        ++g_window.held[k];
         return false;
     }
     if (kind == coop::net::kPropImpactFxDestroyed) {
@@ -100,7 +139,7 @@ bool Admit(uint32_t eid, uint8_t kind, uint64_t now) {
     return true;
 }
 
-// HOST, before the body: the cue this call will play on a container, sent ahead of whatever the body destroys.
+// HOST, before the body: the cue this call will play on a prop, sent ahead of whatever the body destroys.
 sg::Verdict OnImpactPre(const sg::Call& c) {
     coop::net::Session* s = LoadSession();
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return sg::Verdict::Run;
@@ -150,11 +189,11 @@ sg::Verdict OnImpactPre(const sg::Call& c) {
     p.loc[2] = at.Z;
     if (!s->SendReliable(coop::net::ReliableKind::PropImpactFx, &p, static_cast<int>(sizeof(p)))) return sg::Verdict::Run;
     ++g_sent;
-    if (g_sentSaid < kMaxSaid) {
-        ++g_sentSaid;
-        UE_LOGI("[CRATE] host fx: container eid=%u %s at (%.0f, %.0f, %.0f)%s (#%u)", static_cast<unsigned>(eid),
-                KindName(kind), static_cast<double>(at.X), static_cast<double>(at.Y), static_cast<double>(at.Z),
-                coop::props::crate_break::HostApplying() ? " from a client's hit" : "", g_sent);
+    ++g_window.sent[kind < kKinds ? kind : 0];
+    if (SayFirst(g_hostSaid, R::ClassOf(owner))) {
+        UE_LOGI("[CRATE] host fx: %ls eid=%u %s at (%.0f, %.0f, %.0f)%s (#%u)", R::ClassNameOf(owner).c_str(),
+                static_cast<unsigned>(eid), KindName(kind), static_cast<double>(at.X), static_cast<double>(at.Y),
+                static_cast<double>(at.Z), coop::props::crate_break::HostApplying() ? " from a client's hit" : "", g_sent);
     }
     return sg::Verdict::Run;
 }
@@ -172,7 +211,26 @@ void Install(coop::net::Session* session) {
     g_reg = sg::WatchName(kRowImpact, kTag, &OnImpactPre, nullptr) ? Reg::Registered : Reg::Refused;
 }
 
+void SaySummary() {
+    const Window& w = g_window;
+    if (!w.any()) return;
+    UE_LOGI("[CRATE] fx last minute: host sent impact=%u damaged=%u destroyed=%u, held back impact=%u damaged=%u "
+            "destroyed=%u; client played impact=%u damaged=%u destroyed=%u (with a particle: %u/%u/%u, material has no "
+            "particle or it did not spawn: %u/%u/%u), skipped no-actor=%u authored-here=%u no-cue=%u",
+            w.sent[0], w.sent[1], w.sent[2], w.held[0], w.held[1], w.held[2], w.played[0], w.played[1], w.played[2],
+            w.particle[0], w.particle[1], w.particle[2], w.noParticle[0], w.noParticle[1], w.noParticle[2],
+            w.skipNoActor, w.skipAuthored, w.skipNoCue);
+    g_window = Window{};
+}
+
 void Tick() {
+    // The minute's counts: said once a minute while there is anything to say.
+    const uint64_t now = coop::net::NowMs();
+    if (g_summaryDueMs == 0) g_summaryDueMs = now + kSummaryMs;
+    if (now >= g_summaryDueMs) {
+        g_summaryDueMs = now + kSummaryMs;
+        SaySummary();
+    }
     if (g_settled || g_reg == Reg::Pending) return;
     if (g_reg == Reg::Registered) sg::ResolvePendingNames();
     if (g_reg == Reg::Registered && sg::NameWatchLive(kRowImpact, kTag)) {
@@ -188,11 +246,13 @@ void Tick() {
 void OnFx(const coop::net::PropImpactFxPayload& p) {
     coop::net::Session* s = LoadSession();
     if (!s || s->role() != coop::net::Role::Client) return;
+    const size_t kind = p.kind < kKinds ? p.kind : 0;
     void* actor = EL::LivePropActor(static_cast<EL::ElementId>(p.targetEid));
     if (!actor) {
+        ++g_window.skipNoActor;
         if (!g_noActorSaid) {
             g_noActorSaid = true;
-            UE_LOGI("[CRATE] client fx: container eid=%u has no actor here -- its cue is skipped (said once)",
+            UE_LOGI("[CRATE] client fx: eid=%u has no actor here -- its cue is skipped (said once)",
                     static_cast<unsigned>(p.targetEid));
         }
         return;
@@ -201,6 +261,7 @@ void OnFx(const coop::net::PropImpactFxPayload& p) {
     // the particles natively: the host's copy of it sending the same would show them twice. A host-damaged prop's
     // body is cancelled here whoever authors it, so its cues are always this lane's.
     if (!coop::props::crate_break::IsHostDamaged(actor) && coop::props::prop_damage_gate::AuthoredHere(actor)) {
+        ++g_window.skipAuthored;
         if (!g_authoredSaid) {
             g_authoredSaid = true;
             UE_LOGI("[CRATE] client fx: %ls eid=%u is authored here, its own body played the cue -- skipped (said once)",
@@ -223,36 +284,41 @@ void OnFx(const coop::net::PropImpactFxPayload& p) {
     if (p.kind >= coop::net::kPropImpactFxDamaged) {
         void* ps = ue_wrap::physical_audio::ParticleFromPropImpactComponent(
             actor, p.kind == coop::net::kPropImpactFxDestroyed ? Cue::kDestroyed : Cue::kDamaged);
-        if (ps) {
+        if (ps)
             particlePlayed =
                 ue_wrap::engine::SpawnEmitterAtLocation(actor, ps, at, ue_wrap::FRotator{}, FVector{1.f, 1.f, 1.f});
-            if (!particlePlayed && !g_emitterFailedSaid) {
+        if (!particlePlayed) {
+            ++g_window.noParticle[kind];
+            if (ps && !g_emitterFailedSaid) {
                 g_emitterFailedSaid = true;
                 UE_LOGW("[CRATE] client fx: the %s particles of %ls did not spawn (said once)", KindName(p.kind),
                         R::ClassNameOf(actor).c_str());
             }
         }
     }
-    if (!cue) {
+    if (!cue && !particlePlayed) {
+        ++g_window.skipNoCue;
         if (p.kind < coop::net::kPropImpactFxCount && !g_noCueSaid[p.kind]) {
             g_noCueSaid[p.kind] = true;
-            UE_LOGI("[CRATE] client fx: %ls has no %s cue -- skipped (said once)", R::ClassNameOf(actor).c_str(),
-                    KindName(p.kind));
+            UE_LOGI("[CRATE] client fx: %ls has no %s cue or particle -- skipped (said once)",
+                    R::ClassNameOf(actor).c_str(), KindName(p.kind));
         }
         return;
     }
-    coop::prop_sound::PlayMaterialCueAt(actor, cue, at);
-    if (g_playedSaid < kMaxSaid) {
-        ++g_playedSaid;
-        UE_LOGI("[CRATE] client fx: %ls eid=%u %s played at (%.0f, %.0f, %.0f): sound=1 particle=%d",
-                R::ClassNameOf(actor).c_str(), static_cast<unsigned>(p.targetEid), KindName(p.kind),
-                static_cast<double>(at.X), static_cast<double>(at.Y), static_cast<double>(at.Z), particlePlayed ? 1 : 0);
+    if (cue) coop::prop_sound::PlayMaterialCueAt(actor, cue, at);
+    ++g_window.played[kind];
+    if (particlePlayed) ++g_window.particle[kind];
+    if (SayFirst(g_clientSaid, R::ClassOf(actor))) {
+        UE_LOGI("[CRATE] client fx: %ls eid=%u played particle=%d sound=%d (%s at (%.0f, %.0f, %.0f))",
+                R::ClassNameOf(actor).c_str(), static_cast<unsigned>(p.targetEid), particlePlayed ? 1 : 0, cue ? 1 : 0,
+                KindName(p.kind), static_cast<double>(at.X), static_cast<double>(at.Y), static_cast<double>(at.Z));
     }
 }
 
 void OnDisconnect() {
+    SaySummary();
     if (g_sent != 0 || g_capped != 0)
-        UE_LOGI("[CRATE] this session: %u container cues sent, %u held back by the pace", g_sent, g_capped);
+        UE_LOGI("[CRATE] this session: %u prop cues sent, %u held back by the pace", g_sent, g_capped);
     for (Recent& r : g_recent) r = Recent{};
     for (uint32_t& b : g_broken) b = 0;
     g_recentNext = 0;
@@ -260,8 +326,10 @@ void OnDisconnect() {
     g_bucket.Reset();
     g_sent = 0;
     g_capped = 0;
-    g_sentSaid = 0;
-    g_playedSaid = 0;
+    g_window = Window{};
+    g_summaryDueMs = 0;
+    g_hostSaid.Clear();
+    g_clientSaid.Clear();
     g_noActorSaid = false;
     g_emitterFailedSaid = false;
     g_authoredSaid = false;
