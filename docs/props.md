@@ -597,6 +597,45 @@ item (`coop/player/hand_item`), so its RMB runs where it is pressed, and the dro
 spawns are the player's births (`coop/props/prop_spawn_authoring` asks the tray lane), admitted as
 the player's spawn intents. `[?]` until a two-peer run reads the `[SHRIMP]` lines.
 
+### Posters
+
+A poster has two forms. Rolled, it is `prop_poster_C`, a prop in the hand, and the ordinary lifecycle
+carries its birth, grab, motion and destroy. Its left-button use calls `put()`, which, when the
+holder's interaction trace blocks on a body that does not simulate, spawns the class its
+`posterClass` names at its `turn` component's world transform, the scale the scroll wheel gave it
+included, copies `type`, `fileName` and `custom` into it in the deferred window and destroys itself.
+Placed, it is `poster_C`: an `actor_save_C` with a decal, not a prop, so neither the prop lane nor
+the event actors' lane carries it. Its action 7 spawns the rolled form at the player, hands it to
+them and destroys itself; its action 4 on a custom poster opens the texture picker. `[RD]` the
+decoded `prop_poster_C` and `poster_C` bodies. Before this lane a poster put on the wall vanished
+on every other peer, rolled prop and all, and stood on the wall of the peer that put it alone.
+
+The rolled form's record (the preset `type` and the custom `fileName`) rides the record lane, but its
+`loadData` restores both without a redraw, so a mirror drew its class default. The poster lane lands
+that record itself, as a `prop_record_gates` applier: the record through the generic codec, then the
+prop's own `setTex()`. A picture picked on a rolled poster (the right button's picker) republishes
+the record from the picker's callback; a client's republish is an intent the host takes only from a
+live sender in reach.
+
+The placed form is the host's (`coop/items/poster_sync`; a client's half is `coop/items/poster_mirror`). A placed poster is named by its
+`actor_save` key; one without a key gets a random one on the host, written into the actor, so the
+host's save and a joiner's load name it the same way. The host watches `setPoster()`, which every
+placement, load and picture change ends in, and each noted poster's liveness, and sends
+`PosterState`: the class, the transform and the look on a change, the key alone when it is gone. A
+client's put, take-down and custom picture are cancelled at the script-body gate and sent as
+`PosterIntent`. The host refuses a sender that is not alive, out of reach of the poster or of the
+placement, or a rolled poster another peer holds, and otherwise runs the verb on its own copy: it
+spawns the placed poster from the rolled one's class and look at the client's placement and destroys
+the rolled prop, whose destroy the prop lane carries to the hand that held it; or it spawns the
+rolled form at the sender's puppet and destroys the placed one; or it writes the picture and
+redraws. A client creates, updates and destroys its placed posters from `PosterState`, adopting a
+save-loaded one by its key. A verb the client cannot send runs on its own copy, logged.
+
+A custom picture is a file name: the image is a file in each player's own posters folder and does
+not cross. A peer without the file draws the poster's preset picture instead (`custom` is cleared
+for the redraw and put back, so the state is untouched), logged once as `[POSTER]`. `[?]` until a
+two-peer run reads the `[POSTER]` lines.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -612,6 +651,7 @@ the player's spawn intents. `[?]` until a two-peer run reads the `[SHRIMP]` line
 | a self-changing prop's progression | the host | park, corrector or anchor, per prop |
 | a world food's temperature, freshness, bites and cooking | the host | its tick runs on the host alone; `FoodState` on a step or an edge; a client's partial bite is an intent |
 | notebook editor occupancy | the host arbitrates | a claim keyed by the owning prop |
+| a placed poster: existence, transform and look | the host | `PosterState` on a change; a client's put, take-down and picture are intents |
 | notebook page text | the editing peer; the host takes it from the claim's holder, or from anyone while it is free | the notebook's own save record on the record lane, at the editor's commit and at the close |
 | a client's shared-world spawners | the host | refused on a client at the script-body gate; shared-world content arrives only from the host |
 
@@ -637,6 +677,8 @@ the player's spawn intents. `[?]` until a two-peer run reads the `[SHRIMP]` line
 | `FoodState` | the host to all | a world food's temperature, freshness and its count, bites left, `ignoreRotting`, spoiled, frozen and `cookProgress`, by key |
 | `FoodBiteIntent` | a client to the host | a bite of a shared food that did not finish it, with the bites left |
 | `ShrimpDispenseIntent` | a client to the host | a press on a shared shrimp tray, by key: its action 4 or its hand use |
+| `PosterIntent` | a client to the host | a put of a rolled poster (its key and the placement its aim made, scale included), a take-down or a custom picture of a placed one (its key, the picked file name) |
+| `PosterState` | the host to all | a placed poster stands (key, class, transform, type, index, file name, custom), is gone (key), or a joiner's snapshot ended |
 
 ## Late join
 
@@ -654,7 +696,9 @@ world is ready, since the release and the end edge that close them are not sent 
 not ready either: a prop held at the join resolves on the first pose after it, and at the ready edge
 the host re-sends every driven prop's pose, the resting ones included, which the delta gate would
 otherwise never send. An end edge that reaches a joiner before the prop it names is kept until the
-prop resolves. A container's damage needs no seed: its health is the host's alone, a broken container reaches a joiner
+prop resolves. A placed poster arrives with the save under its key; at the ready edge the host sends
+every placed poster's state and an end marker, and the joiner destroys a placed poster the marker
+finds unnamed, one removed between the save and the ready edge. A container's damage needs no seed: its health is the host's alone, a broken container reaches a joiner
 as its absence and its spill as the host's props, and a cue is a one-shot with no replay.
 
 ## Known limits
@@ -675,6 +719,8 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | A prop the stream's end edge puts back into simulation is not tested for overlap with scenery this client displaced locally (a door, a prop it still moves): if the final pose overlaps it PhysX ejects the prop, which can be a visible pop. No overlap query is wrapped yet | `[RD]` `coop/props/prop_drive_stream` ApplyEnd sets the pose, then the physics flags, then the velocity; nothing in `ue_wrap` queries an overlap |
 | A prop parked under the host's drive cannot be grabbed on a client while the drag lasts: the park turns the body kinematic and the game's grab needs a simulating one. It is grabbable again after the end edge | `[V]` `coop/props/prop_drive_stream` parks by switching the mesh's simulation off (`ue_wrap/engine/engine_physics`); `coop/props/prop_wire_parity` records why a kinematic mirror is ungrabbable |
 | A container's break is read, not measured: that `prop_C.addDamage` on a container reaches its component's `impactDamage` with the puppet as damager, that the actor a client's impact names is the thrown prop, which of the container's bodies spills, and that the material's break cues are named `sound_damaged` and `sound_destroyed` are taken from the pak's name maps. A container a client throws breaks only when it strikes something the contact intent names; fire never breaks a container a client holds | `[RD]` the pak's name maps of `comp_physicsImpact`, `prop_container` and `physSnd_wood_crate`; `[?]` until a two-peer run reads the `[CRATE]` lines |
+| A placed poster a client takes down lands at that client's feet as a rolled poster on the floor instead of in its hand: the host spawns it at the sender's puppet, and a puppet's pickup is no hand on the client | `[RD]` `coop/items/poster_sync` spawns the rolled form without `pickupObjectDirect` |
+| A custom poster's image does not cross: a peer without the file in its own posters folder sees the preset picture | `[RD]` `ue_wrap/actors/poster` Redraw's fallback |
 | A pose can arrive milliseconds before the spawn that names its prop; that is a race, not a defect, and a ledger tells the two apart instead of warning per packet | `[V]` `coop/props/unresolved_pose_ledger` |
 
 ## Code map
@@ -695,6 +741,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
+| posters, rolled and placed | `coop/items/poster_sync`, `coop/items/poster_mirror` (a client's placed posters), `ue_wrap/actors/poster`, `coop/props/prop_record_gates` (the rolled form's applier) |
 | a shrimp tray's portions | `coop/props/shrimp_tray_sync`, `ue_wrap/actors/shrimp_tray`, `coop/props/prop_food_state` (the count's carrier) |
 | the drive box's signal rows | `ue_wrap/actors/drive_bank` (the live arrays), `ue_wrap/actors/drive_bank_rows.h` (pack, judge, plan), `ue_wrap/actors/save_record` (the hooks), `coop/items/save_record_wire` (the sidecar) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |

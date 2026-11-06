@@ -1199,6 +1199,39 @@ inline constexpr const wchar_t* BucketHeightProp = L"height";
 inline constexpr const wchar_t* BucketHeightInterpProp = L"height_interp";
 inline constexpr const wchar_t* BucketEmptyProp = L"empty";
 inline constexpr const wchar_t* BucketUpdFn = L"upd";
+
+// The poster, in its two forms. Rolled: prop_poster_C, a prop held in the hand; its left-button use calls put(),
+// which (the holder's hitResult blocking, on a body that does not simulate) spawns `posterClass` at the `turn`
+// component's world transform (scale included: the scroll wheel sizes `spawnLoc`, `turn`'s parent), copies `type`,
+// `fileName` and `custom` into it in the deferred window and destroys itself. Its getData writes ints[0] =
+// {type, 0} and strings[1] = {fileName}; its loadData restores both and does NOT redraw, which setTex() does
+// (`custom`: the texture of gamemode.filenames_posters' match for `fileName`, else lib_C::getPosters(type)).
+// Placed: poster_C, an actor_save_C (not a prop) with a decal; its getData writes ints[0] = {type, index} and
+// strings[1] = {fileName}, its loadData restores them without a redraw, which setPoster() does (BeginPlay runs it
+// a frame late). Its action 7 spawns `posterClass` (the rolled form) at the player with type, index and fileName,
+// hands it to the player (pickupObjectDirect) and destroys itself; its action 4 on a `custom` poster opens the
+// texture picker, whose intComs_texturePickerApply writes `fileName` and redraws (the rolled form's does too).
+// `custom` is a class default of the rolled form, saved by neither record. A missing custom file is null-safe in
+// the Blueprint: the decal goes flat.
+inline constexpr const wchar_t* PosterRolledClass = L"prop_poster_C";
+inline constexpr const wchar_t* PosterPlacedClass = L"poster_C";
+inline constexpr const wchar_t* PosterTypeProp = L"type";
+inline constexpr const wchar_t* PosterIndexProp = L"index";
+inline constexpr const wchar_t* PosterFileNameProp = L"fileName";
+inline constexpr const wchar_t* PosterCustomProp = L"custom";
+inline constexpr const wchar_t* PosterClassProp = L"posterClass";
+inline constexpr const wchar_t* PosterTurnComp = L"turn";
+inline constexpr const wchar_t* PosterHoldingPlayerProp = L"holdingPlayer";
+inline constexpr const wchar_t* PosterGamemodeProp = L"gamemode";
+inline constexpr const wchar_t* PosterCustomFilesProp = L"filenames_posters";   // on mainGamemode_C
+inline constexpr const wchar_t* PosterRolledRedrawFn = L"setTex";
+inline constexpr const wchar_t* PosterPlacedRedrawFn = L"setPoster";
+inline constexpr const wchar_t* PosterPutFn = L"put";
+inline constexpr const wchar_t* PosterPickerApplyFn = L"intComs_texturePickerApply";
+inline constexpr const wchar_t* PosterPickedFileNameParam = L"pickedFileName";
+inline constexpr const wchar_t* ComponentScaleFn = L"GetComponentScale";
+inline constexpr int PosterActionTakeDown = 7;
+inline constexpr int PosterActionPicker = 4;
 }  // namespace name
 
 }  // namespace ue_wrap::profile

@@ -17,6 +17,7 @@
 #include "coop/interactables/surface_clean_sync.h"
 #include "coop/interactables/toggle_verbs.h"
 #include "coop/items/point_sack_intent.h"
+#include "coop/items/poster_sync.h"
 #include "coop/net/session.h"
 #include "coop/props/water_fill_sync.h"
 
@@ -41,6 +42,7 @@ void Install(coop::net::Session& session) {
     coop::microwave_sync::Install(&session);     // a microwave is the host's: a client's press runs there, its run reaches every peer as MicrowaveState
     coop::surface_clean_sync::Install(&session);  // the sink's and the shower's dirt: each peer sends its own wipe, a receiver keeps the cleaner
     coop::water_fill_sync::Install(&session);    // a world bucket's water is the host's: a client's tap-tick fill is cancelled, the host's level reaches every peer
+    coop::poster_sync::Install(&session);        // a poster is the host's: a client's put, take-down and picture run there, placed posters reach every peer as PosterState
 }
 
 void Tick(coop::net::Session& session) {
@@ -60,10 +62,12 @@ void Tick(coop::net::Session& session) {
     { ue_wrap::ScopedWalkTimer _w{"sync:microwave"}; coop::microwave_sync::Tick(session); }  // settle its watches; HOST: queued presses, the noted microwaves' states; CLIENT: the running plates
     { ue_wrap::ScopedWalkTimer _w{"sync:surface_clean"}; coop::surface_clean_sync::Tick(); }  // settle the sponge watches; retry the deferred applies
     { ue_wrap::ScopedWalkTimer _w{"sync:water_fill"}; coop::water_fill_sync::Tick(session); }  // settle the tap-tick watches; HOST: the changed buckets' levels
+    { ue_wrap::ScopedWalkTimer _w{"sync:poster"}; coop::poster_sync::Tick(session); }  // settle its watches; HOST: queued verbs, the placed posters' changes; CLIENT: parked states
 }
 
 void ConnectReplayForSlot(int slot) {
     coop::microwave_sync::OnPeerWorldReady(slot);  // HOST: every noted microwave's state to the joiner
+    coop::poster_sync::OnPeerWorldReady(slot);     // HOST: every placed poster to the joiner, then the snapshot's end
     coop::cord_sync::QueueConnectBroadcastForSlot(slot);  // HOST: every corded prop's link to the joiner, then the seed's end
     coop::surface_clean_sync::QueueConnectBroadcastForSlot(slot);  // HOST: the sink's and the shower's dirt to the joiner (adopt)
     coop::water_fill_sync::OnPeerWorldReady(slot);  // HOST: every bucket holding water to the joiner
@@ -86,6 +90,7 @@ void OnDisconnect() {
     coop::microwave_sync::OnDisconnect();  // a microwave's own press and run stay where they are made
     coop::surface_clean_sync::OnDisconnect();
     coop::water_fill_sync::OnDisconnect();  // a bucket fills from a tap on the peer that holds it
+    coop::poster_sync::OnDisconnect();     // a poster's own verbs run where they are made
 }
 
 }  // namespace coop::verb_lanes

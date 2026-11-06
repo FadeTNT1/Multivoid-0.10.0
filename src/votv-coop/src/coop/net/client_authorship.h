@@ -140,6 +140,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::FoodBiteIntent:
     case ReliableKind::ShrimpDispenseIntent:
     case ReliableKind::MicrowaveIntent:
+    case ReliableKind::PosterIntent:
     case ReliableKind::ProjectileFired:
     case ReliableKind::ExplosionRequest:
     case ReliableKind::AtvExplodeRequest:
@@ -175,6 +176,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::FoodState:
     case ReliableKind::MicrowaveState:
     case ReliableKind::BucketFillState:
+    case ReliableKind::PosterState:
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:
