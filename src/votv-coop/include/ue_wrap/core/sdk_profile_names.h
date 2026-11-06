@@ -700,6 +700,11 @@ inline constexpr const wchar_t* SetVisibilityFn = L"SetVisibility";
 // K2_SetRelativeRotation runs the transform propagation (UpdateComponentToWorld and the child
 // re-evaluation) that a direct RelativeRotation write skips.
 inline constexpr const wchar_t* SetRelativeRotationFn = L"K2_SetRelativeRotation";
+// K2_SetRelativeLocation(NewLocation, bSweep, SweepHitResult, bTeleport): the same propagation for a component's
+// relative location. door_C's leaf roots (door_r_root, door_l_root) are placed by it, in the door's own timeline and
+// in its hit, and the door lane puts a client's copy at the host's crack with it.
+inline constexpr const wchar_t* SetRelativeLocationFn = L"K2_SetRelativeLocation";
+inline constexpr const wchar_t* SetRelativeLocationParam = L"NewLocation";
 inline constexpr const wchar_t* SetHiddenInGameFn = L"SetHiddenInGame";
 inline constexpr const wchar_t* GetComponentLocationFn = L"K2_GetComponentLocation";
 inline constexpr const wchar_t* GetComponentForwardFn = L"GetForwardVector";
@@ -972,6 +977,14 @@ inline constexpr const wchar_t* TimelineNewPositionParam     = L"NewPosition";
 inline constexpr const wchar_t* TimelineFireEventsParam      = L"bFireEvents";
 inline constexpr const wchar_t* TimelineFireUpdateParam      = L"bFireUpdate";
 // garage_C's swing timeline (a UTimelineComponent member named `move`, as door_C's) and its mid-swing flag.
+// door_C's two leaf roots (scene components the leaves attach to; a swing and a hit move these, never the leaves),
+// the offset the right root travels to (negated) and the left root travels to, and the two places the move timeline
+// lerps each root from, written by doorOpen from where the roots stand and by doorClose as zero.
+inline constexpr const wchar_t* DoorRightRootProp            = L"door_r_root";
+inline constexpr const wchar_t* DoorLeftRootProp             = L"door_l_root";
+inline constexpr const wchar_t* DoorOpenOffsetProp           = L"openDoor";
+inline constexpr const wchar_t* DoorLerpaRightProp           = L"lerpa_r";
+inline constexpr const wchar_t* DoorLerpaLeftProp            = L"lerpa_l";
 inline constexpr const wchar_t* GarageMoveTimelineProp       = L"move";
 inline constexpr const wchar_t* GarageMovingProp             = L"mov";
 // garage_C's door mesh (the skeletal mesh the swing montage plays on), its looping swing sound and its nav

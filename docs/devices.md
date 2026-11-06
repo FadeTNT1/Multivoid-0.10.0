@@ -108,6 +108,16 @@ puppet counts in that list exactly when the client's own player counts in the cl
 it. A device with no auto-revert (the garage, an appliance, an oven's repair, a locker, a lid) is
 symmetric: any peer's edge is the state.
 
+A hit that does not open a door still moves it: `addDamage` nudges the two leaf roots (`door_r_root`, `door_l_root`)
+toward their open places and begins the swing only past a threshold, so the open bool alone left a client's copy shut
+while the host's showed the crack. The host watches `addDamage` after its body and the door adapter carries the roots'
+place through the channel's optional hooks (`coop/interactables/door_crack`): `DetailOf` makes a changed crack an edge
+the bool dedup would have dropped, and the place rides `DoorState` as a seed (`kSeedFlagCrack`, the roots in `travel`
+and `holdGen`). A client puts its roots there with `K2_SetRelativeLocation` and never replays the hit. A joiner's
+snapshot also carries a door caught mid-swing (`kSeedFlagMoving`: the timeline's place and the swing's start place),
+which the client starts the usual way and then seeks with `SetPlaybackPosition`. The log says `door: sent crack` and
+`door: applied crack` with both roots' place.
+
 A garage has three bodies that the one `Open` bool does not describe: the collision box and the timeline that drives
 it, and the door mesh, which only the swing montage moves. The host's connect snapshot of a garage is therefore a
 seed (`kSeedFlagSeed`, with `travel` and `kSeedFlagMoving` for a door that is mid-swing), not a toggle. A joiner keeps the

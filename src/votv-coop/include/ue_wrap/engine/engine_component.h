@@ -53,6 +53,11 @@ bool TryGetComponentLocation(void* component, FVector& out);
 // (0,0,0) on null.
 FVector GetComponentRelativeLocation(void* component);
 
+// USceneComponent::K2_SetRelativeLocation(NewLocation, bSweep=false, bTeleport=false): the component's relative
+// location moved through the engine's own setter, which runs the transform propagation (children, bounds) a raw
+// write of the field skips. False on a null component or an unresolved function. Game thread.
+bool SetComponentRelativeLocation(void* component, const FVector& location);
+
 // A UParticleSystemComponent's `Template`, read raw at a reflection-resolved offset; the cue sync
 // matches a live PSC to its cue by it, because the EX_CallMath spawn that created it is invisible
 // to the detour. nullptr if unresolved.

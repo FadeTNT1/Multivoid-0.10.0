@@ -47,6 +47,11 @@ const StateWatch kWatches[] = {
     { &kRowDoorOpen,           0x44534f50 /*'DSOP'*/, "doorOpen",        true },
     { &kRowDoorClose,          0x4453434c /*'DSCL'*/, "doorClose",       true },
     { &kRowMoveFinishedFunc,   0x4453454e /*'DSEN'*/, "the swing's end", false },
+    // A hit at rest moves the leaf roots without touching the open bool (door_C::addDamage lerps each toward its open
+    // place), so the host reads the door after every hit, its own swing's and a client's intent it ran alike: the crack is
+    // a change of state the lane dedups on (interactable_sync's door adapter, coop/interactables/door_crack). A client
+    // keeps its own hit native here: door_verb_intent cancels it before the body, and the crack arrives as a place.
+    { &kRowAddDamage,          0x44534854 /*'DSHT'*/, "a hit (addDamage)", false },
 };
 constexpr int kWatchCount = static_cast<int>(sizeof(kWatches) / sizeof(kWatches[0]));
 
@@ -77,7 +82,7 @@ coop::net::Session* ConnectedAs(coop::net::Role role) {
 // The dev probe's watches (channel_shadow_probe), HOST, after the body: the door's bodies that write what the
 // lane's intent reads (isMoving, dir) outside doorOpen, doorClose and the swing's end -- the jam shake's end
 // (isMoving false, dir 1), the jam's first event (dir 0) and a hit (dir 1, at rest only: it returns on a moving
-// door) -- and the sensor's begin and end, the passage of whoever walks through, each said with the swing it
+// door; the production watch above sends its crack) -- and the sensor's begin and end, the passage of whoever walks through, each said with the swing it
 // leaves, so a SHADOW MISS can be matched to what ran before it. The component events' names carry K2Node_,
 // as the bytecode listing has them; the pseudo-C++ drops it.
 const StateWatch kProbeWatches[] = {
@@ -206,7 +211,7 @@ void Tick() {
     }
     if (live == kWatchCount) {
         g_settled = true;
-        UE_LOGI("[DOOR-STATE] the door state gates are live: doorOpen, doorClose and the swing's end");
+        UE_LOGI("[DOOR-STATE] the door state gates are live: doorOpen, doorClose, the swing's end and a hit");
     } else if (pending == 0 && sg::PendingNameCount() == 0) {
         g_settled = true;
         UE_LOGE("[DOOR-STATE] %d of %d door state gates are dead (refused, or resolved into a full table) -- the "

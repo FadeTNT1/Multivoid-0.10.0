@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 289;
+inline constexpr uint16_t kProtocolVersion = 293;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -173,7 +173,12 @@ enum class ReliableKind : uint8_t {
     // state (its autoclose), so the host is the single syncer: it sends a door when its state verbs
     // run and a full snapshot to a joiner; a client renders the state and refuses its own local
     // state verbs, and its own press, hit and pry reach the host as DoorVerbIntent. Trust:
-    // host-authored, so refused from a client and never relayed. KeyedTogglePayload.
+    // host-authored, so refused from a client and never relayed. KeyedTogglePayload. The bool is the
+    // open intent; beyond it the door's leaf roots ride the payload's seed fields (kSeedFlag*): a shut
+    // door at rest cracked by hits (kSeedFlagCrack, travel and holdGen the left and right roots' place),
+    // and, in a joiner's snapshot, a door mid-swing (kSeedFlagMoving, travel the timeline's place, holdGen
+    // the swing's start place). The crack is a place: a receiver puts its roots there and never replays
+    // the hit.
     DoorState = 9,
 
     // Any peer, relayed by the host: a light switch's own toggle bit, keyed by the switch. The
@@ -2183,7 +2188,7 @@ struct KeyedTogglePayload {
     WireKey  key;        // 32 -- the instance's Key FName (string)
     uint8_t  action;     // 1  -- 0 = closed/off, 1 = open/on (the state AFTER the edge)
     uint8_t  holder;     // 1  -- ContainerState: a peer slot + 1 (0 = none); other kinds: 0
-    uint16_t holdGen;    // 2  -- ContainerState: that peer's hold generation (0 = unknown); other kinds: 0
+    uint16_t holdGen;    // 2  -- ContainerState: that peer's hold generation (0 = unknown); DoorState: a leaf root's place (kSeedFlagCrack); other kinds: 0
     uint16_t travel;     // 2  -- GarageDoorState snapshot: the door's place in its swing, 0 = closed end .. 1000 = open end
     uint8_t  seedFlags;  // 1  -- GarageDoorState: kSeedFlag* bits; 0 on every other kind and on a live edge
     uint8_t  _pad;       // 1  -- 8-byte alignment / reserved
@@ -2198,6 +2203,11 @@ static_assert(sizeof(KeyedTogglePayload) <= 256 - 20 - 8,
 // carries 0 and is the animated swing as before.
 inline constexpr uint8_t kSeedFlagSeed   = 1;  // this state is a snapshot's seed
 inline constexpr uint8_t kSeedFlagMoving = 2;  // the host's door was mid-swing toward `action`; `travel` is its place in it
+// DoorState alone (door_C): `kSeedFlagCrack`, a door shut at rest whose leaf roots a hit moved: `travel` is the left root's
+// place along its path to open and `holdGen` the right root's, each 0..1000 (0 shut .. 1000 at its open place). With
+// `kSeedFlagMoving` the same two fields read: `travel` the move timeline's place (0 shut end .. 1000 open end) and
+// `holdGen` the left root's place at the swing's start (the right is its mirror), where the swing lerps from.
+inline constexpr uint8_t kSeedFlagCrack  = 4;
 
 // Where an open swinger lid rests (SwingerRestPose): the container lane's key for the lid, as
 // KeyedTogglePayload carries it, and the lid actor's world location (cm) and rotation (deg).

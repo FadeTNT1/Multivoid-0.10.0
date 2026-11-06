@@ -7,6 +7,7 @@
 
 #include "coop/interactables/interactable_sync.h"
 #include "coop/interactables/interactable_channel.h"  // the generic engine: Adapter and Channel
+#include "coop/interactables/door_crack.h"          // a door's leaf roots: the crack a hit leaves, a swing in progress
 #include "coop/interactables/swinger_hold.h"          // who holds and who owns an open lid, and the host's judge
 #include "coop/interactables/swinger_join_pose.h"     // a joiner's open lids at their host's places
 
@@ -67,6 +68,18 @@ const Adapter g_doorAdapter = {
     nullptr,
     // The dev probe says a door's swing fields beside a SHADOW MISS.
     &ue_wrap::door::DescribeSwing,
+    nullptr, nullptr,  // the generic portable key; no settle
+    // The leaf roots ride the state (coop/interactables/door_crack): a hit's crack and a snapshot's swing in progress
+    // are places, sent as seeds the client keeps and drives, and the edge dedup sees them through DetailOf.
+    &door_crack::FillPayload,
+    nullptr,
+    &door_crack::FillSeed,
+    &door_crack::IsSeed,
+    [](void* a, bool on, const coop::net::KeyedTogglePayload& p, uint32_t& cookie) -> SeedStep {
+        ApplyMark mark(g_applyingDoor, a);
+        return door_crack::ApplySeed(a, on, p, cookie);
+    },
+    &door_crack::DetailOf,
 };
 const Adapter g_lightAdapter = {
     // Keyed on the switch, so the receiver replays use() and the switch flips visibly with its

@@ -1,8 +1,9 @@
 // coop/interactables/door_state_verbs.h -- a base door's open state moves through its two state verbs, and the
 // lane stands on both. Every live writer of a door's open state reaches it through doorOpen or doorClose -- a
 // press, a hit's pry, the autoclose, a keypad's open, a creature, the blackout, a jam, a trigger; a save load
-// writes it raw, and the load's connect snapshot carries it. The gate watches the two by name, and the swing's
-// end, move__FinishedFunc, where isOpened settles:
+// writes it raw, and the load's connect snapshot carries it. The gate watches the two by name, the swing's
+// end, move__FinishedFunc, where isOpened settles, and a hit, addDamage, whose crack of a door at rest moves the
+// leaf roots with no change of the open state (coop/interactables/door_crack):
 //   - HOST, after the body: the channel reads the state the verb left and sends it when it changed
 //     (Channel::OnLocalEdge), so a door crosses the moment it starts to swing, whoever moved it, and again where
 //     the swing settles otherwise than it began (or the swing's intent fields did not resolve and it reads settled).
