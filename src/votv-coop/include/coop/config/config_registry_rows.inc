@@ -203,7 +203,18 @@ CFG_FLAG(nameplate, "nameplate", "player", true, nullptr,
 CFG_FLAG(melee_fx, "melee_fx", "player", true, "VOTVCOOP_MELEE_FX",
     "Share the sound and particles of melee swings, their hits and a held item's knocks and breaks with the other "
     "players, and play theirs. Off: you neither send nor play them.")
-CFG_FLOAT(local_push_scale, "local_push_scale", "player", 0.25f, 0.0, 1.0, "VOTVCOOP_LOCAL_PUSH_SCALE",
+// The sleepers rows (in [player]): offline players who stay in the world (coop/player/sleepers). Experimental. Read on the
+// host, which alone lays a sleeper down; the distance is each viewer's own.
+CFG_FLAG(sleepers_enabled, "sleepers.enabled", "player", true, "VOTVCOOP_SLEEPERS_ENABLED",
+    "Experimental, the host's choice: a player who leaves your world stays in it asleep, lying where they were, with "
+    "their inventory, which the other players can loot. They wake up there with what is left when they come back.")
+CFG_FLAG(sleepers_loot_online, "sleepers.loot_online", "player", false, "VOTVCOOP_SLEEPERS_LOOT_ONLINE",
+    "Experimental, reserved: looting a player who is asleep while still online. Not in this build; on, it only says so "
+    "in the log. A player who is offline can always be looted.")
+CFG_FLOAT(sleepers_name_distance_m, "sleepers.name_distance_m", "player", 6.0f, 0, 100,
+    "VOTVCOOP_SLEEPERS_NAME_DISTANCE_M",
+    "How close, in metres, you must be to a sleeping player, with nothing in between, to read their name.")
+CFG_FLOAT(local_push_scale,"local_push_scale", "player", 0.25f, 0.0, 1.0, "VOTVCOOP_LOCAL_PUSH_SCALE",
     "While you are in a session, how hard your own body shoves the physics props it walks into, as a fraction of the "
     "game's own (1 = unchanged, 0 = you slide past them). The game's values come back when the session ends. Takes "
     "effect on your next spawn or world load; turn it down if props still jitter or fling when you brush them.")

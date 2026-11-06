@@ -1,5 +1,6 @@
 // coop/items/inventory_restore.cpp -- see coop/items/inventory_restore.h.
 
+#include "coop/player/sleepers.h"
 #include "coop/items/inventory_restore.h"
 
 #include "coop/items/inventory_death_keep.h"
@@ -49,6 +50,7 @@ struct Pending {
     std::string who;
     std::string label;
     uint32_t    itemBytes = 0;
+    bool        sleeperWake = false;   // a sleeper's record put back on its owner (coop/player/sleepers)
 };
 std::array<Pending, coop::net::kMaxPeers> g_pending{};
 uint32_t g_seq = 0;
@@ -210,6 +212,23 @@ bool Request(int slot, const std::string& backup, std::string& reply) {
     return true;
 }
 
+bool SendItems(int slot, const std::vector<uint8_t>& items, const std::string& label) {
+    coop::net::Session* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->running() || s->role() != coop::net::Role::Host) return false;
+    if (slot < 1 || slot >= static_cast<int>(coop::net::kMaxPeers)) return false;
+    if (!s->IsSlotConnected(slot) || !s->IsSlotWorldReady(slot) || items.size() < kMinItemBytes) return false;
+    Pending& pend = g_pending[static_cast<size_t>(slot)];
+    if (pend.active) return false;
+    const std::string who = coop::text::ToUtf8(coop::player_handshake::NicknameForSlot(slot));
+    const std::vector<uint8_t> wire = coop::inventory_wire::SerializeItems(true, items);
+    const uint32_t reqId = ++g_seq;
+    if (!coop::blob_chunks::SendBlobToSlot(s, slot, coop::net::ReliableKind::InventoryRestoreBlob, reqId, wire)) return false;
+    pend = Pending{true, reqId, coop::net::NowMs(), who, label, static_cast<uint32_t>(items.size()), true};
+    UE_LOGI("[RESTORE] host: restore #%u sent to slot %d (%s): %zu bytes of inventory from %s", reqId, slot, who.c_str(),
+            items.size(), label.c_str());
+    return true;
+}
+
 void OnBlob(const coop::net::BlobChunkPayload& chunk, uint8_t senderSlot) {
     coop::net::Session* s = g_session.load(std::memory_order_acquire);
     if (!s || s->role() != coop::net::Role::Client || senderSlot != 0) return;   // only the host sends one
@@ -242,7 +261,9 @@ void OnAck(const coop::net::InventoryRestoreAckPayload& ack, uint8_t senderSlot)
     UE_LOGI("[RESTORE] host: %s answered restore #%u of %s: %s -- carried %d->%d, hands %d->%d, equipment %d->%d (%u bytes)",
             p.who.c_str(), ack.reqId, p.label.c_str(), StatusName(ack.status), ack.before[0], ack.after[0], ack.before[1],
             ack.after[1], ack.before[2], ack.after[2], ack.itemBytes);
+    const bool wake = p.sleeperWake;
     p = Pending{};
+    if (wake) coop::sleepers::OnWakeAck(senderSlot, ack);
 }
 
 void OnDisconnect() {

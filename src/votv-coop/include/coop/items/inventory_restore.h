@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace coop::net {
 class Session;
@@ -36,6 +37,12 @@ void Tick();
 // `slot` (0 is the host's own player). `reply` is the line for the admin. True when the restore was applied (slot 0) or
 // sent (a client; its answer is logged when it arrives).
 bool Request(int slot, const std::string& backup, std::string& reply);
+
+// HOST: put `items` (a profile's inventory component bytes) on the client in `slot`, which must be in the world, on
+// the same lane and with the same rollback copy and answer as Request. `label` names the source in the log. The
+// answer is handed to coop::sleepers::OnWakeAck: this is the wake of a sleeper, whose record replaces whatever the
+// player holds. False when the slot is not ready, a restore to it is still unanswered, or the send was refused.
+bool SendItems(int slot, const std::vector<uint8_t>& items, const std::string& label);
 
 // CLIENT, a chunk of an InventoryRestoreBlob (any role may be handed one; only a client taking it from slot 0 acts).
 void OnBlob(const coop::net::BlobChunkPayload& chunk, uint8_t senderSlot);

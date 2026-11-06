@@ -1,5 +1,7 @@
 // coop/moderation/moderation.cpp -- see coop/moderation/moderation.h.
 
+#include "coop/session/player_handshake.h"
+#include "coop/player/sleepers.h"
 #include "coop/moderation/moderation.h"
 
 #include "coop/moderation/ban_list.h"
@@ -82,6 +84,7 @@ ModResult KickPlayer(const PlayerToken& token, const char* reason) {
         return ModResult::Gone;
     }
     const std::string why = ReasonOr(reason, kKickDefaultReason);
+    coop::sleepers::NoteRemovedByHost(coop::player_handshake::GuidForSlot(token.slot));  // a kick leaves no sleeper
     if (!s->KickWithToken(token.slot, token.generation, coop::net::EndReason::KickedByHost,
                           why.c_str())) {
         UE_LOGW("moderation: kick of #%u (slot %d) did nothing -- they are already "
@@ -132,6 +135,7 @@ ModResult BanPlayer(const PlayerToken& token, const char* reason, bool byAddress
     // the constant stands in when none was typed, and is what the record stores.
     const std::string why = ReasonOr(reason, kBanDefaultReason);
     if (!coop::ban_list::Add(id.c_str(), nick, address.c_str(), why.c_str())) return ModResult::NoId;
+    coop::sleepers::NoteRemovedByHost(id);  // a ban leaves no sleeper
     // Accepted window: the banned player's re-proof over a second connection, whose ban check
     // ran on the net thread just before the Add above, is seated for this session. MTA has
     // none: its join packets are queued by the sync thread and handled on the main thread
@@ -163,6 +167,7 @@ ModResult BanOffline(const char* id, const char* reason, bool byAddress) {
     const std::string why = ReasonOr(reason, kBanDefaultReason);
     if (!coop::ban_list::Add(guid.c_str(), known ? e.nick : "", address.c_str(), why.c_str()))
         return ModResult::NoId;
+    coop::sleepers::NoteRemovedByHost(guid);  // an offline ban takes the player's sleeper away
     UE_LOGI("moderation: offline-banned '%s' (id %.8s..., address %s)", known ? e.nick : "",
             guid.c_str(), address.empty() ? "not enforced" : ue_wrap::log::Addr(address).c_str());
     // A matching player still seated goes too. MTA's AddBan also kicks every seated player

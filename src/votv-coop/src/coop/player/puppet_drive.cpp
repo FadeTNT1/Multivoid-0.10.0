@@ -11,6 +11,7 @@
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
+#include "coop/player/sleepers.h"
 #include "coop/session/player_handshake.h"
 
 #include "ue_wrap/core/game_thread.h"
@@ -195,6 +196,9 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
         if (g_puppets[slot].valid()) g_puppets[slot].Tick();
         else g_puppets[slot].ReleaseHurtFlash();  // a body gone mid-flash: its pins go with it
     }
+    // A peer at rest lies as a sleeper (coop/player/sleepers): after the Tick, so the lying pose is the last write.
+    for (int slot = 0; slot < coop::players::kMaxPeers; ++slot)
+        if (g_puppets[slot].valid()) coop::sleepers::DriveOnline(slot, g_puppets[slot]);
 
     // Killer-wisp grab-window body placement. MUST run AFTER the puppet Tick loop above: a held
     // victim puppet is snapped to the wisp's 'playerGrab' socket, overwriting the streamed pose

@@ -95,4 +95,11 @@ bool ReadBackup(const std::string& guid, const std::string& spec, std::vector<ui
 // (`inventory_rollback/rollback-<UTC stamp>.json`). Returns the path, empty when it could not be written.
 std::string WriteRollback(const std::string& nickJson, const std::vector<uint8_t>& blob);
 
+// A small file of the hosted world's own beside its profiles (the sleepers' list, coop/player/sleepers), cut when the
+// world is saved and read back when it is hosted again: `fileName` is a plain file name in the set's directory, never a
+// path and never a profile's name. Written atomically. False when the world has no directory yet, the name is refused
+// or the write failed; the read is false when there is no such file. Game thread.
+bool WriteWorldSidecar(const std::wstring& fileName, const std::string& bytes);
+bool ReadWorldSidecar(const std::wstring& fileName, std::string& out);
+
 }  // namespace coop::player_profile_store

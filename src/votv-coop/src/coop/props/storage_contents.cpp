@@ -7,6 +7,7 @@
 #include "coop/element/registry.h"
 #include "coop/net/blob_chunks.h"
 #include "coop/net/session.h"
+#include "coop/player/sleepers.h"
 #include "ue_wrap/actors/inventory_item_codec.h"
 #include "ue_wrap/actors/storage_inventory.h"
 #include "ue_wrap/core/log.h"
@@ -283,6 +284,12 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
     }
     if (void* const drone = SI::DroneStorage(); drone && SI::IsWorldStorage(drone))
         (Publish(W::Address{W::AddressKind::Drone, 0}, peerSlot, true) ? sent : refused)++;
+    // The sleepers' loot: their Add went out on the lane just ahead (connect_replay), so the joiner's crate is
+    // being built as these arrive; a set that beats it waits for it.
+    std::vector<uint32_t> sleeperIds;
+    coop::sleepers::LootIds(sleeperIds);
+    for (const uint32_t id : sleeperIds)
+        (Publish(W::Address{W::AddressKind::Sleeper, id}, peerSlot, true) ? sent : refused)++;
     UE_LOGI("storage_contents[host]: connect seed -> slot %d: %zu world storages sent, %zu refused", peerSlot, sent,
             refused);
 }
@@ -292,6 +299,10 @@ void MarkDirty(void* component) { MarkComponent(component); }
 bool AddressOf(void* component, W::Address& out) {
     if (!SI::IsWorldStorage(component)) return false;
     void* const owner = SI::OwnerOf(component);
+    if (const uint32_t sleeper = coop::sleepers::LootIdOfOwner(owner); sleeper != 0) {
+        out = W::Address{W::AddressKind::Sleeper, sleeper};
+        return true;
+    }
     if (SI::IsDrone(owner)) {
         if (owner != ue_wrap::drone::Find()) return false;
         out = W::Address{W::AddressKind::Drone, 0};
@@ -306,6 +317,7 @@ bool AddressOf(void* component, W::Address& out) {
 void* Resolve(const W::Address& a) {
     void* comp = nullptr;
     if (a.kind == W::AddressKind::Drone) comp = SI::DroneStorage();
+    else if (a.kind == W::AddressKind::Sleeper) comp = coop::sleepers::LootStorage(a.id);
     else comp = SI::StorageOf(coop::element::LivePropActor(static_cast<coop::element::ElementId>(a.id)));
     return (comp && SI::IsWorldStorage(comp)) ? comp : nullptr;
 }
@@ -324,6 +336,7 @@ bool InApply() { return g_inApply; }
 const char* Describe(const W::Address& a) {
     static char buf[32];
     if (a.kind == W::AddressKind::Drone) std::snprintf(buf, sizeof(buf), "drone");
+    else if (a.kind == W::AddressKind::Sleeper) std::snprintf(buf, sizeof(buf), "sleeper %u", a.id);
     else std::snprintf(buf, sizeof(buf), "prop %u", a.id);
     return buf;
 }

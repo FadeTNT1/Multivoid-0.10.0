@@ -2,6 +2,7 @@
 // a new sync feature wires in here.
 
 #include "ue_wrap/core/gc_pin.h"
+#include "coop/player/sleepers.h"
 #include "coop/props/trash_mirror.h"
 #include "coop/session/subsystems.h"
 
@@ -347,6 +348,7 @@ void Install(coop::net::Session& session) {
     coop::props::fire_extinguisher_sync::Install(&session);  // BOTH: the shoot and extinguishRay watches and the record rules; HOST: its bursts, published
     coop::props::prop_impact_fx::Install(&session);  // HOST: a container's cue, sent before impactDamage's body runs
     coop::prop_act_host::Install(&session);  // HOST: the judge of a client's take or use of a shared prop
+    coop::sleepers::Install(&session);  // the loot press on a sleeper (InpActEvt_use), both roles
     coop::props::storage_act::Install(&session);  // CLIENT: a storage's verbs gated, a transfer asked of the host; HOST: judged and held
     coop::prop_act_request::Install(&session);  // the six take-or-use watches (CLIENT asks the host, HOST honours a reservation); CLIENT: the host's answer, and the replay of a grant
     coop::kerfur_menu_input::Install(&session);  // client radial-menu verb detect (InpActEvt_use PRE -- the actionName dispatch is PE-invisible) -> kerfur_command relay
@@ -437,6 +439,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
 }
 
 DisconnectStats DisconnectAll() {
+    coop::sleepers::OnClientDisconnect();  // a client's sleepers go; a host whose last client left keeps them
     // The trash mirrors first, before ForceRelease, which can consume a carried one without
     // releasing its GC pin -- and a rooted pending-kill actor anchors its world's whole Outer
     // chain. Retiring them here un-roots, destroys and evicts each drive, so ForceRelease sees no
@@ -672,6 +675,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:laptop_quad"}; coop::laptop_buffer_sync::Tick(); }  // quad int pre-filter poll (4 Hz)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:floppybox"}; coop::floppybox_sync::Tick(); }  // box sweep (1 Hz)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:storageContents"}; coop::props::storage_contents::Tick(); }  // HOST: the dirty drain (4 Hz) and the drone read (1 Hz); CLIENT: waiting sets
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:sleepers"}; coop::sleepers::Tick(); }  // BOTH: the sleepers' bodies and crates; HOST: their loot written back, their saved list
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:containerView"}; coop::props::container_view_close::Tick(); }  // a client's view into a container, closed out of reach
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:desk_cursor"}; coop::desk_cursor_sync::Tick(); }  // coords-panel live cursor -- holder streams viewCoordinate / mirror interpolates (50ms) + WriteCursorOnly
     { PP::Scope _s{PP::Bucket::Interactable}; coop::desk_ping_sync::Tick(); }  // the ping lane's watches until live

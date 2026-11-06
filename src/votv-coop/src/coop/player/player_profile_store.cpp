@@ -600,6 +600,47 @@ size_t CutToDisk(const std::wstring& writtenSlot) {
 
 namespace {
 
+// A sidecar name: one plain file name, never a path, never a profile's own name.
+bool SafeSidecarName(const std::wstring& name) {
+    if (name.empty() || name.size() > 64 || name == L"." || name == L"..") return false;
+    if (name.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos) return false;
+    return !IsProfileFile(fs::path(name));
+}
+
+}  // namespace
+
+bool WriteWorldSidecar(const std::wstring& fileName, const std::string& bytes) {
+    DropHeldOfAnotherWorld();
+    if (!SafeSidecarName(fileName)) return false;
+    const fs::path dir = SlotDir(g_setSlot);
+    if (dir.empty()) return false;
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec) return false;
+    const atomic_file::Result r =
+        atomic_file::Write(dir / fileName, bytes, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
+    if (!r.ok()) {
+        UE_LOGW("player_profile: the sidecar '%ls' beside the profiles could not be written (%s)", fileName.c_str(),
+                atomic_file::Describe(r).c_str());
+        return false;
+    }
+    return true;
+}
+
+bool ReadWorldSidecar(const std::wstring& fileName, std::string& out) {
+    out.clear();
+    DropHeldOfAnotherWorld();
+    if (!SafeSidecarName(fileName)) return false;
+    const fs::path dir = ReadDir(g_setSlot);
+    if (dir.empty()) return false;
+    std::ifstream in(dir / fileName, std::ios::binary);
+    if (!in) return false;
+    out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return true;
+}
+
+namespace {
+
 // A relative path a host's admin typed to name a backup: no drive, no root, no `.` or `..` component, no characters a
 // path cannot hold, and a .json file. It is joined under the world's own profile folder and never trusted beyond it.
 bool SafeRelativeSpec(const std::string& spec) {

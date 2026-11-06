@@ -2,7 +2,8 @@
 // contents (paged), a client's transfer intent, the host's answer and the client's closing word. Pure byte work, no
 // engine access; what a row means is ue_wrap/actors/inventory_item_codec's, what a transfer may do is storage_act's.
 //
-//   address   [u8 kind][u32 id]                 kind 1: a prop element (id = its eid); kind 2: the delivery drone (id 0)
+//   address   [u8 kind][u32 id]                 kind 1: a prop element (id = its eid); kind 2: the delivery drone (id 0);
+//                                               kind 3: a sleeper's loot (id = the host's sleeper id, coop/player/sleepers)
 //   contents  [u8 op=2][address][u32 rev][u32 plan][u8 page][u8 pages][u16 n] then n x ([u32 len][row])
 //   request   [u16 txn][u8 family][address][u32 rev][u32 plan][u64 fingerprint][u8 amount]
 //             then for a put: [u8 keepPlace][u32 len][row]
@@ -21,7 +22,7 @@
 
 namespace coop::props::storage_wire {
 
-enum class AddressKind : uint8_t { Prop = 1, Drone = 2 };
+enum class AddressKind : uint8_t { Prop = 1, Drone = 2, Sleeper = 3 };
 
 struct Address {
     AddressKind kind = AddressKind::Prop;

@@ -15,8 +15,10 @@
 #pragma once
 
 #include "coop/net/protocol.h"
+#include "coop/props/storage_wire.h"
 #include "ue_wrap/core/script_gate.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace coop::net { class Session; }
@@ -32,6 +34,9 @@ void OnPeerGone(uint8_t slot);               // host: that slot's holds are undo
 void OnRequestChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot);
 void OnCommitChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot);
 void OnReplyChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot);
+
+// Host: how many transactions on storage `a` are held, waiting for their client's commit or abort.
+size_t HoldsOn(const storage_wire::Address& a);
 
 // The client's gate on transferFromInvToInf, registered with the storage watch that owns the function's row
 // (storage_contents).

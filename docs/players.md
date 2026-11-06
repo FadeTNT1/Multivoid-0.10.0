@@ -247,6 +247,89 @@ one chat line naming the host when it rises. A joiner is sent the host's flag an
 state that is not awake, and a leaver is told to every client as awake. A client holds its
 nightmare chance at zero, so a nightmare is a roll of the host's machine alone. `[?]`
 
+### Sleepers (experimental)
+
+With `sleepers.enabled` on (the default in this build, the host's setting), a client who leaves the host's world -- on
+the dedicated server, every player -- does not vanish from it: a sleeper lies where they stood, carrying their
+inventory, until they come back (`coop/player/sleepers`). It is the host's: the host lays it down, every peer shows
+it, a joiner included, and it is written beside the profiles when the world is saved, so it is there again after a
+host restart, with the world. The host itself never sleeps: a listen host that leaves ends the session.
+
+**Identity.** A sleeper is keyed by the player's stable id, the GUID the profile store keys by
+(`player_handshake::GuidForSlot`, the hash of the key the player proved), never by a slot or a name. On the wire and
+on the storage lanes it is a per-session number the host hands out.
+
+**The body.** The player's own puppet, wearing their skin, turned onto its side (roll 90 degrees, its facing kept)
+and set down on the floor the host traced under the spot where they stood: the body's lowest point, measured off its
+mesh's bounds, one centimetre above the floor. The pose is deterministic and has no physics; collision is off, so it
+blocks nobody, and a watch lays it back down if anything moves it. The game's plushie ragdoll is not used. Every peer
+puts the body at the transform the host computed. The log says `sleeper: <name> lying at (x, y, z) pitch/roll=p/r`.
+
+**The loot.** The inventory rides a hidden crate (`prop_container_crate_C`) at the same spot, spawned on every peer
+as a display-only prop: never enrolled as an element, out of the save (`ignoreSav`), static, hidden, collision off.
+Its inventory component is a world storage of address kind Sleeper on the storage lanes ([props.md](props.md),
+containers): the host publishes its rows, and a client's take or put is asked of the host, which holds a take's row
+in escrow until the client's commit, puts it back on an abort, a 30 s lapse or the taker's departure, and answers a
+repeated transaction without running it twice -- the same duplicate prevention as any container. The crate is
+filled from the player's profile: the carried grid's items at their own places, then whatever they held and wore,
+laid out on the crate's grid. Its volume is unbounded, so a put is never refused for room.
+
+**Looting.** E on the body (within 2.5 m, aiming at it, with nothing in between) opens the crate in the game's own
+container screen through the gamemode's `openPropInv`; that press, its second dispatch and its release are kept from
+the game's own use, so nothing behind the body is grabbed. A plate shows "[E] Loot" while you can.
+
+**Write-back.** The host reads the crate's rows once a second and, when they changed, rebuilds the player's profile
+items from the ones the crate was filled from (`storage_inventory::RebuildProfileItems`): an item they held or wore
+that is still in the crate stays in its slot, with what is left of its stack; one that was taken leaves its slot
+empty; everything else -- what they carried, what someone put in -- goes on their carried grid at its place in the
+crate. A crate nobody touched rewrites nothing, so an unlooted sleeper keeps its owner's slots exactly. The profile's
+standing spot is the sleeper's, on the same floor. The rewritten profile is held like any other and cut to disk with
+the next world save.
+
+**Rejoin: the sleeper is the single source of truth.** A rejoining player comes back with exactly what their
+sleeper holds, never their older, fuller inventory:
+- The moment the host is about to hand them their profile (pre-world), any loot transaction on the sleeper that is
+  still held (granted, not yet committed or aborted) settles first -- the join waits, a tick at a time, at most the
+  30 s hold -- and the sleeper takes no new one meanwhile; then its loot is written back one last time and it goes,
+  on every peer. The item of a settled take is with the looter, an aborted one back in the crate, so it is in exactly
+  one place when the crate is read.
+- Every write-back is checked before it is kept: per item kind, the rebuilt profile must hold exactly the crate's
+  total (`storage_inventory::ItemsMatchRows`, the plan's own invariant in `ue_wrap/actors/sleeper_rebuild_plan`, which
+  a CI test drives with loot-then-rejoin cases). A rebuild with worn items kept in their slots that does not check
+  falls back to everything on the carried grid; the older profile is never kept over the crate.
+- The join hands that profile back as every profile is handed back: the joiner's world is built from the host's
+  save, and the profile replaces whatever the save put on the player before the world exists, so nothing of the
+  client's own -- a single-player save played in between, a crash, a cached profile, the `.good` backups -- comes
+  into it. Once the player's world is up the host puts the same record on them again through the inventory restore
+  lane, and until that is answered every profile the player streams is dropped, so nothing they loaded overwrites
+  it. The log says `sleeper: <name> woke with N item(s) from the sleeper record (local had M; replaced)`, M being the
+  item arrays' entries the client held just before.
+- The player appears where the sleeper lay, with what is left.
+
+An online sleeper cannot be looted in this build (below), so nothing is taken from a live inventory while its owner
+sleeps.
+
+**Kick and ban.** A kicked or banned player leaves no sleeper, and a `/banid` of an offline player takes theirs away;
+the profile keeps what the looting left. A player who leaves dead, or one with no readable profile, leaves none.
+
+**Nameplate.** A sleeper's plate is "z Z Z", with no ping and no health bar. Its name shows only within
+`sleepers.name_distance_m` (6 m by default, each viewer's own) and only with a clear line from the camera to its
+head; with a wall in between there is no plate at all. Online players' plates are unchanged.
+
+**Online sleepers.** A player who is still connected but at rest -- in a bed, a sleeping bag, or dreaming, the
+state `sleep_sync` already carries -- is shown the same way on every other peer: their puppet is laid flat under
+where they rest (onto the floor, or onto the bed the trace meets) by the same measured pose, held over their pose
+stream each tick, and stood back up the tick they wake or ragdoll. Their plate follows the sleeper's rule: "z Z Z",
+no plate through a wall, the name only near. One who disconnects while lying becomes an offline sleeper in the very
+pose every peer saw; on a client the puppet goes with the roster row and the offline body comes with the host's Add,
+a round trip later. Looting an online sleeper is not in this build: their inventory is live on their own machine, and
+the round trip it needs (the looter asks the host, the host asks the owner's machine, which takes or adds the item
+through the game's own verbs under the same escrow and commit) is a follow-up. `sleepers.loot_online` is reserved
+for it and off; on, it only says so in the log.
+
+**Follow-ups, not in v1:** looting an online sleeper; damage to a sleeper, carrying or moving one, a sleeper for players online when the server
+shuts down, a timeout after which a sleeper goes.
+
 ### Inventory
 
 Per player and private: the contents never cross the wire as gameplay. The host stores each
@@ -372,6 +455,7 @@ effect (`[MELEE-FX]`). `[?]` until a two-peer run reads those lines.
 | damage from enemies | the host detects, the victim applies | a reliable relay to the hit peer |
 | death and revive | that peer | the native chain; the run-ending travel refused by its author |
 | sleep | each peer sleeps natively; each peer reports its rest state, the host relays it and its own sleeping flag | |
+| a sleeper, its loot | the host | laid down, written back and removed by the host; its loot a world storage |
 | inventory | that peer; the host stores it | never on the wire as gameplay |
 | roster, kick, ban | the host | rows asserted as state; a ban by id and address at the identity proof |
 
@@ -390,6 +474,7 @@ effect (`[MELEE-FX]`). `[?]` until a two-peer run reads those lines.
 | `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |
 | `TeleportClient` | host to one peer | a placement; the administration action, not the join |
 | `InventoryRestoreBlob`, `InventoryRestoreAck` | host to one client; that client to the host | a backed-up inventory's bytes, chunked, to put back on that player; the answer with the item counts before and after |
+| `SleeperState` | host to all | a sleeper laid down (its id, its lying transform, its name and skin) or removed (its id); its loot rides `ContainerContents` and `ContainerAct*` as a storage of address kind Sleeper |
 
 ## Late join
 
@@ -399,7 +484,8 @@ choice made during the load is not lost. A melee effect is a one-shot and is not
 at its ready edge. A joiner is sent the host's sleeping flag and the rest state of every peer
 that is not awake. A joiner that rests before the host holds its world ready has that report refused, and repeats
 it each time the host's sleeping flag reaches it, which the host sends once it holds the joiner ready. The inventory is seeded before the world. A peer's death state is not seeded; a joiner sees a
-dead peer through the ragdoll bit of its next pose.
+dead peer through the ragdoll bit of its next pose. Every sleeper is sent to a joiner at its ready edge, just before
+the world storages' rows, its loot's among them.
 
 ## Known limits
 
@@ -413,6 +499,9 @@ dead peer through the ragdoll bit of its next pose.
 | Damage a puppet takes on another machine is dropped by design; only the victim's own contacts count | `[V]` `coop/player/player_damage` |
 | A swing's whoosh is shared only if the game plays it through the player's own graph inside `attack`; a swing that plays no sound there shares none, and the log says so once. A hit on a surface that names no physical material shares no surface sound or particles | `[?]` the `[MELEE-FX]` lines of a two-peer run |
 | A held item's bump below its prop's resistance is not shared, and a hit on a creature gives a client that is neither the swinger nor the host the surface's impact sound, not the creature's own feedback | `[RD]` `coop/player/melee_fx_contact` and `melee_fx` |
+| Sleepers have been built and read against the code; the in-game run (a client leaves, is looted, rejoins; a host restart with a saved sleeper) is pending. That `openPropInv` opens the 0.10.0 free-layout screen onto a crate is read from the code that uses it for the drone and the ATV, not yet seen on a sleeper | `[?]` `coop/player/sleepers` |
+| A sleeper's worn items lie on the crate's grid at places the game picks; a taken worn item's slot is left as a cleared row, and what a looter put in lands on the owner's carried grid, which may then hold more than it would let them pick up | `[RD]` `ue_wrap/actors/storage_inventory` |
+| A looter's take still in escrow when the owner rejoins is the looter's on commit; an abort after the sleeper went has no crate to put the row back into, and it is lost | `[RD]` `coop/props/storage_act`, `coop/player/sleepers` |
 | A third-party bundle pak cannot be discovered: bundle membership is a fixed table | `[V]` `coop/player/skin_registry` |
 | Worn clothing is not drawn on another player's body: the equipment is synced as the owner's inventory, not as meshes | `[RD]` `coop/items/player_inventory_sync` |
 | A ban is by player id and, on a direct link, by address: a banned player with a new identity key who comes from a new address or through a relay is a new player, and an address ban refuses whoever shares that address | `[V]` `coop/moderation/ban_list` |
@@ -432,6 +521,7 @@ dead peer through the ragdoll bit of its next pose.
 | melee and held-item effects | `coop/player/melee_fx` (the wire, the host's judge, the play), `coop/player/melee_fx_swing`, `coop/player/melee_fx_contact`, `ue_wrap/engine/engine_emitter`, `ue_wrap/engine/physical_audio` |
 | damage and death | `coop/player/player_damage`, `coop/player/death_revive`, `coop/player/run_end_travel`, `coop/player/ragdoll_gate` |
 | sleep | `coop/player/sleep_sync`, `coop/player/sleep_rest` |
+| sleepers (offline players in the world) | `coop/player/sleepers`, `coop/player/sleeper_wire`, `ue_wrap/actors/storage_inventory` (profile rows and the rebuild), `ue_wrap/actors/inventory_component` (the scratch component) |
 | inventory | `coop/items/player_inventory_sync`, `coop/items/inventory_wire`, `ue_wrap/actors/inventory_component` |
 | moderation | `coop/moderation/moderation`, `coop/moderation/ban_list`, `coop/moderation/seen_players` |
 | tests | `harness/autotest/autotest_death.cpp` (the drill) + `death_state_probe.cpp` (the reads it and `autotest_runend.cpp` share), `autotest_damage.cpp`, `autotest_playerdmg.cpp`, `autotest_ragdoll.cpp`, `autotest_puppetframe.cpp` |

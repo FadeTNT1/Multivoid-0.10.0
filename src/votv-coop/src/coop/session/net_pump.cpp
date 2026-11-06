@@ -2,6 +2,7 @@
 // the reaper, the puppet drive. The sync-module fan-out lists live in coop/session/subsystems.cpp
 // and the outbound pose, held-prop and ragdoll streams in coop/player/local_streams.cpp.
 
+#include "coop/player/sleepers.h"
 #include "coop/session/net_pump.h"
 #include "net_pump_world_ready_internal.h"  // co-located private header (src tree, not include/)
 
@@ -223,6 +224,8 @@ void OnSlotReplaced_TearDownWorld(int slot, const coop::roster_ledger::Row& outg
     s->OnRosterOrigin(slot, outgoing.occupied(), outgoing.originContext, incoming.occupied(),
                       incoming.originContext);
     if (!outgoing.occupied()) return;
+    // The leaver's sleeper is laid where its puppet stands, so this comes before the puppet goes.
+    coop::sleepers::OnPlayerLeaving(slot, outgoing);
     if (coop::puppet_drive::DestroySlot(slot))
         UE_LOGI("net: peer slot %d (#%u) left -- puppet destroyed", slot,
                 static_cast<unsigned>(outgoing.playerNo));
@@ -284,6 +287,7 @@ void TearDownSession(coop::net::Session& session, const char* why) {
         coop::subsystems::DisconnectSlot(session, slot);
     }
     coop::subsystems::DisconnectAll();
+    coop::sleepers::OnSessionEnd();  // any role: the session's sleepers and their actors go with it
     // The next session's `rig: READY hosting` is owed; the world's settle latch stays. Here and not in
     // DisconnectAll, which also runs when a host's last client leaves and the session lives on.
     coop::host_world_settle::OnSessionEnd();

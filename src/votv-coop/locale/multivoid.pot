@@ -1787,6 +1787,10 @@ msgstr ""
 msgid "Your player id %s"
 msgstr ""
 
+#: src/ui/hud.cpp
+msgid "[E] Loot"
+msgstr ""
+
 #: src/ui/admin_panel.cpp
 msgid "banned"
 msgstr ""

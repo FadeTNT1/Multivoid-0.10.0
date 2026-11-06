@@ -1,5 +1,6 @@
 // coop/items/player_inventory_sync.cpp -- see coop/items/player_inventory_sync.h.
 
+#include "coop/player/sleepers.h"
 #include "coop/items/player_inventory_sync.h"
 
 #include "coop/net/blob_chunks.h"
@@ -439,6 +440,7 @@ void OnWorldGather() {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running() || s->role() != coop::net::Role::Host) return;
     g_gatherSeen = true;
+    coop::sleepers::OnWorldGathered();  // the sleepers' loot into their profiles first, so this gather holds it
     coop::player_profile_store::MarkWorldGathered();
 }
 
@@ -476,6 +478,7 @@ void OnWorldSaveWritten(void* saveObject, bool autosave) {
     g_gatherSeen = false;
     const Clock::time_point t0 = Clock::now();
     const size_t n = coop::player_profile_store::CutToDisk(slotName);
+    coop::sleepers::OnWorldSaveWritten();  // the sleepers' list beside the profiles just cut
     UE_LOGI("player_inventory: the host's world was saved to '%ls' -- %zu changed profile(s) cut to "
             "disk with it in %lld us", slotName, n, static_cast<long long>(
                 std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t0).count()));
@@ -615,6 +618,13 @@ void OnReliable(const coop::net::BlobChunkPayload& p, uint8_t senderPeerSlot) {
                 "dropped, the stored profile is not overwritten", senderPeerSlot, blob.size());
         return;
     }
+    // A player who just woke from a sleeper is getting the sleeper's record put on them; until that is answered, what
+    // they stream is what they loaded locally, and the record must not be overwritten by it.
+    if (coop::sleepers::HoldsProfileOf(guid)) {
+        UE_LOGI("player_inventory: slot %u streamed a profile while its sleeper record is being put on it -- dropped, "
+                "the record stands", senderPeerSlot);
+        return;
+    }
     // Held in memory, by GUID; the disk copy is cut with the host's world save (the store's header
     // says why no other moment will do).
     coop::player_profile_store::Put(guid, std::move(blob),
@@ -637,6 +647,9 @@ bool SendInventoryToSlot(int peerSlot) {
                 peerSlot);
         return false;  // not sent -> caller does not latch; retries when the GUID lands
     }
+    // A sleeper of this player writes its loot back into the profile and goes, before the profile is read: the
+    // sleeper's record IS what the player gets. Not yet while a loot transaction on it is held; asked again next tick.
+    if (!coop::sleepers::OnOwnerJoining(guid)) return false;
     std::vector<uint8_t> blob;
     namespace PS = coop::player_profile_store;
     const PS::Found found = PS::Get(guid, blob);

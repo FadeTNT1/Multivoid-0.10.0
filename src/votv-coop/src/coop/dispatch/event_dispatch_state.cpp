@@ -33,6 +33,7 @@
 #include "coop/interactables/window_stroke_sync.h"
 #include "coop/interactables/surface_clean_sync.h"
 #include "coop/interactables/window_sync.h"
+#include "coop/player/sleepers.h"
 
 #include "ue_wrap/core/log.h"
 
@@ -529,6 +530,19 @@ bool HandleStateEvent(net::Session& session,
         net::BlobChunkPayload rb{};
         std::memcpy(&rb, msg.payload, sizeof(rb));
         coop::inventory_restore::OnBlob(rb, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::SleeperState: {
+        // HOST->ALL: one sleeper laid down or removed (coop::sleepers). Host-authored only (client_authorship.h); the
+        // module takes it only from slot 0 on a client.
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
+            UE_LOGW("event_feed: SleeperState payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::BlobChunkPayload));
+            break;
+        }
+        net::BlobChunkPayload sp{};
+        std::memcpy(&sp, msg.payload, sizeof(sp));
+        coop::sleepers::OnStateChunk(sp, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::InventoryRestoreAck: {
