@@ -10,6 +10,7 @@
 #include "coop/element/quiescence_drain.h"  // SupersedePosCorrection: the own release is the newest pose
 #include "coop/element/registry.h"          // EidForActor: the keyed eid of the released prop
 #include "coop/interactables/interactable_sync.h"  // ContainerKey: a dragged swinger's portable key
+#include "coop/interactables/swinger_hold.h"        // NoteLocalGrab: this peer's player owns the lid it takes
 #include "coop/config/config.h"
 #include "coop/creatures/kerfur_entity.h"  // GetKerfurMirrorEidForActor, the held kerfur prop's eid
 #include "coop/net/protocol.h"
@@ -572,6 +573,7 @@ void Tick(coop::net::Session& session, void* local, void* controller) {
                     ue_wrap::prop::GetInteractableKeyString(heldActor).c_str(),
                     eidLog, mirrored ? "BROADCAST" : "carry-only(trash/clump)");
             g_heldSwinger = ue_wrap::swinger::EnsureResolved() && ue_wrap::swinger::IsSwinger(heldActor);
+            if (g_heldSwinger) coop::swinger_hold::NoteLocalGrab(coop::interactable_sync::ContainerKey(heldActor));
             g_swingerKeySaid = false;
             // The carry-only invariant: every refusal in EnsureHeldItemBroadcast is an anti-dupe
             // gate that assumes the receiver resolves the item by another route (a kerfur prop by

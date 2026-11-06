@@ -424,7 +424,8 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | Kind | Direction | Carries |
 |---|---|---|
 | `DoorState`, `LightGroupState` | the host to all | a key and a state |
-| `LightState`, `ContainerState`, `GarageDoorState`, `ApplianceState`, `LockerDoorState` | each peer, relayed | a key and a state |
+| `LightState`, `GarageDoorState`, `ApplianceState`, `LockerDoorState` | each peer, relayed | a key and a state |
+| `ContainerState` | a client to the host, which judges it and republishes what it accepted | a key, a state, the holder or owner's slot and its hold generation (`swinger_hold`: a close is accepted only from the lid's holder or owner; a copy another peer drags or owns does not close or publish on its own) |
 | `DoorVerbIntent` | a client to the host | a door's key, the verb, a hit's damage |
 | `CameraActiveState`, `CameraLightState` | the host to all | a camera's key and one bit |
 | `CameraToggleIntent` | a client to the host | a camera's key, which bit, the value wanted |

@@ -124,7 +124,8 @@ constexpr bool IsClientRelayableReliableKind(ReliableKind k) {
     // as DoorVerbIntent, an intent addressed to the host alone. PowerControlState likewise: a press
     // reaches the host alone and the host authors the canonical.
     case ReliableKind::LightState:
-    case ReliableKind::ContainerState:
+    // ContainerState is not relayable: the host judges a client's lid edge (coop/interactables/swinger_hold) and
+    // republishes only what it accepted.
     case ReliableKind::GarageDoorState:   // symmetric
     case ReliableKind::ApplianceState:    // symmetric
     case ReliableKind::OvenRepairState:   // symmetric, one way

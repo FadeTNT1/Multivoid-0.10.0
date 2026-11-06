@@ -407,6 +407,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/laptop_sync.cpp
     src/coop/interactables/laptop_tab.cpp
     src/coop/interactables/portable_pc_lid.cpp
+    src/coop/interactables/swinger_hold.cpp
     src/coop/interactables/swinger_join_pose.cpp
     src/coop/interactables/laptop_buffer_sync.cpp
     src/coop/interactables/floppy_slot_entry.cpp
