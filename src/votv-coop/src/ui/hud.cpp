@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -183,6 +184,30 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
                                      : IM_COL32(190, 30, 30, static_cast<int>(a * 235.f));
     dl->AddRectFilled(bp, ImVec2(bp.x + barW * frac, bp.y + barH), fillCol);
     dl->AddRect(bp, ImVec2(bp.x + barW, bp.y + barH), IM_COL32(0, 0, 0, static_cast<int>(a * 200.f)));
+
+    // Sleep Zs: a sleeping peer's plate sheds "z Z Z" from its upper-right corner. Three letters
+    // share one looping life, a third of a life apart, so a new one leaves every ~0.8 s; each drifts
+    // up and to the right with a small sway, grows, and fades in then out. Pure function of the
+    // clock and the sleeping flag, so it starts and stops with the flag, with no state kept.
+    if (p.sleeping) {
+        constexpr int   kZs      = 3;
+        constexpr float kLifeSec = 2.4f;
+        static const char* const kGlyph[kZs] = {"z", "Z", "Z"};
+        const double now = ImGui::GetTime();
+        const ImU32 zCol = IM_COL32(190, 215, 255, 255);
+        for (int i = 0; i < kZs; ++i) {
+            const float u = std::fmod(static_cast<float>(now) + kLifeSec * i / kZs, kLifeSec) / kLifeSec;
+            const float fade = std::min(u / 0.15f, 1.f) * (1.f - u);
+            const float za = a * std::clamp(fade, 0.f, 1.f);
+            if (za <= 0.01f) continue;
+            const float zpx = px * (0.55f + 0.65f * u);
+            const ImVec2 zp(boxMax.x - S(10.f) * s + u * S(26.f) * s + std::sin(u * 9.f) * S(3.f) * s,
+                            textPos.y - u * S(38.f) * s - zpx * 0.4f);
+            TextOutlined(dl, font, zpx, zp,
+                         (zCol & 0x00FFFFFFu) | (static_cast<ImU32>(za * 245.f) << 24),
+                         IM_COL32(0, 0, 0, static_cast<int>(za * 215.f)), kGlyph[i]);
+        }
+    }
 
     // The voice badge: right of the plate extents, scaled and faded with it.
     if (p.voiceIcon != 0) {

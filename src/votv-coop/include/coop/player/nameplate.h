@@ -34,6 +34,7 @@ struct Plate {
     bool  occluded = false;  // world geometry between the camera and the head -> the plate
                              // renders GRAY
     bool  flash = false;     // hurt-flash red (read from RemotePlayer::IsHurtFlashing)
+    bool  sleeping = false;  // the peer rests or dreams (sleep_sync) -> the HUD floats "z Z Z" off the plate
     int   healthPct = 100;   // 0..100 streamed-vitals health (display-only)
     int   ping = -1;         // RTT to the SESSION in ms (0 = sub-ms LAN -> "<1ms")
     // Carried so the plate does not have to INFER "no number to show" from ping == -1. The host has
