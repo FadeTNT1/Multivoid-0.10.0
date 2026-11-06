@@ -36,6 +36,7 @@
 #include "coop/props/crate_break.h"  // CLIENT->HOST a contact on a world container, judged and run by the host
 #include "coop/props/pack_trash_intent.h"  // CLIENT->HOST bagging of a pile or clump
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
+#include "coop/player/washer_fx.h"  // a firing pressure washer's jet, hiss and splashes on every other peer
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
 #include "coop/props/prop_food_state.h"  // HOST->CLIENT a world food's state; CLIENT->HOST a bite of one
 #include "coop/props/water_fill_sync.h"  // HOST->CLIENT a world bucket's water level
@@ -699,6 +700,19 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::melee_fx::OnFx(p);
+        break;
+    }
+    case net::ReliableKind::WasherFx: {
+        // ANY->ALL: a player's pressure washer firing, shown by this peer (coop::washer_fx). The host relays a
+        // client's to the other clients; the handler checks a client's names its own player.
+        net::WasherFxPayload p{};
+        std::memcpy(&p, msg.payload, msg.payloadLen < sizeof(p) ? msg.payloadLen : sizeof(p));
+        if (!coop::washer_fx::WellFormed(p, static_cast<int>(msg.payloadLen))) {
+            UE_LOGW("event_feed: WasherFx from slot %d is malformed (%zu bytes) -- dropping", msg.senderPeerSlot,
+                    static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        coop::washer_fx::OnReliable(p, static_cast<int>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::ProjectileFired: {

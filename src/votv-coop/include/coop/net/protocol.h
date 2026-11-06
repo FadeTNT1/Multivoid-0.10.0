@@ -1433,6 +1433,14 @@ enum class ReliableKind : uint8_t {
     // a world storage of address kind Sleeper on the ContainerContents and ContainerAct lanes. Never relayed; a
     // client's copy is refused at the host's receive edge; not pre-world. BlobChunkPayload.
     SleeperState = 240,
+    // ANY->ALL (the host relays a client's): a player's pressure washer is firing, for the other peers to show
+    // (coop::washer_fx). The firing peer sends a start the frame its washer starts (`firing` 1), the same every 100 ms
+    // while it fires with up to four of its shots' landing points, and a stop (`firing` 0) when the trigger is let
+    // go, the tank runs dry or the washer leaves the hand. A receiver shows the jet at the firer's puppet, the hiss
+    // there and a splash where each shot landed, and never runs the washer's own firing tick, which would fire real
+    // shots and clean a second time. A receiver that hears nothing for 600 ms stops on its own, so a joiner picks a
+    // firing washer up from the next keep. WasherFxPayload.
+    WasherFx = 241,
 };
 
 #pragma pack(push, 1)
@@ -4692,6 +4700,21 @@ inline constexpr int kMeleeFxHeaderBytes = 60;  // everything before `text`
 static_assert(offsetof(MeleeFxPayload, text) == kMeleeFxHeaderBytes, "MeleeFxPayload's header must be 60 bytes");
 static_assert(sizeof(MeleeFxPayload) == 220, "MeleeFxPayload must be 220 bytes");
 static_assert(sizeof(MeleeFxPayload) <= 256 - 20 - 8, "MeleeFxPayload must fit in one reliable datagram");
+
+// A pressure washer's spray (WasherFx): whose washer, which hold of it, whether it fires, and where its shots landed
+// since the last message. `handGen` counts the firing peer's distinct washer holds, so a stop of an older hold
+// cannot end a newer one. A landing is its point and the splash's rotation, as the shot's own splash was spawned.
+inline constexpr int kWasherFxMaxHits = 4;
+struct WasherFxPayload {
+    uint32_t originEid;   // 4  -- the firing player's Player element id
+    uint32_t handGen;     // 4  -- the firing peer's washer hold generation
+    uint8_t  firing;      // 1  -- 1 firing (start or keep), 0 stopped
+    uint8_t  hitCount;    // 1  -- landings that follow, at most kWasherFxMaxHits
+    uint16_t seq;         // 2  -- the sender's running message number
+    float    hits[kWasherFxMaxHits][6];  // 96 -- per landing: x, y, z (world cm), pitch, yaw, roll (degrees)
+};
+static_assert(sizeof(WasherFxPayload) == 108, "WasherFxPayload must be 108 bytes");
+static_assert(sizeof(WasherFxPayload) <= 256 - 20 - 8, "WasherFxPayload must fit in one reliable datagram");
 
 // A lightning strike (LightningStrike): the strike's world location; the receiver spawns the
 // strike actor there, and it destroys itself.
