@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 284;
+inline constexpr uint16_t kProtocolVersion = 285;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1333,6 +1333,21 @@ enum class ReliableKind : uint8_t {
     // host's receive edge. Late join: every placed poster to the joiner at its ready edge, then op 3.
     // PosterStatePayload.
     PosterState = 224,
+    // CLIENT->HOST: a client's own tool action on a shared target (coop::tool_action): a crowbar stuck in a pryable,
+    // its bend, its end (the pry, the strain's snap, the crowbar taken back) and a hacksaw's cut of a heavy prop, its
+    // progress and its end. The host judges a begin (the tool in the sender's hand, the reach, nobody else on the
+    // target), keeps the session, and runs the world-changing end once on its own copy: the pryable's crowbarOpen and
+    // the crowbar given back, the strain's snap, the saw's scraps and the prop's destroy, all of them host births and
+    // deaths on the ordinary lanes. Never relayed: the host re-sends what it accepts as ToolActionState.
+    // ToolActionPayload.
+    ToolActionIntent = 225,
+
+    // HOST->ALL: a tool action every peer shows (coop::tool_action): the host's own and the clients' it accepted, a
+    // refusal back to its sender, and each end. A receiver poses its copy of the prying crowbar (shown in the
+    // pryable, bent as the sender bends it, its strain sounds and spark) or plays the saw's sound at the cut; it runs
+    // no begin and no end that changes the world. Late join: every running session to the joiner at its ready edge.
+    // ToolActionPayload.
+    ToolActionState = 226,
 };
 
 #pragma pack(push, 1)
@@ -2858,6 +2873,46 @@ struct BucketFillStatePayload {
 };
 static_assert(sizeof(BucketFillStatePayload) == 40, "BucketFillStatePayload must be 40 bytes");
 static_assert(sizeof(BucketFillStatePayload) <= 256 - 20 - 8, "BucketFillStatePayload must fit one datagram");
+
+// A tool action (ToolActionIntent, ToolActionState). The target is a pry's prying crowbar by its portable identity
+// (coop::element::PortableWireKey: the pryable's identity and the child's component) or a saw's prop by its key.
+namespace tool_action {
+constexpr uint8_t kPry = 1;
+constexpr uint8_t kSaw = 2;
+// op
+constexpr uint8_t kBegin = 1;     // a pry's crowbar went in / a cut started; carries the whole state (a joiner's seed too)
+constexpr uint8_t kProgress = 2;  // the bend or the cut moved
+constexpr uint8_t kEnd = 3;       // the session ended: `result` says how
+constexpr uint8_t kRefuse = 4;    // HOST->its sender: the begin or end was refused; the sender undoes its own
+// result of a kEnd
+constexpr uint8_t kCancel = 0;    // a cut let go / a pry's crowbar taken back into the hand
+constexpr uint8_t kDone = 1;      // the pry opened its pryable / the cut finished
+constexpr uint8_t kSnap = 2;      // the strain snapped the crowbar
+constexpr uint8_t kDropped = 3;   // the pry's owner left: the host dropped its crowbar
+constexpr uint8_t kLastResult = kDropped;
+// flags
+constexpr uint8_t kStraining = 1u << 0;
+constexpr uint8_t kStrainSound = 1u << 1;
+constexpr uint8_t kSparked = 1u << 2;
+constexpr uint8_t kKnownFlags = kStraining | kStrainSound | kSparked;
+}  // namespace tool_action
+struct ToolActionPayload {
+    uint8_t  kind;       // 1  -- tool_action::kPry / kSaw
+    uint8_t  op;         // 1  -- tool_action::kBegin..kRefuse
+    uint8_t  owner;      // 1  -- the acting player's slot (the host writes it; a client's own is ignored)
+    uint8_t  result;     // 1  -- a kEnd's tool_action result, zero otherwise
+    WireKey  target;     // 32 -- the prying crowbar's portable key, or the sawn prop's key
+    float    pivot[3];   // 12 -- a pry's sk_pivot world location (kBegin), zero for a saw
+    float    alpha;      // 4  -- a pry's alpha, a cut's complete; 0..1.5
+    float    stress;     // 4  -- a pry's snapStress, 0..1.5; a cut's whole time in seconds (kBegin)
+    float    pitch;      // 4  -- a pry's sk_pivot pitch, degrees
+    float    angle;      // 4  -- a pry's bend angle
+    uint8_t  lives;      // 1  -- a pry's crowbar lives (1..3); a cut's scrap count (kBegin)
+    uint8_t  flags;      // 1  -- tool_action flags
+    uint8_t  reserved[2];// 2  -- zero
+};
+static_assert(sizeof(ToolActionPayload) == 68, "ToolActionPayload must be 68 bytes");
+static_assert(sizeof(ToolActionPayload) <= 256 - 20 - 8, "ToolActionPayload must fit one datagram");
 
 // A dispenser pile's counters (TrashPileState): the displayed count is their sum. adopt 1 writes as
 // is; 0 applies the per-component minimum, so concurrent collects converge.
