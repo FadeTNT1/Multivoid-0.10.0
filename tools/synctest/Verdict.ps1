@@ -73,7 +73,7 @@ function Get-SyncVerdict($Row, [string]$HostText, [string]$ClientText) {
         $classes = @{
             ventCrawler='ventCrawler_C'; ventKnocker='kocker_C'; tentacleBalls='tentacleBall_C'
             morningGay='morningUfo_C'; borgRozital='rozitBorg_C'; fallbody_0='ufoDropper_body_C'
-            fallbody_1='ufoDropper_body_C'; fallcar_0='ufoDropper_car_C'; wisps='wisp_C'; piramid='piramid_C'
+            fallbody_1='ufoDropper_body_C'; fallcar_0='ufoDropper_car_C'; wisps='wisp_C'; piramid='piramid2_C'
             arirFollower='npc_arirFollower_C'; eggvasion=@('superEgger_C','eg_C')
             graystank=@('ufoDropper_tank_C','ufoDropper_pig_C'); boarwar='npc_ariral_shooter_C'
         }
