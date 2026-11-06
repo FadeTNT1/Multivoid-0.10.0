@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -30,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 272;
+inline constexpr uint16_t kProtocolVersion = 273;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1250,6 +1251,18 @@ enum class ReliableKind : uint8_t {
     // faster than a bounded rate from a bounded queue. Late join: nothing to replay, since a vacuum the
     // host has not run changed nothing. VacuumPileIntentPayload.
     VacuumPileIntent = 213,
+
+    // CLIENT->HOST: a cosmetic effect this client's player made and plays itself -- a melee swing's sound, a hit's
+    // sound and particles on a wall, a prop or the world, a held item's contact or break (coop::melee_fx). The host
+    // judges the sender, the pace, the id and the point against the sender's reach, then publishes it as MeleeFx to
+    // every other client and plays it itself. Never relayed; not pre-world. Late join: none -- a one-shot effect.
+    // MeleeFxPayload.
+    MeleeFxRequest = 214,
+
+    // HOST->CLIENTS: one such effect, from the host's own player or a judged MeleeFxRequest, to every client but the
+    // origin. The asset ids are asset paths, never an object index; a receiver that does not hold an asset skips that
+    // effect. Never relayed; a client's copy is refused at the host's receive edge. Late join: none. MeleeFxPayload.
+    MeleeFx = 215,
 };
 
 #pragma pack(push, 1)
@@ -4086,6 +4099,41 @@ struct PropImpactFxPayload {
 };
 static_assert(sizeof(PropImpactFxPayload) == 20, "PropImpactFxPayload must be 20 bytes");
 static_assert(sizeof(PropImpactFxPayload) <= 256 - 20 - 8, "PropImpactFxPayload must fit in one reliable datagram");
+
+// A cosmetic effect a player's melee swing or held item made (MeleeFxRequest, MeleeFx): what happened (kMeleeFx*), who
+// made it, where, and the assets to play there as asset paths in `text` (the sound's, then the particle system's, ASCII,
+// no terminator). A receiver plays them at the point on its own machine and resolves the paths itself; nothing here
+// names an object of the sender's process. The message is sent as its header and the used part of `text`.
+inline constexpr uint8_t kMeleeFxSwing   = 0;   // a swing's own sound, the whoosh and whatever else the swing played
+inline constexpr uint8_t kMeleeFxHit     = 1;   // a swing's strike on a surface, a prop or a creature
+inline constexpr uint8_t kMeleeFxContact = 2;   // a held prop struck something, without breaking
+inline constexpr uint8_t kMeleeFxBreak   = 3;   // a held prop broke
+inline constexpr uint8_t kMeleeFxKindCount = 4;
+inline constexpr uint8_t kMeleeFxSound    = 1;  // effects bit: `soundLen` bytes of sound path in `text`
+inline constexpr uint8_t kMeleeFxParticle = 2;  // effects bit: `particleLen` bytes of particle path after them
+inline constexpr int kMeleeFxTextCap = 160;
+
+struct MeleeFxPayload {
+    uint32_t originEid;    // 4  -- the maker's Player element id (the host stamps it on a request it forwards)
+    uint32_t eventId;      // 4  -- the maker's running id, never 0; a repeat is refused
+    uint32_t sourceEid;    // 4  -- the held prop's element id for a contact or break, else 0
+    uint32_t targetEid;    // 4  -- the struck element's id when the maker knew it, else 0
+    uint32_t weaponKey;    // 4  -- FNV-1a of the held item's key, stamped by the host; 0 when it holds none
+    uint8_t  kind;         // 1  -- kMeleeFx*
+    uint8_t  effects;      // 1  -- kMeleeFxSound | kMeleeFxParticle
+    uint8_t  soundLen;     // 1
+    uint8_t  particleLen;  // 1
+    float    loc[3];       // 12 -- where the effect plays, world cm
+    float    normal[3];    // 12 -- the surface normal at the point; zero when none (the emitter then points up)
+    float    scale;        // 4  -- the emitter's scale, 1 for a swing
+    float    volume;       // 4
+    float    pitch;        // 4
+    char     text[kMeleeFxTextCap];  // 160 -- sound path, then particle path
+};
+inline constexpr int kMeleeFxHeaderBytes = 60;  // everything before `text`
+static_assert(offsetof(MeleeFxPayload, text) == kMeleeFxHeaderBytes, "MeleeFxPayload's header must be 60 bytes");
+static_assert(sizeof(MeleeFxPayload) == 220, "MeleeFxPayload must be 220 bytes");
+static_assert(sizeof(MeleeFxPayload) <= 256 - 20 - 8, "MeleeFxPayload must fit in one reliable datagram");
 
 // A lightning strike (LightningStrike): the strike's world location; the receiver spawns the
 // strike actor there, and it destroys itself.

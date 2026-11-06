@@ -795,3 +795,6 @@ CFG_FLAG(key_index_forget_one, "key_index_forget_one", "dev", false, "VOTVCOOP_K
 #include "coop/config/config_registry_rows_dev_nb.inc"
 // The Vulkan overlay arc's probes: their own file, one concept, included as _dev_nb.inc is above.
 #include "coop/config/config_registry_rows_dev_vulkan.inc"
+CFG_FLAG(melee_fx_log, "melee_fx_log", "dev", false, "VOTVCOOP_MELEE_FX_LOG",
+    "Developer: log every melee effect this peer sends, judges, refuses and plays (the [MELEE-FX] lines), not only the "
+    "first few of each.")

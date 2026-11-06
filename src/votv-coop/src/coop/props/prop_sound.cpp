@@ -175,10 +175,14 @@ void PlayDenyClick(void* playerActor) {
     UE_LOGI("prop_sound: deny click at (%.0f, %.0f, %.0f)", loc.X, loc.Y, loc.Z);
 }
 
+void PlaySoundAt(void* worldCtx, void* sound, const ue_wrap::FVector& loc, float volume, float pitch) {
+    if (!worldCtx || !R::IsLive(worldCtx) || !sound || !R::IsLive(sound)) return;
+    ue_wrap::engine::PlaySoundAtLocation(worldCtx, sound, loc, ResolveAttenuation(), volume, pitch);
+}
+
 void PlayMaterialCueAt(void* worldCtx, void* cue, const ue_wrap::FVector& loc) {
-    if (!worldCtx || !R::IsLive(worldCtx) || !cue || !R::IsLive(cue)) return;
     // The volume and pitch the component passes are not read; 1.0 / 1.0 is the pile thud's native pair above.
-    ue_wrap::engine::PlaySoundAtLocation(worldCtx, cue, loc, ResolveAttenuation(), 1.0f, 1.0f);
+    PlaySoundAt(worldCtx, cue, loc, 1.0f, 1.0f);
 }
 
 void PlayInventoryBlipAt(void* worldCtx, const ue_wrap::FVector& loc) {

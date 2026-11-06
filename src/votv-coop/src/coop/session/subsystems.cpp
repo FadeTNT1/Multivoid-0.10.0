@@ -73,6 +73,7 @@
 #include "coop/player/hit_intent.h"  // a client's hit on a host entity as an intent the host judges
 #include "coop/props/prop_damage_gate.h"  // a client never decides the damage of a prop it does not author
 #include "coop/props/crate_break.h"  // a world container's damage, break and spill are the host's
+#include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/props/prop_impact_fx.h"  // a container's hit, damage and break cues on every peer
 #include "coop/props/container_act_host.h"  // a client's take of a record out of a world container, judged and held on the host
 #include "coop/props/container_act_request.h"  // a client's take of a record out of a world container, asked of the host first
@@ -327,6 +328,7 @@ void Install(coop::net::Session& session) {
     coop::hit_intent::Install(&session);  // CLIENT: a swing that hit a host entity's mirror becomes an intent (addDamage watch); HOST: its judge
     coop::props::prop_damage_gate::Install(&session);  // CLIENT: the impactDamage and fireDamage watches cancel the damage of a prop this client does not author
     coop::props::crate_break::Install(&session);  // CLIENT: a container's spill inside its destroy is dissolved; HOST: a client's contact on a container, judged
+    coop::melee_fx::Install(&session);  // BOTH: the swing and held-contact watches make effects; the host judges a client's
     coop::props::prop_impact_fx::Install(&session);  // HOST: a container's cue, sent before impactDamage's body runs
     coop::props::container_act_host::Install(&session);  // HOST: the judge of a client's take of a record out of a world container
     coop::prop_act_host::Install(&session);  // HOST: the judge of a client's take or use of a shared prop
@@ -456,6 +458,7 @@ DisconnectStats DisconnectAll() {
     coop::hit_intent::OnDisconnect();  // forget the once-per-session log latches
     coop::props::prop_damage_gate::OnDisconnect();  // say the cancelled counts, forget the once-per-class latches
     coop::props::crate_break::OnDisconnect();  // drop the contact queues and waits, say the counts
+    coop::melee_fx::OnDisconnect();  // drop the pace and the ids, say the counts
     coop::props::prop_impact_fx::OnDisconnect();  // drop the cue pace, say the counts
     coop::props::container_act_host::OnDisconnect();  // restore the records held in escrow, drop the tallies and refusals
     coop::prop_act_host::OnDisconnect();  // drop the take-or-use tallies, refusals and reservations
@@ -688,6 +691,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::hit_intent::Tick(); }  // the addDamage watch's settle; HOST: each sender's queued hit, judged and paced
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::prop_damage_gate::Tick(); }  // the two damage watches' settle
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::crate_break::Tick(); }  // the container watches' settle; CLIENT: waiting contacts, dissolves; HOST: each sender's queued contact
+    { PP::Scope _s{PP::Bucket::TrashWatch};    coop::melee_fx::Tick(); }  // the swing and contact watches' settle, a stale swing scope
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::prop_impact_fx::Tick(); }  // the cue watch's settle
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::props::container_act_host::Tick(); }  // HOST: each sender's queued container act, judged and paced; the holds' deadline
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::prop_act_host::Tick(); }  // HOST: each sender's queued take or use, judged and paced

@@ -200,6 +200,9 @@ CFG_IDENTITY(player_skin, "player_skin", "player",
     "in-game (F1 menu > skins).")
 CFG_FLAG(nameplate, "nameplate", "player", true, nullptr,
     "Show nameplates over other players (also toggleable in the F1 menu).")
+CFG_FLAG(melee_fx, "melee_fx", "player", true, "VOTVCOOP_MELEE_FX",
+    "Share the sound and particles of melee swings, their hits and a held item's knocks and breaks with the other "
+    "players, and play theirs. Off: you neither send nor play them.")
 CFG_STRING(nick_color, "nick_color", "player", "unset", nullptr, false,
     "Your nickname color as RRGGBB hex, or unset. Pick it in-game (F1 menu color picker).")
 

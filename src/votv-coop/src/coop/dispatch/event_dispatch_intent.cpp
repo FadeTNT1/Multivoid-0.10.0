@@ -32,6 +32,7 @@
 #include "coop/interactables/coffee_intent.h"
 #include "coop/props/crate_break.h"  // CLIENT->HOST a contact on a world container, judged and run by the host
 #include "coop/props/pack_trash_intent.h"  // CLIENT->HOST bagging of a pile or clump
+#include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
 #include "coop/props/prop_act_host.h"  // CLIENT->HOST a take or use of a shared prop, and its commit
 #include "coop/props/prop_act_request.h"  // HOST->CLIENT its answer
@@ -460,6 +461,39 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::props::prop_impact_fx::OnFx(p);
+        break;
+    }
+    case net::ReliableKind::MeleeFxRequest: {
+        // CLIENT->HOST: an effect this client's player made and played itself; the host judges it and publishes it to
+        // the other clients (coop::melee_fx). Never relayed.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: MeleeFxRequest dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::MeleeFxPayload p{};
+        std::memcpy(&p, msg.payload, msg.payloadLen < sizeof(p) ? msg.payloadLen : sizeof(p));
+        if (!coop::melee_fx::WellFormed(p, static_cast<int>(msg.payloadLen))) {
+            UE_LOGW("event_feed: MeleeFxRequest from slot %d is malformed (%zu bytes) -- dropping", msg.senderPeerSlot,
+                    static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        coop::melee_fx::OnRequest(static_cast<int>(msg.senderPeerSlot), p);
+        break;
+    }
+    case net::ReliableKind::MeleeFx: {
+        // HOST->CLIENT: an effect another player made, or the host's own; this peer plays it (coop::melee_fx).
+        // Host-authored only: the receive edge refuses a client's copy.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: MeleeFx dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::MeleeFxPayload p{};
+        std::memcpy(&p, msg.payload, msg.payloadLen < sizeof(p) ? msg.payloadLen : sizeof(p));
+        if (!coop::melee_fx::WellFormed(p, static_cast<int>(msg.payloadLen))) {
+            UE_LOGW("event_feed: MeleeFx is malformed (%zu bytes) -- dropping", static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        coop::melee_fx::OnFx(p);
         break;
     }
     case net::ReliableKind::ProjectileFired: {

@@ -52,6 +52,10 @@ void PlayLandSound(void* propActor);
 // = any live actor in the world (typically the local player).
 void PlayInventoryBlipAt(void* worldCtx, const ue_wrap::FVector& loc);
 
+// Any loaded sound asset at `loc`, through the same attenuation as the cues here, at the given volume and pitch.
+// `worldCtx` = any live actor in the world. Receiver side of ReliableKind::MeleeFx (coop/player/melee_fx).
+void PlaySoundAt(void* worldCtx, void* sound, const ue_wrap::FVector& loc, float volume, float pitch);
+
 // A cue of a prop's own physics material (its impact, damaged or destroyed sound, which the component plays inside
 // impactDamage on the host's copy alone), at `loc` (vol 1.0 / pitch 1.0 / att_default). Receiver side of
 // ReliableKind::PropImpactFx (coop/props/prop_impact_fx). `worldCtx` = any live actor in the world.

@@ -164,6 +164,9 @@ set(VOTVCOOP_SOURCES
     src/coop/player/player_damage.cpp
     src/coop/player/player_hit.cpp
     src/coop/player/hit_intent.cpp
+    src/coop/player/melee_fx.cpp
+    src/coop/player/melee_fx_contact.cpp
+    src/coop/player/melee_fx_swing.cpp
     src/coop/player/hit_judge.cpp
     src/coop/player/ragdoll_gate.cpp
     src/coop/player/death_revive.cpp
