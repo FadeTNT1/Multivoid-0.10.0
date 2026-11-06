@@ -802,3 +802,8 @@ CFG_FLAG(local_prop_push_log, "local_prop_push_log", "dev", false, "VOTVCOOP_LOC
     "Developer: log every event of the local player's prop push (the [LOCAL-PUSH] lines: each read, write and "
     "restore of the movement values), the client shove scan ([CLIENT-SHOVE]: each prop it sees move and each claim "
     "it sends or holds back) and every stream-end overlap read, not only the first few of each.")
+CFG_FLAG(trash_pile_log, "trash_pile_log", "dev", false, "VOTVCOOP_TRASH_PILE_LOG",
+    "Diagnostic (BOTH peers): log every dispenser-pile counter the host's connect snapshot sends, every one a peer "
+    "receives (parked or applied), and the counter moves the poll takes silently (first sighting, a rise), by key, to "
+    "diff host against client when kitchen piles disagree. Off, only expired parked applies and the per-world pile "
+    "count + keysHash are logged.")
