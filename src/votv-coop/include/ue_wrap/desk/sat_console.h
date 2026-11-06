@@ -64,6 +64,8 @@ void DiscardTerminal(void* term);
 // writeToLog's text and bracket type (0 an output line, 1 the typed line's echo, 2 bare).
 bool ReadEnterCommandLine(const uint8_t* locals, std::wstring& out);
 bool ReadWriteToLogArgs(const uint8_t* locals, std::wstring& text, uint8_t& bracketsType);
+// init's name and dish, from a watched init's frame (the dish pointer as passed, unchecked).
+bool ReadInitArgs(const uint8_t* locals, std::wstring& name, void*& dish);
 
 // The terminal's state.
 bool  ReadProcessing(void* term, bool& out);
@@ -99,10 +101,8 @@ bool RunCommand(void* term, const std::wstring& line);
 bool CallWriteToLog(void* term, const std::wstring& text, uint8_t bracketsType);
 bool ConsumeInput(void* term);
 
-// The panels, named by the placed actor's name, which the map gives every machine alike: a panel's
-// name, and this machine's panel of that name in the desk's list, or null.
+// A panel's name: the placed actor's name, which the map gives every machine alike.
 std::wstring PanelName(void* panel);
-void* FindPanelByName(const std::wstring& name);
 
 // ---- the terminals: one per placed panel ----
 //
@@ -129,7 +129,7 @@ size_t EnumeratePanels(std::vector<void*>& out);
 uint32_t PanelId(void* panel);
 std::wstring PanelKey(void* panel);          // empty for a non-panel
 std::wstring KeyForId(uint32_t id);          // "sat_xxxxxxxx", empty for 0
-bool PanelContext(void* panel, TerminalBinding& out);  // false for a non-panel; `ready` says the context is whole
+// A panel's binding; `ready` says the context is whole. Empty (id 0) for a non-panel.
 TerminalBinding TerminalForPanel(void* panel);
 // The binding of a terminal id in this world: false when no live panel carries the id. Cached; a miss walks the
 // panel class's instances at most twice a second.

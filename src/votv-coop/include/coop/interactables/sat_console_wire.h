@@ -1,7 +1,8 @@
 // coop/interactables/sat_console_wire.h -- the SAT console lane's blobs, encoded and decoded with their bounds.
 //
-// ReliableKind::SatConsole carries a BlobChunkPayload blob whose first byte is the op. Every decoder checks
-// the op, bounds each string by its field's own limit BEFORE it allocates, refuses a NUL inside a string (it
+// ReliableKind::SatConsole carries a BlobChunkPayload blob that opens with a common header: the op byte, then the
+// terminal id (u32, never 0) -- the placed SAT panel the blob is about (ue_wrap/sat_console TerminalBinding); every
+// terminal has a screen of its own. Every decoder checks the op and a nonzero id, bounds each string by its field's own limit BEFORE it allocates, refuses a NUL inside a string (it
 // would truncate the engine's FString), checks a count against the bytes that remain, and requires the blob
 // to be consumed exactly. A decoder that returns false leaves its output unspecified.
 //
@@ -33,15 +34,26 @@ constexpr size_t   kMaxHistory    = 3000;   // fixLog keeps the rightmost 3000 c
 constexpr size_t   kMaxPrintChars = 8192;   // `debug rules` prints the game rules as JSON, a few thousand
 constexpr uint8_t  kMaxBrackets   = 2;      // writeToLog's bracketsType: 0 output, 1 echo, 2 bare
 
+constexpr uint32_t kNoTerminal = 0;
+
+// The context fields (dish, name) a client sends are the prompt its terminal shows; the host runs nothing unless they
+// match the context of its own panel of that id.
 struct Line {
+    uint32_t term = kNoTerminal;
     int32_t dish = kNoDish;
-    std::wstring name, used, line;
+    std::wstring name, line;
+};
+
+struct Busy {
+    uint32_t term = kNoTerminal;
+    bool busy = false;
 };
 
 // The host's whole screen: what a peer shows, and who is typing into it. `ackInput` and `ackPresent` are the
 // recipient's own last input and presentation sequences the host took, so a typist's terminal can tell its
 // own unmerged output from a stale canonical screen.
 struct Screen {
+    uint32_t term = kNoTerminal;
     uint32_t rev = 0;
     uint32_t gen = 0;            // the ownership generation: moves with the sat claim's holder
     uint8_t  holder = kNoHolder;
@@ -53,6 +65,7 @@ struct Screen {
 };
 
 struct Input {
+    uint32_t term = kNoTerminal;
     uint32_t stamp = 0;          // the sender's count of its own sat claims; a newer claim outranks every older packet
     uint32_t seq = 0;            // within a stamp, a packet that is not newer than the last taken is stale
     int32_t  dish = kNoDish;
@@ -60,6 +73,7 @@ struct Input {
 };
 
 struct InputRelay {
+    uint32_t term = kNoTerminal;
     uint8_t  holder = kNoHolder;
     uint32_t gen = 0;
     uint32_t seq = 0;
@@ -69,6 +83,7 @@ struct InputRelay {
 enum class PresentKind : uint8_t { Write = 0, Clear = 1 };
 
 struct Present {
+    uint32_t term = kNoTerminal;
     uint32_t seq = 0;
     PresentKind kind = PresentKind::Write;
     uint8_t  type = 0;
@@ -76,17 +91,17 @@ struct Present {
 };
 
 void EncodeLine(std::vector<uint8_t>& out, const Line& v);
-void EncodeBusy(std::vector<uint8_t>& out, bool busy);
+void EncodeBusy(std::vector<uint8_t>& out, const Busy& v);
 void EncodeScreen(std::vector<uint8_t>& out, const Screen& v);
 void EncodeInput(std::vector<uint8_t>& out, const Input& v);
 void EncodeInputRelay(std::vector<uint8_t>& out, const InputRelay& v);
 void EncodePresent(std::vector<uint8_t>& out, const Present& v);
 
-// The op byte of a blob, or false for an empty one.
-bool PeekOp(const std::vector<uint8_t>& blob, uint8_t& op);
+// The header of a blob: its op and terminal id; false for one too short to carry them, or with no terminal.
+bool PeekHeader(const std::vector<uint8_t>& blob, uint8_t& op, uint32_t& term);
 
 bool DecodeLine(const std::vector<uint8_t>& blob, Line& out);
-bool DecodeBusy(const std::vector<uint8_t>& blob, bool& busy);
+bool DecodeBusy(const std::vector<uint8_t>& blob, Busy& out);
 bool DecodeScreen(const std::vector<uint8_t>& blob, Screen& out);
 bool DecodeInput(const std::vector<uint8_t>& blob, Input& out);
 bool DecodeInputRelay(const std::vector<uint8_t>& blob, InputRelay& out);

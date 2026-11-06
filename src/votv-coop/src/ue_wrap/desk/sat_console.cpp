@@ -47,6 +47,7 @@ int32_t g_offPanel = -1, g_offUsed = -1, g_offActiveDish = -1;
 int32_t g_offName = -1, g_offCommand = -1, g_offTextBox = -1, g_offLog = -1;
 int32_t g_offEnterC = -1;  // enterCommand's c
 int32_t g_offWriteB = -1, g_offWriteType = -1;  // writeToLog's B and bracketsType
+int32_t g_offInitName = -1, g_offInitDish = -1;  // init's name and dish
 bool    g_haveFixLog = false;  // the terminal declares the verb that trims its history and repaints it
 bool    g_haveUpd = false;     // ... and the one that redraws its input
 bool    g_saidNoGetText = false;
@@ -165,7 +166,11 @@ bool EnsureResolved() {
         g_offWriteB    = R::FindParamOffset(fnWrite, L"B");
         g_offWriteType = R::FindParamOffset(fnWrite, L"bracketsType");
     }
-    const bool haveInit = fnInit && R::FindParamOffset(fnInit, L"name") >= 0 && R::FindParamOffset(fnInit, L"dish") >= 0;
+    if (fnInit) {
+        g_offInitName = R::FindParamOffset(fnInit, L"name");
+        g_offInitDish = R::FindParamOffset(fnInit, L"dish");
+    }
+    const bool haveInit = g_offInitName >= 0 && g_offInitDish >= 0;
     g_offAtlasTerm  = R::FindPropertyOffset(atlas, N::SatConsoleAtlasTerminalProp);
     g_offDeskPanels = R::FindPropertyOffset(desk, N::SatConsoleDeskPanelsProp);
     g_fnSetText = R::FindFunction(box, N::EditableTextBoxSetTextFn);
@@ -472,6 +477,13 @@ bool ReadWriteToLogArgs(const uint8_t* locals, std::wstring& text, uint8_t& brac
     return true;
 }
 
+bool ReadInitArgs(const uint8_t* locals, std::wstring& name, void*& dish) {
+    if (!locals || !g_resolved || g_offInitName < 0 || g_offInitDish < 0) return false;
+    name = ReadFStringAt(locals, g_offInitName);
+    dish = *reinterpret_cast<void* const*>(locals + g_offInitDish);
+    return true;
+}
+
 bool ReadProcessing(void* term, bool& out) {
     if (!g_resolved || !IsTerminal(term)) return false;
     out = (*At<uint8_t>(term, g_offProcessing) & g_maskProcessing) != 0;
@@ -605,20 +617,6 @@ bool InTerminalBody(void* term) {
 std::wstring PanelName(void* panel) {
     if (!panel || !R::IsLive(panel)) return {};
     return R::ToString(R::NameOf(panel));
-}
-
-void* FindPanelByName(const std::wstring& name) {
-    if (name.empty() || !EnsureResolved()) return nullptr;
-    void* desk = console_desk::Instance();
-    if (!desk) return nullptr;
-    const auto* arr = At<TArrayView>(desk, g_offDeskPanels);
-    if (!arr->data || arr->num <= 0) return nullptr;
-    void* const* elems = reinterpret_cast<void* const*>(arr->data);
-    for (int32_t i = 0; i < arr->num; ++i) {
-        void* p = elems[i];
-        if (p && R::IsLive(p) && R::ToString(R::NameOf(p)) == name) return p;
-    }
-    return nullptr;
 }
 
 // ---- the terminals ----
@@ -756,7 +754,7 @@ std::wstring KeyForId(uint32_t id) {
 
 std::wstring PanelKey(void* panel) { return KeyForId(PanelId(panel)); }
 
-bool PanelContext(void* panel, TerminalBinding& out) {
+static bool PanelContext(void* panel, TerminalBinding& out) {
     out = TerminalBinding{};
     if (!IsPanel(panel)) return false;
     out.panel = panel;

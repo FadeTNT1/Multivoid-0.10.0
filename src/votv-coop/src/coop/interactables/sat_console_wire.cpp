@@ -28,10 +28,15 @@ bool RdDish(const std::vector<uint8_t>& b, size_t& o, int32_t& dish) {
     return W::RdI32(b, o, dish) && dish >= kNoDish && dish <= kMaxDishIndex;
 }
 
-// The op byte, which a decoder of another op refuses.
-bool RdOp(const std::vector<uint8_t>& b, size_t& o, uint8_t want) {
+// The header: the op byte, which a decoder of another op refuses, and the terminal id, never 0.
+bool RdHead(const std::vector<uint8_t>& b, size_t& o, uint8_t want, uint32_t& term) {
     uint8_t op = 0;
-    return W::RdU8(b, o, op) && op == want;
+    return W::RdU8(b, o, op) && op == want && W::RdU32(b, o, term) && term != kNoTerminal;
+}
+
+void AppHead(std::vector<uint8_t>& out, uint8_t op, uint32_t term) {
+    W::AppU8(out, op);
+    W::AppU32(out, term);
 }
 
 bool Done(const std::vector<uint8_t>& b, size_t o) { return o == b.size(); }
@@ -39,20 +44,19 @@ bool Done(const std::vector<uint8_t>& b, size_t o) { return o == b.size(); }
 }  // namespace
 
 void EncodeLine(std::vector<uint8_t>& out, const Line& v) {
-    W::AppU8(out, kOpLine);
+    AppHead(out, kOpLine, v.term);
     W::AppI32(out, v.dish);
     W::AppWStr(out, v.name);
-    W::AppWStr(out, v.used);
     W::AppWStr(out, v.line);
 }
 
-void EncodeBusy(std::vector<uint8_t>& out, bool busy) {
-    W::AppU8(out, kOpBusy);
-    W::AppU8(out, busy ? 1 : 0);
+void EncodeBusy(std::vector<uint8_t>& out, const Busy& v) {
+    AppHead(out, kOpBusy, v.term);
+    W::AppU8(out, v.busy ? 1 : 0);
 }
 
 void EncodeScreen(std::vector<uint8_t>& out, const Screen& v) {
-    W::AppU8(out, kOpScreen);
+    AppHead(out, kOpScreen, v.term);
     W::AppU32(out, v.rev);
     W::AppU32(out, v.gen);
     W::AppU8(out, v.holder);
@@ -66,7 +70,7 @@ void EncodeScreen(std::vector<uint8_t>& out, const Screen& v) {
 }
 
 void EncodeInput(std::vector<uint8_t>& out, const Input& v) {
-    W::AppU8(out, kOpInput);
+    AppHead(out, kOpInput, v.term);
     W::AppU32(out, v.stamp);
     W::AppU32(out, v.seq);
     W::AppI32(out, v.dish);
@@ -75,7 +79,7 @@ void EncodeInput(std::vector<uint8_t>& out, const Input& v) {
 }
 
 void EncodeInputRelay(std::vector<uint8_t>& out, const InputRelay& v) {
-    W::AppU8(out, kOpInputRelay);
+    AppHead(out, kOpInputRelay, v.term);
     W::AppU8(out, v.holder);
     W::AppU32(out, v.gen);
     W::AppU32(out, v.seq);
@@ -83,36 +87,35 @@ void EncodeInputRelay(std::vector<uint8_t>& out, const InputRelay& v) {
 }
 
 void EncodePresent(std::vector<uint8_t>& out, const Present& v) {
-    W::AppU8(out, kOpPresent);
+    AppHead(out, kOpPresent, v.term);
     W::AppU32(out, v.seq);
     W::AppU8(out, static_cast<uint8_t>(v.kind));
     W::AppU8(out, v.type);
     W::AppWStr(out, v.text);
 }
 
-bool PeekOp(const std::vector<uint8_t>& blob, uint8_t& op) {
-    if (blob.empty()) return false;
-    op = blob[0];
-    return true;
+bool PeekHeader(const std::vector<uint8_t>& blob, uint8_t& op, uint32_t& term) {
+    size_t o = 0;
+    return W::RdU8(blob, o, op) && W::RdU32(blob, o, term) && term != kNoTerminal;
 }
 
 bool DecodeLine(const std::vector<uint8_t>& b, Line& out) {
     size_t o = 0;
-    return RdOp(b, o, kOpLine) && RdDish(b, o, out.dish) && RdStr(b, o, out.name, kMaxNameChars) &&
-           RdStr(b, o, out.used, kMaxNameChars) && RdStr(b, o, out.line, kMaxInputChars) && Done(b, o);
+    return RdHead(b, o, kOpLine, out.term) && RdDish(b, o, out.dish) && RdStr(b, o, out.name, kMaxNameChars) &&
+           RdStr(b, o, out.line, kMaxInputChars) && Done(b, o);
 }
 
-bool DecodeBusy(const std::vector<uint8_t>& b, bool& busy) {
+bool DecodeBusy(const std::vector<uint8_t>& b, Busy& out) {
     size_t o = 0;
     uint8_t v = 0;
-    if (!RdOp(b, o, kOpBusy) || !W::RdU8(b, o, v) || v > 1 || !Done(b, o)) return false;
-    busy = v != 0;
+    if (!RdHead(b, o, kOpBusy, out.term) || !W::RdU8(b, o, v) || v > 1 || !Done(b, o)) return false;
+    out.busy = v != 0;
     return true;
 }
 
 bool DecodeScreen(const std::vector<uint8_t>& b, Screen& out) {
     size_t o = 0;
-    return RdOp(b, o, kOpScreen) && W::RdU32(b, o, out.rev) && W::RdU32(b, o, out.gen) &&
+    return RdHead(b, o, kOpScreen, out.term) && W::RdU32(b, o, out.rev) && W::RdU32(b, o, out.gen) &&
            W::RdU8(b, o, out.holder) && W::RdU32(b, o, out.ackInput) && W::RdU32(b, o, out.ackPresent) &&
            W::RdU8(b, o, out.busy) && out.busy <= 1 && RdDish(b, o, out.dish) &&
            RdStr(b, o, out.name, kMaxNameChars) && RdStr(b, o, out.input, kMaxInputChars) &&
@@ -121,20 +124,20 @@ bool DecodeScreen(const std::vector<uint8_t>& b, Screen& out) {
 
 bool DecodeInput(const std::vector<uint8_t>& b, Input& out) {
     size_t o = 0;
-    return RdOp(b, o, kOpInput) && W::RdU32(b, o, out.stamp) && W::RdU32(b, o, out.seq) && RdDish(b, o, out.dish) &&
+    return RdHead(b, o, kOpInput, out.term) && W::RdU32(b, o, out.stamp) && W::RdU32(b, o, out.seq) && RdDish(b, o, out.dish) &&
            RdStr(b, o, out.name, kMaxNameChars) && RdStr(b, o, out.text, kMaxInputChars) && Done(b, o);
 }
 
 bool DecodeInputRelay(const std::vector<uint8_t>& b, InputRelay& out) {
     size_t o = 0;
-    return RdOp(b, o, kOpInputRelay) && W::RdU8(b, o, out.holder) && W::RdU32(b, o, out.gen) &&
+    return RdHead(b, o, kOpInputRelay, out.term) && W::RdU8(b, o, out.holder) && W::RdU32(b, o, out.gen) &&
            W::RdU32(b, o, out.seq) && RdStr(b, o, out.text, kMaxInputChars) && Done(b, o);
 }
 
 bool DecodePresent(const std::vector<uint8_t>& b, Present& out) {
     size_t o = 0;
     uint8_t kind = 0;
-    if (!RdOp(b, o, kOpPresent) || !W::RdU32(b, o, out.seq) || !W::RdU8(b, o, kind) ||
+    if (!RdHead(b, o, kOpPresent, out.term) || !W::RdU32(b, o, out.seq) || !W::RdU8(b, o, kind) ||
         kind > static_cast<uint8_t>(PresentKind::Clear) || !W::RdU8(b, o, out.type) || out.type > kMaxBrackets ||
         !RdStr(b, o, out.text, kMaxPrintChars) || !Done(b, o))
         return false;
