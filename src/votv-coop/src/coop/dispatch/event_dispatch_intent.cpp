@@ -32,6 +32,7 @@
 #include "coop/interactables/coffee_intent.h"
 #include "coop/interactables/microwave_sync.h"  // CLIENT->HOST a microwave press; HOST->CLIENT its state
 #include "coop/items/poster_sync.h"  // CLIENT->HOST a poster verb; HOST->CLIENT a placed poster
+#include "coop/interactables/tool_action.h"  // CLIENT->HOST a pry or a cut; HOST->CLIENT every peer's, shown
 #include "coop/props/crate_break.h"  // CLIENT->HOST a contact on a world container, judged and run by the host
 #include "coop/props/pack_trash_intent.h"  // CLIENT->HOST bagging of a pile or clump
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
@@ -422,6 +423,44 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::microwave_sync::OnIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::ToolActionIntent: {
+        // CLIENT->HOST: a pry or a cut of this client's own (coop::tool_action), judged by the host.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: ToolActionIntent dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::ToolActionPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::tool_action::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::tool_action::WellFormed(p)) {
+            coop::tool_action::CountDropped();
+            break;
+        }
+        coop::tool_action::OnIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::ToolActionState: {
+        // HOST->CLIENT: a pry or a cut every peer shows (coop::tool_action). Host-authored only.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: ToolActionState dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::ToolActionPayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            coop::tool_action::CountDropped();
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        if (!coop::tool_action::WellFormed(p)) {
+            coop::tool_action::CountDropped();
+            break;
+        }
+        coop::tool_action::OnState(session, p);
         break;
     }
     case net::ReliableKind::MicrowaveState: {

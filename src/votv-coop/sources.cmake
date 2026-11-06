@@ -410,6 +410,9 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/coffee_intent.cpp
     src/coop/interactables/coffee_state.cpp
     src/coop/interactables/microwave_sync.cpp
+    src/coop/interactables/tool_action.cpp
+    src/coop/interactables/pry_sync.cpp
+    src/coop/interactables/saw_sync.cpp
     src/coop/interactables/surface_clean_sync.cpp
     src/coop/props/water_fill_sync.cpp
     src/coop/interactables/laptop_sync.cpp

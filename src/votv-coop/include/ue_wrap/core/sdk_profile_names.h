@@ -1248,6 +1248,60 @@ inline constexpr const wchar_t* PosterPickedFileNameParam = L"pickedFileName";
 inline constexpr const wchar_t* ComponentScaleFn = L"GetComponentScale";
 inline constexpr int PosterActionTakeDown = 7;
 inline constexpr int PosterActionPicker = 4;
+// The crowbar's pry. A held prop_crowbar_C's playerHandUse_RMB runs activatePrying, which finds the hidden
+// pryingCrowbar_C child actor of the looked-at pryable and runs its begin(mainPlayer, out failed): the held crowbar is
+// destroyed, its `lives` copied to `currentLives`, the child revealed with `sk_pivot` at the hit and a skeletal
+// `crowbarSK` built under it (createSkeletalMesh) with an AnimBP whose `angle` bends it. The player's LMB on the
+// stuck crowbar (playerUsedOn) binds its mouse to mouseXY, which raises `alpha` and `snapStress`; updPivot pitches
+// `sk_pivot` and writes the AnimBP's `angle`; `strainSound` alternates the two strain audio components and `sparked`
+// lights `eff_spark`. end(pryOpen, dropSelf, destroyed) gives the crowbar back (flung on a pry, dropped, or into the
+// hotbar of `lastPlayer`; none when destroyed), hides the child and, on a pry, runs the parent's crowbarOpen(self).
+// snap() is the strain's break: one life less, a new crowbar or its gibs, then end(false, false, true).
+inline constexpr const wchar_t* PryingCrowbarClass = L"pryingCrowbar_C";
+inline constexpr const wchar_t* PryBeginFn = L"begin";
+inline constexpr const wchar_t* PryEndFn = L"end";
+inline constexpr const wchar_t* PrySnapFn = L"snap";
+inline constexpr const wchar_t* PryCreateSkeletalMeshFn = L"createSkeletalMesh";
+inline constexpr const wchar_t* PryPivotComp = L"sk_pivot";
+inline constexpr const wchar_t* PrySkeletalProp = L"crowbarSK";
+inline constexpr const wchar_t* PryAnimProp = L"anim";
+inline constexpr const wchar_t* PryAnimAngleProp = L"angle";
+inline constexpr const wchar_t* PrySparkComp = L"eff_spark";
+inline constexpr const wchar_t* PryStrainAudioA = L"audio_strain1";
+inline constexpr const wchar_t* PryStrainAudioB = L"audio_strain2";
+inline constexpr const wchar_t* PryUiProp = L"pryingCrowbarUI";
+inline constexpr const wchar_t* PryLastPlayerProp = L"lastPlayer";
+inline constexpr const wchar_t* PryAlphaProp = L"alpha";
+inline constexpr const wchar_t* PryStressProp = L"snapStress";
+inline constexpr const wchar_t* PryLivesProp = L"currentLives";
+inline constexpr const wchar_t* PryStrainSoundProp = L"strainSound";
+inline constexpr const wchar_t* PryStrainingProp = L"straining";
+inline constexpr const wchar_t* PrySparkedProp = L"sparked";
+inline constexpr const wchar_t* PryStickCue = L"stick_Cue";
+inline constexpr const wchar_t* CrowbarClass = L"prop_crowbar_C";
+inline constexpr int CrowbarMaxLives = 3;
+// The hacksaw (prop_hacksaw_C). Its playerHandUse_LMB takes the looked-at heavy simulating prop of a scrappable
+// material as `sawingProp`: processMat() names the scrap in `drop`, `vol` is the mesh's convex volume
+// (BPCodeLib::MeshConvexVolume2), `time` = vol / 100000 / 2 * the physical material's `Density`, `amount` =
+// max(round(vol / 100000 / 2), 1). ReceiveTick adds delta / time to `complete`; at 1 it spawns `amount` scraps in the
+// prop's bounds, runs its broken() and destroys it, then completeSaw(). completeSaw() is the reset (release, a lost
+// aim, the saw's destroy); a 0.8 s timer runs sawSound, which plays sawsaw_Cue in 2D while the aim holds.
+inline constexpr const wchar_t* HacksawClass = L"prop_hacksaw_C";
+inline constexpr const wchar_t* HacksawSawingProp = L"sawingProp";
+inline constexpr const wchar_t* HacksawCompleteProp = L"complete";
+inline constexpr const wchar_t* HacksawTimeProp = L"time";
+inline constexpr const wchar_t* HacksawAmountProp = L"amount";
+inline constexpr const wchar_t* HacksawCompleteSawFn = L"completeSaw";
+inline constexpr const wchar_t* HacksawProcessMatFn = L"processMat";
+inline constexpr const wchar_t* HacksawSawSoundFn = L"sawSound";
+inline constexpr const wchar_t* HandUseLmbFn = L"playerHandUse_LMB";
+inline constexpr const wchar_t* ReceiveTickFn = L"ReceiveTick";
+inline constexpr const wchar_t* IsNotSawableFn = L"isNotSawable";
+inline constexpr const wchar_t* SawSoundCue = L"sawsaw_Cue";
+inline constexpr const wchar_t* MeshVolumeLibClass = L"BPCodeLib";
+inline constexpr const wchar_t* MeshVolumeFn = L"MeshConvexVolume2";
+inline constexpr float HacksawVolumeDivisor = 200000.0f;  // vol / 100000 / 2
+inline constexpr float HacksawSoundPeriodSec = 0.8f;
 }  // namespace name
 
 }  // namespace ue_wrap::profile

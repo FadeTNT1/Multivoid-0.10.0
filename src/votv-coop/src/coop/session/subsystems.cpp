@@ -142,6 +142,7 @@
 #include "coop/items/broom_stroke.h"
 #include "coop/items/vacuum_pile_intent.h"
 #include "coop/props/pack_trash_intent.h"
+#include "coop/interactables/tool_action.h"  // a leaver's stuck crowbars drop, its cut ends
 #include "coop/interactables/verb_lanes.h"  // the interactable lanes on a device's own verbs, at the script gate
 #include "coop/creatures/kerfus_lanes.h"  // the plain kerfur: its brain on the host, its state and drive, its verbs
 #include "coop/creatures/served_player.h"  // a robot the host runs for a client reads that client as its player
@@ -400,6 +401,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     // are handled by DisconnectAll.
     coop::trash_mirror::OnDisconnectForSlot(slot);  // phase 1: retire the leaver's trash mirrors BEFORE the generic mirror drain (else the rooted actor leaks)
     coop::trash_channel::OnGrabHolderLeft(session, static_cast<uint8_t>(slot));  // the leaver's carried clump is let go: it falls, streams, lands
+    coop::tool_action::OnPeerLeft(static_cast<uint8_t>(slot));  // the leaver's stuck crowbars drop, its cut ends
     coop::broom_stroke::OnPeerLeft(static_cast<uint8_t>(slot));  // the leaver's stroke rate goes with it
     coop::kerfus_lanes::OnPeerLeft(static_cast<uint8_t>(slot));  // and the Kerfuses it turned on follow the host again (its verbs' queue goes with its slot)
     coop::dish_calib_sync::OnPeerLeft(static_cast<uint8_t>(slot));  // and its precision-intent budget

@@ -76,6 +76,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/engine/engine_playerragdoll.cpp
     src/ue_wrap/engine/engine_attach.cpp
     src/ue_wrap/devices/door.cpp
+    src/ue_wrap/devices/pryable.cpp
     src/ue_wrap/devices/cord.cpp
     src/ue_wrap/devices/base_window.cpp
     src/ue_wrap/devices/surface_clean.cpp
@@ -143,6 +144,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/cubicle.cpp
     src/ue_wrap/actors/food.cpp
     src/ue_wrap/actors/shrimp_tray.cpp
+    src/ue_wrap/actors/hacksaw.cpp
     src/ue_wrap/actors/chip_pile.cpp
     src/ue_wrap/engine/engine_pawn.cpp
     src/ue_wrap/engine/engine_physics.cpp
