@@ -457,6 +457,7 @@ is built; concrete and food are designed and not built.
 | `ContainerState`, `ContainerContents` | the presser; the host | open or closed; one slice of the host's object array |
 | `PropContactIntent` | a client to the host | a contact on a world container by a prop the client throws, or by the container it threw: the ids, the damage, the speed, the point, the impact |
 | `PropImpactFx` | the host to all | a world container's impact, damaged or destroyed cue, with the point |
+| `MeleeFxRequest`, `MeleeFx` | a client to the host; the host to every other client | the sound and particles of a held prop's damaging knock or its break, found by the maker through the prop's own material and named by asset path; a container's sound is not among them ([players.md](players.md)) |
 | `InventoryPickup` | each peer, relayed | the pocket blip, so others hear a pickup |
 
 ## Late join
@@ -508,6 +509,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | the stick | `coop/props/prop_stick_sync` |
 | a prop under a hook's drive or a broom's push | `coop/props/prop_drive_host` (the host's set and stream), `coop/props/prop_drive_stream` (the receiver), `coop/items/hook_prop_claim` (the hook lane feeding it), `coop/items/hook_constraint` (the tie itself, host-only), `coop/items/broom_push` (the broom's push feeding it) |
 | containers | `coop/props/container_contents_sync`, `coop/items/save_record_wire`, `coop/interactables/interactable_sync` |
+| a held prop's knock and break effects | `coop/player/melee_fx_contact`, `coop/player/melee_fx` |
 | a container's damage, break and cues | `coop/props/crate_break`, `coop/props/prop_impact_fx`, `coop/props/prop_damage_gate`, `coop/props/hit_target_prop`, `ue_wrap/actors/physics_impact` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |

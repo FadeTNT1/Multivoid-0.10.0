@@ -282,6 +282,25 @@ at once. When a server setting such as the voice range changes, every player's c
 friend given `multivoid.set` in the permission files can change them too: their line runs on the
 host. A setting that holds a password is never set or shown by command.
 
+### Melee and held-item effects
+
+The game plays a swing's whoosh, a hit's sound and a hit's particles inside the swinger's own graph, so only the swinger
+heard them. `coop/player/melee_fx` makes each one a message. A watch on `mainPlayer_C::attack` opens a scope in which the
+native sound calls the player's own graph makes (`PlaySoundAtLocation`, `PlaySound2D`) are observed through a pre hook, and
+its post reads the `hit` and `OutputPin` the call returned: each observed sound is sent (a `swing` effect, or a `hit` one
+when it sounded at the struck point), and a hit is sent with its surface's own impact sound (unless one already played
+there) and impact particles, found through the hit's physical material, `lib_C::getPhysicalAsAudio` and the audio
+material's reflected particle field. A watch on `comp_physicsImpact_C::impactDamage` does the same for a prop this player
+holds when the knock damages it (`contact`) or breaks it (`break`), before the body runs. The message names its assets by
+asset path and its place by coordinates, never by an object of the sender's process, so a break plays even though the prop
+is already gone. A client sends `MeleeFxRequest`; the host judges the sender's world-ready state, its pace, a fresh id, the
+spelling of the assets, and the point against the sender's eye and the held item's reach and facing (a held prop's effect
+against the prop the sender drives), then publishes `MeleeFx` to every other client and plays it itself. The host's own
+effects go straight to every client. A world container's hit sound stays with `PropImpactFx` ([props.md](props.md)): a
+swing at a container sends particles only. A hit on a creature the host parks is forwarded without being played on the
+host, whose own zombie feedback already played. `melee_fx=0` switches the lane off; `[dev] melee_fx_log=1` logs every
+effect (`[MELEE-FX]`). `[?]` until a two-peer run reads those lines.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -290,6 +309,7 @@ host. A setting that holds a password is never set or shown by command.
 | the display name | the host | assigned for uniqueness; every peer adopts it |
 | nameplate visibility, colour, skin | that peer | a preference, relayed to all |
 | the hand item, the flashlight | that peer | on change, mirrored for display |
+| a swing's, a hit's and a held item's sound and particles | the maker plays its own; the host judges and relays | a one-shot message, no state |
 | damage from contact | the victim's machine | other bodies' impact entries are cancelled |
 | damage from enemies | the host detects, the victim applies | a reliable relay to the hit peer |
 | death and revive | that peer | the native chain; the run-ending travel refused by its author |
@@ -306,6 +326,7 @@ host. A setting that holds a password is never set or shown by command.
 | `Join`, `RosterRow` | each peer; the host | identity, nickname, skin, preferences; who occupies each slot |
 | `SkinChange`, `NameplateChange`, `NickColorChange` | each peer, relayed | the three preferences |
 | `HandItem`, `ItemActivate` | each peer, relayed | the held item's class, its actor's name and its hold slot's item name (the key of the game's item tables); the flashlight beam: on or off, mode, intensity, cones, reach, colour, profile |
+| `MeleeFxRequest`, `MeleeFx` | a client to the host; the host to every client but the maker | one effect: its kind (swing, hit, contact, break), the maker, an id, the point and surface normal, the volume and pitch, and the sound's and particle system's asset paths |
 | `PlayerHit` | host to the hit peer | a parked creature's hit on the peer's puppet: the verb (addDamage or punch) to run on its own player |
 | `SleepState` | a client to the host; the host to all | a rest state with its bed (awake, resting, dreaming); the host's sleeping flag; one peer's rest state relayed |
 | `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |
@@ -315,7 +336,7 @@ host. A setting that holds a password is never set or shown by command.
 
 The puppet spawns on the first pose that arrives. The roster rows, skin, nameplate and colour
 preferences are in the set of messages a host may send before the joiner's world exists, so a
-choice made during the load is not lost. Hand items and item states are replayed to the joiner
+choice made during the load is not lost. A melee effect is a one-shot and is not replayed. Hand items and item states are replayed to the joiner
 at its ready edge. A joiner is sent the host's sleeping flag and the rest state of every peer
 that is not awake. A joiner that rests before the host holds its world ready has that report refused, and repeats
 it each time the host's sleeping flag reaches it, which the host sends once it holds the joiner ready. The inventory is seeded before the world. A peer's death state is not seeded; a joiner sees a
@@ -328,6 +349,8 @@ dead peer through the ragdoll bit of its next pose.
 | No chat line announces a death | `[V]` `coop/comms/chat_sync` carries no such kind |
 | After a revive the player can drift horizontally from the base gate, metres over seconds; the cause is unmeasured | `[V]` `harness/autotest/death_state_probe.cpp` reads the position back |
 | Damage a puppet takes on another machine is dropped by design; only the victim's own contacts count | `[V]` `coop/player/player_damage` |
+| A swing's whoosh is shared only if the game plays it through the player's own graph inside `attack`; a swing that plays no sound there shares none, and the log says so once. A hit on a surface that names no physical material shares no surface sound or particles | `[?]` the `[MELEE-FX]` lines of a two-peer run |
+| A held item's bump below its prop's resistance is not shared, and a hit on a creature gives a client that is neither the swinger nor the host the surface's impact sound, not the creature's own feedback | `[RD]` `coop/player/melee_fx_contact` and `melee_fx` |
 | A third-party bundle pak cannot be discovered: bundle membership is a fixed table | `[V]` `coop/player/skin_registry` |
 | Worn clothing is not drawn on another player's body: the equipment is synced as the owner's inventory, not as meshes | `[RD]` `coop/items/player_inventory_sync` |
 | A ban is by player id and, on a direct link, by address: a banned player with a new identity key who comes from a new address or through a relay is a new player, and an address ban refuses whoever shares that address | `[V]` `coop/moderation/ban_list` |
@@ -344,6 +367,7 @@ dead peer through the ragdoll bit of its next pose.
 | name, colour, nameplate | `coop/player/nameplate`, `coop/player/nick_color`, `ui/hud`, `ui/scoreboard` |
 | skins | `coop/player/client_model`, `coop/player/skin_registry`, `coop/player/skin_effects`, `coop/player/local_body`, `coop/player/skin_preview`, `ui/skins_panel`, `assets/paks/` |
 | held and toggled items | `coop/player/hand_item`, `coop/player/item_activate`, `coop/player/flashlight_click_sound` |
+| melee and held-item effects | `coop/player/melee_fx` (the wire, the host's judge, the play), `coop/player/melee_fx_swing`, `coop/player/melee_fx_contact`, `ue_wrap/engine/engine_emitter`, `ue_wrap/engine/physical_audio` |
 | damage and death | `coop/player/player_damage`, `coop/player/death_revive`, `coop/player/run_end_travel`, `coop/player/ragdoll_gate` |
 | sleep | `coop/player/sleep_sync`, `coop/player/sleep_rest` |
 | inventory | `coop/items/player_inventory_sync`, `coop/items/inventory_wire`, `ue_wrap/actors/inventory_component` |
