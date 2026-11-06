@@ -395,6 +395,16 @@ void RemotePlayer::Tick() {
     // SetTargetPose.
     AdvanceInterp();
 
+    // The prop guard (the puppet ignores WorldDynamic and PhysicsBody, ue_wrap/actors/puppet.h) is checked
+    // on the capsule once a second; a response put back is logged and the guard asserted again.
+    if (const auto now = std::chrono::steady_clock::now(); now >= guardNextCheck_) {
+        guardNextCheck_ = now + std::chrono::seconds(1);
+        if (!ue_wrap::puppet::PuppetPropGuardHolds(actor_)) {
+            UE_LOGW("RemotePlayer: the prop guard no longer holds on the puppet capsule -- asserting it again");
+            ue_wrap::puppet::EnforcePuppetPropGuard(actor_, "recheck");
+        }
+    }
+
     // Advance the body-yaw presentation (the turn in place, coop/player/puppet_body_yaw.h), which
     // keeps moving while the wire is quiet, so it sets dirty_ itself. Skipped while ragdolled: the
     // pelvis attachment owns the transform.

@@ -9,6 +9,7 @@
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/world/world_singleton.h"
 #include "ue_wrap/core/reflected_offset.h"
@@ -18,6 +19,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace ue_wrap::puppet {
 
@@ -122,31 +124,104 @@ void RestoreTickerOwner(void* ticker, void* owner) {
 // prop's edge lowers the wire Z while the puppet capsule keeps its standing height, a step onto a prop
 // lands inside it) resolves as a depenetration impulse on the prop: a fling that prop sync then
 // spreads. Props belong to prop sync and the real player's machine, so every primitive the puppet owns
-// ignores ECC_PhysicsBody; the visibility/camera/pawn channels stay as they were, since hit judging,
-// grab and nameplate traces use them. The CMC's own physics interaction (the CapsuleTouched push) goes
-// off with it.
+// ignores both channels a simulated prop collides as: ECC_PhysicsBody (light props) and ECC_WorldDynamic
+// (heavy props, the wooden crates and the dumpsters; the PROP-CHANNELS census logged at spawn shows the
+// channel of each prop class). WorldStatic stays blocking, and the visibility, camera and pawn channels
+// stay as they were, since hit judging, grab and nameplate traces use them and the local player still
+// walks into the puppet. The CMC's own physics interaction (the CapsuleTouched push) goes off with it.
+namespace {
+
+constexpr uint8_t kEccWorldStatic  = 0;  // ECollisionChannel::ECC_WorldStatic
+constexpr uint8_t kEccWorldDynamic = 1;  // ECollisionChannel::ECC_WorldDynamic
+constexpr uint8_t kEccPawn         = 2;  // ECollisionChannel::ECC_Pawn
+constexpr uint8_t kEccPhysicsBody  = 5;  // ECollisionChannel::ECC_PhysicsBody
+constexpr uint8_t kResponseIgnore  = 0;  // ECollisionResponse::ECR_Ignore
+
+const char* ChannelName(size_t ch) {
+    switch (ch) {
+    case kEccWorldStatic:  return "WorldStatic";
+    case kEccWorldDynamic: return "WorldDynamic";
+    case kEccPawn:         return "Pawn";
+    case kEccPhysicsBody:  return "PhysicsBody";
+    default:               return "other";
+    }
+}
+
+// Sets `channel` to Ignore on `comp` and reads it back, counting into the report. True when it reads Ignore.
+bool IgnoreChannel(void* comp, uint8_t channel, PropGuardReport& rep) {
+    const bool setOk = E::SetCollisionResponseToChannel(comp, channel, kResponseIgnore);
+    if (!setOk) ++rep.setFailed;
+    uint8_t now = 0xFF;
+    if (!E::GetCollisionResponseToChannel(comp, channel, now)) {
+        ++rep.readFailed;
+        UE_LOGW("puppet[MainPlayer]: prop guard: component %p (%ls) %s response read-back did not dispatch (set ok=%d)",
+                comp, R::ClassNameOf(comp).c_str(), ChannelName(channel), setOk ? 1 : 0);
+        return false;
+    }
+    if (now == kResponseIgnore) return true;
+    ++rep.notIgnore;
+    UE_LOGW("puppet[MainPlayer]: prop guard: component %p (%ls) reads response %u on %s after Ignore (set ok=%d)",
+            comp, R::ClassNameOf(comp).c_str(), (unsigned)now, ChannelName(channel), setOk ? 1 : 0);
+    return false;
+}
+
+// The census of the prop classes' own object channels: one live instance per class of prop_C, its root
+// component's GetCollisionObjectType. It shows which prop classes collide as WorldDynamic (heavy) and which
+// as PhysicsBody (light), so the channels the guard ignores are proven against the live game.
+struct ChannelCensus {
+    void* propClass = nullptr;
+    int classes = 0;
+    int unread = 0;
+    int count[16] = {};
+    std::vector<std::wstring> names[16];
+};
+
+void CensusClass(void* ctx, void* cls, void* anyInstance) {
+    auto* c = static_cast<ChannelCensus*>(ctx);
+    if (!R::IsDescendantOfAny(cls, &c->propClass, 1)) return;
+    ++c->classes;
+    uint8_t type = 0xFF;
+    void* root = E::RootComponentOf(anyInstance);
+    if (!root || !E::GetCollisionObjectType(root, type)) {
+        ++c->unread;
+        return;
+    }
+    const size_t slot = type < 15 ? type : 15;
+    ++c->count[slot];
+    c->names[slot].push_back(R::ClassNameOf(anyInstance));
+}
+
+void LogPropChannelCensus() {
+    ChannelCensus census;
+    census.propClass = R::FindClass(P::name::PropClass);
+    if (!census.propClass) return;
+    object_index::ForEachClass(&CensusClass, &census);
+    UE_LOGI("puppet[MainPlayer]: PROP-CHANNELS %d prop class(es) with a live instance, %d root(s) unread",
+            census.classes, census.unread);
+    for (size_t ch = 0; ch < 16; ++ch) {
+        if (census.count[ch] == 0) continue;
+        // The light PhysicsBody classes are the bulk and only sampled; every other channel is listed whole.
+        const size_t cap = ch == kEccPhysicsBody ? 6 : 80;
+        std::wstring list;
+        for (size_t i = 0; i < census.names[ch].size() && i < cap; ++i) {
+            if (!list.empty()) list += L", ";
+            list += census.names[ch][i];
+        }
+        UE_LOGI("puppet[MainPlayer]: PROP-CHANNELS %s(%zu) x%d: %ls%s", ChannelName(ch), ch, census.count[ch],
+                list.c_str(), census.names[ch].size() > cap ? ", ..." : "");
+    }
+}
+
+}  // namespace
+
 PropGuardReport EnforcePuppetPropGuard(void* puppetActor, const char* why) {
     PropGuardReport rep;
     if (!puppetActor || !R::IsLive(puppetActor)) return rep;
-    constexpr uint8_t kEccPhysicsBody = 5;  // ECollisionChannel::ECC_PhysicsBody
-    constexpr uint8_t kResponseIgnore = 0;  // ECollisionResponse::ECR_Ignore
 
     for (void* comp : E::GetPrimitiveComponents(puppetActor)) {
         ++rep.primitives;
-        const bool setOk = E::SetCollisionResponseToChannel(comp, kEccPhysicsBody, kResponseIgnore);
-        if (!setOk) ++rep.setFailed;
-        uint8_t now = 0xFF;
-        if (!E::GetCollisionResponseToChannel(comp, kEccPhysicsBody, now)) {
-            ++rep.readFailed;
-            UE_LOGW("puppet[MainPlayer]: prop guard: component %p (%ls) response read-back did not dispatch (set ok=%d)",
-                    comp, R::ClassNameOf(comp).c_str(), setOk ? 1 : 0);
-        } else if (now == kResponseIgnore) {
-            ++rep.confirmedIgnore;
-        } else {
-            ++rep.notIgnore;
-            UE_LOGW("puppet[MainPlayer]: prop guard: component %p (%ls) reads response %u on PhysicsBody after Ignore (set ok=%d)",
-                    comp, R::ClassNameOf(comp).c_str(), (unsigned)now, setOk ? 1 : 0);
-        }
+        if (IgnoreChannel(comp, kEccWorldDynamic, rep)) ++rep.ignoredWorldDynamic;
+        if (IgnoreChannel(comp, kEccPhysicsBody, rep)) ++rep.ignoredPhysicsBody;
     }
 
     // bEnablePhysicsInteraction: a bool bitfield resolved from the live FProperty (byte + mask), so
@@ -162,12 +237,25 @@ PropGuardReport EnforcePuppetPropGuard(void* puppetActor, const char* why) {
         }
     }
 
-    UE_LOGI("puppet[MainPlayer]: PROP-GUARD (%s) actor=%p primitives=%d ignorePhysicsBody=%d "
-            "setFailed=%d readFailed=%d notIgnore=%d cmcPhysicsInteraction=%s",
-            why ? why : "?", puppetActor, rep.primitives, rep.confirmedIgnore, rep.setFailed,
-            rep.readFailed, rep.notIgnore,
+    UE_LOGI("puppet[MainPlayer]: PROP-GUARD (%s) actor=%p primitives=%d ignores WorldDynamic+PhysicsBody: "
+            "WorldDynamic=%d/%d PhysicsBody=%d/%d setFailed=%d readFailed=%d notIgnore=%d cmcPhysicsInteraction=%s",
+            why ? why : "?", puppetActor, rep.primitives, rep.ignoredWorldDynamic, rep.primitives,
+            rep.ignoredPhysicsBody, rep.primitives, rep.setFailed, rep.readFailed, rep.notIgnore,
             rep.cmcPhysicsInteraction == 0 ? "off" : rep.cmcPhysicsInteraction == 1 ? "STILL-ON" : "unresolved");
+    if (why && std::string(why) == "spawn") LogPropChannelCensus();
     return rep;
+}
+
+bool PuppetPropGuardHolds(void* puppetActor) {
+    if (!puppetActor || !R::IsLive(puppetActor)) return true;  // nothing to judge
+    void* capsule = ReadPtr(puppetActor, P::off::ACharacter_CapsuleComponent);
+    if (!capsule || !R::IsLive(capsule)) return true;  // not judgeable: no re-assert loop
+    for (const uint8_t ch : {kEccWorldDynamic, kEccPhysicsBody}) {
+        uint8_t now = 0xFF;
+        if (!E::GetCollisionResponseToChannel(capsule, ch, now)) return true;  // not judgeable: no re-assert loop
+        if (now != kResponseIgnore) return false;
+    }
+    return true;
 }
 
 static void* SpawnPuppetMainPlayer(const FVector& loc,

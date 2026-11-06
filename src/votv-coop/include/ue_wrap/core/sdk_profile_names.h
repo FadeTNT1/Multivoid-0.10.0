@@ -1143,6 +1143,10 @@ inline constexpr const wchar_t* SetCollisionResponseToChannelFn      = L"SetColl
 // GetCollisionResponseToChannel (UPrimitiveComponent; param `Channel`, returns ECollisionResponse): the
 // read-back that confirms the puppet guard's Ignore landed.
 inline constexpr const wchar_t* GetCollisionResponseToChannelFn      = L"GetCollisionResponseToChannel";
+// GetCollisionObjectType (UPrimitiveComponent; no params, returns ECollisionChannel): the object channel a
+// component itself sits on. The prop-channel census reads the root of each prop class with it, to show which
+// channel (WorldDynamic or PhysicsBody) a heavy prop collides as, so the puppet guard's list is proven.
+inline constexpr const wchar_t* GetCollisionObjectTypeFn             = L"GetCollisionObjectType";
 // UCharacterMovementComponent::bEnablePhysicsInteraction (a bool bitfield, resolved at run time through
 // FindBoolProperty): off, CapsuleTouched returns before it pushes any simulated body the capsule touches.
 inline constexpr const wchar_t* CmcEnablePhysicsInteractionProp      = L"bEnablePhysicsInteraction";
