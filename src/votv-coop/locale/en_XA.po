@@ -1424,6 +1424,9 @@ msgstr "[[Your net.ice=relay keeps your address from other players, and a direct
 msgid "Your player id %s"
 msgstr "[[Your player id %s]]"
 
+msgid "[E] Loot"
+msgstr "[[[E] Loot]]"
+
 msgid "banned"
 msgstr "[[banned]]"
 

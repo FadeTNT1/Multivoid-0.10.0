@@ -55,6 +55,7 @@ struct In {
         if (!U8(k) || !U32(a.id)) return false;
         if (k == static_cast<uint8_t>(AddressKind::Prop)) { a.kind = AddressKind::Prop; return a.id != 0; }
         if (k == static_cast<uint8_t>(AddressKind::Drone)) { a.kind = AddressKind::Drone; return a.id == 0; }
+        if (k == static_cast<uint8_t>(AddressKind::Sleeper)) { a.kind = AddressKind::Sleeper; return a.id != 0; }
         return false;
     }
     bool Bytes(std::vector<uint8_t>& out, size_t cap) {

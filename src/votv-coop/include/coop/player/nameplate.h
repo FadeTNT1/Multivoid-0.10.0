@@ -35,6 +35,12 @@ struct Plate {
                              // renders GRAY
     bool  flash = false;     // hurt-flash red (read from RemotePlayer::IsHurtFlashing)
     bool  sleeping = false;  // the peer rests or dreams (sleep_sync) -> the HUD floats "z Z Z" off the plate
+    // A sleeper (coop/player/sleepers), an offline player lying in the world: "z Z Z", no ping and no health bar;
+    // the name only within the sleeper name distance, and the loot hint while the viewer can loot it. A sleeper
+    // behind a wall has no plate at all.
+    bool  sleeper = false;
+    bool  showNick = true;
+    bool  lootHint = false;
     int   healthPct = 100;   // 0..100 streamed-vitals health (display-only)
     int   ping = -1;         // RTT to the SESSION in ms (0 = sub-ms LAN -> "<1ms")
     // Carried so the plate does not have to INFER "no number to show" from ping == -1. The host has
@@ -49,9 +55,12 @@ struct Plate {
     char  nick[coop::text::kNickBufBytes] = {};
 };
 
+// Sleepers drawn at most at once, the nearest first-come (the overlay is a budget, not a census).
+inline constexpr int kMaxSleeperPlates = 16;
+
 struct Snapshot {
     int   count = 0;
-    Plate plates[coop::players::kMaxPeers];
+    Plate plates[coop::players::kMaxPeers + kMaxSleeperPlates];
 };
 
 // GAME THREAD: project every live remote puppet -> a fresh snapshot, then publish.

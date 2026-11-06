@@ -12,6 +12,7 @@
 #include "coop/element/intent_authority.h"
 #include "coop/net/blob_chunks.h"
 #include "coop/net/session.h"
+#include "coop/player/sleepers.h"
 #include "coop/props/container_reach.h"
 #include "coop/props/storage_contents.h"
 #include "coop/props/storage_wire.h"
@@ -119,6 +120,9 @@ W::Reply Judge(uint8_t slot, const W::Request& q) {
     if (q.plan != ue_wrap::inventory_item_codec::PlanSignature()) return Refuse(q.txn, ContainerActReason::Refused);
     void* const comp = SC::Resolve(q.address);
     if (!comp) return Refuse(q.txn, ContainerActReason::Gone);
+    // A sleeper whose owner is coming back takes no new transaction: its last ones settle, then it wakes.
+    if (q.address.kind == W::AddressKind::Sleeper && coop::sleepers::LootClosing(q.address.id))
+        return Refuse(q.txn, ContainerActReason::Gone);
     if (const ContainerActReason r = JudgeReach(*s, slot, q.address, comp); r != ContainerActReason::Granted)
         return Refuse(q.txn, r);
     size_t held = 0;
@@ -409,3 +413,13 @@ void OnLayoutRequest(uint8_t slot, const W::Request& q) {
 }
 
 }  // namespace coop::props::storage_act::host
+
+namespace coop::props::storage_act {
+
+size_t HoldsOn(const storage_wire::Address& a) {
+    size_t n = 0;
+    for (const host::Hold& h : host::g_holds) n += h.address == a ? 1 : 0;
+    return n;
+}
+
+}  // namespace coop::props::storage_act

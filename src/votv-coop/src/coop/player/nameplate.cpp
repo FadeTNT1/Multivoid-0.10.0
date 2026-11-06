@@ -6,6 +6,7 @@
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
+#include "coop/player/sleepers.h"
 #include "coop/player/sleep_sync.h"
 #include "coop/session/player_handshake.h"
 #include "coop/voice/voice_chat.h"
@@ -21,6 +22,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <iterator>
 #include <mutex>
 
 namespace coop::nameplate {
@@ -72,6 +75,49 @@ float DistanceScale(float distCm) {
     constexpr float kMinScale = 0.40f;  // floor, reached ~22.5 m as the alpha fade progresses
     if (distCm <= kRefCm) return 1.f;
     return std::max(kRefCm / distCm, kMinScale);
+}
+
+// The sleepers' plates: a sleeper behind a wall has none; in sight it sheds "z Z Z", and its name shows only within
+// the sleeper name distance. Online players keep the plate above.
+void AppendSleeperPlates(Snapshot& snap) {
+    coop::sleepers::PlateAnchor anchors[kMaxSleeperPlates];
+    const size_t n = coop::sleepers::PlateAnchors(anchors, kMaxSleeperPlates);
+    if (n == 0) return;
+    void* const lp = coop::players::Registry::Get().Local();
+    void* const pc = lp ? E::GetController(lp) : nullptr;
+    if (!pc) return;
+    ue_wrap::FVector camera = E::GetCameraLocation();
+    if (camera.X == 0.f && camera.Y == 0.f && camera.Z == 0.f) {
+        if (!E::TryGetActorLocation(lp, camera)) return;
+        camera.Z += 60.f;
+    }
+    const float nameCm =
+        std::max(0.f, coop::config::ResolveFloat(::coop::config_registry::rows::sleepers_name_distance_m)) * 100.f;
+    for (size_t i = 0; i < n && snap.count < static_cast<int>(std::size(snap.plates)); ++i) {
+        const auto& a = anchors[i];
+        ue_wrap::FVector2D screen{};
+        if (!E::ProjectWorldToScreen(pc, a.head, screen, false)) continue;
+        const float dx = a.head.X - camera.X, dy = a.head.Y - camera.Y, dz = a.head.Z - camera.Z;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const float alpha = DistanceAlpha(dist);
+        if (alpha <= 0.02f) continue;
+        // Line of sight from the camera to the head: a wall in between hides the sleeper's plate whole. An
+        // unresolved trace (-1) hides it too, the closed side for a name a wall should keep.
+        if (ue_wrap::trace::LineBlockedStatDyn(lp, camera, a.head) != 0) continue;
+        Plate& pl = snap.plates[snap.count++];
+        pl = Plate{};
+        pl.x = screen.X;
+        pl.y = screen.Y;
+        pl.alpha = alpha;
+        pl.scale = DistanceScale(dist);
+        pl.onScreen = true;
+        pl.sleeping = true;
+        pl.sleeper = true;
+        pl.showNick = dist <= nameCm;
+        pl.lootHint = a.lootable;
+        pl.linkKind = coop::net::LinkKind::Local;
+        std::memcpy(pl.nick, a.nick, sizeof(pl.nick));
+    }
 }
 
 void Publish(const Snapshot& s) {
@@ -129,6 +175,7 @@ void Update() {
         const bool inFront = E::ProjectWorldToScreen(pc, head, screen, false);
 
         Plate& pl = snap.plates[snap.count];
+        pl = Plate{};   // a plate skipped below (a sleeper behind a wall) must not leave its fields to the next
         const float dx = head.X - viewer.X, dy = head.Y - viewer.Y, dz = head.Z - viewer.Z;
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         pl.alpha = DistanceAlpha(dist);
@@ -146,6 +193,14 @@ void Update() {
         pl.y = screen.Y;
         pl.flash = p->IsHurtFlashing();
         pl.sleeping = coop::sleep_sync::PeerState(slot) != coop::net::SleepPeerState::Awake;
+        if (pl.sleeping) {
+            // A player at rest is a sleeper to everyone else (coop/player/sleepers): no plate through a wall, "z Z Z"
+            // in sight, the name only near. The plate's own occlusion trace is the sight line.
+            if (!pl.onScreen || pl.occluded) continue;
+            pl.sleeper = true;
+            pl.showNick = dist <= std::max(0.f, coop::config::ResolveFloat(
+                                               ::coop::config_registry::rows::sleepers_name_distance_m)) * 100.f;
+        }
         const float h = std::clamp(p->GetHealth(), 0.f, 1.f);
         pl.healthPct = static_cast<int>(std::lround(h * 100.f));
         // The ledger, not a per-tick fan-out through RemotePlayer. The old path pushed
@@ -168,6 +223,7 @@ void Update() {
         if (snap.count >= static_cast<int>(coop::players::kMaxPeers)) break;
     }
 
+    AppendSleeperPlates(snap);
     Publish(snap);
 }
 

@@ -443,6 +443,8 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/signal_catch_sync.cpp
     src/coop/player/sleep_rest.cpp
     src/coop/player/sleep_sync.cpp
+    src/coop/player/sleeper_wire.cpp
+    src/coop/player/sleepers.cpp
     src/coop/creatures/wisp_attack_sync.cpp
     src/coop/creatures/wisp_grab_hold.cpp
     src/coop/creatures/wisp_tear_mirror.cpp

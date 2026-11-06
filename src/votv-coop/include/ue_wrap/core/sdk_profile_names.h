@@ -177,6 +177,17 @@ inline constexpr const wchar_t* ItemWidgetSetPositionFn       = L"setPosition";
 inline constexpr const wchar_t* ItemWidgetUpdateSlotInfoFn    = L"updateSlotInfo";
 inline constexpr const wchar_t* ScreenSnapShiftProp           = L"snapToGrid_shift";
 inline constexpr const wchar_t* ScreenGridSizeProp            = L"gridSize";
+// The gamemode's own verb that opens the inventory screen onto a container prop (mainGamemode_C::openPropInv(prop)),
+// the one the drone, the sack and the ATV hand their container to. A sleeper's loot opens through it.
+inline constexpr const wchar_t* GamemodeOpenPropInvFn         = L"openPropInv";
+inline constexpr const wchar_t* GamemodeOpenPropInvParam      = L"prop";
+// A sleeper (an offline player lying in the world, coop/player/sleepers) carries its inventory in a hidden container
+// of this class, spawned on every peer and never saved, enrolled or drawn: a plain crate, whose begin-play only
+// makes itself its storage's owner. Loaded by path when no instance has loaded the class yet.
+inline constexpr const wchar_t* SleeperLootContainerClass     = L"prop_container_crate_C";
+inline constexpr const wchar_t* SleeperLootContainerPath      = L"/Game/objects/prop_container_crate.prop_container_crate_C";
+// prop_C.ignoreSav: the prop's own "leave me out of the save" bool, which its ignoreSave answer ORs in.
+inline constexpr const wchar_t* PropIgnoreSavProp             = L"ignoreSav";
 
 // 0.10.0's player inventory (ue_wrap/actors/inventory_component): mainPlayer_C's own
 // inventoryComponent_player, its three item arrays (the carried grid, the hands and hotbar, the
@@ -595,6 +606,7 @@ inline constexpr const wchar_t* SetActorEnableCollisionFn = L"SetActorEnableColl
 inline constexpr const wchar_t* ActorHiddenProp = L"bHidden";  // AActor::bHidden, the bool SetActorHiddenInGame writes (read by the vent-cover census)
 inline constexpr const wchar_t* DestroyActorFn = L"K2_DestroyActor";
 inline constexpr const wchar_t* TeleportToFn = L"K2_TeleportTo";  // bool(FVector, FRotator); large-distance teleport that survives Character/CMC constraints
+inline constexpr const wchar_t* GetComponentBoundsFn = L"GetComponentBounds";  // KismetSystemLibrary static (Component, out Origin, out BoxExtent, out SphereRadius)
 inline constexpr const wchar_t* GetActorBoundsFn = L"GetActorBounds";   // (bool,FVector&,FVector&,bool); world-space AABB of the actor's mesh
 
 // Controller removal: an auto-possessing remote pawn's second PlayerController fights the local

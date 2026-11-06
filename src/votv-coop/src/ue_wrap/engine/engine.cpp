@@ -659,6 +659,24 @@ bool GetActorBounds(void* actor, bool onlyColliding, FVector& outOrigin, FVector
     return true;
 }
 
+bool GetComponentBounds(void* component, FVector& outOrigin, FVector& outBoxExtent) {
+    static void* sCdo = nullptr;
+    static void* sFn = nullptr;
+    if (!component || !R::IsLive(component)) return false;
+    if (!sCdo) sCdo = R::FindClassDefaultObject(P::name::KismetSystemLibraryClass);
+    if (sCdo && !sFn) {
+        if (void* cls = R::ClassOf(sCdo)) sFn = R::FindFunction(cls, P::name::GetComponentBoundsFn);
+    }
+    if (!sCdo || !sFn) return false;
+    ParamFrame f(sFn);
+    if (!f.valid()) return false;
+    f.Set<void*>(L"Component", component);
+    if (!Call(sCdo, f)) return false;
+    f.GetRaw(L"Origin", &outOrigin, sizeof(outOrigin));
+    f.GetRaw(L"BoxExtent", &outBoxExtent, sizeof(outBoxExtent));
+    return !(outBoxExtent.X == 0.f && outBoxExtent.Y == 0.f && outBoxExtent.Z == 0.f);
+}
+
 // The target ORIGIN is not its surface, and the game traces stop at whatever they HIT, so a large
 // prop is legitimately reachable from further away than reach-from-origin. Measure the real bounds
 // instead of inventing a constant fudge for "big things".

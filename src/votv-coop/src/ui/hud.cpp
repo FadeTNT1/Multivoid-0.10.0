@@ -14,6 +14,7 @@
 #include "ui/link_format.h"
 #include "ui/scale.h"
 #include "ui/voice_icons.h"
+#include "l10n/l10n.h"
 
 #include "imgui.h"
 
@@ -57,9 +58,10 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
     // below; the cost is that the nick's centre sits half the suffix's width left of the bar's
     // centre and slides sideways as the latency gains or loses a digit.
     char nickTxt[coop::text::kNickBufBytes];
-    std::snprintf(nickTxt, sizeof(nickTxt), "%s", p.nick);
+    // A sleeper's name shows only near it (nameplate.cpp decides); far, the plate is its "z Z Z" alone.
+    std::snprintf(nickTxt, sizeof(nickTxt), "%s", (p.sleeper && !p.showNick) ? "" : p.nick);
     char pingTxt[20] = {};
-    if (p.linkKind != coop::net::LinkKind::Local && p.ping >= 0) {
+    if (!p.sleeper && p.linkKind != coop::net::LinkKind::Local && p.ping >= 0) {
         char pb[16];
         ui::link_format::FormatPing(p.ping, p.linkKind, pb, sizeof(pb));
         std::snprintf(pingTxt, sizeof(pingTxt), " (%s)", pb);
@@ -178,12 +180,23 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
     // the normal fill; `a` already carries the occlusion halving, so the lower constant stacks on
     // it. The nick takes the grey treatment; the hurt flash wins.
     const float frac = std::clamp(p.healthPct / 100.f, 0.f, 1.f);
+    if (p.sleeper) {
+        // No health bar on a sleeper; the loot hint sits where it would be, while the viewer can loot it.
+        if (p.lootHint) {
+            const char* hint = l10n::T("[E] Loot");
+            const float hpx = px * 0.8f;
+            const ImVec2 hsz = font->CalcTextSizeA(hpx, FLT_MAX, 0.f, hint);
+            TextOutlined(dl, font, hpx, ImVec2(ax - hsz.x * 0.5f, bp.y), IM_COL32(230, 230, 200, static_cast<int>(a * 245.f)),
+                         outline, hint);
+        }
+    } else {
     dl->AddRectFilled(bp, ImVec2(bp.x + barW, bp.y + barH), IM_COL32(0, 0, 0, static_cast<int>(a * 160.f)));
     const ImU32 fillCol = p.flash    ? red
                         : p.occluded ? IM_COL32(120, 18, 18, static_cast<int>(a * 220.f))
                                      : IM_COL32(190, 30, 30, static_cast<int>(a * 235.f));
     dl->AddRectFilled(bp, ImVec2(bp.x + barW * frac, bp.y + barH), fillCol);
     dl->AddRect(bp, ImVec2(bp.x + barW, bp.y + barH), IM_COL32(0, 0, 0, static_cast<int>(a * 200.f)));
+    }
 
     // Sleep Zs: a sleeping peer's plate sheds "z Z Z" from its upper-right corner. Three letters
     // share one looping life, a third of a life apart, so a new one leaves every ~0.8 s; each drifts

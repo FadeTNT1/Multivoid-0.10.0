@@ -80,6 +80,9 @@ public:
 
     // The engine-reported location; false when the puppet is not valid or the read failed.
     bool TryGetLocation(ue_wrap::FVector& out) const;
+    // The streamed position the drive is interpolating (the capsule centre), whatever the actor shows: a sleeper's
+    // lying pose (coop/player/sleepers) holds the actor elsewhere.
+    ue_wrap::FVector GetSyncedPosition() const { return curPos_; }
 
     // The world point the nameplate and the voice speaker anchor to: the head bone of the mesh the
     // peer is rendered by (the ragdoll body while ragdolled, the skin mesh otherwise), lifted above

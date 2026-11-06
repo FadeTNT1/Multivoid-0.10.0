@@ -33,6 +33,17 @@ bool Capture(void* player, std::vector<uint8_t>& out);
 // builds fresh elements. False, having written nothing, when an array or a native does not resolve.
 bool Restore(void* player, const std::vector<uint8_t>& bytes);
 
+// The same two operations on any inventoryComponent_player_C, not only a player's: the capture of its bytes, and a
+// load that first empties the three item arrays, exactly as Capture and Restore do for the player's own.
+bool CaptureComponent(void* component, std::vector<uint8_t>& out);
+bool LoadComponent(void* component, const std::vector<uint8_t>& bytes);
+
+// A scratch inventoryComponent_player_C owned by nobody (its outer is the game instance, never an actor), to read or
+// rebuild a stored profile's items off any player: the host's sleepers load a profile into one, read its rows and
+// write the rows that are left back. The collector takes it once the calling task has returned. Null when the class
+// or the outer does not resolve.
+void* NewScratchComponent();
+
 // How many items each array holds; -1 when it does not resolve.
 struct Counts {
     int32_t carried = -1;    // canvasInventory

@@ -28,6 +28,11 @@ bool IsFrozen(void* prop);
 void WriteStatic(void* prop, bool on);
 void WriteFrozen(void* prop, bool on);
 
+// Aprop_C.ignoreSav, which the prop's ignoreSave answer ORs in: true keeps the prop out of the game's save walk. A
+// display-only prop the mod spawns (a sleeper's hidden loot crate) sets it before its finish. False when the bool does
+// not resolve. Game thread.
+bool WriteIgnoreSav(void* prop, bool on);
+
 // The game's own unfreeze, the one a player's grab of a frozen prop runs (playerGrabbed_pre):
 // frozen and sleep cleared, the prop detached and re-init()ed; static is left as it is. False if
 // the verb did not resolve or dispatch. Game thread.

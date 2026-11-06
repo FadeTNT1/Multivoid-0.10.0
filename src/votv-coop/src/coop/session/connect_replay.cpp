@@ -1,6 +1,7 @@
 // coop/session/connect_replay.cpp -- the host's connect replay for one slot; declared in
 // coop/session/subsystems.h, whose fan-out lists call it from the world-ready answer.
 
+#include "coop/player/sleepers.h"
 #include "coop/session/subsystems.h"
 
 #include "coop/world/balance_sync.h"
@@ -139,6 +140,7 @@ void ConnectReplayForSlot(int slot) {
     coop::laptop_tab::QueueConnectBroadcastForSlot(slot);  // the tab the PC's user is on
     coop::portable_pc_lid::QueueConnectBroadcastForSlot(slot);  // every open portable PC lid
     coop::floppybox_sync::QueueConnectBroadcastForSlot(slot);  // one canonical per live box
+    coop::sleepers::QueueConnectBroadcastForSlot(slot);  // every sleeper's body, ahead of its loot's rows just below
     coop::props::storage_contents::QueueConnectBroadcastForSlot(slot);  // every world storage's rows, the empty ones too (principle 8 anchor over the join snapshot)
     coop::dish_sync::QueueConnectBroadcastForSlot(slot);  // the dish snapshot -- AFTER the desk rows + the catch seed (same ordered lane)
     coop::download_arm_sync::QueueConnectArmForSlot(slot);  // an armed machine's ARM row, after the catch's seed and the dish snapshot

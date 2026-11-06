@@ -187,6 +187,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::InventoryRestoreBlob:
     case ReliableKind::BasementPipeState:
     case ReliableKind::AchievementState:
+    case ReliableKind::SleeperState:
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:
