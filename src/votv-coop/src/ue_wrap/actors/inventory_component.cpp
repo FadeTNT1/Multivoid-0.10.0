@@ -200,6 +200,8 @@ Counts CountItems(void* player) {
     c.carried = ArrayNum(comp, N::InventoryCarriedArray);
     c.hands = ArrayNum(comp, N::InventoryHandsArray);
     c.equipment = ArrayNum(comp, N::InventoryEquipmentArray);
+    c.slotC = ArrayNum(comp, N::InventorySlotArrayC);
+    c.slotD = ArrayNum(comp, N::InventorySlotArrayD);
     return c;
 }
 

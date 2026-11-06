@@ -116,6 +116,31 @@ write is logged with its path and size, a call that wrote nothing is logged as a
 for nothing. The per-player profiles are cut beside it then (`coop/items/player_inventory_sync`, keyed on the world folder),
 and the dedicated server's autosave runs the same `saveSlot_C::save` (`ue_wrap/engine/world_save`).
 
+### One player record
+
+A world save holds one record per `int_save` actor, and the player's is the record keyed `mainPlayer`
+(`mainPlayer_C::betterGetData`: the pawn's data and its `inventoryComponent_player`, which holds the
+carried grid, the hands and hotbar and the equipment). `mainPlayer_C::ignoreSave` is a constant
+false, and the mod spawns more `mainPlayer_C` actors than the local player: every peer's puppet
+(`ue_wrap/actors/puppet_spawn`) and the skins panel's preview mannequin. `[RD]` Each was saved as an
+empty `mainPlayer` record beside the host's own (`[V]` the host's 00:05 save held two, a 20261105
+one held three; saves of sessions with nobody else in them held one). The loader replays the
+records in order, and for a key it finds in the world it calls `betterLoadData` on the live actor
+(`mainGamemode_C::loadObjects`, `[RD]` `existingGatherersKeys` / `array_find`), so the second,
+empty record emptied the inventory, hotbar and equipment the first had just restored; the next
+save wrote that empty player out.
+
+Two guards hold it. `coop/save/save_player_filter` answers `mainPlayer_C::ignoreSave` true for every
+`mainPlayer_C` that is not the local player (a registered puppet, or any body beside a known local
+player), at the script gate, so the save walk skips it; the preview mannequin holds the gate for as
+long as it stands, since no session may be running. And `ue_wrap/engine/save_restore_watch` refuses
+a second `betterLoadData` for a player that already took a record in the same `loadObjects`, so a
+save written before the fix loads with the first record (the player's own) and not the last. Both
+log: the load logs what the player holds after each `betterLoadData`, the save logs what the local
+player holds as its record is captured and again when the file is written, and a refused record is a
+warning. `tools/savecheck/list_players.py` lists a save copy's `mainPlayer` records and their
+inventory counts, read-only.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -146,6 +171,7 @@ file, so a joiner who leaves keeps its own worlds exactly as they were.
 | After a session ends with the mirror still loaded, the verb gates stop with the session's hold of the script gate; `disableSave` and the flat-slot gate stay | `[RD]` `coop/session/subsystems` holds the gate for the session |
 | Folder loading, the client refusal line and Create world are verified by build and by reading the game's bytecode; the in-game run is pending | `[?]` |
 | The launch level (`currentLevel`) and the restore watch are verified by build and by reading the game's bytecode; the in-game run of save, menu, reload is pending | `[?]` |
+| The save filter and the duplicate-record refusal are verified by build and by the offline save reading above; the in-game run (carried item, hotbar and equipment, save, menu, re-host, with a client and the skin preview) is pending | `[?]` |
 | A world whose metadata names a starter map other than `untitled_1` is refused | `[RD]` every boot and session path keys on `untitled_1` |
 
 ## Code map
@@ -158,4 +184,5 @@ file, so a joiner who leaves keeps its own worlds exactly as they were.
 | the rules copy | `ue_wrap/world/game_rules` (`CopyRules`) |
 | making a world | `ui/host_window_native`, `ui/host_create_world`, `ui/host_save_picker` |
 | only the host saves | `coop/save/save_block`, `ue_wrap/engine/save_to_slot_hook`, `ue_wrap/engine/world_save` |
+| one player record | `coop/save/save_player_filter`, `ue_wrap/engine/save_restore_watch`, `tools/savecheck/list_players.py` |
 | tests | `harness/autotest/autotest_saveui.cpp` (`VOTVCOOP_RUN_SAVEBLOCK_TEST`, `VOTVCOOP_RUN_SAVEMSG_TEST`) |
