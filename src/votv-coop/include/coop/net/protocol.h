@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 277;
+inline constexpr uint16_t kProtocolVersion = 278;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1303,6 +1303,14 @@ enum class ReliableKind : uint8_t {
     // refused at the host's receive edge. Late join: every noted microwave's state to the joiner at its ready edge,
     // no ding. MicrowaveStatePayload.
     MicrowaveState = 220,
+
+    // PEER->PEER, relayed: the dirt of the kitchen sink and the shower cubicle (sink_C / prop_shower_C `clean`,
+    // 0 filthy .. 1 spotless), keyed by the surface's Aactor_save_C::Key (coop::surface_clean_sync). Each peer sends
+    // a value its own sponge raised (the cleanSponge body); a receiver takes the MAXIMUM of its own and the wire
+    // (adopt 0), so two peers wiping at once converge and nothing lowers it. The host's snapshot to a joiner at its
+    // ready edge is adopt 1: the joiner takes the host's value as sent, an adopt counted from slot 0 only.
+    // KeyedScalarPayload.
+    SurfaceCleanState = 221,
 };
 
 #pragma pack(push, 1)
@@ -2737,7 +2745,7 @@ struct ServerSettingPayload {
 static_assert(sizeof(ServerSettingPayload) == 227 && sizeof(ServerSettingPayload) <= 228,
               "ServerSettingPayload must be 227 bytes and fit the inline reliable buffer");
 
-// The shared payload of the keyed monotone-decreasing dirt scalars (WindowCleanState, GrimeState):
+// The shared payload of the keyed monotone-decreasing dirt scalars (WindowCleanState, GrimeState, SurfaceCleanState):
 // the instance's identity string (a Key for a window, a quantized position for a grime decal), the
 // value, and adopt: 0 applies the minimum of local and wire, 1 (a host snapshot, trusted from slot
 // 0 only) writes the value as is.

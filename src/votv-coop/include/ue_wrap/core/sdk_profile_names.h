@@ -1105,6 +1105,12 @@ inline constexpr int MicrowaveActionStart = 8;
 inline constexpr int   MicrowaveModeCount = 5;
 inline constexpr float MicrowaveSpinDegPerSec = 60.0f;
 inline constexpr const wchar_t* AddLocalRotationFn = L"K2_AddLocalRotation";
+// The sink and the shower: the dirt scalar `clean` (0 filthy .. 1 spotless) their cleanSponge raises, and the no-arg
+// upd() that clamps it and paints it onto the cube's material.
+inline constexpr const wchar_t* SinkClass = L"sink_C";
+inline constexpr const wchar_t* ShowerClass = L"prop_shower_C";
+inline constexpr const wchar_t* SurfaceCleanProp = L"clean";
+inline constexpr const wchar_t* SurfaceUpdFn = L"upd";
 }  // namespace name
 
 }  // namespace ue_wrap::profile
