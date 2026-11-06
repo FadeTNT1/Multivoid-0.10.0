@@ -1,5 +1,5 @@
-// coop/interactables/surface_clean_sync.cpp -- see coop/interactables/surface_clean_sync.h. The sink's and the
-// shower's dirt scalar, the base window's mirrored (coop/interactables/window_sync.cpp) with the direction reversed:
+// coop/interactables/surface_clean_sync.cpp -- see coop/interactables/surface_clean_sync.h. The sink's, the
+// shower's and the toilet's dirt scalar, the base window's mirrored (coop/interactables/window_sync.cpp) with the direction reversed:
 // a wipe RAISES `clean` here, so a receiver applies the maximum.
 
 #include "coop/interactables/surface_clean_sync.h"
@@ -101,7 +101,7 @@ size_t HubPassComplete(void*, bool isFull, uint32_t worldGen) {
     }
     if (total != g_lastLogCount) {
         g_lastLogCount = total;
-        UE_LOGI("[SURFACE] index now %zu live keyed sink/shower surface(s) (%s pass)", total, isFull ? "full" : "tail");
+        UE_LOGI("[SURFACE] index now %zu live keyed sink/shower/toilet surface(s) (%s pass)", total, isFull ? "full" : "tail");
     }
     g_scanFound.clear();
     return total;
@@ -150,14 +150,17 @@ void ApplyResolved(void* actor, const std::wstring& key, float wireClean, bool a
 // ---- the sender: the wipe verbs ----------------------------------------------------------------------------
 UE_FACT_FN(kRowSinkSponge, "surface_clean_sync", L"sink_C", L"cleanSponge", Declared);
 UE_FACT_FN(kRowShowerSponge, "surface_clean_sync", L"prop_shower_C", L"cleanSponge", Declared);
+UE_FACT_FN(kRowToiletSponge, "surface_clean_sync", L"toilet_C", L"cleanSponge", Declared);
 constexpr int kTagSink = 0x53574B31;    // 'SWK1'
 constexpr int kTagShower = 0x53574B32;  // 'SWK2'
+constexpr int kTagToilet = 0x53574B33;  // 'SWK3'
 bool g_sinkWatched = false;
 bool g_showerWatched = false;
+bool g_toiletWatched = false;
 bool g_settled = false;
 
-// The surface a cleanSponge body runs on and its clean before the body. The body (a sink's or a shower's ubergraph)
-// calls only native helpers and upd(), so no watched body runs inside it and one slot holds it.
+// The surface a cleanSponge body runs on and its clean before the body. The body (a sink's, a shower's or a
+// toilet's ubergraph) calls only native helpers and upd(), so no watched body runs inside it and one slot holds it.
 void* g_wiping = nullptr;
 float g_before = 0.f;
 
@@ -199,16 +202,17 @@ void OnWipePost(const sg::Call& call) {
 }
 
 void Settle() {
-    if (g_settled || !g_sinkWatched || !g_showerWatched) return;
+    if (g_settled || !g_sinkWatched || !g_showerWatched || !g_toiletWatched) return;
     const bool sinkLive = sg::NameWatchLive(kRowSinkSponge, kTagSink);
     const bool showerLive = sg::NameWatchLive(kRowShowerSponge, kTagShower);
-    if (sinkLive && showerLive) {
+    const bool toiletLive = sg::NameWatchLive(kRowToiletSponge, kTagToilet);
+    if (sinkLive && showerLive && toiletLive) {
         g_settled = true;
-        UE_LOGI("[SURFACE] the sink and shower cleanSponge watches are live");
+        UE_LOGI("[SURFACE] the sink, shower and toilet cleanSponge watches are live");
     } else if (sg::PendingNameCount() == 0) {
         g_settled = true;
-        UE_LOGE("[SURFACE] cleanSponge watch dead (sink live=%d, shower live=%d) -- that surface's wipes stay on the "
-                "peer that made them", sinkLive ? 1 : 0, showerLive ? 1 : 0);
+        UE_LOGE("[SURFACE] cleanSponge watch dead (sink live=%d, shower live=%d, toilet live=%d) -- that surface's "
+                "wipes stay on the peer that made them", sinkLive ? 1 : 0, showerLive ? 1 : 0, toiletLive ? 1 : 0);
     }
 }
 
@@ -221,6 +225,8 @@ void Install(coop::net::Session* session) {
         g_sinkWatched = sg::WatchName(kRowSinkSponge, kTagSink, &OnWipePre, &OnWipePost);
     if (!g_showerWatched)
         g_showerWatched = sg::WatchName(kRowShowerSponge, kTagShower, &OnWipePre, &OnWipePost);
+    if (!g_toiletWatched)
+        g_toiletWatched = sg::WatchName(kRowToiletSponge, kTagToilet, &OnWipePre, &OnWipePost);
 }
 
 void OnReliable(const coop::net::KeyedScalarPayload& payload, uint8_t senderPeerSlot) {

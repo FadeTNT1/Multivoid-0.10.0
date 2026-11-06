@@ -1395,6 +1395,8 @@ inline constexpr const wchar_t* AddLocalRotationFn = L"K2_AddLocalRotation";
 // (what the look follows), `empty` (the tipped-over / nothing-in-it flag the tap's tick clears) and its no-arg upd().
 inline constexpr const wchar_t* SinkClass = L"sink_C";
 inline constexpr const wchar_t* ShowerClass = L"prop_shower_C";
+// The toilet has the same `clean` and upd(); unlike the other two its own graph also lowers `clean` (use dirties it).
+inline constexpr const wchar_t* ToiletClass = L"toilet_C";
 inline constexpr const wchar_t* BucketClass = L"prop_bucket_C";
 inline constexpr const wchar_t* SurfaceCleanProp = L"clean";
 inline constexpr const wchar_t* SurfaceUpdFn = L"upd";
@@ -1575,6 +1577,31 @@ inline constexpr const wchar_t* AdvancementCompletedProp = L"advancementsComplet
 inline constexpr const wchar_t* AchievementProgressMember = L"progress_";
 inline constexpr const wchar_t* AchievementTargetMember = L"progressTarget_";
 inline constexpr const wchar_t* ProgressAdvancementFn = L"progressAdvancement";
+
+// The cleaning brushes. Every cleaner of the bay window is a prop_sponge_C: the held sponge, the mop
+// (prop_mop_C), the bucket pour (prop_sponge_bucketpour_C) and the pressure washer's water shot
+// (prop_sponge_p_C, a short-lived projectile prop_waterShooter_C fires from its tick). Each makes its brush
+// material in BeginPlay with itself as the outer, from its class default's `drawmat`, so a dab's material
+// names the cleaner that drew it.
+inline constexpr const wchar_t* SpongeClass = L"prop_sponge_C";
+inline constexpr const wchar_t* MopClass = L"prop_mop_C";
+inline constexpr const wchar_t* SpongePourClass = L"prop_sponge_bucketpour_C";
+inline constexpr const wchar_t* SpongeShotClass = L"prop_sponge_p_C";
+inline constexpr const wchar_t* SpongeDrawMatProp = L"drawmat";
+
+// The pressure washer, prop_waterShooter_C. playerHandUse_LMB sets `fire` and enables the actor's tick;
+// release clears both. Each tick with `fire` set and `level` (the tank, litres) above zero drains the tank,
+// fires one prop_sponge_p_C from the player's camera along its forward (x5000 plus a random 100 spread)
+// and plays wade_Cue in 2D. The shot spawns eff_waterThrower where it is born; where it hits it plays
+// wade_Cue and spawns eff_waterThrowSplash, then cleans what it overlaps.
+inline constexpr const wchar_t* WaterShooterClass = L"prop_waterShooter_C";
+inline constexpr const wchar_t* WaterShooterFireProp = L"fire";
+inline constexpr const wchar_t* WaterShooterLevelProp = L"level";
+inline constexpr const wchar_t* WasherSprayFx = L"eff_waterThrower";
+inline constexpr const wchar_t* WasherSplashFx = L"eff_waterThrowSplash";
+inline constexpr const wchar_t* WasherCue = L"wade_Cue";
+inline constexpr const wchar_t* ParticleSystemClass = L"ParticleSystem";
+inline constexpr const wchar_t* SoundCueClass = L"SoundCue";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

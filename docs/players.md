@@ -442,6 +442,16 @@ swing at a container sends particles only. A hit on a creature the host parks is
 host, whose own zombie feedback already played. `melee_fx=0` switches the lane off; `[dev] melee_fx_log=1` logs every
 effect (`[MELEE-FX]`). `[?]` until a two-peer run reads those lines.
 
+The pressure washer fires from its own tick on the peer that holds it: a water shot a frame, each a peer-local prop
+that cleans where it lands, so its spray was seen and heard only there. `coop/player/washer_fx` sends `WasherFx`: a
+start when the washer starts firing, a keep every 100 ms with up to four of its shots' landing points (read off the
+splash each shot spawns), and a stop on release, an empty tank or a swap, each naming the hold so an old stop cannot
+end a new hold. Every other peer shows the jet at the firer's puppet along its aim, the hiss spatialized there, and a
+splash with its sound at each landing; it never runs the washer's firing tick, which would fire real shots and clean
+twice. A receiver stops after 600 ms without a keep, on the firer's death and on its slot's disconnect, and a joiner
+picks a firing washer up from the next keep (`[WASHER-FX]` lines, a once-a-minute summary). `[?]` until a two-peer
+run reads those lines.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -469,6 +479,7 @@ effect (`[MELEE-FX]`). `[?]` until a two-peer run reads those lines.
 | `SkinChange`, `NameplateChange`, `NickColorChange` | each peer, relayed | the three preferences |
 | `HandItem`, `ItemActivate` | each peer, relayed | the held item's class, its actor's name and its hold slot's item name (the key of the game's item tables); the flashlight beam: on or off, mode, intensity, cones, reach, colour, profile |
 | `MeleeFxRequest`, `MeleeFx` | a client to the host; the host to every client but the maker | one effect: its kind (swing, hit, contact, break), the maker, an id, the point and surface normal, the volume and pitch, and the sound's and particle system's asset paths |
+| `WasherFx` | each peer, relayed | a firing pressure washer: the firer, the hold, firing or stopped, up to four shot landings |
 | `PlayerHit` | host to the hit peer | a parked creature's hit on the peer's puppet: the verb (addDamage or punch) to run on its own player |
 | `SleepState` | a client to the host; the host to all | a rest state with its bed (awake, resting, dreaming); the host's sleeping flag; one peer's rest state relayed |
 | `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |

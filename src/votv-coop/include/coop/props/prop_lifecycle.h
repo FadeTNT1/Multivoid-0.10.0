@@ -48,8 +48,9 @@ bool IsWireSuppressedPropClass(const std::wstring& cls);
 // key, can never claim-bind). Never snapshot-expressed, never live-broadcast, never swept --
 // but unlike IsWireSuppressedPropClass the LOCAL instance LIVES, because it is the player's
 // own state and sweeping it as unclaimed fatals that peer at the next GC purge. Call sites:
-// snapshot enumerate-skip, Init POST broadcast-skip, adoption-sweep universe-skip. The name
-// compares without case, as the engine compares names.
+// snapshot enumerate-skip, Init POST broadcast-skip, adoption-sweep universe-skip. Also the
+// peer-local projectiles (the pressure washer's water shot), which each peer fires and keeps for
+// itself. The name compares without case, as the engine compares names.
 bool IsPerPlayerPropClass(const std::wstring& cls);
 
 // Destroy a local prop via K2_DestroyActor, ECHO-SUPPRESSED: MarkIncomingDestroy

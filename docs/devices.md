@@ -242,16 +242,26 @@ second, so the host mirrors six driver floats about once a second and the turbin
 interpolates (`coop/interactables/turbine_sync`). The base window's dirt and the wall grime are
 monotone: a wipe only lowers them, so each peer broadcasts a decrease and the receiver keeps the
 minimum, and two peers wiping at once converge with no oscillation; the grime decals are keyed by
-their quantised world position, since both peers place them from the same save
+their class, type, 2 cm cell and exact position, since both peers place them from the same save (a key
+that does not match exactly falls back to its cell's one decal). A decal's key is taken before the
+cleaning verb runs, so a decal no index pass has reached yet still sends its fall and its wipe; a
+repaint that fails is retried on its own, and a slice of the index is checked against the shared floor
+each second. A crack (`grime_crack_C`) is not cleanable: a sponge or the pressure washer leaves it on
+every peer, and only the wall fixer repairs it
 (`coop/interactables/window_sync`, `coop/interactables/grime_sync`).
 
-The kitchen sink's and the shower cubicle's dirt (`clean`, 0 filthy to 1 spotless) is the same register turned
-over: the sponge's `cleanSponge` body raises it, calls the surface's own `upd` to paint the material and, at 1,
+The kitchen sink's, the shower cubicle's and the toilet's dirt (`clean`, 0 filthy to 1 spotless) is the same register
+turned over: the sponge's `cleanSponge` body raises it, calls the surface's own `upd` to paint the material and, at 1,
 credits the wiper's own advancement. Each peer sends the value its own wipe raised (a watch on both bodies, keyed
 by the surface's save key, the one the appliance lane names the tap bit by) and a receiver keeps the greater, so two
 peers wiping at once converge. The apply writes the field and calls `upd` and nothing else: no sound, no wipe
 cursor, no advancement. The host sends each surface's value to a joiner with the adopt flag
-(`coop/interactables/surface_clean_sync`).
+(`coop/interactables/surface_clean_sync`). The toilet's own graph also lowers `clean` when it is used, on the
+peer where that runs, which a max register does not carry.
+
+Not covered yet: washing an ATV a peer does not sync (the syncer's condition block overwrites it), and a
+detached ATV wheel, which no lane publishes. Both need the vehicle owner's lane to accept a wash from another
+peer; they are left as follow-ups.
 
 A bucket under a running faucet or shower is the host's. Each tap's `ReceiveTick` raises the `height` of the bucket
 its trace finds, on every peer on its own, so on a client the bucket's water is read before that tick and put back
@@ -266,10 +276,15 @@ wipes one dab at a time, so there is no scalar to compare. A stroke reaches the 
 `cleanPhys` through a script call no hook here carries arguments for, so the dab is observed at
 its native draw instead -- a `UCanvas::K2_DrawMaterial` whose calling frame is the window with its
 canvas session open, which the window's periodic dirt splotch cannot be, since that refuses to run
-while the session is open. The stroking peer sends the dab's pixel, its edge and the brush's
-opacity and colour; every other peer draws the same dab through the window's own `Canvas` event
-with a brush material the mod owns, and the host relays a client's dab, so the host's save carries
-every peer's wipes. Never `setDraw`, `endDraw` or `dirty` from outside: the session belongs to the
+while the session is open. A pre hook reads the dab from that call: its pixel, its edge and the brush
+material, whose opacity and colour the cleaner set for that dab and whose outer is the cleaner -- the
+held sponge, the mop, a thrown sponge, a bucket pour or the pressure washer's water shot -- so every
+one of them is sent. Every other peer draws the same dab through the window's own `Canvas` event
+with a brush material the mod owns for that cleaner, and the host relays a client's dab, so the host's
+save carries every peer's wipes. A dab whose replay fails keeps its place in the queue (1024 dabs, 30 s).
+The periodic dirt splotch still rolls on each peer; a host-authored checkpoint of the whole render
+target through the window's `getCode`/`setCode` would close that drift, and is not built: it is a
+render-target read-back and a chunked blob on every change, a bigger change than the dab lane. Never `setDraw`, `endDraw` or `dirty` from outside: the session belongs to the
 window, and an outside `endDraw` deletes the world canvas the game's own next dab draws into
 (`coop/interactables/window_stroke_sync`, `ue_wrap/devices/window_canvas`).
 
@@ -433,7 +448,7 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | the fuse towers (the three coordinate towers and the radio tower) | the host | a row per tower whenever one changes; a client's presses are intents the host runs, its fuse pulls and inserts claims the host takes or refuses |
 | the turbine | the host | six floats a second |
 | a window, the grime | any peer, minimum wins | monotone decreases |
-| the sink's and the shower's dirt | any peer, maximum wins | monotone rises; the host's value to a joiner |
+| the sink's, the shower's and the toilet's dirt | any peer, maximum wins | monotone rises; the host's value to a joiner |
 | a world bucket's water | the host | a client's tap-tick fill is put back; `BucketFillState` on a change, about twice a second |
 | the drone | the host | a transform stream; the client's tick suppressed |
 | a microwave's mode, time and run | the host | a client's press is an intent; `MicrowaveState` on a change and once a second while it runs |

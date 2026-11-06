@@ -124,6 +124,7 @@
 #include "coop/world/sky_sync.h"
 #include "coop/world/time_sync.h"
 #include "coop/interactables/window_stroke_sync.h"
+#include "coop/player/washer_fx.h"
 #include "coop/interactables/window_sync.h"
 #include "coop/session/join_progress.h"
 #include "coop/session/world_load_episode.h"
@@ -322,6 +323,7 @@ void Install(coop::net::Session& session) {
     coop::voice_chat::Install(&session);  // proximity voice chat (opus over the session; PTT X)
     coop::window_sync::Install(&session);  // base-window dirt scalar (the "main huge window")
     coop::window_stroke_sync::Install(&session);  // the bay window's render-target dabs
+    coop::washer_fx::Install(&session);  // a firing pressure washer's jet, hiss and splashes on every other peer
     coop::grime_sync::Install(&session);  // surface grime (walls/ceiling/floor dirt decals)
     coop::trash_pile_sync::Install(&session);  // trash pile collect counters
     coop::broom_stroke::Install(&session);  // a client's broom stroke is run by the host, with what the client's stroke read
@@ -407,6 +409,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     // Shut the chat lane's per-slot seed gate: the next occupant's applied range starts empty, so
     // it must get its seed before it hears a live line.
     coop::chat_sync::OnSlotDisconnected(slot);
+    coop::washer_fx::OnSlotDisconnected(static_cast<uint8_t>(slot));  // that player's washer stops showing
     coop::command_sync::OnSlotDisconnected(slot);  // the leaver's command rate bucket and notice clocks
     coop::stat_orders::OnSlotDisconnected(static_cast<uint8_t>(slot));  // every order and query still waiting on the leaver is answered Left
     // Per-slot cleanup: only subsystems with per-slot state are called here; the global-state ones
@@ -580,6 +583,7 @@ DisconnectStats DisconnectAll() {
     coop::voice_chat::OnDisconnect();
     coop::window_sync::OnDisconnect();
     coop::window_stroke_sync::OnDisconnect();
+    coop::washer_fx::OnDisconnect();
     coop::trash_pile_sync::OnDisconnect();
     coop::broom_stroke::OnDisconnect();  // with no session the game's broom sweeps as written
     coop::pack_trash_intent::OnDisconnect();  // with no session the game's own bagging stands
@@ -709,6 +713,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:coingun"}; coop::coingun_sync::Tick(); }
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:window"}; coop::window_sync::Tick(); }  // base-window clean: deferred-apply retry (wipes go at the verb)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:window_stroke"}; coop::window_stroke_sync::Tick(); }  // bay-window dabs: send observed, replay received
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:washer_fx"}; coop::washer_fx::Tick(); }  // washer jets: own edges out, others' shown
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:grime"}; coop::grime_sync::Tick(); }  // surface grime: the lowering verbs' watches + the end-of-play subscription, until they take
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:movement_ledger"}; coop::movement_ledger::Tick(session); }  // HOST: throttled per-slot summary + the wire-vs-actor divergence sample (an ENGINE read, hence game thread)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:npc_host"}; coop::npc_sync::TickPoseStream(); }  // HOST: read NPCs -> publish EntityPose batch (host-only, no-op on client)

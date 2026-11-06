@@ -159,6 +159,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/sat_console_sync.cpp
     src/coop/interactables/window_sync.cpp
     src/coop/interactables/window_stroke_sync.cpp
+    src/coop/player/washer_fx.cpp
     src/coop/interactables/grime_sync.cpp
     src/coop/session/player_handshake.cpp
     src/coop/session/player_handshake_prefs.cpp

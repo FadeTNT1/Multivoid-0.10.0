@@ -6,13 +6,18 @@
 //
 // A monotone minimum register, the window_sync shape keyed differently. A decal the save holds has a
 // saved transform, so both peers put it at an identical world position, and that position IS its
-// cross-peer identity: the key is a quantised world-position string. Splatter spawned during a session
+// cross-peer identity: the key is the decal's class, type and 2 cm grid cell, then the bits of its exact
+// position (a key that does not match exactly falls back to its cell's one decal). Splatter spawned during a session
 // lands where each peer's own run put it, so its key names nothing on the other peer, and what is sent
 // for it is kept there as an unused floor. Only a FALL is propagated, read before and after a lowering
 // verb's body on the script gate (clean; the wall fixer's repair of a crack), so MIN(local, wire)
 // converges concurrent wipes. A verb that takes the process below zero destroys the decal inside the
 // Blueprint; the engine's end of play says destroyed, a wipe sent as zero, or streamed out, whose
-// process is kept as the key's floor for the decal's return.
+// process is kept as the key's floor for the decal's return. A decal's identity is taken BEFORE the verb
+// runs, so a decal no index pass has reached yet still sends its fall and its wipe. A write whose repaint
+// fails is retried on its own (visual pending), and a slice of the index is reconciled against the floor
+// each second. A crack (grime_crack_C) is not cleanable: a sponge or the pressure washer leaves it as
+// it is on every peer, and only the wall fixer repairs it.
 
 #pragma once
 
@@ -45,13 +50,13 @@ void OnReliable(const coop::net::KeyedScalarPayload& payload, uint8_t senderPeer
 void QueueConnectBroadcastForSlot(int peerSlot);
 
 // Per-tick: install the two lowering verbs' watches and the end-of-play subscription until they
-// take. Call every net-pump tick on the game thread.
+// take; while connected, retry the visual-pending repaints and reconcile a slice of the index
+// against the floor. Call every net-pump tick on the game thread.
 void Tick();
 
-// DEV-DRILL ONLY: the quantised position key this module would index `actor` under. The
-// scan-parity drill uses it so its independent walk counts DISTINCT CELLS the way the index
-// does. An instance count over-reads, because the grid is not collision-free: the rig's save puts
-// 1117 decals on 1087 keys.
+// DEV-DRILL ONLY: the key this module would index `actor` under (class, type, grid cell and exact
+// position). The scan-parity drill uses it so its independent walk counts distinct keys the way the
+// index does; with the exact position in the key, twins of one cell are distinct.
 std::wstring DebugPosKeyForActor(void* actor);
 
 }  // namespace coop::grime_sync

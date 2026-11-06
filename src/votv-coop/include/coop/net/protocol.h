@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 302;
+inline constexpr uint16_t kProtocolVersion = 303;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1433,6 +1433,14 @@ enum class ReliableKind : uint8_t {
     // a world storage of address kind Sleeper on the ContainerContents and ContainerAct lanes. Never relayed; a
     // client's copy is refused at the host's receive edge; not pre-world. BlobChunkPayload.
     SleeperState = 240,
+    // ANY->ALL (the host relays a client's): a player's pressure washer is firing, for the other peers to show
+    // (coop::washer_fx). The firing peer sends a start the frame its washer starts (`firing` 1), the same every 100 ms
+    // while it fires with up to four of its shots' landing points, and a stop (`firing` 0) when the trigger is let
+    // go, the tank runs dry or the washer leaves the hand. A receiver shows the jet at the firer's puppet, the hiss
+    // there and a splash where each shot landed, and never runs the washer's own firing tick, which would fire real
+    // shots and clean a second time. A receiver that hears nothing for 600 ms stops on its own, so a joiner picks a
+    // firing washer up from the next keep. WasherFxPayload.
+    WasherFx = 241,
 };
 
 #pragma pack(push, 1)
@@ -3187,17 +3195,20 @@ struct BroomStrokePayload {
     float fwdX, fwdY, fwdZ;         // 12 -- the holder's actor forward, a unit vector
     float velX, velY, velZ;         // 12 -- the holder's velocity, cm/s
 };
-// One sponge dab on the bay window's 1645x512 dirt render target (WindowStroke). The window is a
-// singleton, so no identity travels. x/y is the dab's top-left pixel as the stroke computed it from
-// its own hit, size the dab's edge, and opac/col the brush material scalars the sponge set for that
-// dab (col 0 paints clean). A receiver draws the same dab through the window's canvas session.
+// One cleaning dab on the bay window's 1645x512 dirt render target (WindowStroke). The window is a
+// singleton, so no identity travels. x/y is the dab's top-left pixel and size its edge, both as the
+// stroke passed them to its draw, and opac/col the brush material scalars the cleaner set for that
+// dab (col 0 paints clean). source is the cleaner (ue_wrap::window_canvas::DabSource: 0 sponge,
+// 1 pressure washer, 2 bucket pour, 3 mop), whose brush the receiver draws with. A receiver draws the
+// same dab through the window's canvas session.
 struct WindowStrokePayload {
     float    x;          // 4 -- dab top-left, render-target pixels
     float    y;          // 4
     float    size;       // 4 -- dab edge, pixels
     float    opac;       // 4 -- brush "opac"
     float    col;        // 4 -- brush "col"
-    uint8_t  _pad[4];    // 4 -- alignment / reserved
+    uint8_t  source;     // 1 -- the cleaner (DabSource)
+    uint8_t  _pad[3];    // 3 -- alignment / reserved
 };
 static_assert(sizeof(WindowStrokePayload) == 24, "WindowStrokePayload must be 24 bytes");
 static_assert(sizeof(WindowStrokePayload) <= 256 - 20 - 8,
@@ -4689,6 +4700,21 @@ inline constexpr int kMeleeFxHeaderBytes = 60;  // everything before `text`
 static_assert(offsetof(MeleeFxPayload, text) == kMeleeFxHeaderBytes, "MeleeFxPayload's header must be 60 bytes");
 static_assert(sizeof(MeleeFxPayload) == 220, "MeleeFxPayload must be 220 bytes");
 static_assert(sizeof(MeleeFxPayload) <= 256 - 20 - 8, "MeleeFxPayload must fit in one reliable datagram");
+
+// A pressure washer's spray (WasherFx): whose washer, which hold of it, whether it fires, and where its shots landed
+// since the last message. `handGen` counts the firing peer's distinct washer holds, so a stop of an older hold
+// cannot end a newer one. A landing is its point and the splash's rotation, as the shot's own splash was spawned.
+inline constexpr int kWasherFxMaxHits = 4;
+struct WasherFxPayload {
+    uint32_t originEid;   // 4  -- the firing player's Player element id
+    uint32_t handGen;     // 4  -- the firing peer's washer hold generation
+    uint8_t  firing;      // 1  -- 1 firing (start or keep), 0 stopped
+    uint8_t  hitCount;    // 1  -- landings that follow, at most kWasherFxMaxHits
+    uint16_t seq;         // 2  -- the sender's running message number
+    float    hits[kWasherFxMaxHits][6];  // 96 -- per landing: x, y, z (world cm), pitch, yaw, roll (degrees)
+};
+static_assert(sizeof(WasherFxPayload) == 108, "WasherFxPayload must be 108 bytes");
+static_assert(sizeof(WasherFxPayload) <= 256 - 20 - 8, "WasherFxPayload must fit in one reliable datagram");
 
 // A lightning strike (LightningStrike): the strike's world location; the receiver spawns the
 // strike actor there, and it destroys itself.

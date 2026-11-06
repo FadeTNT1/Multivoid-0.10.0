@@ -148,8 +148,11 @@ void GrabObserver_Aprop_Init_POST_Body(void* self) {
         return;
     }
     if (IsPerPlayerPropClass(cls)) {
-        UE_LOGI("grab_hook[Aprop.Init POST]: skipping broadcast for per-player '%ls' actor=%p (each peer owns its own)",
-                cls.c_str(), self);
+        // Washer shots come dozens a second: counted, and only the first few said.
+        static uint64_t sSkipped = 0;
+        if (++sSkipped <= 5 || sSkipped % 1000 == 0)
+            UE_LOGI("grab_hook[Aprop.Init POST]: skipping broadcast for per-player '%ls' actor=%p (each peer owns "
+                    "its own; #%llu)", cls.c_str(), self, static_cast<unsigned long long>(sSkipped));
         return;
     }
     // A kerfur conversion successor: the kerfur layer owns kerfur-form expression (one entity;
@@ -367,7 +370,16 @@ bool IsPerPlayerPropClass(const std::wstring& cls) {
     // client's own inventory container fataled the client at the next GC purge). The opposite of
     // IsWireSuppressedPropClass, whose client site destroys the local instance. Compared without case,
     // as IsWireSuppressedPropClass is and for its reason.
-    return ::_wcsicmp(cls.c_str(), P::name::PropInventoryContainerPlayerClass) == 0;
+    //
+    // The pressure washer's water shot belongs here for the same reasons: a prop_sponge_p_C is a
+    // ten-second projectile its own peer's washer fires from its tick, dozens a second, and it cleans
+    // where it lands. Expressed, every shot the host fired went out as a PropSpawn with no velocity
+    // (2773 of them, 671 KB of birth records in one session) and fell on the client as a real shot
+    // that could clean a second time where it dropped. Each peer keeps its own shots; what they clean
+    // crosses on the cleaning lanes (grime, surfaces, the window's dabs) and how they look on the
+    // washer echo.
+    return ::_wcsicmp(cls.c_str(), P::name::PropInventoryContainerPlayerClass) == 0 ||
+           ::_wcsicmp(cls.c_str(), P::name::SpongeShotClass) == 0;
 }
 
 void Install(coop::net::Session* session) {
