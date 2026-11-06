@@ -219,6 +219,7 @@ set(VOTVCOOP_SOURCES
     src/coop/props/prop_drop_intent.cpp
     src/coop/props/hit_target_prop.cpp
     src/coop/props/crate_break.cpp
+    src/coop/props/fire_extinguisher_sync.cpp
     src/coop/props/prop_impact_fx.cpp
     src/coop/props/bracket_position_wait.cpp
     src/coop/props/prop_damage_gate.cpp

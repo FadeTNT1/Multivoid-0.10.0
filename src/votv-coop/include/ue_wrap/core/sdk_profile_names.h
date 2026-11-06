@@ -468,6 +468,16 @@ inline constexpr const wchar_t* FireExtMountHeldProp = L"fireExt";
 inline constexpr const wchar_t* FireExtChargeProp = L"life";
 inline constexpr const wchar_t* FireExtSprayingProp = L"firing";
 inline constexpr const wchar_t* FireExtThrustingProp = L"active";
+// The burst: shoot() fires the thrust (the thruster, its flame particles and its roar start, `active` is set and
+// a latent loop drains `life`), and the three components it starts. Deactivate is the engine's own verb on each.
+inline constexpr const wchar_t* FireExtShootFn = L"shoot";
+inline constexpr const wchar_t* FireExtThrusterComp = L"PhysicsThruster";
+inline constexpr const wchar_t* FireExtThrustFxComp = L"eff_fireExtThr";
+inline constexpr const wchar_t* FireExtThrustSoundComp = L"fireExtThrust";
+inline constexpr const wchar_t* ComponentDeactivateFn = L"Deactivate";
+// Where prop_fireExt_C::getData files its own two members in the save record, read from the pak: the leaf class
+// appends one group of each kind after the base prop's, `life` as floats[1][0] and `active` as bools[1][0].
+inline constexpr int FireExtRecordGroup = 1;
 
 // The held item's right mouse button, int_objects_C's playerHandUse_RMB / playerHandRelease_RMB:
 // the player's input reaches the item in its hand through these, with itself as the argument.

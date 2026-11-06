@@ -9,6 +9,10 @@
 // setPropProps, its end-overlap forgets it, and `fireExt` names the one it holds. Taking one off a
 // mount is an ordinary grab of a frozen prop, which the game unfreezes before it grabs.
 //
+// The burst is the extinguisher's own `shoot`: it fires the thruster, the flame particles and the roar, sets `active`,
+// and starts the latent loop that drains `life` and randomly calls `extinguishRay`. Nothing else starts it but the
+// guards of addDamage, receivedPhyiscsDamage and fireDamage and a save record's loadData.
+//
 // A Blueprint class dies with the world that loaded it, so a class is known here by its name and
 // a member's offset is read off the live class; the offsets are kept, being the same for one
 // cooked class in every world.
@@ -36,5 +40,18 @@ void* MountedExtinguisher(void* mount);
 bool ReadCharge(void* ext, float& out);
 bool ReadSpraying(void* ext, bool& out);
 bool ReadThrusting(void* ext, bool& out);
+
+// Write `life` and `active` as they are, with no verb run: the receiver of a record sets the charge and the flag the
+// game's loop reads. False, writing nothing, for anything that is not an extinguisher or a member that did not resolve.
+bool WriteCharge(void* ext, float value);
+bool WriteThrusting(void* ext, bool value);
+
+// Run the game's own `shoot` on `ext`. False when it is not an extinguisher, the function did not resolve or the call
+// did not run. Game thread.
+bool CallShoot(void* ext);
+
+// Deactivate the thruster, its flame particles and its roar through the engine's own verb, for a burst whose charge is
+// spent. True when at least one component was there to stop. Game thread.
+bool StopThrust(void* ext);
 
 }  // namespace ue_wrap::fire_extinguisher

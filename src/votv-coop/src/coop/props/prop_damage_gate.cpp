@@ -10,7 +10,6 @@
 #include "coop/props/prop_syncer.h"
 #include "coop/props/prop_throw.h"
 
-#include "ue_wrap/actors/container_inventory.h"
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/log.h"
@@ -167,9 +166,9 @@ sg::Verdict Judge(Row row, const sg::Call& c) {
     if (!s || !s->connected() || s->role() != coop::net::Role::Client) return sg::Verdict::Run;
     void* owner = R::OuterOf(c.object);
     if (!owner || !ue_wrap::prop::IsDescendantOfProp(owner)) return sg::Verdict::Run;
-    // A container's break spills its contents, which only the host's copy may do: its damage is the host's whoever
-    // authors its motion, and an impact goes there as an intent.
-    if (ue_wrap::container_inventory::IsContainer(owner)) {
+    // A container's break spills its contents, which only the host's copy may do, and an extinguisher's burst is the
+    // host's to start: their damage is the host's whoever authors their motion, and an impact goes there as an intent.
+    if (coop::props::crate_break::IsHostDamaged(owner)) {
         if (row == kImpact) coop::props::crate_break::OnClientImpact(c, owner);
         ++g_cancelled[row];
         return sg::Verdict::Cancel;

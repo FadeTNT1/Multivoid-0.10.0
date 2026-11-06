@@ -299,6 +299,33 @@ damage. Sent before the body, a break's cue precedes its destroy on the same lan
 cue of that kind, falling back to the milder one a material lacks; the swinger hears the host's too, since its own call
 was cancelled. At most one cue per container in 80 ms, one break cue per container, twenty a second in all `[?]`.
 
+### A fire extinguisher's burst
+
+An extinguisher (`prop_fireExt_C`) bursts when a hit over 5, a physics impact or a fire's damage reaches its guards: they
+call its `shoot`, which starts the thruster, the flame particles and the roar, sets `active`, and runs a latent loop that
+drains `life` (a full charge lasts a minute) and randomly runs `extinguishRay`. Nothing in that was on a wire. The burst
+is the host's (`coop/props/fire_extinguisher_sync`). The extinguisher counts as host-damaged beside the containers
+(`coop/props/crate_break`), so a client's swing at it is cancelled and sent as a `HitIntent`, which the host judges and
+runs as the extinguisher's own `addDamage` with the swinger's puppet as the damager, and a thrown contact reaches the
+host as a `PropContactIntent`, which it runs as the component's own `impactDamage`; the host's native guard then starts
+the burst. On a client the extinguisher's `shoot` is cancelled unless the replay below is running, so no other route
+into it, a fire's damage or a `loadData`, starts a burst there, and its loop's `extinguishRay` is cancelled while it
+thrusts: the host's loop extinguishes, and fire reaches the clients by its own lanes.
+
+The state is the extinguisher's own save record, `life` as `floats[1][0]` and `active` as `bools[1][0]`. The host
+watches `shoot` after its body, marks the prop, and on its tick publishes the record, again about once a second while
+the charge lasts and once more when it is spent. While the prop thrusts it claims it under the drive stream
+(`coop/props/prop_drive_host`, a prop in a hand is refused), and releases it to coast at exhaustion. A client's own
+record for an extinguisher is refused. A client lands the record through its own narrow apply, registered with the record
+gates (`coop/props/prop_record_gates`): it writes `life` and `active` and nothing else, so the record lands whether the
+prop is held, driven or parked, and the game's `loadData` (which re-runs the prop's init and would restart the burst) is
+not run. On the edge, `active` with a charge and no burst started yet here, it runs the game's own `shoot` once, inside the
+one scope the gate lets it through; a correction only moves `life`, so the loop is never restarted. A spent burst stops
+the thruster, the particles and the roar through their own `Deactivate`. A joiner takes the record with the prop's spawn
+(the snapshot sends it, or the park holds it until the mirror is born), so the order of the pose and the record does not
+matter. `[V]` the prop_fireExt Blueprint's name table and bytecode; `[?]` the on-screen result of a replayed burst on a
+mirror the drive stream is also posing.
+
 ### A record that changes in place
 
 A prop's save record crosses on every birth path and on no other, so a prop whose record changes
@@ -511,6 +538,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | containers | `coop/props/container_contents_sync`, `coop/items/save_record_wire`, `coop/interactables/interactable_sync` |
 | a held prop's knock and break effects | `coop/player/melee_fx_contact`, `coop/player/melee_fx` |
 | a container's damage, break and cues | `coop/props/crate_break`, `coop/props/prop_impact_fx`, `coop/props/prop_damage_gate`, `coop/props/hit_target_prop`, `ue_wrap/actors/physics_impact` |
+| a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |
 | the pocket blip | `coop/items/inventory_pickup_sync` |

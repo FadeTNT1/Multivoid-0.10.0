@@ -18,6 +18,7 @@
 #include "coop/props/remote_prop.h"
 
 #include "ue_wrap/actors/container_inventory.h"
+#include "ue_wrap/actors/fire_extinguisher.h"
 #include "ue_wrap/actors/int_objects.h"
 #include "ue_wrap/actors/physics_impact.h"
 #include "ue_wrap/actors/prop.h"
@@ -273,12 +274,12 @@ Served Serve(coop::net::Session& s, int slot, const Queued& q) {
     if (!s.IsSlotWorldReady(slot)) return done("slot not world-ready");
     if (Seen(sl, p.contactId)) return done("a repeated contact");
     void* target = EL::LivePropActor(static_cast<EL::ElementId>(p.targetEid));
-    if (!target || !IsHostDamaged(target)) return done("not a container");
+    if (!target || !IsHostDamaged(target)) return done("not a host-damaged prop");
     // The sender's throw: the row the host elected it for stands on the causer (or on the container it threw).
     const uint32_t synced = p.causerEid != 0 ? p.causerEid : p.targetEid;
     if (coop::prop_drive_host::ClientSyncerOf(synced) != static_cast<uint8_t>(slot)) {
         if (coop::net::NowMs() - q.arrivedMs < kSyncWaitMs) return Served::Wait;
-        return done(p.causerEid != 0 ? "the causer is not the sender's" : "the container is not the sender's");
+        return done(p.causerEid != 0 ? "the causer is not the sender's" : "the target is not the sender's");
     }
     void* causer = p.causerEid != 0 ? EL::LivePropActor(static_cast<EL::ElementId>(p.causerEid)) : nullptr;
     if (p.causerEid != 0 && !causer) return done("the causer is gone");
@@ -348,7 +349,11 @@ void SettleWatches() {
 
 }  // namespace
 
-bool IsHostDamaged(void* prop) { return prop && ue_wrap::container_inventory::IsContainer(prop); }
+bool IsHostDamaged(void* prop) {
+    // A fire extinguisher is host-damaged for the same reason a container is: its burst is a game-side effect (a
+    // thrust, a spray, a drained charge) that one peer decides and the record then carries (fire_extinguisher_sync).
+    return prop && (ue_wrap::container_inventory::IsContainer(prop) || ue_wrap::fire_extinguisher::IsExtinguisher(prop));
+}
 
 void OnClientImpact(const sg::Call& c, void* container) {
     coop::net::Session* s = LoadSession();
