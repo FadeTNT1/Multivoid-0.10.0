@@ -1290,6 +1290,19 @@ enum class ReliableKind : uint8_t {
     // lifecycle and FoodState. Never relayed; not pre-world. Late join: nothing to replay; the count is the tray's
     // FoodState. ShrimpDispenseIntentPayload.
     ShrimpDispenseIntent = 218,
+
+    // CLIENT->HOST: a client's press on a microwave -- action 4 (the time mode) or action 8 (start) -- by its prop key
+    // (coop::microwave_sync). The client cancels its own run; the host refuses a sender that is not alive or out of
+    // reach and runs the game's own action once with the sender's puppet. Never relayed; not pre-world. Late join:
+    // nothing to replay. MicrowaveIntentPayload.
+    MicrowaveIntent = 219,
+
+    // HOST->ALL: a microwave's mode, set time, time left and whether it runs, with a ding on the stop
+    // (coop::microwave_sync), on every change and once a second while it runs. A client draws the run and its stop
+    // and turns the plate; its own wave and the loop's effects are cancelled. Never relayed; a client's copy is
+    // refused at the host's receive edge. Late join: every noted microwave's state to the joiner at its ready edge,
+    // no ding. MicrowaveStatePayload.
+    MicrowaveState = 220,
 };
 
 #pragma pack(push, 1)
@@ -2396,6 +2409,32 @@ struct ShrimpDispenseIntentPayload {
 };
 static_assert(sizeof(ShrimpDispenseIntentPayload) == 36, "ShrimpDispenseIntentPayload must be 36 bytes");
 static_assert(sizeof(ShrimpDispenseIntentPayload) <= 256 - 20 - 8, "ShrimpDispenseIntentPayload must fit one datagram");
+
+// A client's press on a microwave (MicrowaveIntent): the microwave by its prop key and the action, 4 or 8.
+struct MicrowaveIntentPayload {
+    WireKey key;          // 32
+    uint8_t action;       // 1 -- 4 the time mode, 8 start
+    uint8_t reserved[3];  // 3 -- zero
+};
+static_assert(sizeof(MicrowaveIntentPayload) == 36, "MicrowaveIntentPayload must be 36 bytes");
+static_assert(sizeof(MicrowaveIntentPayload) <= 256 - 20 - 8, "MicrowaveIntentPayload must fit one datagram");
+
+// A microwave's state (MicrowaveState), by its prop key.
+namespace microwave_state_flags {
+constexpr uint8_t kActive = 1u << 0;   // running
+constexpr uint8_t kDing   = 1u << 1;   // this state is the stop of a run: play the ding
+constexpr uint8_t kKnown  = kActive | kDing;
+}  // namespace microwave_state_flags
+struct MicrowaveStatePayload {
+    WireKey key;          // 32
+    float   timer;        // 4 -- the set time, seconds
+    float   remaining;    // 4 -- what is left of a run, seconds
+    int32_t timeMode;     // 4 -- 0..4
+    uint8_t flags;        // 1 -- microwave_state_flags
+    uint8_t reserved[3];  // 3 -- zero
+};
+static_assert(sizeof(MicrowaveStatePayload) == 48, "MicrowaveStatePayload must be 48 bytes");
+static_assert(sizeof(MicrowaveStatePayload) <= 256 - 20 - 8, "MicrowaveStatePayload must fit one datagram");
 
 // A client's press of the tool gun's remover (RemoverRequest): the element it hit, the camera point it looked
 // from and the point its shot struck, in world centimetres. The host judges all three; none is trusted.

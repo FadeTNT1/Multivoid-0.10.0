@@ -1044,6 +1044,33 @@ inline constexpr const wchar_t* ShrimpTrayCountProp = L"shrimps";
 inline constexpr const wchar_t* ShrimpTrayDropClassProp = L"shrimpDrop";
 inline constexpr const wchar_t* ShrimpTrayUpdFn = L"upd";
 inline constexpr int ShrimpTrayMaxCount = 64;   // a sanity bound on the wire, far over the tray's nine
+
+// The microwave (prop_microwave_C; its door is the child actor prop_microwaveDoor_C, a prop_swinger_C). Action 4
+// cycles `timeMode` mod 5 and sets `timer` to 5/10/15/30/60 s; action 8 calls `wave()`, which (powered, door shut)
+// sets `active`, shows `pointLight`, starts `microwave_loop`, copies `timer` into `time` and runs a latent loop that
+// spends `time`, rotates `spin` 60 deg/s and calls microwave(self) / microwaveElec() on each of `objectsInside`;
+// at 0 it plays `microwave_ding` and stops. Opening the door while active runs forceOpenDoor (the same stop).
+inline constexpr const wchar_t* MicrowaveClass = L"prop_microwave_C";
+inline constexpr const wchar_t* MicrowaveDoorClass = L"prop_microwaveDoor_C";
+inline constexpr const wchar_t* MicrowaveOpenedProp = L"opened";
+inline constexpr const wchar_t* MicrowaveActiveProp = L"active";
+inline constexpr const wchar_t* MicrowaveTimerProp = L"timer";
+inline constexpr const wchar_t* MicrowaveTimeProp = L"time";
+inline constexpr const wchar_t* MicrowaveTimeModeProp = L"timeMode";
+inline constexpr const wchar_t* MicrowaveObjectsInsideProp = L"objectsInside";
+inline constexpr const wchar_t* MicrowaveDoorObjProp = L"doorObj";
+inline constexpr const wchar_t* MicrowaveDelayCloseProp = L"delayClose";
+inline constexpr const wchar_t* MicrowaveLoopComp = L"microwave_loop";
+inline constexpr const wchar_t* MicrowaveDingComp = L"microwave_ding";
+inline constexpr const wchar_t* MicrowaveLightComp = L"pointLight";
+inline constexpr const wchar_t* MicrowaveSpinComp = L"spin";
+inline constexpr const wchar_t* MicrowaveWaveFn = L"wave";
+inline constexpr const wchar_t* CordedPoweredProp = L"cordPowered";
+inline constexpr int MicrowaveActionMode = 4;
+inline constexpr int MicrowaveActionStart = 8;
+inline constexpr int   MicrowaveModeCount = 5;
+inline constexpr float MicrowaveSpinDegPerSec = 60.0f;
+inline constexpr const wchar_t* AddLocalRotationFn = L"K2_AddLocalRotation";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

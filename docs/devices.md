@@ -363,6 +363,34 @@ door-verb, keypad and container lanes wait. The leave-timer face rides the same 
 its own drone's setting, which every peer's copy takes from the drone's state stream, and the console's
 click plays on the presser's machine and on the host.
 
+### The microwave
+
+A microwave (`prop_microwave_C`) sets its time on action 4 (`timeMode` mod 5, `timer` 5, 10, 15, 30
+or 60 s) and starts on action 8, `wave()`: powered and with its door shut it sets `active`, shows
+`pointLight`, starts `microwave_loop` and copies `timer` into `time`, then a latent loop spends
+`time`, turns the `spin` plate 60 degrees a second and calls `microwave(self)` and
+`microwaveElec()` on each of `objectsInside`, which its box's overlap keeps; at 0 it plays
+`microwave_ding` and stops. Opening the door while it runs is `forceOpenDoor`, the same stop. Its
+door is the child `prop_microwaveDoor_C`, a swinger, whose `doorOpened` and `doorClosed` the
+microwave binds through `doorObj`; the door already rides the swinger adapter
+(`coop/interactables/interactable_sync`). `getData` saves none of the run. `[V]` the decoded
+prop_microwave bodies. It is not one of the on/off appliances (`ue_wrap/devices/appliance`): its
+state is a mode, a time and a run, not one bool.
+
+The host owns it (`coop/interactables/microwave_sync`). On a client both presses are cancelled at
+the script-body gate and sent as `MicrowaveIntent` with the key and the action; a press the client
+cannot send runs on its own copy. The host refuses a sender not alive or out of reach and runs the
+game's own action once with the sender's puppet. A client's `wave` is cancelled from any other
+route, and since a loop already running there is not stopped by that, every class's `microwave`
+and `microwaveElec` called from a microwave's frame are cancelled on a client too: the host's loop
+heats the food, which crosses on the food lane ([props.md](props.md), Food). The host notes each
+microwave a press, a wave or its tick touched and sends `MicrowaveState` (the mode, the set time,
+the time left, whether it runs, a ding on the stop) on every change and once a second while it
+runs; a joiner gets every noted one's at its ready edge. A client writes the mode, draws a run as
+`wave` does (the light, the loop sound) and its stop as the loop does (the ding, the light, the
+sound), and turns the plate itself while it runs and is powered. `[?]` until a two-peer run reads
+the `[MICROWAVE]` lines; the sparks and the spin a metal object gets inside are the host's alone.
+
 ### The computer and the economy
 
 The base laptop (its tab and inbox), the shared balance, the upgrade levels, the shop orders, the
@@ -418,6 +446,7 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | the turbine | the host | six floats a second |
 | a window, the grime | any peer, minimum wins | monotone decreases |
 | the drone | the host | a transform stream; the client's tick suppressed |
+| a microwave's mode, time and run | the host | a client's press is an intent; `MicrowaveState` on a change and once a second while it runs |
 
 ## Wire messages
 
@@ -436,6 +465,8 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | `TurbineState`, `WindowCleanState`, `GrimeState` | each peer or the host | the driver floats; a decrease |
 | `DroneState` | the host to all | the drone's transform and flags, among them its leave timer |
 | `DroneFlyIntent` | a client to the host | the face pressed, the keyboard or the leave timer; the host finds the console by the sender's reach |
+| `MicrowaveIntent` | a client to the host | a microwave's key and the action, 4 or 8 |
+| `MicrowaveState` | the host to all | a microwave's key, mode, set time, time left, running, and a ding on the stop |
 
 ## Late join
 
@@ -468,5 +499,6 @@ state it shows, and the first rows a world takes play no sound.
 | the fuse towers | `coop/world/fuse_tower_rows`, `coop/world/fuse_tower_ops`, `coop/world/fuse_tower_kind`, `ue_wrap/devices/coord_tower`, `ue_wrap/devices/radio_tower` |
 | the drone | `coop/interactables/drone_sync`, `coop/interactables/drone_call_intent`, `ue_wrap/devices/drone`, `ue_wrap/devices/drone_console` |
 | the signal servers | `coop/interactables/serverbox_sync`, `coop/interactables/server_upgrade_sync`, `ue_wrap/devices/serverbox` |
+| the microwave | `coop/interactables/microwave_sync`, `ue_wrap/devices/microwave`, `coop/props/prop_food_state` (what it heats) |
 | identity | `coop/element/portable_identity` |
 | tests and probes | `coop/dev/container_selftest`, `coop/dev/door_drill`, `coop/dev/lightswitch_probe`, `coop/dev/drone_probe`, `coop/dev/drone_call_drill`, `coop/dev/light_group_census`, `coop/dev/tower_drill` |

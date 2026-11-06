@@ -402,6 +402,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/tape_caddy_sync.cpp
     src/coop/interactables/coffee_intent.cpp
     src/coop/interactables/coffee_state.cpp
+    src/coop/interactables/microwave_sync.cpp
     src/coop/interactables/laptop_sync.cpp
     src/coop/interactables/laptop_tab.cpp
     src/coop/interactables/portable_pc_lid.cpp
