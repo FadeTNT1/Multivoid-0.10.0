@@ -9,7 +9,12 @@
 // own copy's cue of that kind at the point (coop/props/prop_sound) and, for a break, its material's destroyed particles,
 // since the destroy that follows removes the copy without its own break. The swinger hears it from the host too: its own call
 // was cancelled, so there is nothing to predict twice. Bounded per container and in total; no late-join replay.
-// Game thread.
+//
+// The same lane covers every other prop (a mannequin, a crate-less barrel, a bottle): the host's component damages or
+// breaks it from any cause (a fall, a throw, a bump, a swing), and a client's copy runs none of that body, so its damaged
+// and destroyed particles and cues are sent too, and the receiver spawns the material's particle of that kind. A prop the
+// receiver authors itself ran its own body and is skipped; a prop a client drives is that client's (its held-contact
+// event, coop/player/melee_fx_contact). Game thread.
 
 #pragma once
 

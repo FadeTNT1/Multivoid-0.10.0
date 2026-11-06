@@ -43,6 +43,11 @@ coop::net::Session* LiveSession();
 // or the send failed. Game thread.
 bool Publish(const Effect& e);
 
+// Play the particle of `e` here, for this machine's own player, as it makes the effect. For a surface effect no native
+// call of the swing shows its maker (a material with no impact particle, whose damaged one the hit stands in for):
+// Publish only sends it to the others. Log line "local play own". Call before Publish of the same effect. Game thread.
+void PlayOwn(const Effect& e);
+
 // FNV-1a of `text`'s UTF-16 code units, low byte first: the id of a held item's key on the wire.
 uint32_t KeyHash(const std::wstring& text);
 
