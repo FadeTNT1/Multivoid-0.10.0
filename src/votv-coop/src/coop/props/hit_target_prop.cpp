@@ -17,6 +17,8 @@
 
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/obj_keyed_cache.h"
+#include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/types.h"
 #include "ue_wrap/engine/engine.h"
@@ -40,6 +42,9 @@ int  g_electedSaid = 0;
 int  g_convergedSaid = 0;
 bool g_unboundSaid = false;
 uint32_t g_converged = 0;
+// The host-damaged classes whose first swing at an unbound copy has been said: that copy breaks for nobody, so each
+// class says it, with the prop's row, rather than one line for every kind.
+ue_wrap::ObjKeyedCache<bool, 16> g_unboundHostDamagedSaid;
 
 // Developer red arm: the host takes no prop as a target, so it elects no swinger and drives its own copy instead.
 bool RefusesProps() {
@@ -64,9 +69,13 @@ uint32_t ClientClaim(const sg::Call& c, coop::hit_intent::Swing& swing) {
     if (coop::props::crate_break::IsHostDamaged(c.object)) {
         const EL::ElementId held = EL::Registry::Get().EidForActor(c.object);
         if (held == EL::kInvalidId) {
-            if (!g_unboundSaid) {
-                g_unboundSaid = true;
-                UE_LOGI("hit_target_prop: a swing at a prop not yet bound to the host's is lost");
+            void* const cls = ue_wrap::reflection::ClassOf(c.object);
+            if (cls && !g_unboundHostDamagedSaid.Find(cls)) {
+                g_unboundHostDamagedSaid.Insert(cls, true);
+                UE_LOGW("hit_target_prop: a swing at host-damaged %ls (row '%ls') is lost -- this copy is bound to no "
+                        "host element, so the host cannot break it (said once per class)",
+                        ue_wrap::reflection::ClassNameOf(c.object).c_str(),
+                        ue_wrap::prop::GetPropNameString(c.object).c_str());
             }
             return coop::hit_intent::kClaimedUnsent;
         }
@@ -158,6 +167,7 @@ void OnDisconnect() {
     g_convergedSaid = 0;
     g_converged = 0;
     g_unboundSaid = false;
+    g_unboundHostDamagedSaid.Clear();
 }
 
 }  // namespace coop::hit_target_prop

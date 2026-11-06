@@ -373,6 +373,33 @@ the burst. On a client the extinguisher's `shoot` is cancelled unless the replay
 into it, a fire's damage or a `loadData`, starts a burst there, and its loop's `extinguishRay` is cancelled while it
 thrusts: the host's loop extinguishes, and fire reaches the clients by its own lanes.
 
+### A breakable explosive's break
+
+The props whose own `broken` spawns an `explosion_C` are host-damaged beside the containers and the extinguisher
+(`coop/props/crate_break`, `ue_wrap/actors/breakable_explosive`): the vending machine (`prop_vending_C`; the live
+machine is `prop_vending_soda_C`), the gas can, the barrel, bottle and box bombs, the explosive crystal and the
+explosive drive. The vending machine's `broken` spills half its stock as fresh props and food, spawns an explosion at
+its `audio_sell` (force 5000, damage 100) and lights the spill. On a client's copy that break would blast and spill a
+second set, or, with the explosion's birth dissolved there and no request for a source of that kind
+(`coop/world/explosion_sync`), vanish with no blast at all. So a client runs no damage on one: a swing goes to the
+host as the ordinary `HitIntent` with no sequence, a thrown contact as a `PropContactIntent`, a fire's damage is
+cancelled, and the host's copy breaks once. Its blast reaches every peer as the host's `ExplosionSpawn`, its spill as
+births, its death through the destroy seam, its cues through `PropImpactFx`. A peer that joins after the break loads
+the host's world without the machine; no blast is replayed `[?]`.
+
+### A cubicle partition's hits and break
+
+The office partitions of the base's main room (`prop_cubicle_C`, and plain `prop_C` partitions of row `cubicleP_<n>`;
+`ue_wrap/actors/cubicle`) are host-damaged too. A level partition has no syncer for a client's swing to elect, so a
+client's hit broke nothing and its cues, played inside the component's `impactDamage`, reached no one. Now a client's
+swing goes to the host as a `HitIntent`, the host runs the partition's own `addDamage` on its copy, and the
+component's cues (impact, damaged, destroyed) reach every client as `PropImpactFx` before the break's destroy; the
+client spawns the material's destroyed particles from its copy while it still stands. The point a swing or contact
+names may lie anywhere on the prop's colliding bounds (50 cm of slack), since a partition is wider than the 200 cm
+radius a crate is judged by. The melee relay leaves a host-damaged target's hit cue to the host, so the swinger and
+every peer hear it once. A swing at a partition whose copy is bound to no host element is logged once per class with
+its row. A joiner after a break loads the host's world without the partition `[?]`.
+
 The state is the extinguisher's own save record, `life` as `floats[1][0]` and `active` as `bools[1][0]`. The host
 watches `shoot` after its body, marks the prop, and on its tick publishes the record, again about once a second while
 the charge lasts and once more when it is spent. While the prop thrusts it claims it under the drive stream

@@ -9,8 +9,8 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/props/crate_break.h"
 
-#include "ue_wrap/actors/container_inventory.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
@@ -187,7 +187,9 @@ bool ReadHit(const sg::Call& c, ue_wrap::hit_result::Hit& hit) {
 void Emit(void* player, bool hit, const ue_wrap::hit_result::Hit& h) {
     FVector playerAt{};
     E::TryGetActorLocation(player, playerAt);
-    const bool container = hit && h.actor && ue_wrap::container_inventory::IsContainer(h.actor);
+    // A host-damaged target (a container, an extinguisher, a breakable explosive, a cubicle) has its hit and break
+    // cues sent by the host (coop/props/prop_impact_fx): relaying them here too would play them twice.
+    const bool container = hit && h.actor && coop::props::crate_break::IsHostDamaged(h.actor);
     const uint32_t targetEid =
         hit && h.actor ? static_cast<uint32_t>(EL::Registry::Get().EidForActor(h.actor)) : 0u;
     const uint32_t target = targetEid == EL::kInvalidId ? 0u : targetEid;

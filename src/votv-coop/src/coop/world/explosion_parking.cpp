@@ -44,16 +44,21 @@ UE_FACT_FN(kRowVerbReached, "explosion", nullptr, L"reachedByExplosion", AnyClas
 UE_FACT_FN(kRowVerbIgnite, "explosion", nullptr, L"ignite", AnyClass);
 UE_FACT_FN(kRowRuneCheck, "explosion", L"explosion_C", L"runeCheck", Declared);
 UE_FACT_FN(kRowNarrowBeginPlay, "explosion", L"explosion_C", L"ReceiveBeginPlay", Declared);
+// The overlap types explosion_C hands its blast (ThingsAndStuffLib::OccludedExplosionImpulse, since 0.10.0): the
+// Blueprint library's out array, narrowed on a client before the native reads it.
+UE_FACT_FN(kRowDynPhysPawn, "explosion", L"lib_obj_C", L"obj_dynphyspawn", Declared);
 
 constexpr int kVerbs = 4;
 constexpr int kVerbsOwnerTakes = 2;    // addDamage and exploded: the first two rows of kTable
 constexpr int kTagVerb0 = 0x45585630;  // 'EXV0'..'EXV3'
 constexpr int kTagRune = 0x45585243;   // 'EXRC'
 constexpr int kTagNarrow = 0x45584E52; // 'EXNR'
+constexpr int kTagBlastTypes = 0x45584254;  // 'EXBT'
 
 SG::Verdict OnVerbPre(const SG::Call& c);
 SG::Verdict OnRunePre(const SG::Call& c);
 void        OnNarrowPost(const SG::Call& c);
+void        OnBlastTypesPost(const SG::Call& c);
 
 struct Hook {
     const ue_wrap::facts::Function* row;
@@ -62,7 +67,7 @@ struct Hook {
     SG::PostFn                      post;
     const char*                     name;
 };
-constexpr int kHooks = 6;
+constexpr int kHooks = 7;
 const Hook kTable[kHooks] = {
     {&kRowVerbAddDamage, kTagVerb0 + 0, &OnVerbPre, nullptr, "addDamage"},
     {&kRowVerbExploded, kTagVerb0 + 1, &OnVerbPre, nullptr, "exploded"},
@@ -70,6 +75,7 @@ const Hook kTable[kHooks] = {
     {&kRowVerbIgnite, kTagVerb0 + 3, &OnVerbPre, nullptr, "ignite"},
     {&kRowRuneCheck, kTagRune, &OnRunePre, nullptr, "runeCheck"},
     {&kRowNarrowBeginPlay, kTagNarrow, nullptr, &OnNarrowPost, "ReceiveBeginPlay"},
+    {&kRowDynPhysPawn, kTagBlastTypes, nullptr, &OnBlastTypesPost, "obj_dynphyspawn"},
 };
 
 constexpr auto kRetry = std::chrono::seconds(1);
@@ -185,11 +191,39 @@ void OnNarrowPost(const SG::Call& c) {
     }
 }
 
+// The blast's overlap types, as lib_obj_C::obj_dynphyspawn wrote them into the explosion graph's local, narrowed to
+// pawns before OccludedExplosionImpulse reads them: on a client the copy's blast pushes no prop, physics body or
+// dynamic actor, whose motion is its syncer's (the host's coast, or the client that drives it), and still knocks the
+// pawns back. Only a call an explosion's own graph makes is narrowed; the library serves every other caller as is.
+// This parking removes a second author: the host's blast flings the bodies and their syncers stream them.
+R::ParamOffset g_blastTypesOff{L"obj"};
+bool           g_blastTypesSaid = false;
+
+void OnBlastTypesPost(const SG::Call& c) {
+    if (!c.callerObject || !coop::spawn_authority::IsActiveClientSession()) return;
+    bool byName = false;
+    if (ue_wrap::explosion::ClassIdOf(R::ClassOf(c.callerObject), byName) < 0) return;
+    const int32_t off = g_blastTypesOff.Of(c.function);
+    uint8_t* array = off >= 0 ? SG::OutParamPtr(c, off) : nullptr;
+    if (ue_wrap::explosion::NarrowObjectTypesToPawn(array) >= 0) {
+        ++g_counters.blastNarrowed;
+        return;
+    }
+    ++g_counters.blastNarrowFailed;
+    if (!g_blastTypesSaid) {
+        g_blastTypesSaid = true;
+        UE_LOGE("[EXPLOSION] the overlap types of an explosion copy's blast could not be narrowed (off=%d array=%p): "
+                "its impulse reaches this client's props (said once)", off, static_cast<void*>(array));
+    }
+}
+
 // ---- the coast of flung props ---------------------------------------------------------------------------------------
 
-UE_FACT_FN(kRowFireImpulse, "explosion", L"RadialForceComponent", L"FireImpulse", Declared);
+// Since 0.10.0 explosion_C's blast is ThingsAndStuffLib::OccludedExplosionImpulse (a native static its ubergraph calls
+// after a 0.1 s delay, with the radial force's radius and strength), not RadialForceComponent::FireImpulse.
+UE_FACT_FN(kRowBlastImpulse, "explosion", L"ThingsAndStuffLib", L"OccludedExplosionImpulse", Declared);
 
-// An explosion whose radial force fired, by pointer and the object index it had. The hook fires inside the
+// An explosion whose blast fired, by pointer and the object index it had. The hook fires inside the
 // explosion's own body; the props are read and handed on in Tick, outside it. No cap: every flung prop coasts, and a
 // chain blast queues each of its explosions.
 struct Fired {
@@ -214,16 +248,15 @@ bool     g_fireGaveUp = false;
 int      g_fireTries = 0;
 Clock::time_point g_fireNextTry{};
 
-// Every Blueprint call of FireImpulse arrives here; an explosion's is the one whose component's owner is one of
-// ours. A component's outer is the actor that owns it.
-void OnFireImpulsePost(void* component, void* /*sourceObject*/, void* /*result*/) {
+// Every Blueprint call of OccludedExplosionImpulse arrives here; an explosion's is the one whose calling frame runs on
+// an explosion (a static's dispatch context is not the caller, so the frame's object names it).
+void OnBlastImpulsePost(void* /*context*/, void* sourceObject, void* /*result*/) {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!component || !s || !s->connected() || s->role() != coop::net::Role::Host || s->connectedPeerCount() <= 0)
+    if (!sourceObject || !s || !s->connected() || s->role() != coop::net::Role::Host || s->connectedPeerCount() <= 0)
         return;
-    void* owner = R::OuterOf(component);
     bool byName = false;
-    if (!owner || ue_wrap::explosion::ClassIdOf(R::ClassOf(owner), byName) < 0) return;
-    g_fired.push_back(Fired{owner, R::InternalIndexOf(owner)});
+    if (ue_wrap::explosion::ClassIdOf(R::ClassOf(sourceObject), byName) < 0) return;
+    g_fired.push_back(Fired{sourceObject, R::InternalIndexOf(sourceObject)});
 }
 
 // What a dead parking watch costs, said only where it applies: a client in a session drops the host's copies.
@@ -232,19 +265,19 @@ const char* kNotApplied() {
 }
 
 // Install under the same policy as the watches: a refused install is retried each second, 30 times, then said once.
-void InstallFireImpulse() {
+void InstallBlastImpulse() {
     if (g_fireInstalled || g_fireGaveUp || Clock::now() < g_fireNextTry) return;
     g_fireNextTry = Clock::now() + kRetry;
-    const ue_wrap::facts::Resolved fn = ue_wrap::facts::Resolve(kRowFireImpulse);
-    if (fn && ue_wrap::ufunction_hook::InstallPostHook(fn, &OnFireImpulsePost)) {
+    const ue_wrap::facts::Resolved fn = ue_wrap::facts::Resolve(kRowBlastImpulse);
+    if (fn && ue_wrap::ufunction_hook::InstallPostHook(fn, &OnBlastImpulsePost)) {
         g_fireInstalled = true;
         g_fired.reserve(16);
         g_blasts.reserve(16);
-        UE_LOGI("[EXPLOSION] coast seam installed on RadialForceComponent::FireImpulse");
+        UE_LOGI("[EXPLOSION] coast seam installed on ThingsAndStuffLib::OccludedExplosionImpulse");
     } else if (++g_fireTries >= kMaxTries) {
         g_fireGaveUp = true;
-        UE_LOGE("[EXPLOSION] the FireImpulse hook did not install in %d tries; the props a host explosion flings are "
-                "not driven to clients", kMaxTries);
+        UE_LOGE("[EXPLOSION] the OccludedExplosionImpulse hook did not install in %d tries; the props a host "
+                "explosion flings are not driven to clients", kMaxTries);
     }
 }
 
@@ -252,7 +285,7 @@ void InstallFireImpulse() {
 
 void Install(coop::net::Session* s) {
     g_session.store(s, std::memory_order_release);
-    InstallFireImpulse();
+    InstallBlastImpulse();
     if (g_liveLogged || g_settledDead) return;
     bool pending = false, dead = false;
     if (Clock::now() >= g_nextTry) {
@@ -343,10 +376,12 @@ void OnDisconnect() {
     const Counters c = GetCounters();
     if (c.verbCalls[0] || c.verbCalls[1] || c.verbCalls[2] || c.verbCalls[3])
         UE_LOGI("[EXPLOSION] parking end: verbCalls=%u/%u/%u/%u refused=%u/%u/%u/%u runeRefused=%u narrowed=%u "
-                "narrowFailed=%u",
+                "narrowFailed=%u blastNarrowed=%u blastNarrowFailed=%u",
                 c.verbCalls[0], c.verbCalls[1], c.verbCalls[2], c.verbCalls[3], c.verbRefused[0], c.verbRefused[1],
-                c.verbRefused[2], c.verbRefused[3], c.runeRefused, c.narrowed, c.narrowFailed);
+                c.verbRefused[2], c.verbRefused[3], c.runeRefused, c.narrowed, c.narrowFailed, c.blastNarrowed,
+                c.blastNarrowFailed);
     g_counters = Counters{};
+    g_blastTypesSaid = false;
 }
 
 Counters GetCounters() { return g_counters; }

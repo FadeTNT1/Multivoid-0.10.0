@@ -530,6 +530,22 @@ inline constexpr const wchar_t* VacuumClassPrefix = L"prop_vacuum";
 inline constexpr const wchar_t* TrashPileVacuumedFn = L"vacuumed";
 inline constexpr const wchar_t* TrashPileVerbLocationParam = L"location";
 
+// The breakable props whose own break spawns an explosion_C (ue_wrap/actors/breakable_explosive): the vending
+// machine's `broken` spills half its stock, blasts at its `audio_sell` and ignites the spill (the live machine is the
+// subclass prop_vending_soda_C), a gas can's `broken` and `broken_fire`, the three bombs, the explosive crystal and
+// the explosive drive. Each is matched with its subclasses.
+inline constexpr const wchar_t* BreakableExplosiveClasses[] = {
+    L"prop_vending_C",   L"prop_gascan_C",          L"prop_bombBarrel_C",       L"prop_bombBottle_C",
+    L"prop_bombBox_C",   L"prop_crystal_explode_C", L"prop_drive_explosive_C",
+};
+
+// The office cubicle partitions of the base's main room (ue_wrap/actors/cubicle): the class prop_cubicle_C (a prop_C
+// whose begin-play can break it at once through a huge addDamage when `instaBreak` is set), and plain prop_C
+// partitions whose list_props row is cubicleP_<n> (cubicleP_1 measured in a run's log). An FName keeps a trailing
+// _<n> as its number, so the row base is matched by name index, whatever the number.
+inline constexpr const wchar_t* CubicleClass = L"prop_cubicle_C";
+inline constexpr const wchar_t* CubicleItemRowBase = L"cubicleP";
+
 // The fire extinguisher and its wall mount (ue_wrap/actors/fire_extinguisher). The extinguisher's
 // own members are its charge, its hand spray and its runaway thrust; the mount's `fireExt` names
 // the extinguisher its box last snapped onto its attach point.

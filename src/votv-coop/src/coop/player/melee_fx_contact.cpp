@@ -11,8 +11,8 @@
 #include "coop/player/hand_item.h"
 #include "coop/player/players_registry.h"
 #include "coop/props/prop_damage_gate.h"
+#include "coop/props/crate_break.h"
 
-#include "ue_wrap/actors/container_inventory.h"
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -77,8 +77,8 @@ bool HeldHere(void* prop) {
 sg::Verdict OnImpactPre(const sg::Call& c) {
     if (!Enabled() || !LiveSession()) return sg::Verdict::Run;
     void* owner = R::OuterOf(c.object);
-    // A container's cues are the host's (coop/props/prop_impact_fx), held or not.
-    if (!owner || !ue_wrap::prop::IsDescendantOfProp(owner) || ue_wrap::container_inventory::IsContainer(owner))
+    // A host-damaged prop's cues are the host's (coop/props/prop_impact_fx), held or not.
+    if (!owner || !ue_wrap::prop::IsDescendantOfProp(owner) || coop::props::crate_break::IsHostDamaged(owner))
         return sg::Verdict::Run;
     // The component's own arithmetic says whether this knock hurts the prop; a bump below its resistance plays the
     // game's impact sound for the holder alone and is left there.

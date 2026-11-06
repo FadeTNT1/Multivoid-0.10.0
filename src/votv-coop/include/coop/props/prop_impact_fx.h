@@ -6,7 +6,8 @@
 // host watches that body before it runs: on a container whose component the call damages or breaks (the component's own
 // arithmetic, prop_damage_gate::ImpactOutcomeOf), or one a client's swing or contact the host runs now strikes without
 // damage, it sends PropImpactFx to every client, before the break's PropDestroy on the same lane. The receiver plays its
-// own copy's cue of that kind at the point (coop/props/prop_sound). The swinger hears it from the host too: its own call
+// own copy's cue of that kind at the point (coop/props/prop_sound) and, for a break, its material's destroyed particles,
+// since the destroy that follows removes the copy without its own break. The swinger hears it from the host too: its own call
 // was cancelled, so there is nothing to predict twice. Bounded per container and in total; no late-join replay.
 // Game thread.
 
