@@ -8,6 +8,7 @@
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/game_thread.h"  // IsDefinitelyOffGameThread: where a base may resolve
 #include "ue_wrap/engine/engine.h"
+#include "ue_wrap/engine/engine_attach.h"  // GetActorRootCollisionEnabled: the census reads a prop's root collision
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/object_index.h"  // the fuzzy dedupe: one class and its instances
@@ -389,6 +390,26 @@ bool WriteSpParityIdentity(void* prop, R::FName nameRow,
     *reinterpret_cast<bool*>(base + P::off::Aprop_removeWOrespawn) = removeWOrespawn;
     *reinterpret_cast<bool*>(base + P::off::Aprop_frozen)          = frozen;
     *reinterpret_cast<bool*>(base + P::off::Aprop_sleep)           = sleep;
+    return true;
+}
+
+bool ReadPropVisibility(void* prop, PropVisibility& out) {
+    out = PropVisibility{false, false, false, false, false, -1};
+    if (!prop) return false;
+    int32_t off = 0;
+    uint8_t mask = 0;
+    if (R::FindBoolProperty(R::ClassOf(prop), P::name::ActorHiddenProp, off, mask)) {
+        out.actorHiddenRead = true;
+        out.actorHidden = (ReadField<uint8_t>(prop, static_cast<size_t>(off)) & mask) != 0;
+    }
+    if (void* mesh = GetStaticMesh(prop)) {
+        const uint8_t vis = ReadField<uint8_t>(mesh, P::off::USceneComponent_VisFlagsByte);
+        const uint8_t hid = ReadField<uint8_t>(mesh, P::off::USceneComponent_HiddenFlagsByte);
+        out.meshRead = true;
+        out.meshVisible = (vis & (1u << 4)) != 0;
+        out.meshHiddenInGame = (hid & (1u << 2)) != 0;
+    }
+    out.rootCollision = engine::GetActorRootCollisionEnabled(prop);
     return true;
 }
 

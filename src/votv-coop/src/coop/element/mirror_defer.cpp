@@ -10,6 +10,7 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"      // InternalIndexOf + IsLiveByIndex
 
+#include <chrono>
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
@@ -48,6 +49,22 @@ std::unordered_map<uint32_t, HiddenRec> g_hidden;
 // is: do not re-hide on the idempotent re-spawn return, for any mirror kind.
 std::unordered_set<uint32_t> g_revealed;
 bool g_armed = false;
+
+// The watchdog's clocks. Every reveal above is driven by a message or a latch (SnapshotComplete, the
+// quiescence probe); if the drive never comes -- the handler that carries it faulted partway, or the
+// latch never lands -- the mirrors it owes a reveal stay hidden for good: a prop the host sees and
+// the joiner does not. So the window also ages out on its own. Game thread only.
+using Clock = std::chrono::steady_clock;
+Clock::time_point g_armedAt{};
+Clock::time_point g_lastHideAt{};
+bool g_liftDone = false;  // RevealConfirmedAtLift ran in this window
+// With no lift reveal and no new hidden mirror for this long, the bracket is not coming: show the
+// confirmed ones. The host's bracket arrives within seconds of its begin; a slow link keeps hiding
+// (each hide restarts the clock), so only a quiet one trips it.
+constexpr std::chrono::seconds kLiftIdleLimit{45};
+// A window open this long is over, whatever else is pending: the absolute bound of the quiescence
+// probe is 120 s, and this sits past it.
+constexpr std::chrono::seconds kWindowLimit{180};
 
 // Reveal one record: Show + restore what the hide changed of collision (Off: the actor flag back on;
 // PhysicsOnly: each primitive's value the hide found, for those still live). Liveness-gated -- a record
@@ -111,6 +128,9 @@ void Arm() {
     // so a full teardown's dead actors are a harmless no-op. Same reveal-then-clear discipline as Reset().
     for (auto& kv : g_hidden) RevealRec(kv.second);
     g_armed = true;
+    g_armedAt = Clock::now();
+    g_lastHideAt = g_armedAt;
+    g_liftDone = false;
     g_hidden.clear();
     g_revealed.clear();
     UE_LOGI("mirror_defer: ARMED -- join deferred-hide window open (new host mirrors spawn hidden "
@@ -151,6 +171,7 @@ void OnMirrorSpawned(uint32_t eid, void* actor, HideCollision collision, bool ho
     }
     if (collision == HideCollision::Off) ue_wrap::engine::SetActorEnableCollision(actor, false);
     g_hidden[eid] = HiddenRec{actor, idx, collision, std::move(comps), primitives, fallbackWhy, holdUntilQuiescence};
+    g_lastHideAt = Clock::now();
 }
 
 bool HideInfoOf(uint32_t eid, HideInfo& out) {
@@ -162,7 +183,11 @@ bool HideInfoOf(uint32_t eid, HideInfo& out) {
 
 void RevealConfirmedAtLift() {
     UE_ASSERT_GAME_THREAD("mirror_defer::RevealConfirmedAtLift");
-    if (!g_armed) return;
+    if (!g_armed) {
+        UE_LOGI("mirror_defer: lift-reveal skipped -- the deferred-hide window is not open (nothing is held hidden)");
+        return;
+    }
+    g_liftDone = true;
     int revealed = 0;
     for (auto it = g_hidden.begin(); it != g_hidden.end();) {
         if (it->second.hold) { ++it; continue; }  // local twin still visible -> wait for quiescence
@@ -185,6 +210,36 @@ void RevealAllSurvivorsAtQuiescence() {
     g_armed = false;
     UE_LOGI("mirror_defer: quiescence-reveal -- %d held/tail mirror(s) shown; deferred-hide window "
             "CLOSED (steady-state spawns now visible immediately)", n);
+}
+
+void TickWatchdog() {
+    UE_ASSERT_GAME_THREAD("mirror_defer::TickWatchdog");
+    if (!g_armed) return;
+    const auto now = Clock::now();
+    if (now - g_armedAt >= kWindowLimit) {
+        const int n = static_cast<int>(g_hidden.size());
+        for (auto& kv : g_hidden) RevealRec(kv.second);
+        g_hidden.clear();
+        g_armed = false;
+        UE_LOGW("mirror_defer: watchdog -- the window was open %lld s with no quiescence reveal; %d hidden "
+                "mirror(s) shown and the window CLOSED (a mirror held for its twin may now be visible beside it)",
+                static_cast<long long>(kWindowLimit.count()), n);
+        return;
+    }
+    if (!g_liftDone && !g_hidden.empty() && now - g_lastHideAt >= kLiftIdleLimit) {
+        int revealed = 0;
+        for (auto it = g_hidden.begin(); it != g_hidden.end();) {
+            if (it->second.hold) { ++it; continue; }
+            RevealRec(it->second);
+            g_revealed.insert(it->first);
+            it = g_hidden.erase(it);
+            ++revealed;
+        }
+        g_liftDone = true;  // once: the window's own reveals take it from here
+        UE_LOGW("mirror_defer: watchdog -- no lift reveal and no new mirror for %lld s (the bracket's end never "
+                "drove it); %d confirmed mirror(s) shown, %zu held to quiescence",
+                static_cast<long long>(kLiftIdleLimit.count()), revealed, g_hidden.size());
+    }
 }
 
 }  // namespace coop::mirror_defer

@@ -158,6 +158,9 @@ void ApplyEnd(void* actor, const coop::net::PropDriveEndPayload& p, bool parkedH
     // The host's frozen and sleep at the end first: a hook that bites a frozen prop unfreezes it on
     // the host only (hook_C's attach_a runs setPropProps), so a copy still frozen here takes the
     // host's flags before the physics decision reads them.
+    // A wall vent the ventCrawler pulled down ends Static-cleared: this copy takes the release first, so the
+    // frozen/sleep step below and the physics decision read the flags the host's copy has.
+    coop::prop_wire_parity::ConvergeStaticRelease(actor, p.physFlags);
     coop::prop_wire_parity::ConvergeFrozenSleep(actor, p.physFlags);
     if (!PhysicsStaysOff(actor)) {
         coop::prop_wire_parity::RestoreSpParityPhysicsAfterConverge(actor, p.physFlags);

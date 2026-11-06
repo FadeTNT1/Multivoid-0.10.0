@@ -201,6 +201,14 @@ rebound onto its row by the sweep, and the host's pose and flags for it, kept th
 replayed onto the re-create through the convergence the snapshot apply runs
 (`coop/props/join_keyed_replay`).
 
+Three guards keep a reveal from being lost. The lift's reveal runs before the curtain's fade, so a fault in
+the fade (the cover reads the overlay's clock, and the overlay builds its context on its first drawn frame)
+cannot skip it; the fade stamps its start on the render thread when the game thread has no context to read
+(`ui/join_curtain`). The reveal logs a line even when its window is not open. And the window ages out on
+its own (`mirror_defer::TickWatchdog`, driven by the client reconcile tick): 45 s with no lift and no new
+mirror shows the confirmed ones, and 180 s after it opened every hidden mirror is shown and the window
+closes, each with a warning; a mirror held for its twin may then be visible beside it.
+
 Visually the joiner never sees the reconcile. A full-screen curtain rises at connect and fades
 out when the primary world is assembled, at the end marker plus the spawn drain, seconds before
 quiescence (`ui/join_curtain`). Every host mirror spawns hidden (`coop/element/mirror_defer`): an

@@ -300,4 +300,20 @@ void* FindNearestChipPile(const FVector& anchor, float radiusCm, float* outDist 
 // False if the mesh or the UFunction does not resolve. Idempotent.
 bool ForceRestoreDefaultCollision(void* prop);
 
+// What a player's eye can say about a prop, read from memory with no dispatch: the actor's own hidden
+// flag (AActor::bHidden, what SetActorHiddenInGame writes), the static-mesh component's bVisible and
+// bHiddenInGame, and the root primitive's effective collision (0 None, 1 QueryOnly, 2 PhysicsOnly,
+// 3 QueryAndPhysics; -1 when it did not read). `actorHiddenRead` and `meshRead` say which fields could
+// be read at all, so an unread field is never taken for a false one. For the vent-cover census; the
+// caller owns liveness. Game thread.
+struct PropVisibility {
+    bool actorHiddenRead;
+    bool actorHidden;
+    bool meshRead;
+    bool meshVisible;
+    bool meshHiddenInGame;
+    int  rootCollision;
+};
+bool ReadPropVisibility(void* prop, PropVisibility& out);
+
 }  // namespace ue_wrap::prop

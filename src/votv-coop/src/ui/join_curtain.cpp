@@ -18,6 +18,12 @@ enum class State { Hidden, Up, Fading };
 std::atomic<int>    g_state{static_cast<int>(State::Hidden)};
 std::atomic<double> g_fadeStart{0.0};  // ImGui::GetTime() at BeginDismiss
 
+// g_fadeStart before the render thread has stamped it: BeginDismiss runs on the game thread, where the
+// ImGui context may not exist yet (the overlay builds it on its first drawn frame), and ImGui::GetTime()
+// dereferences that context. Render reads the clock on its own thread, where the context is current,
+// and stamps the start from the first frame it sees Fading.
+constexpr double kFadeUnstamped = -1.0;
+
 constexpr float kFadeSeconds = 0.40f;  // smooth 1->0 dismiss (not a hard snap); the world fades in assembled
 
 State Get() { return static_cast<State>(g_state.load(std::memory_order_acquire)); }
@@ -32,7 +38,7 @@ void BeginDismiss() {
     // Only from a raised cover; ignore a double-dismiss / not-shown. Publish g_fadeStart BEFORE flipping to
     // Fading so the render thread, on observing Fading (acquire), sees the start time (release pairs).
     int expected = static_cast<int>(State::Up);
-    g_fadeStart.store(ImGui::GetTime(), std::memory_order_relaxed);
+    g_fadeStart.store(ImGui::GetCurrentContext() ? ImGui::GetTime() : kFadeUnstamped, std::memory_order_relaxed);
     g_state.compare_exchange_strong(expected, static_cast<int>(State::Fading),
                                     std::memory_order_release, std::memory_order_relaxed);
 }
@@ -51,7 +57,11 @@ void Render() {
 
     float alpha = 1.0f;
     if (st == State::Fading) {
-        const double start = g_fadeStart.load(std::memory_order_relaxed);
+        double start = g_fadeStart.load(std::memory_order_relaxed);
+        if (start == kFadeUnstamped) {  // BeginDismiss ran with no context: the fade starts at this frame
+            start = ImGui::GetTime();
+            g_fadeStart.store(start, std::memory_order_relaxed);
+        }
         const float t = static_cast<float>(ImGui::GetTime() - start) / kFadeSeconds;
         if (t >= 1.0f) return;  // fade complete -> draw nothing (Render is read-only; state stays Fading
                                 // until the next Show()/Reset() on the game thread -- harmless, IsActive

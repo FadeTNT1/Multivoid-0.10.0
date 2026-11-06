@@ -188,7 +188,10 @@ that lives outside the actor's rotation streams as an auxiliary yaw. The eventer
 the same way, through its row of the source-gated catch: the vent crawler and the egger, the
 knocker in the vent, the morning UFO, the Rozital mothership and the falling body and car
 droppers and graystank's tank or pig dropper, and the arirFollower event's follower crosses on the
-character lane through its spawner's row `[RD]`. boarwar's controller (`boarInvasion_C`) has its own row:
+character lane through its spawner's row `[RD]`. The vent the crawler pulls down is a prop, not part of
+the creature: the host streams it on the driven-prop channel while the crawler's break timeline plays, and
+a client's cover takes the final pose and the release from Static at the end edge
+([props.md](props.md), "The wall vent the crawler pulls down") `[RD]`. boarwar's controller (`boarInvasion_C`) has its own row:
 its two ariral shooters, minted a minute and two minutes in, cross on the character lane, and the
 boars it throws are props on the prop lane; its four closing fire tanks and the level UFO shader it
 lights stay the host's `[RD]`. The mothership flies a part of itself across the sky from its own tick, so its mirror

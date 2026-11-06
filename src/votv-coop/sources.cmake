@@ -257,6 +257,8 @@ set(VOTVCOOP_SOURCES
     src/coop/props/prop_drive_host.cpp
     src/coop/props/client_shove.cpp
     src/coop/props/prop_motion_scan.cpp
+    src/coop/props/vent_census.cpp
+    src/coop/props/vent_drive.cpp
     src/coop/props/prop_drive_stream.cpp
     src/coop/props/prop_syncer_host.cpp
     src/coop/props/prop_syncer_client.cpp

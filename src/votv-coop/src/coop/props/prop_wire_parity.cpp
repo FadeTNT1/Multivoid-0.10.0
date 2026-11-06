@@ -96,6 +96,24 @@ void ConvergeFrozenSleep(void* actor, uint8_t physFlags) {
     }
 }
 
+bool ConvergeStaticRelease(void* actor, uint8_t physFlags) {
+    namespace pf = coop::net::propspawn_flags;
+    if (!(physFlags & pf::kLiveState) || (physFlags & pf::kStatic)) return false;  // the host's copy is still Static
+    if (!actor || !ue_wrap::prop::IsDescendantOfProp(actor)) return false;
+    if (R::ClassNameOf(actor) != ue_wrap::profile::name::PropVentClass) return false;
+    if (!ue_wrap::prop::IsStatic(actor)) return false;                              // already released
+    const bool wantFrozen = (physFlags & pf::kFrozen) != 0;
+    const bool wantSleep  = (physFlags & pf::kSleep) != 0;
+    const bool ok = ue_wrap::prop::CallBaseSetPropProps(actor, /*isStatic=*/false, wantFrozen, wantSleep);
+    if (ok) {
+        UE_LOGI("prop_wire_parity: %p released from Static (frozen=%d sleep=%d) -- the host's vent was pulled down",
+                actor, wantFrozen ? 1 : 0, wantSleep ? 1 : 0);
+    } else {
+        UE_LOGW("prop_wire_parity: %p Static -> off: the game's setter did not dispatch; the copy stays Static", actor);
+    }
+    return ok;
+}
+
 bool SpParitySimulate(uint8_t physFlags) {
     namespace pf = coop::net::propspawn_flags;
     return (physFlags & (pf::kStatic | pf::kFrozen | pf::kSleep)) == 0;
