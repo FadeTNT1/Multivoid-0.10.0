@@ -41,7 +41,7 @@ int32_t g_tpOff       = -1;       // tp       (a UBillboardComponent*: where `ex
 // neighbouring bools into one byte. -1 = unresolved.
 int32_t g_batteryOff  = -1;
 struct BoolField { int32_t off = -1; uint8_t mask = 0; };
-BoolField g_empty, g_broken, g_underwater, g_inFwd, g_inBack;
+BoolField g_empty, g_broken, g_underwater, g_inFwd, g_inBack, g_inLeft, g_inRight, g_isDrive;
 
 void ResolveBool(void* cls, const wchar_t* name, BoolField& f) {
     if (!R::FindBoolProperty(cls, name, f.off, f.mask) || f.off < 0 || f.mask == 0) {
@@ -108,6 +108,9 @@ bool EnsureResolved() {
     ResolveBool(cls, N::AtvUnderwaterProp, g_underwater);
     ResolveBool(cls, N::AtvInputForwardProp, g_inFwd);
     ResolveBool(cls, N::AtvInputBackProp, g_inBack);
+    ResolveBool(cls, N::AtvInputLeftProp, g_inLeft);
+    ResolveBool(cls, N::AtvInputRightProp, g_inRight);
+    ResolveBool(cls, N::AtvIsDriveProp, g_isDrive);
 
     g_resolved.store(true, std::memory_order_release);
     UE_LOGI("atv: resolved ATV_C=%p Key@0x%04X Player@0x%04X isDriven@0x%04X fuel@0x%04X "
@@ -212,6 +215,17 @@ bool ReadDriveGates(void* atv, DriveGates& out) {
 
 bool WriteEmptyLatch(void* atv, bool v) { return WriteBool(atv, g_empty, v); }
 bool WriteBrokenLatch(void* atv, bool v) { return WriteBool(atv, g_broken, v); }
+
+uint8_t ClearDriveInput(void* atv) {
+    if (!atv || !g_resolved.load(std::memory_order_acquire)) return 0;
+    const BoolField* fields[] = {&g_inFwd, &g_inBack, &g_inLeft, &g_inRight, &g_isDrive};
+    uint8_t was = 0;
+    for (uint8_t i = 0; i < 5; ++i) {
+        if (!ReadBool(atv, *fields[i])) continue;
+        if (WriteBool(atv, *fields[i], false)) was |= static_cast<uint8_t>(1u << i);
+    }
+    return was;
+}
 
 bool ReadTpLocation(void* atv, FVector& out) {
     out = FVector{};

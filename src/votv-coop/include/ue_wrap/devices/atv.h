@@ -82,6 +82,12 @@ bool ReadDriveGates(void* atv, DriveGates& out);
 bool WriteEmptyLatch(void* atv, bool v);
 bool WriteBrokenLatch(void* atv, bool v);
 
+// Clears the driver's input (input_forward, input_back, input_left, input_right) and `isDrive` on a copy. Returns the
+// bits that were set before the clear (bit 0 forward, 1 back, 2 left, 3 right, 4 isDrive); 0 when none was, on null, an
+// unresolved ATV_C, or a field that did not resolve (that field is left alone). Writes fields only and calls nothing,
+// so no sound or event of the ATV's own runs from it. Names: sdk_profile_names.h. Game thread.
+uint8_t ClearDriveInput(void* atv);
+
 // The story event's flag: while it is set the ATV's own tick explodes it (health to 0, then `explode`) once its driver
 // has moved. Resolved by name with no fallback; both return false, and touch nothing, on null, an unresolved ATV_C or a
 // class without the property. Game thread.

@@ -122,6 +122,13 @@ inline constexpr const wchar_t* AtvBrokenLatchProp  = L"brokenn";
 inline constexpr const wchar_t* AtvUnderwaterProp   = L"underwater";
 inline constexpr const wchar_t* AtvInputForwardProp = L"input_forward";
 inline constexpr const wchar_t* AtvInputBackProp    = L"input_back";
+// The rest of the driver's input and the engine-sound state. sound_drive (called by the throttle and steer input events,
+// f_brake, unbrake, loadbrake and dismount) sets `isDrive` = (input_forward || input_back) && !Brake and, when that
+// differs from the last value, re-activates audio_car_drive_start (the short engine rev) or audio_car_drive_brake;
+// receiveTick burns fuel while `isDrive` holds. Neither checks isDriven, so a copy nobody sits in keeps them only stale.
+inline constexpr const wchar_t* AtvInputLeftProp    = L"input_left";
+inline constexpr const wchar_t* AtvInputRightProp   = L"input_right";
+inline constexpr const wchar_t* AtvIsDriveProp      = L"isDrive";
 inline constexpr const wchar_t* AtvUpdBatteryFn     = L"updBattery";
 // ATV_C's repair look and its unscrew. lookAt writes the part the player looks at: `lookAtTire` (a fitted wheel,
 // -1 none), `lookAtTireSocket` (an empty wheel socket, -1 none), `lookAtSpareTireBox`, `lookAtContainer` (the
