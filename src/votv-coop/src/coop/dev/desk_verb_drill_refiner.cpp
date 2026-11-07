@@ -29,6 +29,7 @@ bool    g_poked = false;
 // CLIENT: its readings at the press.
 int32_t g_levelBefore = -1;
 int32_t g_processedBefore = -1;
+std::wstring g_greenBefore;  // the green console's text at the press: a mirrored decode must change it
 // join, CLIENT: the census as it went live ahead of the load, so the join counts its own restore.
 Census g_joinBase;
 
@@ -123,10 +124,20 @@ bool RefinerArmed(int leg) {
 void RefinerBeforePress() {
     g_levelBefore = CompLevel();
     g_processedBefore = Processed();
+    if (!ue_wrap::comp_pane::ReadHecerText(g_greenBefore)) g_greenBefore.clear();
+}
+
+// The mirror's green console fed (comp_sync's cosmetic lines): its text differs from the press's. The feed waits on the
+// pane being in use, as the native step does, so a closed pane is not judged.
+static bool GreenConsoleFed() {
+    CD::Scalars sc;
+    if (!CD::ReadScalars(sc) || !sc.activeComp) return true;
+    std::wstring now;
+    return ue_wrap::comp_pane::ReadHecerText(now) && now != g_greenBefore;
 }
 
 bool RefinerClientDone(int leg) {
-    if (leg == kStart) return coop::comp_sync::MirrorActive() || CompLatched();
+    if (leg == kStart) return coop::comp_sync::MirrorActive() ? GreenConsoleFed() : CompLatched();
     if (leg == kStop) return !coop::comp_sync::MirrorActive() && !CompLatched();
     return CompLevel() > g_levelBefore;  // complete, processed
 }
@@ -166,6 +177,7 @@ void RefinerReset() {
     g_hostLevel = g_hostProcessed = -1;
     g_poked = false;
     g_levelBefore = g_processedBefore = -1;
+    g_greenBefore.clear();
     g_joinBase = Census{};
 }
 

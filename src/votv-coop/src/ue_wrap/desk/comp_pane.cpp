@@ -36,6 +36,8 @@ void* g_updCompFn = nullptr;           // updComp(bool Condition)
 void* g_compStartFn = nullptr;         // comp_start(float startPorgressFrom, bool& succ)
 void* g_sndWorking = nullptr;          // SoundCue 'computerWorking_Cue' (the loop)
 void* g_sndWorkingEnd = nullptr;       // SoundCue 'computerWorking_end' (the wind-down)
+int32_t g_offHecerText = -1;           // comp_hecertext (FString; the green console's backing text)
+void* g_writeHecerFn = nullptr;        // comp_writehecer(FString a)
 
 bool g_required = false;               // fast latch: steady state = one bool load
 std::chrono::steady_clock::time_point g_nextResolve{};
@@ -61,6 +63,8 @@ void ResolvePass() {
     if (g_offCueDone < 0) g_offCueDone = R::FindPropertyOffset(g_deskCls, L"Done");
     if (!g_updCompFn) g_updCompFn = R::FindFunction(g_deskCls, L"updComp");
     if (!g_compStartFn) g_compStartFn = R::FindFunction(g_deskCls, kCompStart);
+    if (g_offHecerText < 0) g_offHecerText = R::FindPropertyOffset(g_deskCls, L"comp_hecertext");
+    if (!g_writeHecerFn) g_writeHecerFn = R::FindFunction(g_deskCls, L"comp_writehecer");
     // The cue ASSETS share the component property's leaf name -- class-filter
     // the lookup so we never grab the component instance by mistake.
     if (!g_sndWorking) {
@@ -234,6 +238,28 @@ bool CompBeepDone(bool maxed) {
     void* c = DeskAudioComponent(maxed ? g_offCueDone : g_offCueProg);
     if (!c) return false;
     return ue_wrap::component_calls::Activate(c);
+}
+
+bool WriteHecer(const wchar_t* text) {
+    void* d = Desk();
+    if (!d || !g_writeHecerFn || !text || !ue_wrap::console_desk::AtlasWidget()) return false;
+    // The param-frame FString aliases OUR buffer for the call: comp_writehecer concatenates it into a new string and
+    // keeps no pointer to it (the convention asset_load and ExecuteConsoleCommand use). Num counts the terminator.
+    std::wstring s(text);
+    const int32_t n = static_cast<int32_t>(s.size()) + 1;
+    R::FString fs{s.data(), n, n};
+    ue_wrap::ParamFrame f(g_writeHecerFn);
+    if (!f.valid() || !f.Set<R::FString>(L"a", fs)) return false;
+    return ue_wrap::Call(d, f);
+}
+
+bool ReadHecerText(std::wstring& out) {
+    void* d = Desk();
+    if (!d || g_offHecerText < 0) return false;
+    const auto* fs = OffPtr<R::FString>(d, g_offHecerText);
+    out.clear();
+    if (fs->Data && fs->Num > 1) out.assign(fs->Data, static_cast<size_t>(fs->Num - 1));
+    return true;
 }
 
 }  // namespace ue_wrap::comp_pane

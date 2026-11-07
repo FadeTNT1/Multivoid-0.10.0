@@ -17,6 +17,8 @@
 
 #include "ue_wrap/core/script_gate.h"
 
+#include <string>
+
 namespace ue_wrap::comp_pane {
 
 // The names a watch on the refiner knows its functions by. A class-scoped watch is known by the pointers it was
@@ -75,5 +77,13 @@ bool PaintCompProcess(const wchar_t* text);
 bool CompCueStart();
 bool CompCueStop();
 bool CompBeepDone(bool maxed);
+
+// The pane's green output console (text_compconsole), fed by the desk's own comp_writehecer(a): it prepends `a` to
+// comp_hecertext, keeps the first 1500 characters and repaints the console. The native decode step writes there; a
+// mirror, whose decode step never runs, calls it for the same cosmetic text. False when the function or the atlas
+// widget is not there (the script would read an invalid widget).
+bool WriteHecer(const wchar_t* text);
+// comp_hecertext as it stands. False when unresolved or no desk.
+bool ReadHecerText(std::wstring& out);
 
 }  // namespace ue_wrap::comp_pane
