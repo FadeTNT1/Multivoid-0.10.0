@@ -19,6 +19,7 @@
 #include "coop/player/sleeper_snore.h"
 #include "coop/player/sleeper_wire.h"
 #include "coop/props/prop_echo_suppress.h"
+#include "coop/props/remote_prop.h"
 #include "coop/props/storage_act.h"
 #include "coop/props/storage_wire.h"
 #include "coop/save/save_transfer.h"
@@ -123,6 +124,7 @@ struct Sleeper {
     Clock::time_point nextTry{};
     Clock::time_point nextPoseWatch{};
     Clock::time_point nextCrateWatch{};
+    std::set<uint32_t> hiddenMirrorEids;
     int crateFixes = 0;        // times the crate was found shown, colliding, simulating or off the body
     bool poseFixedSaid = false;
     bool closing = false;      // host: the owner is coming back; no new loot, the held ones settle
@@ -1109,6 +1111,18 @@ void PoseWatch(Sleeper& s, Clock::time_point now) {
 void CrateWatch(Sleeper& s, Clock::time_point now) {
     if (s.joining || !Live(s.crate, s.crateIdx) || now < s.nextCrateWatch) return;
     s.nextCrateWatch = now + kCrateWatchEvery;
+    if (IsClient()) {
+        for (void* actor : R::FindObjectsByClass(N::SleeperLootContainerClass)) {
+            if (actor == s.crate) continue;
+            const auto eid = coop::remote_prop::ResolveMirrorEidByActor(actor, true);
+            FVector at{};
+            if (eid == coop::element::kInvalidId || !E::TryGetActorLocation(actor, at) || Len(Sub(at, s.lie)) > 120.f) continue;
+            E::SetActorLocation(actor, s.lie);
+            HideCrate(actor);
+            if (s.hiddenMirrorEids.insert(eid).second)
+                UE_LOGI("sleeper: %s's mirrored loot crate eid=%u hidden on this client", Utf8(s.nick).c_str(), eid);
+        }
+    }
     if (g_open.active && g_open.crate == s.crate) return;
     ue_wrap::prop::PropVisibility v{};
     ue_wrap::prop::ReadPropVisibility(s.crate, v);
