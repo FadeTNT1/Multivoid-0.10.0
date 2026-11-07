@@ -242,7 +242,11 @@ coasts those props at once, ahead of the sweep, under the same coast budget: sim
 (the held-prop lane owns a held prop, as everywhere). A prop a client is syncing and nobody holds is overridden to
 the host, as a push on it would (`prop_drive_host::OverrideClientSyncer`); a row a host verb holds stays that verb's.
 The row ends as any coast does, at rest, with the final pose, flags and velocity, and a joiner at its ready edge is
-sent every driven prop's pose again. The water itself is the host's too (`BasementFloodState`,
+sent every driven prop's pose again. The feeder does not reopen a coast for a prop that is still where its last coast
+left it (inside the scan's epsilons): the body simulates all the while it floats, so a reopen once a second only ended
+"rested" again with a reliable End, which flipped the clients' copies kinematic and simulating and made them jitter (a
+10-minute session opened some 27 000 coasts, eids at generation 130). A push that moves it reopens one, and the feeder
+waits for `host_world_settle` before it feeds at all. The water itself is the host's too (`BasementFloodState`,
 [events-and-weather.md](events-and-weather.md)), so a client's own buoyancy master floats its copies in the same
 water the host's floats them in while the host's rows lead them.
 

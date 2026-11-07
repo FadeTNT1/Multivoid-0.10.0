@@ -11,6 +11,7 @@
 #include "coop/props/prop_drive_host.h"       // Coast, IsDriven, InAHand, CoastingCount
 #include "coop/props/prop_drive_stream.h"     // LastEndAgeMs: a released row's settle
 #include "coop/props/prop_lifecycle.h"        // IsWireSuppressedPropClass
+#include "coop/session/host_world_settle.h"  // Settled: no feeding before the host's world is up
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
@@ -65,6 +66,13 @@ size_t   g_coastsOpened = 0;
 size_t   g_waterCoasts = 0;
 uint64_t g_nextWaterMs = 0;
 std::vector<void*> g_water;   // kept for its capacity
+// Where each prop the water holds was last seen at rest or coasting: a prop whose pose has not moved past the scan
+// epsilons since is bobbing in place, and a coast reopened for it only ends again 500 ms later with a reliable End.
+struct WaterRest {
+    ue_wrap::FVector  loc{};
+    ue_wrap::FRotator rot{};
+};
+std::unordered_map<void*, WaterRest> g_waterRest;
 size_t   g_nextSayAt = 1;   // the log line's next count: the first coast, then every 64
 std::vector<coop::element::Registry::ActorIdPair> g_snap;   // kept for its capacity
 
@@ -185,23 +193,51 @@ bool Check(uint32_t eid, bool mayCoast) {
 // for as long as they are inside it. Props only, simulating, in no hand; a client's unheld row on one goes to the host.
 // Bounded by the same coast slots as the sweep. Returns how many coasts it opened.
 size_t FeedWater(size_t alreadyOpened) {
+    // The host's world is still starting: every body in it is settling and the water master has not placed
+    // its list yet, so a feed now only churns coasts for props that are about to rest (docs/props.md).
+    if (!coop::host_world_settle::Settled()) return 0;
     const uint64_t now = coop::active_drive::NowMs();
     if (now < g_nextWaterMs) return 0;
     g_nextWaterMs = now + kWaterFeedMs;
-    if (ue_wrap::water_float_master::ActorsInWater(g_water) == 0) return 0;
+    if (ue_wrap::water_float_master::ActorsInWater(g_water) == 0) {
+        g_waterRest.clear();
+        return 0;
+    }
+    {
+        // Only what the water holds now keeps a resting pose.
+        std::unordered_map<void*, WaterRest> keep;
+        keep.reserve(g_water.size());
+        for (void* a : g_water) {
+            const auto old = g_waterRest.find(a);
+            if (old != g_waterRest.end()) keep.emplace(a, old->second);
+        }
+        g_waterRest.swap(keep);
+    }
     size_t opened = 0;
     for (void* a : g_water) {
         if (CoastSlots(coop::prop_drive_host::CoastingCount(), alreadyOpened + opened) == 0) break;
         if (!R::IsLive(a) || !PR::IsDescendantOfProp(a)) continue;
         if (coop::prop_drive_host::InAHand(a)) continue;   // the held-prop lane owns it
+        ue_wrap::FVector loc{};
+        ue_wrap::FRotator rot{};
+        const bool posed = E::TryGetActorLocation(a, loc) && E::TryGetActorRotation(a, rot);
         if (coop::prop_drive_host::IsDriven(a)) {
             coop::prop_drive_host::OverrideClientSyncer(a, "buoyancy");   // a client's unheld row; a host row stands
+            if (posed) g_waterRest[a] = WaterRest{loc, rot};   // where the open coast has it; its End will leave it here
             continue;
         }
         void* mesh = PR::GetStaticMesh(a);
         if (!mesh || !E::IsComponentSimulatingPhysics(mesh)) continue;
+        // A prop that came to rest in the water is not coasted again for as long as it stays put: the body
+        // simulates the whole time, so the reopen would only end again "rested" a half second on, and every
+        // End told the clients to flip the copy kinematic and simulating once a second.
+        if (posed) {
+            const auto seen = g_waterRest.find(a);
+            if (seen != g_waterRest.end() && !MovedPastScanEps(loc, rot, seen->second.loc, seen->second.rot)) continue;
+        }
         coop::prop_drive_host::Coast(a, "buoyancy");
         if (!coop::prop_drive_host::IsDriven(a)) continue;   // the channel refused it (no element id, a class no peer holds)
+        if (posed) g_waterRest[a] = WaterRest{loc, rot};
         ++opened;
         ++g_coastsOpened;
         ++g_waterCoasts;
@@ -260,6 +296,7 @@ void OnDisconnect() {
     g_waterCoasts = 0;
     g_nextWaterMs = 0;
     g_water.clear();
+    g_waterRest.clear();
     g_nextSayAt = 1;
 }
 
