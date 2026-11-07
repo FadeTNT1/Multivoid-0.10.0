@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 326;
+inline constexpr uint16_t kProtocolVersion = 327;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1555,6 +1555,14 @@ enum class ReliableKind : uint8_t {
     // world-ready. Late join: the host sends every slot's row at the ready edge.
     // PlayerLocationPayload.
     PlayerLocation = 248,
+
+    // ANY->ALL (the host relays a client's): blood a player's bleeding dropped (coop::blood_drop_fx). The game's
+    // effect_bloodLoss_C.dropTimer runs on the bleeding player's own peer only and hands each drop to the gamemode's
+    // bloodDecalMaster_C.addParticle, whose falling particle leaves a grime_blood2 decal where it lands. The bleeding
+    // peer sends each drop's start point, velocity, size and type; every other peer runs the same addParticle, so the
+    // drop falls and stains the floor there too. The host checks a client's names its own player. Late join: none,
+    // a drop is a moment (a decal already on the floor rides the save). BloodDropFxPayload.
+    BloodDropFx = 237,
 };
 
 #pragma pack(push, 1)
@@ -4928,6 +4936,19 @@ struct WasherFxPayload {
 };
 static_assert(sizeof(WasherFxPayload) == 108, "WasherFxPayload must be 108 bytes");
 static_assert(sizeof(WasherFxPayload) <= 256 - 20 - 8, "WasherFxPayload must fit in one reliable datagram");
+
+// Blood drops a bleeding player's peer handed to bloodDecalMaster_C.addParticle (BloodDropFx), oldest first: each
+// drop's start point and velocity (world cm, cm/s), its size and its type (0 a drip, 1 a splat), as the game passed them.
+inline constexpr int kBloodDropFxMax = 4;
+struct BloodDropFxPayload {
+    uint32_t originEid;   // 4  -- the bleeding player's Player element id
+    uint8_t  count;       // 1  -- drops that follow, 1..kBloodDropFxMax
+    uint8_t  pad;         // 1  -- zero
+    uint16_t seq;         // 2  -- the sender's running message number
+    float    drops[kBloodDropFxMax][8];  // 128 -- per drop: x, y, z, vx, vy, vz, size, type
+};
+static_assert(sizeof(BloodDropFxPayload) == 136, "BloodDropFxPayload must be 136 bytes");
+static_assert(sizeof(BloodDropFxPayload) <= 256 - 20 - 8, "BloodDropFxPayload must fit in one reliable datagram");
 
 // A lightning strike (LightningStrike): the strike's world location; the receiver spawns the
 // strike actor there, and it destroys itself.
