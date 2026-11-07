@@ -161,16 +161,16 @@ void Tick() {
     // Per slot, in order: its shots, then the blasts of those shots, then the blasts of its body, then its ATV's.
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot) {
         detail::Slot& sl = g_slots[slot];
-        sl.fired.Serve(detail::kFired, coop::net::NowMs, [&](const detail::FiredItem& it) {
+        sl.fired.Serve(slot, detail::kFired, coop::net::NowMs, [&](const detail::FiredItem& it) {
             return detail::JudgeShot(slot, sl, it);
         });
-        sl.shotBlast.Serve(detail::kShotBlast, coop::net::NowMs, [&](const detail::RequestItem& it) {
+        sl.shotBlast.Serve(slot, detail::kShotBlast, coop::net::NowMs, [&](const detail::RequestItem& it) {
             return detail::JudgeShotBlast(slot, sl, it);
         });
-        sl.bodyBlast.Serve(detail::kBodyBlast, coop::net::NowMs, [&](const detail::RequestItem& it) {
+        sl.bodyBlast.Serve(slot, detail::kBodyBlast, coop::net::NowMs, [&](const detail::RequestItem& it) {
             return detail::JudgeBody(slot, sl, it);
         });
-        sl.atvBlast.Serve(detail::kAtvBlast, coop::net::NowMs, [&](const detail::AtvItem& it) {
+        sl.atvBlast.Serve(slot, detail::kAtvBlast, coop::net::NowMs, [&](const detail::AtvItem& it) {
             return detail::JudgeAtvBlast(slot, it);
         });
         ExpireRockets(sl);

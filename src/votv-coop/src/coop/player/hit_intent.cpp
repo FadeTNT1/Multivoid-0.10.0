@@ -262,7 +262,7 @@ void ServeQueues(coop::net::Session& s) {
     static bool sWeaponsReady = false;
     if (!sWeaponsReady) sWeaponsReady = ue_wrap::weapon_catalog::Ready();
     for (int slot = 1; slot < coop::players::kMaxPeers; ++slot) {
-        g_slots[slot].queue.Serve(kBudget, coop::net::NowMs, [&](const Queued& q) {
+        g_slots[slot].queue.Serve(slot, kBudget, coop::net::NowMs, [&](const Queued& q) {
             Serve(s, slot, q);
             return coop::net::Served::Done;
         });

@@ -35,32 +35,39 @@ bool RunIntentQueueSelftest() {
         IntentQueue<Entry> q;
         q.Push(Entry{1, 10}, 4);
         q.Push(Entry{2, 20}, 4);
-        q.Serve(oneThenNone, at1000, done);
+        q.Serve(1, oneThenNone, at1000, done);
         check(q.size() == 1, "a served Done leaves the queue");
-        q.Serve(oneThenNone, at1000, done);
+        q.Serve(1, oneThenNone, at1000, done);
         check(q.size() == 1, "with no token a serve does nothing");
     }
     {
         IntentQueue<Entry> q;
         q.Push(Entry{1, 10}, 4);
         int seen = 0;
-        q.Serve(oneThenNone, at1000, [&](Entry& e) { seen = e.val; return Served::Wait; });
+        uint8_t acting = coop::acting_slot::kNone;
+        q.Serve(3, oneThenNone, at1000, [&](Entry& e) {
+            seen = e.val;
+            acting = coop::acting_slot::Current();
+            return Served::Wait;
+        });
         check(seen == 10 && q.size() == 1, "a Wait keeps the head");
-        q.Serve(oneThenNone, at1000, done);
+        check(acting == 3 && coop::acting_slot::Current() == coop::acting_slot::kNone,
+              "the head runs acting for its sender, and the scope closes after it");
+        q.Serve(1, oneThenNone, at1000, done);
         check(q.empty(), "the Wait gave its token back: the same instant serves the head");
-        q.Serve(oneThenNone, at1000, wait);
+        q.Serve(1, oneThenNone, at1000, wait);
         check(q.empty(), "an empty queue serves nothing");
         int clockReads = 0;
-        q.Serve(oneThenNone, [&] { ++clockReads; return uint64_t{1000}; }, done);
+        q.Serve(1, oneThenNone, [&] { ++clockReads; return uint64_t{1000}; }, done);
         check(clockReads == 0, "an empty queue does not read the clock");
     }
     {
         IntentQueue<Entry> q;
         q.Push(Entry{1, 10}, 4);
-        q.Serve(oneThenNone, at1000, done);
+        q.Serve(1, oneThenNone, at1000, done);
         q = IntentQueue<Entry>{};
         q.Push(Entry{1, 10}, 4);
-        q.Serve(oneThenNone, at1000, done);
+        q.Serve(1, oneThenNone, at1000, done);
         check(q.empty(), "a value-initialised instance is empty and its first Take succeeds");
     }
     if (pass == total) {

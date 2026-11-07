@@ -152,7 +152,9 @@ dispatch on both roles and re-runs the game's own verb with the kerfur serving t
 (`coop/creatures/served_player`), so its reads of the player answer that peer: follow follows it,
 patrol circles it. A request waits while the host has no body for its sender, and a verb the game
 refuses changes nobody's service. Nothing writes a puppet's hand yet, so a client's get the reports
-gets the game's refusal hint, shown on the host. On a client the chosen verb is read at the E-input seam, the
+gets the game's refusal hint, shown to that client (`coop/player/hint_route`). Every hint a command, a
+Kerfus verb or a robot's own job raises on the host for a client goes to that client: "Kerfur cannot find
+broken server" is the Kerfus's use verb's answer, raised in its findBrokenServer. On a client the chosen verb is read at the E-input seam, the
 one dispatched through the engine, before the local dispatch runs
 (`coop/creatures/kerfur_menu_input`). At a join a save-loaded kerfur prop is adopted by class and
 nearest pose once the load tail settles (`coop/creatures/kerfur_prop_adoption`), and a kerfur

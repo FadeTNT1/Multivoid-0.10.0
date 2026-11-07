@@ -401,7 +401,7 @@ void Tick() {
     if (!IsHost()) return;
     UE_ASSERT_GAME_THREAD("prop_act_host::Tick");
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot) {
-        g_slots[slot].queue.Serve(kBudget, coop::net::NowMs,
+        g_slots[slot].queue.Serve(slot, kBudget, coop::net::NowMs,
                                   [&](const Queued& q) { return ServeHead(slot, q); });
     }
     g_refusals.Flush(Now());

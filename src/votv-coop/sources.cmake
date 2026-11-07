@@ -29,6 +29,7 @@ set(VOTVCOOP_SOURCES
     src/coop/items/vacuum_pile_intent.cpp
     ${VOTVCOOP_SOURCES_UE_WRAP_2}
     src/coop/player/movement_ledger.cpp
+    src/coop/player/hint_route.cpp
     src/coop/player/remote_player.cpp
     src/coop/player/remote_player_ragdoll.cpp
     src/coop/player/client_model.cpp

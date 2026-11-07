@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 317;
+inline constexpr uint16_t kProtocolVersion = 320;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1500,6 +1500,12 @@ enum class ReliableKind : uint8_t {
     // syncs. Never relayed; not pre-world. Late join: nothing to replay; the connect snapshot carries the condition.
     // AtvRepairIntentPayload.
     AtvRepairIntent = 239,
+    // HOST->ONE CLIENT: an in-game hint the game raised on the host while the host ran something on that client's
+    // behalf (coop::hint_route): one of its intents, or a robot or drone job it set going. The host's lib_C::addHint
+    // is refused there and the client raises the same hint through its own lib_C::addHint -- the same text, icon
+    // and duration. Never relayed; a client's copy is refused at the host's receive edge; not pre-world (a hint
+    // before the world has nowhere to show). Late join: nothing to replay. HintRoutePayload.
+    HintRoute = 246,
 };
 
 #pragma pack(push, 1)
@@ -4042,6 +4048,17 @@ struct CommandRequestPayload {
 static_assert(sizeof(CommandRequestPayload) == 204, "CommandRequestPayload must be 204 bytes");
 static_assert(sizeof(CommandRequestPayload) <= 256 - 20 - 8,
               "CommandRequestPayload must fit in one reliable datagram");
+
+// One routed in-game hint (HintRoute), host to the client it belongs to: the game's notify type (its icon) and the
+// display text, UTF-8, length-prefixed, not NUL-terminated, cut at a code point to fit.
+struct HintRoutePayload {
+    uint8_t type;       // enum_notifytype, as the host's lib_C::addHint was given it
+    uint8_t len;        // bytes used in text[] (0 < len <= sizeof(text))
+    char    text[200];  // the hint, UTF-8
+};
+static_assert(sizeof(HintRoutePayload) == 202, "HintRoutePayload must be 202 bytes");
+static_assert(sizeof(HintRoutePayload) <= 256 - 20 - 8,
+              "HintRoutePayload must fit in one reliable datagram");
 
 // One reply line the host sends one client (CommandReply): UTF-8, length-prefixed, not NUL-terminated.
 struct CommandReplyPayload {

@@ -111,4 +111,8 @@ void* ContainerOf(void* drone);
 // Game thread.
 void* OfSellLocation(void* sellLocation);
 
+// The drone `obj` names when it is a droneSellLocation_C (OfSellLocation), else null: any object may be asked,
+// since the class is tested first, where OfSellLocation reads a `drone` field on whatever it is given. Game thread.
+void* OfSellLocationIfAny(void* obj);
+
 }  // namespace ue_wrap::drone

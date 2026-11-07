@@ -161,6 +161,23 @@ host-authored and driven into each client's server boxes, so a client never auth
 "server down". The purely local notices (an item that cannot be used while held) are left
 alone.
 
+The hints are the one exception, because the host runs so many Blueprints on a client's behalf. Every
+hint (the info-icon toast, bottom right) is raised through lib_C::addHint, on the machine whose
+Blueprint ran, so a client's intent, its Kerfus or Kerfur command and the drone it sent painted their
+hints on the host's screen, and the player who acted saw nothing. The host watches that one function
+(`coop/player/hint_route`) and decides each hint by who it is for:
+
+| The hint arises | Where it shows |
+|---|---|
+| while the host handles a client's message, or serves a queued intent of its (an acting-slot scope, `coop/net/acting_slot.h`, which the reliable drain and every intent queue open) | that client alone: refused on the host, sent as `HintRoute`, raised by the client's own lib_C::addHint with the same text, icon and duration |
+| from a robot serving a client (a Kerfus it turned on, an Omega it commanded) or the drone it sent, on their own tick, timer or latent resume | that client, unless the Blueprint chain began at the host's own player (the host pressed it) |
+| from the host's own hand, the world, an event, a save or a load | the host, as the game shows it |
+| editor-only (`debug`) | nowhere, as the game decides |
+
+Nothing is broadcast: a notice meant for everyone reaches each client through the state its own game
+paints it from, as above. The same text to the same player within two seconds is sent once, and a
+routed hint the client's own game already showed in that window is not shown twice.
+
 ### The quick-slot bar's icons
 
 The bar across the top of the screen draws one icon per carried item, and those icons could be
@@ -221,10 +238,13 @@ the two tables published 233 ms apart in that run.
 | the thanks list | `assets/thanks/thanks.txt`, published to the master | the higher revision of the build's copy and the master's last word |
 | nameplates, the scoreboard | game-thread snapshots | render-thread draws |
 | the notifications | each machine's game | the state behind them is synced, not the toast |
+| a hint raised for a client on the host | the host's hint route | refused on the host, sent to that client, raised by its game |
 
 ## Wire messages
 
-None of its own: every surface renders a snapshot owned by a lane on another page. The preferences
+One: `HintRoute`, host to one client, a hint the host's game raised for that client (its notify type and
+its text). Never relayed, not before the world. Otherwise every surface renders a snapshot owned by a lane
+on another page. The preferences
 it edits (skin, nameplate, colour) travel on the players page's kinds; the lobby list, the
 update check and the thanks list are the master server's HTTP.
 
@@ -241,6 +261,7 @@ scoreboard fills as roster rows arrive; nameplates appear with each puppet's fir
 | The game's own toasts a client self-generates from diverged world state are not suppressed or mirrored; only the server state behind one family is driven | `[V]` `coop/interactables/serverbox_sync` is the one family |
 | The old ImGui browser is kept as a fallback, a deliberate exception to retiring replaced code | `[V]` `ui/server_browser_surface` |
 | Resolution and fullscreen recovery needs an in-game check with two peers: change resolution and toggle fullscreen repeatedly, then check shared interactions, chat, F1, movement and mouse input; full graphics-device replacement is not reinitialized | `[?]` `ui/overlay_backend_dx11`, `ui/overlay_backend_dx12`, `ui/imgui_overlay`; the resize-release/rebuild, queue re-confirmation and Win32 rebind logs identify the paths exercised |
+| A hint raised from work the host deferred for a client outside an intent queue (a posted game-thread job, a timer of the mod's own) has no acting scope and shows on the host; a hint text is the host's language, not re-localised on the client | `[V]` `coop/player/hint_route`, `coop/net/acting_slot.h` |
 | The quick-slot bar's rebuild has been confirmed on a load issued through the game's own load call, not on a click of the menu's Load button; a second load in one process cannot close that, since the texture array survives the world | `[V]` `harness/world_boot`, the same call the button ends at |
 
 ## Code map
@@ -253,5 +274,6 @@ scoreboard fills as roster rows arrive; nameplates appear with each puppet's fir
 | joining and failing | `ui/loading_screen`, `ui/join_curtain`, `ui/end_reason_dialog`, `ui/boot_warning_dialog`, `ui/console` |
 | the overlay host | `ui/imgui_overlay`, `ui/overlay_seams`, `ui/overlay_backend`, `ui/overlay_backend_dx11`, `ui/overlay_backend_dx12`, `ui/overlay_backend_vk`, `ui/overlay_backend_vk_frame`, `ui/overlay_cursor`, `ui/input_focus`, `ui/fonts`, `ui/atlas_watch`, `ui/scale`, `ui/style` |
 | the F1 panels | `ui/dev_menu`, `ui/skins_panel`, `ui/voice_panel`, `ui/world_rules_panel`, `ui/net_stats_panel`, `ui/admin_panel`, `ui/server_settings_pane`, `ui/bug_report_pane`, `ui/config_review_panel` |
+| the routed hints | `coop/player/hint_route`, `coop/net/acting_slot.h`, `ue_wrap/world/votv_lib` |
 | the HUD | `ui/hud`, `ui/chat_input`, `ui/chat_view`, `ui/scoreboard`, `ui/voice_icons`, `ui/menu_sfx`, `ui/link_format` |
 | tests | the browser screenshot run and the four-peer scoreboard capture, both scripted on the rig |
