@@ -146,7 +146,14 @@ W::Reply Judge(uint8_t slot, const W::Request& q) {
         const int32_t index = SI::FindRow(comp, q.fingerprint, q.amount);
         uint64_t fp = 0;
         uint8_t rowAmount = 0;
-        if (index < 0 || !SI::RowInfo(comp, index, fp, rowAmount)) return Refuse(q.txn, ContainerActReason::Gone);
+        if (index < 0 || !SI::RowInfo(comp, index, fp, rowAmount)) {
+            // The client asked for a row this storage no longer holds: its view is stale. Its latest contents go out
+            // again under a new revision, so the row leaves the client's screens instead of lingering there.
+            UE_LOGI("storage_act[host]: slot %u take txn %u at %s: the row is gone -- the host's contents published again",
+                    static_cast<unsigned>(slot), q.txn, SC::Describe(q.address));
+            SC::Resync(q.address);
+            return Refuse(q.txn, ContainerActReason::Gone);
+        }
         if (!SI::EncodeRowAt(comp, index, h.row, q.amount)) return Refuse(q.txn, ContainerActReason::Refused);
         const bool off = q.amount == rowAmount ? SI::RemoveRowAt(comp, index) : SI::ReduceRowAt(comp, index, q.amount);
         if (!off) return Refuse(q.txn, ContainerActReason::Refused);
