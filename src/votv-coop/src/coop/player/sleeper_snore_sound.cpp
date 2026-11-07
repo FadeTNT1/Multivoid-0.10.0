@@ -13,6 +13,8 @@
 
 #include <miniaudio.h>
 
+#include "../../../resources/snore_resource_ids.h"
+
 namespace coop::sleeper_snore_sound {
 namespace {
 
@@ -66,11 +68,8 @@ bool ExistsFile(const std::wstring& p) {
     return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
-// miniaudio's built-in WAV decoder, down-mixed to mono s16 at the file's own rate.
-bool LoadWav(const std::wstring& path, Clip& out) {
-    ma_decoder_config cfg = ma_decoder_config_init(ma_format_s16, 1, 0);
-    ma_decoder dec;
-    if (ma_decoder_init_file_w(path.c_str(), &cfg, &dec) != MA_SUCCESS) return false;
+// Drain an opened decoder into `out` (mono s16 at the file's own rate), then close it.
+bool ReadDecoder(ma_decoder& dec, Clip& out) {
     ma_format fmt;
     ma_uint32 ch = 0, rate = 0;
     ma_decoder_get_data_format(&dec, &fmt, &ch, &rate, nullptr, 0);
@@ -89,6 +88,32 @@ bool LoadWav(const std::wstring& path, Clip& out) {
     out.pcm = std::move(pcm);
     out.rate = rate;
     return true;
+}
+
+// miniaudio's built-in WAV decoder, down-mixed to mono s16 at the file's own rate.
+bool LoadWav(const std::wstring& path, Clip& out) {
+    ma_decoder_config cfg = ma_decoder_config_init(ma_format_s16, 1, 0);
+    ma_decoder dec;
+    if (ma_decoder_init_file_w(path.c_str(), &cfg, &dec) != MA_SUCCESS) return false;
+    return ReadDecoder(dec, out);
+}
+
+// The snore embedded in this DLL (resources/snore.rc), decoded straight from the mapped image.
+bool LoadEmbedded(Clip& out) {
+    HMODULE self = nullptr;
+    ::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         reinterpret_cast<LPCWSTR>(&LoadEmbedded), &self);
+    if (!self) return false;
+    HRSRC res = ::FindResourceW(self, MAKEINTRESOURCEW(IDR_SNORE_WAV), reinterpret_cast<LPCWSTR>(RT_RCDATA));
+    if (!res) return false;
+    HGLOBAL glob = ::LoadResource(self, res);
+    const DWORD size = ::SizeofResource(self, res);
+    const void* p = glob ? ::LockResource(glob) : nullptr;
+    if (!p || size == 0) return false;
+    ma_decoder_config cfg = ma_decoder_config_init(ma_format_s16, 1, 0);
+    ma_decoder dec;
+    if (ma_decoder_init_memory(p, size, &cfg, &dec) != MA_SUCCESS) return false;
+    return ReadDecoder(dec, out);
 }
 
 }  // namespace
@@ -155,11 +180,21 @@ void Prepare() {
             g_clips.push_back(std::move(c));
             return;
         }
-        UE_LOGW("sleeper_snore: %ls could not be decoded as a wav -- using the generated snore", path.c_str());
+        UE_LOGW("sleeper_snore: %ls could not be decoded as a wav -- using the built-in snore", path.c_str());
+    }
+    {
+        Clip c;
+        if (LoadEmbedded(c)) {
+            UE_LOGI("sleeper_snore: using the built-in snore (%zu frames at %u Hz, %.1f s)", c.pcm.size(), c.rate,
+                    static_cast<float>(c.pcm.size()) / static_cast<float>(c.rate));
+            g_clips.push_back(std::move(c));
+            return;
+        }
+        UE_LOGW("sleeper_snore: the built-in snore could not be read -- generating one");
     }
     static const struct { uint32_t seed; float len; } kVariants[] = {{0x51CE01u, 1.7f}, {0x51CE02u, 2.1f}, {0x51CE03u, 2.4f}};
     for (const auto& v : kVariants) g_clips.push_back(Synthesize(v.seed, v.len));
-    UE_LOGI("sleeper_snore: no snore.wav beside main.dll -- generated %zu snores (%u Hz mono, %.1f to %.1f s)",
+    UE_LOGI("sleeper_snore: no snore.wav and no built-in snore -- generated %zu snores (%u Hz mono, %.1f to %.1f s)",
             g_clips.size(), kRate, kVariants[0].len, kVariants[2].len);
 }
 

@@ -8,6 +8,7 @@
 #include "coop/player/sleepers.h"
 #include "coop/voice/voice_chat.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/trace.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/engine/engine_pawn.h"
 
@@ -26,10 +27,13 @@ using Clock = std::chrono::steady_clock;
 using ue_wrap::FVector;
 
 constexpr float kFullCm = 100.f;                         // full volume within about a metre
-constexpr float kSilentCm = 600.f;                       // silent by six
-constexpr float kPitchSpread = 0.05f;                    // +-5 %
+constexpr float kSilentCm = 400.f;                       // silent by four: heard only right beside the sleeper
+constexpr float kGain = 0.25f;                           // the snore sits far under the configured volume
+constexpr float kPitchBase = 0.96f;                      // a touch slower and lower: a softer breath
+constexpr float kPitchSpread = 0.03f;                    // +-3 %
+constexpr float kEarAboveHeadCm = 25.f;                  // the wall check aims just over the head, clear of the pillow
 constexpr float kFirstDelayMinS = 0.3f, kFirstDelayMaxS = 2.5f;
-constexpr float kIntervalMinS = 3.0f, kIntervalMaxS = 6.0f;
+constexpr float kIntervalMinS = 4.5f, kIntervalMaxS = 6.5f;   // the built-in breath is about 4 s long
 constexpr auto kScanEvery = std::chrono::milliseconds(250);
 constexpr auto kListenerEvery = std::chrono::milliseconds(50);
 constexpr size_t kMaxSources = 64;
@@ -83,6 +87,15 @@ void Stop(State& st) {
     st.handle = 0;
 }
 
+// A wall, floor or door between the listener and the sleeper's head (static and dynamic geometry, as the
+// nameplate's check). A trace that cannot run counts as clear, so the snore is never lost to a missing hook.
+bool Walled(const FVector& head) {
+    void* const local = coop::players::Registry::Get().Local();
+    if (!local) return false;
+    const FVector ear{head.X, head.Y, head.Z + kEarAboveHeadCm};
+    return ue_wrap::trace::LineBlockedStatDyn(local, g_listener, ear) == 1;
+}
+
 void Scan(Clock::time_point now) {
     if (!coop::config::ResolveFlag(::coop::config_registry::rows::sleepers_snore)) {
         StopAll();
@@ -113,18 +126,24 @@ void Scan(Clock::time_point now) {
     const auto& clips = coop::sleeper_snore_sound::Clips();
     if (clips.empty()) return;
     UpdateListener();
-    const float volume = coop::config::ResolveFloat(::coop::config_registry::rows::sleepers_snore_volume);
+    const float volume = kGain * coop::config::ResolveFloat(::coop::config_registry::rows::sleepers_snore_volume);
     for (size_t i = 0; i < n; ++i) {
         auto [it, fresh] = g_states.try_emplace(src[i].key);
         State& st = it->second;
         st.head = src[i].head;
         if (fresh) st.next = now + std::chrono::milliseconds(static_cast<int>(1000.f * Rand(kFirstDelayMinS, kFirstDelayMaxS)));
         if (st.handle && !coop::voice_chat::WorldSoundPlaying(st.handle)) st.handle = 0;
-        if (st.handle || now < st.next || !g_listenerOk) continue;
+        if (!g_listenerOk) continue;
         const float dx = st.head.X - g_listener.X, dy = st.head.Y - g_listener.Y, dz = st.head.Z - g_listener.Z;
-        if (std::sqrt(dx * dx + dy * dy + dz * dz) >= kSilentCm) continue;   // out of earshot: nothing to start
+        const bool inRange = std::sqrt(dx * dx + dy * dy + dz * dz) < kSilentCm;
+        if (st.handle) {
+            if (!inRange || Walled(st.head)) Stop(st);   // walked off, or a wall came between: cut it
+            continue;
+        }
+        if (now < st.next || !inRange) continue;   // out of earshot: nothing to start
+        if (Walled(st.head)) continue;             // another room: not heard
         const auto& clip = clips[static_cast<size_t>(g_rng() % clips.size())];
-        const float pitch = 1.0f + Rand(-kPitchSpread, kPitchSpread);
+        const float pitch = kPitchBase + Rand(-kPitchSpread, kPitchSpread);
         st.handle = coop::voice_chat::PlayWorldSound(clip.pcm.data(), static_cast<uint32_t>(clip.pcm.size()), clip.rate,
                                                      pitch, st.head.X, st.head.Y, st.head.Z, volume, kFullCm, kSilentCm);
         if (!st.handle) continue;   // the emitters are all busy: tried again next scan

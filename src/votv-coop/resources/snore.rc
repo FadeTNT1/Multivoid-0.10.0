@@ -1,0 +1,6 @@
+// resources/snore.rc -- embed the sleeper snore (assets/snore/snore.wav: 22050 Hz mono s16, one breath)
+// into the DLL as RCDATA, so no loose file has to ship beside main.dll.
+
+#include "snore_resource_ids.h"
+
+IDR_SNORE_WAV RCDATA "../assets/snore/snore.wav"
