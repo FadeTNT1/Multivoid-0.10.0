@@ -113,8 +113,9 @@ void AppendSleeperPlates(Snapshot& snap) {
         pl.onScreen = true;
         pl.sleeping = true;
         pl.sleeper = true;
-        pl.showNick = dist <= nameCm;
+        pl.showNick = a.joining || dist <= nameCm;   // a joining player is named at any distance
         pl.lootHint = a.lootable;
+        pl.joining = a.joining;
         pl.linkKind = coop::net::LinkKind::Local;
         std::memcpy(pl.nick, a.nick, sizeof(pl.nick));
     }

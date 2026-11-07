@@ -41,6 +41,7 @@ struct Plate {
     bool  sleeper = false;
     bool  showNick = true;
     bool  lootHint = false;
+    bool  joining = false;   // a sleeper that is a connecting player's joining body: "(joining...)" under the name
     int   healthPct = 100;   // 0..100 streamed-vitals health (display-only)
     int   ping = -1;         // RTT to the SESSION in ms (0 = sub-ms LAN -> "<1ms")
     // Carried so the plate does not have to INFER "no number to show" from ping == -1. The host has
