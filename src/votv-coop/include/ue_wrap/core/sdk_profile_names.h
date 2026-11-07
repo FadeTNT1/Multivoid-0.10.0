@@ -1956,6 +1956,10 @@ inline constexpr const wchar_t* GrowingPlantAttachToProp        = L"attachTo";
 inline constexpr const wchar_t* GrowingPlantDataProp            = L"data";
 inline constexpr const wchar_t* FarmPlantTypeMember             = L"planttype_";
 inline constexpr const wchar_t* FarmPlantAmountRangeMember      = L"amount_range_";
+// The wild sugarcane row (list_farmPlants), whose 0..1 amount range drops nothing half the time.
+inline constexpr const wchar_t* FarmPlantWildSugarcaneRow       = L"sugarcane_w";
+// The world rule "Funny" (struct_gameRules funnySetting_29_...), as ue_wrap/world/game_rules keys a rule.
+inline constexpr const char*    GameRuleFunnyKey                = "funnySetting";
 inline constexpr const wchar_t* FarmPlantCanGrowInPotsMember    = L"cangrowinpots_";
 inline constexpr const wchar_t* FarmPlantMinSizeMember          = L"minsize_";
 inline constexpr const wchar_t* FarmPlantTable                  = L"list_farmplants";

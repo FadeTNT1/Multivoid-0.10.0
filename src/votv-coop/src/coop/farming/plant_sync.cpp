@@ -19,6 +19,9 @@
 #include "ue_wrap/core/reflection_props.h"
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/sdk_profile_names.h"
+#include "ue_wrap/world/game_rules.h"
+
+#include <string.h>  // _stricmp
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
@@ -97,6 +100,20 @@ struct HostAction {
 };
 std::vector<HostAction> g_hostAction;
 
+// The wild sugarcane's yield, fixed (see OnActionPreAll).
+constexpr int32_t kWildCaneYield = 2;
+
+// The world's Funny setting (struct_gameRules funnySetting), from the process copy every rule is read from. A
+// harvest is rare, so the snapshot's allocation is fine here. False when the rules are not readable.
+bool FunnyRuleOn() {
+    ue_wrap::game_rules::Snapshot snap;
+    if (!ue_wrap::game_rules::ReadLocal(snap)) return false;
+    for (const auto& f : snap.fields)
+        if (f.kind == ue_wrap::game_rules::Kind::Bool && _stricmp(f.key.c_str(), ue_wrap::profile::name::GameRuleFunnyKey) == 0)
+            return f.bval;
+    return false;
+}
+
 uint8_t ActionOf(const sg::Call& c) {
     const int32_t off = g_actionParam.Of(c.function);
     return (off >= 0 && c.locals) ? c.locals[off] : 0;
@@ -116,6 +133,15 @@ sg::Verdict OnActionPreAll(const sg::Call& c) {
             a.rangeMax = st.amountMax;
             a.grow = st.grow;
             a.row = st.plant;
+            // House rule (user decision, 2026-11-07): with the world's Funny setting on, a wild cane always yields
+            // two. Its row's 0..1 range drops nothing half the time, which players read as the cane "turning into
+            // nothing". With Funny off the game's own 0.10.0 roll stands. The host's harvest is the only one that
+            // runs and every peer plays under the host's rules, so this plant's copy of the range covers everyone.
+            if (a.type == 0 && a.row == ue_wrap::profile::name::FarmPlantWildSugarcaneRow && FunnyRuleOn() &&
+                GP::WriteAmountRange(c.object, kWildCaneYield, kWildCaneYield)) {
+                a.rangeMin = kWildCaneYield;
+                a.rangeMax = kWildCaneYield;
+            }
         }
         g_hostAction.push_back(std::move(a));
     }

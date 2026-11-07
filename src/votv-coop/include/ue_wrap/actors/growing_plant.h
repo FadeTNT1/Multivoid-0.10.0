@@ -45,6 +45,9 @@ bool WriteState(void* plant, const State& in);
 bool WriteGrew(void* plant, bool grew);
 bool ReadDiscard(void* plant, bool& discard);
 bool WriteDiscard(void* plant, bool discard);
+// Overwrite the plant's own copy of its row's amount range (`data`), the bounds dropFruits_grass rolls its yield
+// from. The DataTable is untouched; only this plant's copy changes. False when `data` did not resolve.
+bool WriteAmountRange(void* plant, int32_t amountMin, int32_t amountMax);
 
 // The plant's own functions: upd(skipDataTable), updLoc(), processGrown(skipGrowCheck), addDisease(name) (its
 // `success`), the disease component's heal() (false when the plant has none), addMedicine(type, time), harvestSound().

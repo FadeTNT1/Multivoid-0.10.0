@@ -275,6 +275,14 @@ bool WriteGrew(void* plant, bool grew) { return IsPlant(plant) && WriteBool(g_gr
 bool ReadDiscard(void* plant, bool& discard) { return IsPlant(plant) && ReadBool(g_discard, plant, discard); }
 bool WriteDiscard(void* plant, bool discard) { return IsPlant(plant) && WriteBool(g_discard, plant, discard); }
 
+bool WriteAmountRange(void* plant, int32_t amountMin, int32_t amountMax) {
+    if (!IsPlant(plant) || !ResolveData()) return false;
+    uint8_t* d = reinterpret_cast<uint8_t*>(plant) + g_data.off;
+    std::memcpy(d + g_dataMembers.range, &amountMin, sizeof(int32_t));
+    std::memcpy(d + g_dataMembers.range + 4, &amountMax, sizeof(int32_t));
+    return true;
+}
+
 bool CallUpd(void* plant, bool skipDataTable) {
     return IsPlant(plant) && CallBoolArg(plant, N::GrowingPlantUpdFn, N::GrowingPlantUpdSkipParam, skipDataTable);
 }

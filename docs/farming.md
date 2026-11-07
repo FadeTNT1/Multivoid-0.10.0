@@ -30,7 +30,8 @@ Facts read from the 0.10.0 bytecode capture; `class.function@N` is the bytecode 
   `dropFruits_grass` (`receiveDestroyed@69-71`, `dropFruits_grass@9`), or the seed when `grow <= 0.1`
   (`receiveDestroyed@1-2`). The count is rolled afresh at every loop step (`dropFruits_grass@9-11`: `i <= randomIntegerInRange(x, y)`), so a row
   whose range starts at 0 yields nothing part of the time: the wild cane `sugarcane_w` is `drop=sugarcane`, `amount_range=0..1`, planttype 0
-  (read from `list_farmPlants` in the 0.10.0 pak), one cane or none at about even odds; the farmed `sugarcane` is 1..4. With `discard` set (a young plant)
+  (read from `list_farmPlants` in the 0.10.0 pak), one cane or none at about even odds; the farmed `sugarcane` is 1..4. **House rule (Funny setting on only):** when the world's `funnySetting` rule is on, the host writes a wild cane's own copy of the range to 2..2 just
+  before its harvest runs (`plant_sync.cpp` `OnActionPreAll`, `kWildCaneYield`), so every wild cane drops exactly two; with Funny off the game's 0..1 roll stands. With `discard` set (a young plant)
   and `input_alt` held the action destroys it (`@3-6`).
 - Wild cane: `sugarcaneGrower_C.spawn` places `plant=sugarcane_w` at random spline points (`@1`, `@3-6`, `@27`).
 - A pot (`prop_farmPot_C.playerUsedOn`) plants the item `player.holdingActor_main` names when its row exists, is not a
