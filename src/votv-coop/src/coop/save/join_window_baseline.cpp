@@ -9,8 +9,10 @@
 #include "coop/props/prop_element_tracker.h"  // the capture-instant collectors
 #include "coop/props/prop_snapshot.h"         // ExpressSpawnToSlot: the post-window spawn row
 #include "coop/props/prop_wire_parity.h"      // PhysFlagsOf, the state a correction carries
+#include "ue_wrap/actors/container_inventory.h"  // IsContainer: the world containers re-sent at the window close
 #include "ue_wrap/actors/prop.h"     // IsChipPile: a grabbed clump belongs to the convert stream
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/reflection.h"
 #include "ue_wrap/engine/engine.h"   // the host's current prop position
 
 #include <chrono>
@@ -278,6 +280,32 @@ void ReexpressCorrected_(int peerSlot, const std::vector<coop::element::ElementI
                 "(%zu corrected), now that the joiner has quiesced", peerSlot, sent, corrected.size());
 }
 
+// The window's close, the world containers: each one's spawn row again, to this joiner alone, whether or not the
+// host moved it. A container (a barrel, a crate, a locker) is the prop a player walks up to and opens, and one the
+// joiner lacks is not a small loss. The host log of a join shows a barrel the host never moved in the window
+// (no correction for its eid) that the joiner could not see until the host first held it, whose re-announce is
+// this same row: the joiner's first row for it landed on a world still being adjudicated, and nothing else sends
+// it again. By now the joiner has quiesced, so the row converges a copy it has (aligned, a no-op, and a copy under
+// a hand or a drive is left to its stream) and spawns visible one it lacks. A container in a hand or still
+// moving is left to its own stream. `already` is what ReexpressCorrected_ sent, never sent twice.
+void ReexpressContainers_(int peerSlot, const std::vector<coop::element::ElementId>& already) {
+    std::unordered_set<coop::element::ElementId> done(already.begin(), already.end());
+    std::vector<coop::element::Registry::ActorIdPair> props;
+    coop::element::Registry::Get().SnapshotActorsByType(coop::element::ElementType::Prop, props);
+    int sent = 0, seen = 0;
+    for (const auto& pr : props) {
+        if (pr.mirror || !pr.actor || done.count(pr.id)) continue;
+        if (!ue_wrap::reflection::IsLiveByIndex(pr.actor, pr.internalIdx)) continue;
+        if (!ue_wrap::container_inventory::IsContainer(pr.actor)) continue;
+        ++seen;
+        if (coop::prop_drive_host::InAHand(pr.actor) || !AtRest_(pr.actor)) continue;
+        if (coop::prop_snapshot::ExpressSpawnToSlot(pr.actor, peerSlot)) ++sent;
+    }
+    UE_LOGI("[JOIN-CONTAINERS] HOST slot %d window closed -- re-sent the spawn row of %d of %d world container(s) "
+            "(a barrel the joiner lacked is spawned visible by it; the joiner logs [JOIN-CONTAINERS] CLIENT "
+            "for each row that found no copy)", peerSlot, sent, seen);
+}
+
 // After the late window: only the props a hand held once their correction had gone out are still
 // watched, each sent its follow-up and dropped from the set at rest.
 void SettleHandHeld_(int peerSlot) {
@@ -428,6 +456,7 @@ void TickLateArm() {
                 if (kit != g_blobKeyedXforms[slot].end()) FlushKeyedProp_(slot, "expiry", eid, kit->second);
             }
             ReexpressCorrected_(slot, corrected);
+            ReexpressContainers_(slot, corrected);
             const size_t held = g_handSinceSent[slot].size();
             if (held == 0) {
                 g_flushArmUntil[slot] = {};
