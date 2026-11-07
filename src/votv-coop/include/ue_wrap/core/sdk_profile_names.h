@@ -2117,6 +2117,21 @@ inline constexpr const wchar_t* BloodAddParticleLocationParam = L"location";
 inline constexpr const wchar_t* BloodAddParticleVelocityParam = L"velocity";
 inline constexpr const wchar_t* BloodAddParticleSizeParam = L"size";
 inline constexpr const wchar_t* BloodAddParticleTypeParam = L"type";
+// The cargo lift (ue_wrap/actors/cargo_lift). cargolift_C.actionOptionIndex(player, hit, action, lookatcomponent) with
+// action 4 starts a trip when `moving` is false: it sets moving, flips `dir` and loops (a 0-delay latent) adding to
+// `alpha` until alpha leaves 0..1, then clears `moving`; each pass sets the `attach` component's relative location to
+// (0, 0, 500 * ease(alpha)). dir true runs toward alpha 1. [RD] cargolift_c.actionoptionindex / executeubergraph_cargolift.
+inline constexpr const wchar_t* CargoLiftClass = L"cargolift_C";
+inline constexpr const wchar_t* CargoLiftPropClass = L"prop_cargolift_C";
+inline constexpr const wchar_t* CargoLiftPressFn = L"actionOptionIndex";
+inline constexpr const wchar_t* CargoLiftPressPlayerParam = L"player";
+inline constexpr const wchar_t* CargoLiftPressActionParam = L"action";
+inline constexpr const wchar_t* CargoLiftMovingProp = L"moving";
+inline constexpr const wchar_t* CargoLiftDirProp = L"dir";
+inline constexpr const wchar_t* CargoLiftAlphaProp = L"alpha";
+inline constexpr const wchar_t* CargoLiftAttachProp = L"attach";
+inline constexpr int CargoLiftActionPress = 4;
+inline constexpr float CargoLiftTravelUU = 500.0f;
 }  // namespace name
 
 }  // namespace ue_wrap::profile

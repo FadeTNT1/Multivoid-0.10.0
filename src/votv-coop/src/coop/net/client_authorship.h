@@ -129,6 +129,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::PowerGridState:
     case ReliableKind::DeskVerb:
     case ReliableKind::EraserPressIntent:
+    case ReliableKind::CargoLiftIntent:
     case ReliableKind::FuseTowerState:
     case ReliableKind::DeskPingVerdict:
     case ReliableKind::ServerRepair:
@@ -198,6 +199,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::EventScenePhase:
     case ReliableKind::EventSoundCue:
     case ReliableKind::BasementFloodState:
+    case ReliableKind::CargoLiftState:
     case ReliableKind::InventoryRestoreBlob:
     case ReliableKind::BasementPipeState:
     case ReliableKind::AchievementState:
