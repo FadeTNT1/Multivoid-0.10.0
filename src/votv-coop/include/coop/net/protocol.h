@@ -1378,7 +1378,8 @@ enum class ReliableKind : uint8_t {
     // source classes the relay lists (the vent crawler's footsteps and vent break), whose client mirrors have the
     // playing bodies refused, so a client plays each once and never sends one back. Cosmetic, a one-shot: never
     // relayed; a client's copy is refused at the host's receive edge; not pre-world. Late join: none, a sound that
-    // has played is gone. EventSoundCuePayload.
+    // has played is gone. Op kFlick carries the host's ticker_flickerer flick (every light root's lamps blink and
+    // return to the group's state), which a client's own flickerer has refused. EventSoundCuePayload.
     EventSoundCue = 228,
 
     // HOST->ALL: the basement's water level (coop::basement_flood_sync). The flood is the host's: its level moves
@@ -2825,6 +2826,7 @@ static_assert(sizeof(EventScenePhasePayload) <= 256 - 20 - 8, "EventScenePhasePa
 namespace event_sound_ops {
 constexpr uint8_t kSound   = 1;   // PlaySoundAtLocation: loc, volume, pitch, attenuation
 constexpr uint8_t kEmitter = 2;   // SpawnEmitterAtLocation: loc, rot, scale
+constexpr uint8_t kFlick   = 3;   // the flickerer's flick on every light root: no text, no place (all zero)
 }  // namespace event_sound_ops
 inline constexpr int kEventSoundTextCap = 172;
 struct EventSoundCuePayload {

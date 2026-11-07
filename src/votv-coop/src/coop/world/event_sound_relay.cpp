@@ -7,6 +7,7 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/session/net_pump.h"  // IsInAnnouncedWorld: a client's own world load runs natively
 
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -15,6 +16,7 @@
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/types.h"
 #include "ue_wrap/core/ufunction_hook.h"
+#include "ue_wrap/devices/lightswitch.h"
 #include "ue_wrap/engine/engine_audio.h"
 #include "ue_wrap/engine/engine_emitter.h"
 #include "ue_wrap/facts/function_row.h"
@@ -38,6 +40,13 @@ namespace N  = coop::net;
 
 UE_FACT_FN(kRowPlayAt, "event_sound_relay", L"GameplayStatics", L"PlaySoundAtLocation", Declared);
 UE_FACT_FN(kRowEmitter, "event_sound_relay", L"GameplayStatics", L"SpawnEmitterAtLocation", Declared);
+// The light flicker: ticker_flickerer_C's tick rolls, every 30 to 60 s, a chance that grows as the generators run
+// down, and on a hit calls flick() on every trigger_lightRoot_C (the 0.10.0 capture's
+// ticker_flickerer_c.executeubergraph). flick() blinks the group's lamps and returns them to isActive; it never
+// goes through runTrigger, so the light group lane does not see it. Every peer's flickerer rolls its own, so the
+// host's flick is carried (op kFlick) and a client's own is refused.
+UE_FACT_FN(kRowFlick, "event_sound_relay", L"trigger_lightRoot_C", L"flick", Declared);
+constexpr int kFlickTag = 0x464C4943;  // 'FLIC'
 
 std::atomic<N::Session*> g_session{nullptr};
 
@@ -53,6 +62,12 @@ void* g_emitterFn = nullptr;
 bool  g_emitterHooked = false;
 bool  g_emitterRefused = false;
 bool  g_armed = false;
+
+// The flick watch: registered once per process; the host's flicks of one tick are one cue.
+bool g_flickWatchTried = false;
+bool g_flickPending = false;
+bool g_applyingFlick = false;
+uint64_t g_flicksSent = 0, g_flicksRefused = 0, g_flicksPlayed = 0;
 
 // The source classes, resolved by name as each loads.
 void* g_sourceClasses[sizeof(P::name::kPositionalCueSourceClasses) / sizeof(P::name::kPositionalCueSourceClasses[0])] = {};
@@ -112,7 +127,33 @@ void OnEmitterPost(void*, void* source, void* component) {
     g_pending.push_back(p);
 }
 
+N::Session* ConnectedAs(N::Role role) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    return (s && s->running() && s->role() == role) ? s : nullptr;
+}
+
+// CLIENT, before flick's body: the client's own flickerer rolled it; the host's flick arrives as a cue.
+SG::Verdict OnFlickPre(const SG::Call& call) {
+    if (g_applyingFlick || call.fromOurCode || !ConnectedAs(N::Role::Client)) return SG::Verdict::Run;
+    if (!call.object || !coop::net_pump::IsInAnnouncedWorld(call.object)) return SG::Verdict::Run;
+    if ((++g_flicksRefused & (g_flicksRefused - 1)) == 0)
+        UE_LOGI("event_sound_relay: client refused its own light flick (%llu so far) -- the host's flick plays here",
+                static_cast<unsigned long long>(g_flicksRefused));
+    return SG::Verdict::Cancel;
+}
+
+// HOST, after flick's body: the flickerer calls it on every root in one loop, so one tick's calls are one cue.
+void OnFlickPost(const SG::Call&) {
+    if (ConnectedAs(N::Role::Host)) g_flickPending = true;
+}
+
 void TryInstall() {
+    if (!g_flickWatchTried) {
+        g_flickWatchTried = true;
+        if (!SG::WatchName(kRowFlick, kFlickTag, &OnFlickPre, &OnFlickPost))
+            UE_LOGE("event_sound_relay: the script-body gate refused the watch on flick -- each peer flickers its "
+                    "own lights");
+    }
     if (!g_sound.hooked && !g_sound.refused) {
         const ue_wrap::facts::Resolved fn = ue_wrap::facts::Resolve(kRowPlayAt);
         if (fn) {
@@ -214,6 +255,15 @@ void Install(N::Session* session) {
 void Tick() {
     auto* s = g_session.load(std::memory_order_acquire);
     if (s && s->running() && s->role() == N::Role::Host) PollArm();
+    if (g_flickPending) {
+        g_flickPending = false;
+        if (s && s->running() && s->role() == N::Role::Host && s->AnyWorldReadyPeer()) {
+            N::EventSoundCuePayload p{};
+            p.op = N::event_sound_ops::kFlick;
+            s->SendReliable(N::ReliableKind::EventSoundCue, &p, sizeof(p));
+            if (++g_flicksSent == 1) UE_LOGI("event_sound_relay: first host light flick sent");
+        }
+    }
     if (g_pending.empty()) return;
     std::vector<Pending> out;
     out.swap(g_pending);
@@ -233,6 +283,12 @@ void Tick() {
 }
 
 bool WellFormed(const N::EventSoundCuePayload& p) {
+    if (p.op == N::event_sound_ops::kFlick) {
+        // No text and no place: every byte past the op is zero.
+        const auto* b = reinterpret_cast<const uint8_t*>(&p);
+        for (size_t i = 1; i < sizeof(p); ++i) if (b[i] != 0) return false;
+        return true;
+    }
     if (p.op != N::event_sound_ops::kSound && p.op != N::event_sound_ops::kEmitter) return false;
     if (p.reserved != 0 || p.nameLen == 0) return false;
     if (static_cast<int>(p.nameLen) + p.attLen > N::kEventSoundTextCap) return false;
@@ -252,6 +308,17 @@ void OnCue(const N::EventSoundCuePayload& p) {
     if (++g_windowPlays > kPlaysPerSecond) {
         if ((++g_paced & (g_paced - 1)) == 0)
             UE_LOGW("event_sound_relay: %llu cue(s) over the pace dropped", static_cast<unsigned long long>(g_paced));
+        return;
+    }
+    if (p.op == N::event_sound_ops::kFlick) {
+        int flicked = 0;
+        g_applyingFlick = true;
+        for (void* root : ue_wrap::lightswitch::FindLightRoots()) {
+            if (!R::IsLive(root) || !coop::net_pump::IsInAnnouncedWorld(root)) continue;
+            if (ue_wrap::lightswitch::CallFlick(root)) ++flicked;
+        }
+        g_applyingFlick = false;
+        if (++g_flicksPlayed == 1) UE_LOGI("event_sound_relay: first host light flick played here (%d root(s))", flicked);
         return;
     }
     void* world = coop::players::Registry::Get().Local();
@@ -282,6 +349,16 @@ void OnDisconnect() {
     g_nextArmPollMs = 0;
     g_pending.clear();
     for (void*& c : g_sourceClasses) c = nullptr;
+    if (g_flicksSent || g_flicksRefused || g_flicksPlayed)
+        UE_LOGI("event_sound_relay: session end -- light flicks: %llu sent, %llu played, %llu own refused",
+                static_cast<unsigned long long>(g_flicksSent), static_cast<unsigned long long>(g_flicksPlayed),
+                static_cast<unsigned long long>(g_flicksRefused));
+    g_flickPending = false;
+    g_applyingFlick = false;
+    g_flicksSent = g_flicksRefused = g_flicksPlayed = 0;
+    g_windowMs = 0;
+    g_windowPlays = 0;
+    g_paced = g_played = g_unresolved = 0;
 }
 
 }  // namespace coop::event_sound_relay
