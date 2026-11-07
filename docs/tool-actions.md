@@ -54,6 +54,22 @@ taker's own hotbar.
 The child is named on the wire by the door lane's key for a pryable door (a door's game key is minted per process)
 and by its portable identity (`coop/element/portable_identity`) otherwise.
 
+### The piece's break `[RD]`
+
+`prop_asologoPiece_C::break()` is the cosmetic half of the breaking sequence: it activates `eff_break` (the break
+particles) and `audio_offthewall` (the tear-off sound) and nothing else. Only the host runs the sequence (above), so
+no other peer ever ran `break()`, whoever pried: the piece fell on their screen with no particles and no sound.
+`radiator_C`, `radiator_base2_C` and `securityTV_C` declare no `break` of their own, so the one body is the family's.
+
+`coop/interactables/piece_break_fx` watches `break()` after it ran. On the host it sends `PieceBreakFx` with the
+piece's element id to every client, the one whose player pried it too, since that client's own end was cut at the
+gate. A client resolves the copy by element id and calls the piece's own `break()` through
+`ue_wrap/devices/asologo_piece`, never `breakingSequence`, whose physics and constraints the prop lanes already carry.
+A copy that has not resolved yet is retried for four seconds. A cue for a piece whose `break()` ran on that peer in the
+last three seconds (a native run, or a repeat of the cue) plays nothing, and the lane's own call is not watched, so
+nothing is sent back. The sequence also runs from `dodamage` at no health, so a piece shot or exploded to pieces gets
+the same cue.
+
 ### The cut `[RD]`
 
 `prop_hacksaw_C::playerHandUse_LMB` takes the looked-at prop as `sawingProp` when it is a non-child, simulating,
@@ -106,6 +122,7 @@ not make the mend plays the kit's `fixAudio` at the pipe every 0.8 s while it la
 |---|---|---|
 | `ToolActionIntent` (225) | client -> host | a client's own begin, progress or end |
 | `ToolActionState` (226) | host -> all | every accepted session's begin, progress and end; a refusal to its sender |
+| `PieceBreakFx` (243) | host -> all | a pried wall piece's `break()` ran: the piece's element id (8 bytes); never relayed |
 
 One payload, `ToolActionPayload` (68 bytes): the kind (pry, saw, toolbox), the op (begin, progress, end, refuse), the owner's
 slot, the end's result (taken back, done, snapped, dropped), the target's key, a pry's pivot, `alpha`, strain, pitch,
@@ -120,7 +137,8 @@ of 0.95 or more; an end the host does not believe drops the crowbar to the floor
 The host sends a joiner every running session at its ready edge as a begin with its current state: every stuck
 crowbar, bent as it is, every running cut and every running mend (the pipe's burst flag comes with the pipe state, see
 [events-and-weather.md](events-and-weather.md)). What a finished pry or cut changed is already in the world the joiner
-loaded or arrives as the host's births and deaths.
+loaded or arrives as the host's births and deaths. `PieceBreakFx` is a one-shot cue and is not replayed: a joiner sees
+the piece already torn off.
 
 ## Known limits
 
@@ -128,6 +146,8 @@ loaded or arrives as the host's births and deaths.
 - `prop_asologoPiece_C`'s breaking sequence runs on the host's copy; a client's copy follows the host's physics on the
   prop lanes, and its constraint state is not carried. Its Static clear is: the client's copy takes the release on the
   host's drive end, snapshot row or hold (`ConvergeStaticRelease`, [props.md](props.md)), so the piece can be grabbed. `[?]`
+- A `PieceBreakFx` whose copy never resolves within four seconds (a prop with no element id on the host, a copy a
+  joiner has not loaded) is dropped with a warning; the piece still falls. `[?]`
 - The host's cut measure needs the mesh's volume through `BPCodeLib::MeshConvexVolume2` and the material's density;
   when either cannot be read it takes the sender's time and leaves one scrap, and says so. `[?]`
 - The heavy and simulating checks of the cut are the sender's own; the host checks the prop's identity, its
@@ -146,7 +166,9 @@ loaded or arrives as the host's births and deaths.
 | `coop/interactables/pry_sync` | the pry: the owner's watches, the host's judge and end, a receiver's copy |
 | `coop/interactables/saw_sync` | the cut: the owner's watches, the host's measure and end, the sound at the cut |
 | `coop/interactables/toolbox_sync` | the mend: the owner's watches, the host's judge and commit, the sound at the pipe |
+| `coop/interactables/piece_break_fx` | the piece's break: the host's watch and send, a client's `break()` on its copy, the wait for an unresolved copy |
 | `coop/world/basement_pipe_sync` | the pipe's burst flag: the host's, a client's writers parked, a joiner seeded |
 | `ue_wrap/devices/pryable` | `pryingCrowbar_C`: its state, a shown copy, its end and snap |
+| `ue_wrap/devices/asologo_piece` | `prop_asologoPiece_C`: whether an object is one, and its `break()` alone |
 | `ue_wrap/actors/toolbox` | `prop_toolbox_C` and `burstWaterPipe_C`: the kit's mend, the pipe's flag, state and fix |
 | `ue_wrap/actors/hacksaw` | `prop_hacksaw_C`: its cut, its reset, the game's measure, its end run for a sender |

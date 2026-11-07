@@ -14,6 +14,7 @@
 #include "coop/interactables/keypad_verbs.h"
 #include "coop/interactables/lightgroup_verbs.h"
 #include "coop/interactables/microwave_sync.h"
+#include "coop/interactables/piece_break_fx.h"
 #include "coop/interactables/surface_clean_sync.h"
 #include "coop/interactables/toggle_verbs.h"
 #include "coop/interactables/tool_action.h"
@@ -49,6 +50,7 @@ void Install(coop::net::Session& session) {
     coop::basement_flood_sync::Install(&session);  // the basement's water level is the host's: a client's drain, pipe and cheat writers are parked, the host's level reaches every peer
     coop::poster_sync::Install(&session);        // a poster is the host's: a client's put, take-down and picture run there, placed posters reach every peer as PosterState
     coop::tool_action::Install(&session);        // a crowbar's pry and a hacksaw's cut: shown on every peer, their end run once on the host
+    coop::piece_break_fx::Install(&session);     // a pried wall piece's break particles and tear-off sound: the host's break() is sent to every client
 }
 
 void Tick(coop::net::Session& session) {
@@ -72,6 +74,7 @@ void Tick(coop::net::Session& session) {
     { ue_wrap::ScopedWalkTimer _w{"sync:basement_flood"}; coop::basement_flood_sync::Tick(session); }  // settle its watches; HOST: the level when it moved; CLIENT: a level that waited for the water volume
     { ue_wrap::ScopedWalkTimer _w{"sync:poster"}; coop::poster_sync::Tick(session); }  // settle its watches; HOST: queued verbs, the placed posters' changes; CLIENT: parked states
     { ue_wrap::ScopedWalkTimer _w{"sync:tool_action"}; coop::tool_action::Tick(session); }  // settle the pry and saw watches; the owner's progress; HOST: sessions whose target or tool left
+    coop::piece_break_fx::Tick();       // settle the piece break watch; CLIENT: retry a cue whose copy had not resolved
 }
 
 void ConnectReplayForSlot(int slot) {
@@ -106,6 +109,7 @@ void OnDisconnect() {
     coop::basement_flood_sync::OnDisconnect();  // the water stands where it is; the game's own writers run again
     coop::poster_sync::OnDisconnect();     // a poster's own verbs run where they are made
     coop::tool_action::OnDisconnect();      // a pry and a cut run whole where they are made
+    coop::piece_break_fx::OnDisconnect();   // a waiting cue goes with its session
 }
 
 }  // namespace coop::verb_lanes

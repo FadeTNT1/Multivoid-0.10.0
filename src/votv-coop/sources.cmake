@@ -421,6 +421,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/microwave_sync.cpp
     src/coop/interactables/tool_action.cpp
     src/coop/interactables/pry_sync.cpp
+    src/coop/interactables/piece_break_fx.cpp
     src/coop/interactables/saw_sync.cpp
     src/coop/interactables/toolbox_sync.cpp
     src/coop/interactables/surface_clean_sync.cpp

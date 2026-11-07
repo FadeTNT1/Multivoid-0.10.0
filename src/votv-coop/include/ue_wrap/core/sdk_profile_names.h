@@ -1547,6 +1547,12 @@ inline constexpr const wchar_t* PryStrainingProp = L"straining";
 inline constexpr const wchar_t* PrySparkedProp = L"sparked";
 inline constexpr const wchar_t* PryStickCue = L"stick_Cue";
 inline constexpr const wchar_t* CrowbarClass = L"prop_crowbar_C";
+// The prop_asologoPiece_C family (radiator_C, radiator_base2_C, securityTV_C), the pryables whose crowbarOpen runs the
+// inherited breakingSequence. Its `break()` is the cosmetic half alone: it activates the break particles (eff_break)
+// and the tear-off sound (audio_offthewall); the sequence that calls it also frees the piece's physics and breaks its
+// four world constraints one by one.
+inline constexpr const wchar_t* AsologoPieceClass = L"prop_asologoPiece_C";
+inline constexpr const wchar_t* AsologoPieceBreakFn = L"break";
 inline constexpr int CrowbarMaxLives = 3;
 // The hacksaw (prop_hacksaw_C). Its playerHandUse_LMB takes the looked-at heavy simulating prop of a scrappable
 // material as `sawingProp`: processMat() names the scrap in `drop`, `vol` is the mesh's convex volume
