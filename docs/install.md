@@ -132,13 +132,6 @@ reported it working in [#4](https://github.com/VOTV-MP/Multivoid/issues/4). The 
 on DirectX 11, DirectX 12 and Vulkan; if the chat, the name tags or the F1 menu are still
 missing, start the game on DirectX 11 (add `-dx11` after `%command%`) and tell us in an issue.
 
-## macOS (CrossOver / Wine wrappers)
-
-VOTV has no Mac build; Mac players run the Windows build in CrossOver, Whisky, a Sikarugir/Kegworks wrapper or
-plain Wine. The friend installer (`install-multivoid.sh`, or double-click `Install-Multivoid-Mac.command`) finds the
-game inside the bottle and can add the `dwmapi=native,builtin` DLL override to the bottle's `user.reg` for you.
-See `installer/INSTALL-MAC.md`. Mac support is community-made and untested by the Multivoid authors.
-
 ## Upgrading from an old (pre-mod-folder) install
 
 Older Multivoid builds were two DLLs sitting next to the game's executable.
