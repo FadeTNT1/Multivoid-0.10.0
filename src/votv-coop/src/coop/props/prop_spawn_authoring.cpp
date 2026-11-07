@@ -275,9 +275,15 @@ BirthStamp g_births[kBirthStamps] = {};
 size_t     g_birthNext = 0;
 
 // The dispatches a client sent a shared destroy from.
-constexpr size_t kDestroyTokens = 16;
-uint64_t g_destroyTokens[kDestroyTokens] = {};
-size_t   g_destroyNext = 0;
+// One entry per destroy, with where the destroyed prop stood: a replacement is born where its original was.
+struct DestroyStamp {
+    uint64_t token;
+    float    at[3];
+    bool     hasAt;
+};
+constexpr size_t kDestroyTokens = 32;
+DestroyStamp g_destroyTokens[kDestroyTokens] = {};
+size_t       g_destroyNext = 0;
 
 }  // namespace
 
@@ -427,18 +433,25 @@ bool DiesInItsBirthDispatch(void* actor) {
 
 void NoteTransientDeath() { ++g_transientDeaths; }
 
-void NoteSharedDestroy() {
+void NoteSharedDestroy(const float* at) {
     const uint64_t token = SS::OutermostDispatchSerial();
     if (token == 0) return;
-    if (g_destroyTokens[(g_destroyNext + kDestroyTokens - 1) % kDestroyTokens] == token) return;
-    g_destroyTokens[g_destroyNext] = token;
+    DestroyStamp& d = g_destroyTokens[g_destroyNext];
+    d.token = token;
+    d.hasAt = at != nullptr;
+    for (int i = 0; i < 3; ++i) d.at[i] = at ? at[i] : 0.f;
     g_destroyNext = (g_destroyNext + 1) % kDestroyTokens;
 }
 
-bool SharedDestroyCrossedIn(uint64_t token) {
+bool SharedDestroyCrossedIn(uint64_t token, const float* birthAt, float radiusCm) {
     if (token == 0) return false;
-    for (const uint64_t t : g_destroyTokens)
-        if (t == token) return true;
+    for (const DestroyStamp& d : g_destroyTokens) {
+        if (d.token != token) continue;
+        // A destroy whose place was unreadable pairs by dispatch alone, as before.
+        if (!d.hasAt || !birthAt) return true;
+        const float dx = d.at[0] - birthAt[0], dy = d.at[1] - birthAt[1], dz = d.at[2] - birthAt[2];
+        if (dx * dx + dy * dy + dz * dz <= radiusCm * radiusCm) return true;
+    }
     return false;
 }
 

@@ -280,7 +280,12 @@ void DestroySeamBody(void* self, HandView handView) {
         coop::prop_drop_intent::NoteClientKeyedDestroy(keyStr);
         // This dispatch destroyed a shared prop on every peer: a birth in it is that prop's
         // replacement, and the drop-intent drain sends it after the destroy.
-        if (!actLatched) coop::prop_spawn_authoring::NoteSharedDestroy();
+        if (!actLatched) {
+            ue_wrap::FVector at{};
+            const bool haveAt = ue_wrap::engine::TryGetActorLocation(self, at);
+            const float atF[3] = {at.X, at.Y, at.Z};
+            coop::prop_spawn_authoring::NoteSharedDestroy(haveAt ? atF : nullptr);
+        }
     }
 }
 

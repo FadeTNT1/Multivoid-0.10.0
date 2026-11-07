@@ -9,6 +9,8 @@
 #include "coop/element/registry.h"          // EidForActor (drain: tracked/mirror exclusion)
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
+#include "coop/player/players_registry.h"  // Puppet: the host guard reads the author's body
+#include "coop/player/remote_player.h"
 #include "coop/player/hand_item.h"          // LocalHandActor (place detect: exclude the hand display)
 #include "coop/props/prop_echo_suppress.h"  // IsMirrorSpawn (exclude host-echo adopt spawns)
 #include "coop/props/join_membership_sweep.h"// RecordSelfAuthored (a player's own prop is never divergence)
@@ -55,6 +57,7 @@
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <deque>
@@ -539,6 +542,10 @@ void Tick(coop::net::Session* session) {
     }
     std::vector<PendingPlace> keep;
     namespace probe = coop::dev::prop_birth_key_probe;
+    // Replacement intents this drain has sent (see the pairing below).
+    constexpr float    kReplaceRadiusCm = 400.f;
+    constexpr unsigned kMaxReplacePerTick = 3;
+    unsigned           replacementsThisTick = 0;
     for (PendingPlace& e : g_pending) {
         if (!e.actor || !R::IsLiveByIndex(e.actor, e.idx)) {                          // died before drain
             probe::NoteDrainExit(e.actor, "died-before-drain", e.tries, std::wstring());
@@ -646,8 +653,29 @@ void Tick(coop::net::Session* session) {
         // destroyed a prop on every peer (a knife's slice, lib_C::replaceProp, a glowstick lit), so the
         // prop it became must reach them too, or the act leaves the host with nothing. Decided here, a
         // tick on, because the replacement is often born before the destroy runs.
-        const bool replacement = !parked && !e.playerSpawn && !e.unpackSpawn && !e.breakGib && !e.laneOwned &&
-                                 PSA::SharedDestroyCrossedIn(e.token);
+        //
+        // A replacement is born where the prop it replaces stood, and there are few of them in a tick. The dispatch
+        // alone is not that fact: a long outermost dispatch (the load tail's churn) destroys and births unrelated
+        // props, and pairing those re-authored the host's cleaned-up junk (a burst of kitchen cups, 17 in one tick,
+        // a few seconds after a join's world-ready). So the pairing also needs the birth within kReplaceRadiusCm of a
+        // destroy of that dispatch, and a tick that already sent kMaxReplacePerTick refuses the rest.
+        bool replacement = false;
+        if (!parked && !e.playerSpawn && !e.unpackSpawn && !e.breakGib && !e.laneOwned) {
+            ue_wrap::FVector birthLoc{};
+            const bool haveLoc = ue_wrap::engine::TryGetActorLocation(e.actor, birthLoc);
+            const float birthAt[3] = {birthLoc.X, birthLoc.Y, birthLoc.Z};
+            if (PSA::SharedDestroyCrossedIn(e.token, haveLoc ? birthAt : nullptr, kReplaceRadiusCm)) {
+                if (replacementsThisTick >= kMaxReplacePerTick) {
+                    UE_LOGW("[PROP-DROP] CLIENT refused a REPLACEMENT intent (more than %u in one tick -- a load-tail or "
+                            "bulk churn, not a player's act) actor=%p cls='%ls'",
+                            static_cast<unsigned>(kMaxReplacePerTick), e.actor, R::ClassNameOf(e.actor).c_str());
+                    probe::NoteDrainExit(e.actor, "replacement-burst-refused", e.tries, key);
+                    continue;
+                }
+                ++replacementsThisTick;
+                replacement = true;
+            }
+        }
         //
         // And an UNPACK birth: what an MRE opens into, born by the MRE's own body on this client
         // (MarkUnpackScope). The host's side of a shared MRE's open destroys the MRE and nothing
@@ -798,6 +826,43 @@ void MarkUnpackScope(const ue_wrap::script_gate::Call& c) {
     sg::MarkScope(c, g_unpackBit);
 }
 
+// Host sanity guard on a client-placed spawn: a player places and throws within reach, one or a few at a time. A spawn
+// far from the author's own body, or a burst past what a hand can do in a second, is client-side churn that
+// slipped its gates; spawning it would put junk the host's players already cleaned up back into the host's save. Refused
+// and logged, so a regression is loud instead of littering the world.
+bool HostAdmitsClientPlaced(const coop::net::PropDropIntentPayload& p, const std::wstring& cls,
+                            const std::wstring& key, uint8_t senderSlot) {
+    constexpr float    kMaxFromBodyCm = 6000.f;   // a throw's reach is a few hundred; the rest is lag slack
+    constexpr uint64_t kBurstWindowMs = 1000;
+    constexpr unsigned kMaxPerWindow = 12;
+    static uint64_t sWinStart[256] = {};
+    static unsigned sWinCount[256] = {};
+    const uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (now - sWinStart[senderSlot] > kBurstWindowMs) { sWinStart[senderSlot] = now; sWinCount[senderSlot] = 0; }
+    const unsigned n = ++sWinCount[senderSlot];
+    if (n > kMaxPerWindow) {
+        UE_LOGW("[PROP-DROP] HOST REFUSED client-placed spawn from slot=%u: burst of %u in %llu ms (limit %u) -- "
+                "cls='%ls' key='%ls'; a client bulk-authoring props is a bug, not a player",
+                senderSlot, n, static_cast<unsigned long long>(kBurstWindowMs), kMaxPerWindow, cls.c_str(), key.c_str());
+        return false;
+    }
+    auto* pup = coop::players::Registry::Get().Puppet(senderSlot);
+    void* body = pup ? pup->GetActor() : nullptr;
+    ue_wrap::FVector at{};
+    if (body && R::IsLive(body) && ue_wrap::engine::TryGetActorLocation(body, at)) {
+        const float dx = p.locX - at.X, dy = p.locY - at.Y, dz = p.locZ - at.Z;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > kMaxFromBodyCm) {
+            UE_LOGW("[PROP-DROP] HOST REFUSED client-placed spawn from slot=%u: %.0f cm from that player's body "
+                    "(limit %.0f) -- cls='%ls' key='%ls' at (%.1f,%.1f,%.1f); not a drop or throw by that player",
+                    senderSlot, dist, kMaxFromBodyCm, cls.c_str(), key.c_str(), p.locX, p.locY, p.locZ);
+            return false;
+        }
+    }
+    return true;
+}
+
 void OnPropDropIntent(coop::net::Session& session, const coop::net::PropDropIntentPayload& sent,
                       uint8_t senderSlot) {
     UE_ASSERT_GAME_THREAD("prop_drop_intent::OnPropDropIntent");
@@ -825,6 +890,7 @@ void OnPropDropIntent(coop::net::Session& session, const coop::net::PropDropInte
         }
         return;
     }
+    if (!HostAdmitsClientPlaced(p, cls, key, senderSlot)) return;
     void* actor = HostSpawnPlacedProp(p, cls, key, senderSlot);
     // A data drive the client brought in: its row, which only that client has, is the one the host takes for it.
     if (actor) coop::drive_payload_sync::NoteClientBrought(actor, senderSlot);
