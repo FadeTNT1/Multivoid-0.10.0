@@ -294,6 +294,9 @@ puts the body at the transform the host computed. The log says `sleeper: <name> 
 
 **The loot.** The inventory rides a hidden crate (`prop_container_crate_C`) at the same spot, spawned on every peer
 as a display-only prop: never enrolled as an element, out of the save (`ignoreSav`), static, hidden, collision off.
+Each peer holds it that way: twice a second a crate found shown, colliding, simulating or off the body's spot (the
+game's own prop code can undo the hide) is put back, and the log says `sleeper: <name>'s loot crate was found .. --
+hidden again`.
 Its inventory component is a world storage of address kind Sleeper on the storage lanes ([props.md](props.md),
 containers): the host publishes its rows, and a client's take or put is asked of the host, which holds a take's row
 in escrow until the client's commit, puts it back on an abort, a 30 s lapse or the taker's departure, and answers a
