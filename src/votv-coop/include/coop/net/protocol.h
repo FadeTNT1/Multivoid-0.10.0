@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 305;
+inline constexpr uint16_t kProtocolVersion = 307;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1448,6 +1448,14 @@ enum class ReliableKind : uint8_t {
     // dropped pack sends no grant, so a refusal costs the sender nothing. `reqId` echoes the
     // intent's, so a grant answers one press. Late join: nothing to replay. PackTrashGrantPayload.
     PackTrashGrant = 242,
+
+    // HOST->ALL: the host ran a prop_asologoPiece_C family prop's `break` (a pried wall radiator, a security TV; the
+    // break of a piece shot to pieces) and every client, the one whose player pried it too, plays that prop's own
+    // `break` cosmetics (coop::piece_break_fx): its break particles and its tear-off sound. The prop's physics and
+    // constraints ride the prop lanes, so a receiver runs `break` alone, never the breaking sequence that calls it.
+    // The prop is named by its Element id. Never relayed; a client's copy is refused at the host's receive edge. Late
+    // join: none -- a one-shot cue. PieceBreakFxPayload.
+    PieceBreakFx = 243,
 };
 
 #pragma pack(push, 1)
@@ -3720,9 +3728,9 @@ struct WorldActorSpawnPayload {
     uint8_t       _pad[3];                     // 3  -- explicit; the struct is 4-aligned for the floats
     // The payload uses 172 of the 228 usable bytes. A class whose birth content does not
     // fit length-prefixed in 64 bytes needs the blob sized first.
-    // Protocol 305: the gamemode's UFO rolls carry their setup in the blob (coop/world/ufo_event_sync.h) -- ufo_ballfo_C
+    // Protocol 307: the gamemode's UFO rolls carry their setup in the blob (coop/world/ufo_event_sync.h) -- ufo_ballfo_C
     // 32 bytes of floats (the heading, the two endpoints, the ball's place), ufo_boofo_spawn1_C its alpha and the
-    // angles of its random spline, ufo_joel_C and ufo_pillfo_C their timelines' places. A 304 peer ignores them and
+    // angles of its random spline, ufo_joel_C and ufo_pillfo_C their timelines' places. An older peer ignores them and
     // flies its own random course.
 };
 static_assert(sizeof(WorldActorSpawnPayload) == 172,
@@ -4726,6 +4734,14 @@ inline constexpr int kMeleeFxHeaderBytes = 60;  // everything before `text`
 static_assert(offsetof(MeleeFxPayload, text) == kMeleeFxHeaderBytes, "MeleeFxPayload's header must be 60 bytes");
 static_assert(sizeof(MeleeFxPayload) == 220, "MeleeFxPayload must be 220 bytes");
 static_assert(sizeof(MeleeFxPayload) <= 256 - 20 - 8, "MeleeFxPayload must fit in one reliable datagram");
+
+// The host ran a piece's break (PieceBreakFx): the prop's Element id. `reserved` is zero.
+struct PieceBreakFxPayload {
+    uint32_t targetEid;    // 4 -- the prop_asologoPiece_C family prop's Element id
+    uint32_t reserved;     // 4 -- zeroed
+};
+static_assert(sizeof(PieceBreakFxPayload) == 8, "PieceBreakFxPayload must be 8 bytes");
+static_assert(sizeof(PieceBreakFxPayload) <= 256 - 20 - 8, "PieceBreakFxPayload must fit in one reliable datagram");
 
 // A pressure washer's spray (WasherFx): whose washer, which hold of it, whether it fires, and where its shots landed
 // since the last message. `handGen` counts the firing peer's distinct washer holds, so a stop of an older hold

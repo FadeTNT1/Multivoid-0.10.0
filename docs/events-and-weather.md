@@ -118,7 +118,7 @@ a mirror `[V]` (`octa_drill` births). The Octa's attack on a player is relayed f
 The gamemode's UFO rolls are the host's too. Five timer bodies in `mainGamemode_C` roll on their own and bypass the
 eventer, so the event-fire lane never sees them: `ufo_ball`, `ufo_boo`, `ufo_joel`, `ufo_pill` and `ufo_midas`. Each is
 refused on a client at the script gate (tags `gamemode.ufo_*`), which also ends its re-arm; the host's four spawns are
-outputs of the gamemode's source row and ride the world-actor lane (`coop/world/ufo_event_sync`, protocol 305), and
+outputs of the gamemode's source row and ride the world-actor lane (`coop/world/ufo_event_sync`, protocol 307), and
 `ufo_midas`, which mints nothing, is an event scene (below).
 
 | Roll | Chance and window | Mints | What crosses |
@@ -146,7 +146,7 @@ root never moves: its `set` (the construction script's and BeginPlay's) turns th
 and puts the endpoints `a` and `b` at random offsets from it, and its tick slides the `balls` component from the ball's
 place to `b` at a constant speed, then destroys the actor. The mirror therefore keeps its own tick
 (`kWorldActorTickDrivenClasses`), and the spawn's birth blob carries the yaw, both endpoints and the ball's place now
-(`coop/world/ufo_ball_sync`, protocol 305), laid over the mirror's own random `set` in the frame it finishes
+(`coop/world/ufo_ball_sync`, protocol 307), laid over the mirror's own random `set` in the frame it finishes
 spawning; both balls then fly one course. A joiner mid-flight gets the ball's place at the join edge from the connect
 snapshot, the host's destroy (or the ball's arrival) retires the mirror, and `event_active_sync` leaves the class to
 the world-actor lane at the join edge, so its `setEvent` is not replayed a second time. Host log: `ufo_ball[host]:

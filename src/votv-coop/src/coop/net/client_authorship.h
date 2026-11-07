@@ -177,6 +177,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ChurchState:
     case ReliableKind::PropImpactFx:
     case ReliableKind::MeleeFx:
+    case ReliableKind::PieceBreakFx:
     case ReliableKind::FoodState:
     case ReliableKind::MicrowaveState:
     case ReliableKind::BucketFillState:

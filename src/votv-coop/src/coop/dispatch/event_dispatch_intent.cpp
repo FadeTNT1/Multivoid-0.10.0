@@ -33,6 +33,7 @@
 #include "coop/interactables/microwave_sync.h"  // CLIENT->HOST a microwave press; HOST->CLIENT its state
 #include "coop/items/poster_sync.h"  // CLIENT->HOST a poster verb; HOST->CLIENT a placed poster
 #include "coop/interactables/tool_action.h"  // CLIENT->HOST a pry or a cut; HOST->CLIENT every peer's, shown
+#include "coop/interactables/piece_break_fx.h"  // HOST->CLIENT a pried wall piece's break particles and sound
 #include "coop/props/crate_break.h"  // CLIENT->HOST a contact on a world container, judged and run by the host
 #include "coop/props/pack_trash_intent.h"  // CLIENT->HOST bagging of a pile or clump
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
@@ -685,6 +686,22 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::props::prop_impact_fx::OnFx(p);
+        break;
+    }
+    case net::ReliableKind::PieceBreakFx: {
+        // HOST->CLIENT: the host ran a pried wall piece's break(); this peer plays its copy's
+        // (coop::piece_break_fx). Host-authored only: the receive edge refuses a client's copy.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: PieceBreakFx dropped (role or sender slot %d)", msg.senderPeerSlot);
+            break;
+        }
+        net::PieceBreakFxPayload p{};
+        std::memcpy(&p, msg.payload, msg.payloadLen < sizeof(p) ? msg.payloadLen : sizeof(p));
+        if (!coop::piece_break_fx::WellFormed(p, static_cast<int>(msg.payloadLen))) {
+            UE_LOGW("event_feed: PieceBreakFx is malformed (%zu bytes) -- dropping", static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        coop::piece_break_fx::OnFx(p);
         break;
     }
     case net::ReliableKind::MeleeFxRequest: {

@@ -228,6 +228,9 @@ void RegisterWatches() {
 
 void Settle() {
     if (g_settled) return;
+    // Nothing is judged before the watches are registered (Tick can run ahead of Install): none pending then
+    // reads as every watch dead.
+    if (g_reg[0] == Reg::Pending || g_reg[1] == Reg::Pending || g_reg[2] == Reg::Pending) return;
     const bool live = g_reg[0] == Reg::Registered && g_reg[1] == Reg::Registered && g_reg[2] == Reg::Registered &&
                       sg::NameWatchLive(kRowHandUse, kTagHandUse) && sg::NameWatchLive(kRowTick, kTagTick) &&
                       sg::NameWatchLive(kRowComplete, kTagComplete);
