@@ -4,6 +4,7 @@
 
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 
 namespace ue_wrap::garbage_bag {
 namespace {
@@ -46,7 +47,7 @@ void* FilledClass() { return Cached(g_filledCls, L"prop_garbageBag_C"); }
 
 bool ReadRollCount(void* roll, int32_t& bags) {
     if (!IsRoll(roll)) return false;
-    if (g_bagsOff < 0) g_bagsOff = R::FindPropertyOffset(R::ClassOf(roll), L"bags");
+    if (g_bagsOff < 0) g_bagsOff = R::FindPropertyOffset(R::ClassOf(roll), ue_wrap::profile::name::GarbBagRollCountProp);
     if (g_bagsOff < 0) return false;
     bags = *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(roll) + g_bagsOff);
     return true;

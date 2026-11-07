@@ -327,10 +327,28 @@ bool HandleIntentEvent(net::Session& session,
                     static_cast<unsigned>(p.targetKind), static_cast<unsigned>(p.toolKind));
             break;
         }
-        UE_LOGI("[PACK-TRASH] RECEIVED eid=%u slot=%d target=%u tool=%u", p.eid, msg.senderPeerSlot,
-                static_cast<unsigned>(p.targetKind), static_cast<unsigned>(p.toolKind));
+        UE_LOGI("[PACK-TRASH] RECEIVED eid=%u slot=%d target=%u tool=%u req=%u", p.eid, msg.senderPeerSlot,
+                static_cast<unsigned>(p.targetKind), static_cast<unsigned>(p.toolKind),
+                static_cast<unsigned>(p.reqId));
         coop::pack_trash_intent::OnPackTrashIntent(session, p,
                                                    static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::PackTrashGrant: {
+        // HOST->CLIENT, one recipient, never relayed: the host ran the pack this client asked for, so
+        // this client spends its own tool. coop::pack_trash_intent::OnPackTrashGrant.
+        if (session.role() != net::Role::Client) {
+            UE_LOGW("event_feed: PackTrashGrant received on the host -- dropping");
+            break;
+        }
+        if (msg.payloadLen < sizeof(net::PackTrashGrantPayload)) {
+            UE_LOGW("event_feed: PackTrashGrant payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::PackTrashGrantPayload));
+            break;
+        }
+        net::PackTrashGrantPayload p{};
+        std::memcpy(&p, msg.payload, sizeof(p));
+        coop::pack_trash_intent::OnPackTrashGrant(p);
         break;
     }
     case net::ReliableKind::CoffeeActionIntent: {

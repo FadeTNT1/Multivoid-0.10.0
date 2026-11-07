@@ -225,6 +225,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::AuthChallenge:
     case ReliableKind::LightGroupState:
     case ReliableKind::GrabRefused:
+    case ReliableKind::PackTrashGrant:
     case ReliableKind::JoinPhaseNote:
     case ReliableKind::UpgradeLevels:
     case ReliableKind::KerfusState:

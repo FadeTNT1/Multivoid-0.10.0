@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 303;
+inline constexpr uint16_t kProtocolVersion = 304;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1441,6 +1441,13 @@ enum class ReliableKind : uint8_t {
     // shots and clean a second time. A receiver that hears nothing for 600 ms stops on its own, so a joiner picks a
     // firing washer up from the next keep. WasherFxPayload.
     WasherFx = 241,
+
+    // Host to client, one recipient, never relayed: the host ran the pack a PackTrashIntent asked for
+    // (the bag spawned, the target destroyed). The client spends its own tool on this and on nothing
+    // else -- a hand item and a roll's counter are per-peer state with no lane, and a refused or
+    // dropped pack sends no grant, so a refusal costs the sender nothing. `reqId` echoes the
+    // intent's, so a grant answers one press. Late join: nothing to replay. PackTrashGrantPayload.
+    PackTrashGrant = 242,
 };
 
 #pragma pack(push, 1)
@@ -4076,11 +4083,22 @@ struct PackTrashIntentPayload {
     uint32_t eid;          // the pile or clump the client used the bag on
     uint8_t  targetKind;   // 0 = pile, 1 = clump
     uint8_t  toolKind;     // 0 = folded bag, 1 = bag roll
-    uint8_t  _pad[2];      // 8-byte alignment; bytes beyond the kinds zero
+    uint16_t reqId;        // the sender's press counter; the PackTrashGrant that answers echoes it
 };
 static_assert(sizeof(PackTrashIntentPayload) == 8, "PackTrashIntentPayload must be 8 bytes");
 static_assert(sizeof(PackTrashIntentPayload) <= 256 - 20 - 8,
               "PackTrashIntentPayload must fit one datagram");
+
+// The host ran a pack (PackTrashGrant): the press it answers and the tool that press spent.
+struct PackTrashGrantPayload {
+    uint32_t eid;          // the pile or clump the host bagged
+    uint16_t reqId;        // the PackTrashIntent's reqId
+    uint8_t  toolKind;     // 0 = folded bag, 1 = bag roll (the intent's, as the host accepted it)
+    uint8_t  _pad;         // 8-byte alignment; zero
+};
+static_assert(sizeof(PackTrashGrantPayload) == 8, "PackTrashGrantPayload must be 8 bytes");
+static_assert(sizeof(PackTrashGrantPayload) <= 256 - 20 - 8,
+              "PackTrashGrantPayload must fit one datagram");
 
 // The upgrade levels (UpgradeLevels), host to all: the whole struct, absolute. The ORDER is
 // ue_wrap::upgrades' table order, fixed in that file precisely so this payload does not depend on

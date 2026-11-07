@@ -9,9 +9,11 @@
 //
 // This lane refuses the client's own body at the script-body gate and sends the target's element id
 // instead. The host re-tests reach and type, then spawns the bag and destroys the target itself, so
-// the prop seams carry both to every peer and into the host's save. The client spends its own tool:
-// a hand item and the roll's counter are per-peer state with no lane. Late join: nothing to replay,
-// since a pack the host has not run changed nothing.
+// the prop seams carry both to every peer and into the host's save, and answers the sender with a
+// PackTrashGrant. The client spends its own tool on that grant: a hand item and the roll's counter
+// (`invRead_bags`) are per-peer state with no lane, so exactly one bag leaves the bagging player's
+// own roll per bag the host made, and none for a press the host refused. Late join: nothing to
+// replay, since a pack the host has not run changed nothing.
 
 #pragma once
 
@@ -20,6 +22,7 @@
 namespace coop::net {
 class Session;
 struct PackTrashIntentPayload;
+struct PackTrashGrantPayload;
 }  // namespace coop::net
 
 namespace coop::pack_trash_intent {
@@ -31,6 +34,9 @@ void Install(coop::net::Session* session);
 // Per pump tick: keep the gate enabled for this session, consume the tools this peer's own presses
 // spent (client), and run one queued pack per peer per token (host). Game thread.
 void Tick(coop::net::Session& session);
+
+// CLIENT: the host ran the pack request `payload.reqId` named; spend the held tool for it.
+void OnPackTrashGrant(const coop::net::PackTrashGrantPayload& payload);
 
 // HOST: a client asks for a pack. Queued here and performed from Tick under the rate limit.
 void OnPackTrashIntent(coop::net::Session& session, const coop::net::PackTrashIntentPayload& payload,
