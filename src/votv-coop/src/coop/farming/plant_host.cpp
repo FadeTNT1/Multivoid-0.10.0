@@ -50,6 +50,9 @@ constexpr uint64_t kDriftSayMs = 60000;
 constexpr uint64_t kBodyWaitMs = 4000;
 constexpr uint64_t kHandWaitMs = 3000;
 constexpr float    kReachUU = 400.0f;
+// A tend's outcome was made by a held tool aimed from range (the growinator fires; the client lists plants within
+// this radius around itself, plant_client_verbs kTendRadiusUU), so its reach is that radius.
+constexpr float    kTendReachUU = 1500.0f;
 constexpr float    kMoveUU = 5.0f;
 constexpr size_t   kMaxRows = 4096;
 constexpr size_t   kMaxPending = 8;
@@ -431,7 +434,8 @@ coop::net::Served Execute(coop::net::Session& s, Queued& q, uint8_t slot) {
         Answer(slot, m, false, "the sender's player is not alive");
         return Served::Done;
     }
-    const EL::IntentTarget reach = EL::IntentTarget::ForClientIntent(s, slot, kReachUU);
+    const EL::IntentTarget reach =
+        EL::IntentTarget::ForClientIntent(s, slot, m.op == W::IntentOp::Tend ? kTendReachUU : kReachUU);
     void* body = PuppetBody(slot);
     if (!reach.HasBody() || !body) {
         if (NowMs() - q.atMs < kBodyWaitMs) return Served::Wait;
