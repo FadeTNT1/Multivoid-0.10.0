@@ -15,6 +15,7 @@
 // The BATCH channels (npc, worldactor, trashcarry, voice) keep their own TUs.
 
 #include "coop/player/movement_ledger.h"
+#include "coop/player/pocket_travel.h"  // the pocket rule: the host keeps no body from another level
 #include "coop/net/session.h"
 #include "ue_wrap/core/log.h"
 
@@ -186,6 +187,13 @@ void Session::StoreStreamPacket(MsgType type, int routeSlot, int peerSlot,
         ctx = h.originContext;
     }
     OriginStreams& origin = origin_[routeSlot];
+    // The pocket rule (coop/player/pocket_travel): the host stands in the main world, so a client's
+    // body streams from a pocket are not its puppet's to follow -- the puppet stays where the player
+    // left, which is also its sleeper's and its profile's place -- and are not billed to the movement
+    // ledger. They are still relayed: two clients in the same pocket see each other
+    // (RelayUnreliableToOtherClients judges the location). Read through the table's atomics.
+    const bool hostSkipsOrigin = cfg_.role == Role::Host && routeSlot > 0 &&
+        !coop::player::pocket_travel::SameLocation(static_cast<uint8_t>(routeSlot), 0);
     const auto occupancyAccepted = [&](MsgType kind) {  // under remoteMutex_
         if (originContext_.Accepts(routeSlot, ctx)) return true;
         if (kind == MsgType::PoseSnapshot)
@@ -203,6 +211,10 @@ void Session::StoreStreamPacket(MsgType type, int routeSlot, int peerSlot,
             streamRefusals_.Refused(routeSlot, StreamRefusals::Why::FailedValidation, seq,
                                     origin.pose.LastSeq());
             return;
+        }
+        if (hostSkipsOrigin) {
+            RelayUnreliableToOtherClients(peerSlot, data, len);
+            break;
         }
         {
             std::lock_guard<std::mutex> lk(remoteMutex_);
@@ -242,6 +254,7 @@ void Session::StoreStreamPacket(MsgType type, int routeSlot, int peerSlot,
         for (float v : vals) if (!std::isfinite(v)) return;
         if (!PropPoseInBounds(pkt.pose)) return;
         if (pkt.pose.key.len > 31) return;
+        if (hostSkipsOrigin) break;  // a held prop of another level: neither kept nor relayed
         {
             std::lock_guard<std::mutex> lk(remoteMutex_);
             if (!occupancyAccepted(type)) break;
@@ -278,6 +291,10 @@ void Session::StoreStreamPacket(MsgType type, int routeSlot, int peerSlot,
         if (std::fabs(pkt.pose.pitch) > 180.f ||
             std::fabs(pkt.pose.yaw)   > 180.f ||
             std::fabs(pkt.pose.roll)  > 180.f) return;
+        if (hostSkipsOrigin) {
+            RelayUnreliableToOtherClients(peerSlot, data, len);
+            break;
+        }
         {
             std::lock_guard<std::mutex> lk(remoteMutex_);
             if (!occupancyAccepted(type)) break;
@@ -301,6 +318,10 @@ void Session::StoreStreamPacket(MsgType type, int routeSlot, int peerSlot,
             if (std::fabs(pkt.pose.relPos[i]) > 300.f) return;
             if (std::fabs(pkt.pose.relRot[i]) > 180.f) return;
         }
+        if (hostSkipsOrigin) {
+            RelayUnreliableToOtherClients(peerSlot, data, len);
+            break;
+        }
         {
             std::lock_guard<std::mutex> lk(remoteMutex_);
             if (!occupancyAccepted(type)) break;
@@ -319,6 +340,7 @@ void Session::StoreStreamPacket(MsgType type, int routeSlot, int peerSlot,
         // Trust-boundary sanitize: viewCoordinate is screen-space (no fixed magnitude
         // bound), so a finite check is the sane floor before it reaches WriteCursorOnly.
         if (!std::isfinite(pkt.pose.viewX) || !std::isfinite(pkt.pose.viewY)) return;
+        if (hostSkipsOrigin) break;  // a desk of another level: neither kept nor relayed
         {
             std::lock_guard<std::mutex> lk(remoteMutex_);
             if (!occupancyAccepted(type)) break;
@@ -453,6 +475,13 @@ void Session::SendStreamsTick(std::chrono::steady_clock::time_point now,
             for (int i = 0; i < kMaxPeers; ++i) {
                 const uint32_t hConn = peerConns_[i].load();
                 if (hConn == 0) continue;
+                // The pocket rule (coop/player/pocket_travel): the host stands in the main world, and
+                // a client in a pocket is in another level. Every stream of this round is the host's
+                // body or a thing of the main world (creatures, world actors, carried trash, driven
+                // props, the clock, the desk, the dish, the reel, roaches), so none goes to it. Read
+                // through the location table's atomics: this is the net thread.
+                if (isHost && !coop::player::pocket_travel::SameLocation(0, static_cast<uint8_t>(i)))
+                    continue;
                 // One accounting for every datagram of this round: the session's traffic total,
                 // the occupancy the headroom rule reads, and the rejection count the per-second
                 // diagnostics report. These are the sends the reserve exists to protect, so they

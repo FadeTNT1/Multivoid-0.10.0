@@ -1724,6 +1724,10 @@ msgstr ""
 msgid "You can't see that from there"
 msgstr ""
 
+#: src/coop/player/pocket_travel_host.cpp
+msgid "You can't travel to another dimension while hosting: the shared world runs on your machine. Stop hosting first to take the trip."
+msgstr ""
+
 #: src/ui/config_review_panel.cpp
 #, c-format
 msgid "Your body skin (%s) could not be saved to multivoid.ini this launch -- it is temporary for this session. Fix whatever keeps the file from being read or saved (a lock from an editor or antivirus, permissions, or a file saved as UTF-16); nothing is lost once a launch can save again."

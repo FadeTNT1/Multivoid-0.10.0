@@ -104,6 +104,13 @@ inline Lane LaneForKind(ReliableKind k) {
     case ReliableKind::ItemActivate:   return Lane::Default;
     case ReliableKind::PlayerHit:      return Lane::Default;
     case ReliableKind::ExplosionSpawn: return Lane::Default;
+    // A client's pocket trip edge rides Default on purpose, in order with the world lanes beside it:
+    // its Enter lands behind whatever it sent from the world it is leaving, so the host has judged all
+    // of that before the slot is isolated, and its ReturnRequest ahead of the save request it re-arms.
+    // The host's location row names a slot, not an element, and rides High: a returning slot's own
+    // row would otherwise wait behind its join gate for the whole connect snapshot.
+    case ReliableKind::PocketTravel:   return Lane::Default;
+    case ReliableKind::PlayerLocation: return Lane::High;
     default:                           return Lane::Default;
     }
 }
@@ -222,8 +229,67 @@ inline bool IsPreWorldSendableKind(ReliableKind k) {
     case ReliableKind::PermissionGrants:
     // A command's answer is a private text line; the receiver touches no world.
     case ReliableKind::CommandReply:
+    // The pocket trips (coop/player/pocket_travel): a slot away in a pocket is not world-ready by
+    // design, and its own location rows and its trip edges are the whole conversation it has with
+    // the host about where it is. Both receivers only store a row or judge an edge.
+    case ReliableKind::PocketTravel:
+    case ReliableKind::PlayerLocation:
     // PropDriveEnd stays gated: it names a prop by eid, which a joiner has only after its world is up,
     // and the world-ready replay re-sends every driven prop's pose in any case. The syncer pair likewise.
+        return true;
+    default:
+        return false;
+    }
+}
+
+// The pocket rule (coop/player/pocket_travel_host, docs/pocket-dimensions.md): what the host still
+// sends to a slot that is away in a pocket dimension, or on its way back before its return's ready
+// announce. Such a slot is not world-ready, so the pre-world gate above already holds every world
+// kind; this narrows that list further, because a slot away is not a joiner at the menu but a
+// player standing in a level of its own, and a pre-world kind whose receiver touches the world
+// once it can -- EventFire queues until an eventer resolves, and the pocket's gamemode has one --
+// would act in the pocket. What stays: the roster and identity rows, the save transfer and the
+// inventory blob that bring it home, the link probes and the join beacon, the server settings, the
+// grants, a command's answer, the pocket rows, and chat (a client's chat is one line in its feed, and
+// the bubble over a puppet it cannot see is a no-op), which a joiner at the menu does not get but a
+// player in a pocket should.
+inline bool IsAwaySendableKind(ReliableKind k) {
+    switch (k) {
+    case ReliableKind::EventFire:
+        return false;
+    case ReliableKind::ChatLine:
+    case ReliableKind::ChatSpeaker:
+        return true;
+    default:
+        return IsPreWorldSendableKind(k);
+    }
+}
+
+// The same rule at the host's receive edge: what the host takes from a slot that is away. Its world
+// was unloaded under it, so anything it says about props, devices, creatures or the shared world is
+// about a level that is not the host's (a pocket's copy, or the teardown of the world it left) and is
+// refused before the inbox and the relay. The client is the producer and stands its world lanes down
+// while away (coop/player/pocket_travel_client); this is the host's belt for what slips through.
+// Taken: its trip edges, the return's request and announce, its profile, chat, the link probes, its
+// own identity and voice settings, its rest state, a command, and its answers to the host's orders.
+inline bool IsAwayReceivableKind(ReliableKind k) {
+    switch (k) {
+    case ReliableKind::PocketTravel:
+    case ReliableKind::SaveTransferRequest:
+    case ReliableKind::ClientWorldReady:
+    case ReliableKind::PlayerInventoryBlob:
+    case ReliableKind::InventoryRestoreAck:
+    case ReliableKind::ChatMessage:
+    case ReliableKind::LinkProbe:
+    case ReliableKind::LinkProbeReply:
+    case ReliableKind::SkinChange:
+    case ReliableKind::NameplateChange:
+    case ReliableKind::NickColorChange:
+    case ReliableKind::VoiceState:
+    case ReliableKind::SleepState:
+    case ReliableKind::CommandRequest:
+    case ReliableKind::StatOrderReply:
+    case ReliableKind::StatQueryReply:
         return true;
     default:
         return false;

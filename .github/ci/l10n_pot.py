@@ -56,6 +56,7 @@ ALLOWLIST = [
     "src/coop/player/local_body.cpp",
     "src/coop/player/nameplate.cpp",
     "src/coop/player/nick_color.cpp",
+    "src/coop/player/pocket_travel_host.cpp",
     "src/coop/player/sleep_sync.cpp",
     "src/coop/props/container_act_request.cpp",
     "src/coop/props/storage_act_client.cpp",

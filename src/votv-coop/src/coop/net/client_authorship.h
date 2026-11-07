@@ -131,6 +131,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DeskPingVerdict:
     case ReliableKind::ServerRepair:
     case ReliableKind::CommandRequest:
+    case ReliableKind::PocketTravel:      // a client's own trip edges (coop/player/pocket_travel_client)
     case ReliableKind::StatOrderReply:
     case ReliableKind::StatQueryReply:
     case ReliableKind::PointSackRedeem:
@@ -190,6 +191,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::BasementPipeState:
     case ReliableKind::AchievementState:
     case ReliableKind::SleeperState:
+    case ReliableKind::PlayerLocation:    // where each slot is: the host's location table
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:

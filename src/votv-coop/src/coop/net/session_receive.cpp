@@ -10,6 +10,7 @@
 #include "coop/net/net_clock.h"        // NowMs -- the probe's echo is timed on the net layer's clock
 #include "coop/net/peer_admission.h"   // the identity challenge every peer passes
 #include "coop/net/peer_identity.h"    // GuidForPublicKey -- the proved storage name
+#include "coop/player/pocket_travel_host.h"  // the pocket rule at the receive edge
 #include "client_authorship.h"  // co-located private header: which kinds a client may author
 #include "session_lanes.h"      // co-located private header: the admission and relayable kind lists
 #include "ue_wrap/core/log.h"
@@ -271,6 +272,11 @@ void Session::HandleMessage(int peerSlot, uint32_t hConn, const void* data, int 
         StoreRemoteTrashCarryBatch(data, len, seq);  // session_trashcarry.cpp (parse + newest-wins store)
         break;
     case MsgType::PropDrivePose:
+        // A driven prop's rows from a slot away in a pocket name a prop of a world it left: dropped
+        // (the pocket rule, session_lanes.h IsAwayReceivableKind).
+        if (cfg_.role == Role::Host && routeSlot >= 1 && routeSlot < kMaxPeers &&
+            coop::player::pocket_travel_host::IsSlotIsolated(static_cast<uint8_t>(routeSlot)))
+            break;
         StoreRemotePropDriveBatch(routeSlot, data, len, seq);  // session_propdrive.cpp (parse + merge by eid)
         break;
     case MsgType::VoiceFrame:
@@ -311,6 +317,18 @@ void Session::HandleMessage(int peerSlot, uint32_t hConn, const void* data, int 
                 }
                 return;
             }
+        }
+        // The pocket rule (session_lanes.h IsAwayReceivableKind): a slot away in a pocket dimension has
+        // no main world, so a world kind from it is about a level that is not the host's and goes no
+        // further -- not inboxed, not relayed. The state is pocket_travel_host's atomic per slot; a
+        // return's ClientWorldReady lifts it for the messages behind it.
+        if (cfg_.role == Role::Host && peerSlot >= 1 && peerSlot < kMaxPeers &&
+            coop::player::pocket_travel_host::IsSlotIsolated(static_cast<uint8_t>(peerSlot)) &&
+            !IsAwayReceivableKind(static_cast<ReliableKind>(rh.kind))) {
+            awayKindRefusals_.Note(static_cast<std::uint8_t>(peerSlot),
+                                   "a world kind from a slot away in a pocket dimension",
+                                   RefusalTally::Clock::now());
+            return;
         }
         // payloadLen is a uint16, so only the upper bound is a real guard.
         const int payloadLen = static_cast<int>(rh.payloadLen);
@@ -410,6 +428,19 @@ void Session::HandleMessage(int peerSlot, uint32_t hConn, const void* data, int 
             // that locks after is dropped here -- none is left for the game thread to dispatch
             // after the slot's teardown. The departed peer's message goes no further (no relay).
             if (peerConns_[peerSlot].load() != hConn) return;
+            // A client's pocket trip begins here for the receive edge: its Enter isolates the slot
+            // before the game thread sees it, so the teardown of the world it leaves, sent behind the
+            // Enter, is refused by the pocket rule above rather than one drain later
+            // (pocket_travel_host; the game thread judges the edge in full and may put it back).
+            if (cfg_.role == Role::Host &&
+                static_cast<ReliableKind>(rh.kind) == ReliableKind::PocketTravel &&
+                payloadLen == static_cast<int>(sizeof(PocketTravelPayload)) &&
+                peerSlot >= 1 && peerSlot < kMaxPeers) {
+                PocketTravelPayload tp{};
+                std::memcpy(&tp, static_cast<const uint8_t*>(data) + sizeof(PacketHeader) +
+                                     sizeof(ReliableHeader), sizeof(tp));
+                coop::player::pocket_travel_host::NoteTravelReceived(static_cast<uint8_t>(peerSlot), tp);
+            }
             // The join gate opens before the announce is visible to the game thread, which runs the
             // connect replay on it: no send of that replay, and no relay reaching the slot after
             // this, passes ungated. The snapshot's completion closes it (prop_snapshot.cpp). Lock
@@ -444,9 +475,13 @@ void Session::HandleMessage(int peerSlot, uint32_t hConn, const void* data, int 
         // joiner and applied to the host after the ready-edge seed's read (lost); with the stamp,
         // rows received after relay directly and rows received before ride the seed. Exactly once,
         // by ordering.
+        // A slot parked in a pocket dimension has no main world to be ready in: its announce is not
+        // stamped (the game thread refuses it, world_ready_answer); a returning slot's is, and from
+        // this message on its link carries world lanes again (pocket_travel_host).
         if (cfg_.role == Role::Host &&
             static_cast<ReliableKind>(rh.kind) == ReliableKind::ClientWorldReady &&
-            peerSlot >= 1 && peerSlot < kMaxPeers) {
+            peerSlot >= 1 && peerSlot < kMaxPeers &&
+            coop::player::pocket_travel_host::NoteWorldReadyReceived(static_cast<uint8_t>(peerSlot))) {
             relayEligible_[peerSlot].store(peerConns_[peerSlot].load(),
                                            std::memory_order_release);
         }

@@ -37,6 +37,16 @@ inline constexpr const wchar_t* PocketLevelWoid     = L"sl_woid";
 // the map is not one of its known maps and the token does not match: a travel the mod drives to a
 // pocket level must carry it.
 inline constexpr const wchar_t* PocketTravelToken   = L"PQXYyeofZ8cr5rJD4YXLVw";
+// What a trip's trigger leaves behind on the machine that refuses it (the host while hosting,
+// ue_wrap/engine/travel_residue). skullzone_C and insomniac_C clear the game instance's
+// loadedSlotName before their travel, and saveSlot_C::save returns early while it is empty, so a
+// refused trip would leave the host unable to save; prop_biotoilet_C and puddle_C set
+// currentLevel = None; puddle_C sets the character's movement mode to MOVE_None through
+// UCharacterMovementComponent::SetMovementMode(NewMovementMode, NewCustomMode).
+inline constexpr const wchar_t* GameInstanceLoadedSlotNameProp = L"loadedSlotName";
+inline constexpr const wchar_t* CharacterSetMovementModeFn     = L"SetMovementMode";
+inline constexpr const wchar_t* CharacterSetMovementModeParam  = L"NewMovementMode";
+inline constexpr const wchar_t* CharacterSetCustomModeParam    = L"NewCustomMode";
 
 // The checkpoint spawn point at the base entrance (the actor centre, world cm; re-derive per game
 // version): every client appearance is teleported here (coop/session/teleport_client).
