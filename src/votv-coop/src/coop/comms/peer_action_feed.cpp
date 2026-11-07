@@ -75,6 +75,12 @@ constexpr Row kRows[] = {
     {Action::OrderCommitFailed, L10N_MARK("%1$s could not order: the delivery could not be placed"), nullptr,
      Kind::None},
     {Action::OrderRefused, L10N_MARK("%1$s could not order: the host refused it"), nullptr, Kind::None},
+    {Action::WentToPoopDim, L10N_MARK("%1$s went to the poop dimension"), nullptr, Kind::None},
+    {Action::WentToGoop, L10N_MARK("%1$s went into the goop"), nullptr, Kind::None},
+    {Action::WentToPlace, L10N_MARK("%1$s went to the place"), nullptr, Kind::None},
+    {Action::WentToAlexPdim, L10N_MARK("%1$s went to Alex's dimension"), nullptr, Kind::None},
+    {Action::WentToWoid, L10N_MARK("%1$s went to the woid"), nullptr, Kind::None},
+    {Action::CameBack, L10N_MARK("%1$s came back"), nullptr, Kind::None},
 };
 static_assert(sizeof(kRows) / sizeof(kRows[0]) == static_cast<size_t>(Action::kCount),
               "one sentence per Action");

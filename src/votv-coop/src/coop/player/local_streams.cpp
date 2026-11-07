@@ -418,6 +418,16 @@ void OnSessionStart() {
     g_gapLoggedEid = coop::element::kInvalidId;
 }
 
+void TickPoseOnly(coop::net::Session& session, void* local, void* controller) {
+    namespace PP = coop::dev::perf_probe;
+    PP::Scope _s{PP::Bucket::LocalSend};
+    coop::net::PoseSnapshot mine;
+    if (!ReadLocalPose(local, controller, mine)) return;
+    session.SetLocalPose(mine);
+    coop::skin_effects::TickStride(local, ue_wrap::FVector{mine.x, mine.y, mine.z}, mine.speed,
+                                   (mine.stateBits & coop::net::kStateBitInAir) == 0);
+}
+
 void Tick(coop::net::Session& session, void* local, void* controller) {
     namespace PP = coop::dev::perf_probe;
     coop::net::PoseSnapshot mine;

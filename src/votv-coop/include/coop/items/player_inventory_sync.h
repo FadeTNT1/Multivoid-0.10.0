@@ -91,6 +91,47 @@ uint32_t ProfilesReceived();
 // last step of the save seam; a write the seam refuses is not counted). A reader waits on the count rising. Game thread.
 uint32_t WorldSavesWritten();
 
+// ---- a pocket trip (coop/player/pocket_travel_client) ----
+//
+// A pocket level is a full map load on the client, restored from the client's in-memory save object,
+// which is the join's (a client never saves): natively the player would arrive with the inventory it
+// joined with. The client is the one author of what it carries, so it captures that state at the
+// trip's edges and puts it back itself; the host only holds the flushed copy for its saves.
+
+// HOST: push slot `slot` its held profile again exactly as at a join: the per-slot pushed latch is
+// re-armed, so the next 1 Hz pass sends it the profile the store holds. Logged. Game thread.
+void HostRearmApplyForSlot(uint8_t slot);
+
+// CLIENT: capture what the local player carries now (items, hands, equipment, vitals) as the trip's
+// carried state. A read that fails, or an inventory the void-death keep calls collapsed, keeps the
+// previous capture. Returns the item count of the capture held after the call (carried, hands and
+// equipment slots), or -1 when none is held. Game thread, outside a script body (the read dispatches).
+int ClientCaptureCarried(const char* why);
+
+// CLIENT: send the profile now, made of the captured carried state, with `departure` (x, y, z cm;
+// pitch, yaw, roll deg) as the player's place, past the stream's hash and cadence. False when nothing
+// is captured, this world was not built from a host profile, or the transport refused. Game thread.
+bool ClientFlushCarried(const float departure[6]);
+
+// CLIENT: put the captured carried state back on the local player at the next world's own load (its
+// player load or its loadObjects return), the join's substitution path. Game thread.
+void ClientArmCarriedApply();
+enum class CarriedApply : uint8_t { Idle, Armed, Applied, Failed };
+CarriedApply ClientCarriedApplyState();
+// CLIENT: put it back now on the local player, when no load event ran in time (the settle fallback).
+// False with no local player or nothing armed. Game thread.
+bool ClientApplyCarriedNow(const char* when);
+
+// CLIENT: the way home re-runs the join's load. Re-arms the one-shot join apply (BeginJoinApply) and
+// the one-shot join placement (TakeJoinPlacement), so that load puts the carried state on the player
+// and places it at `departure`. The carried state is this client's own capture when one is held (the
+// host's re-push of its held copy is then not used: the client authored both, and its capture is the
+// newer); without one, the boot waits for the host's re-push. Idempotent. Game thread.
+void ClientRearmForReturn(const float departure[6]);
+
+// CLIENT: forget the trip's carried state and any return arm (a finished trip, a session start).
+void ClientForgetCarried();
+
 // Per-tick: the client's outbound inventory stream, or the host's on-join push, by role. It
 // also carries a one-shot read-verify self-test (ini inventory_selftest=1) that reads the local
 // saveSlot inventory a few seconds after world-up and logs what it found; that part is a no-op

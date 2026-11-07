@@ -10,6 +10,7 @@
 #include "coop/items/player_profile.h"
 #include "coop/player/player_profile_store.h"
 #include "coop/player/players_registry.h"
+#include "coop/player/pocket_travel_client.h"  // LocalAway: the stream stands down on a trip
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/session/player_handshake.h"
@@ -140,6 +141,37 @@ std::array<bool, coop::net::kMaxPeers> g_applySentToSlot{};
 // the poll, kept while the player drives, falls or lies ragdolled.
 coop::player_profile::Pose g_standingPose;
 
+// Client: a pocket trip's carried state (ClientCaptureCarried), what the player held at the last
+// capture. It is put back whole on the player in the next world (ClientArmCarriedApply,
+// ClientRearmForReturn): the apply REPLACES the inventory component's contents with these bytes, it
+// never adds to them, and the world it lands in was restored from the join's save object (the
+// pocket) or the host's live world (the return), neither of which holds this player's items as a
+// second copy. So an item is in exactly one place: the player's own inventory. Game thread.
+struct Carried {
+    bool                      valid = false;
+    std::vector<uint8_t>      items;
+    bool                      hasVitals = false;
+    ue_wrap::vitals::Snapshot vitals;
+    int                       count = 0;  // carried + hands + equipment, for the log
+};
+Carried g_carried;
+CarriedApply g_carriedApply = CarriedApply::Idle;
+// Client: the return's load is armed (ClientRearmForReturn): the next join apply is the way home, and
+// places the player at g_returnPose whatever its profile says. `g_returnSeeded` says the pending apply
+// was seeded from this client's own capture, so the host's re-push of its held copy is not used.
+bool g_returnArmed = false;
+bool g_returnSeeded = false;
+coop::player_profile::Pose g_returnPose;
+
+coop::player_profile::Pose PoseOfDeparture(const float d[6]) {
+    // x, y, z, pitch, yaw, roll -> the profile's standing pose (yaw only).
+    coop::player_profile::Pose p;
+    auto ok = [](float c) { return std::isfinite(c) && std::fabs(c) <= coop::net::kMaxCoord; };
+    if (!d || !ok(d[0]) || !ok(d[1]) || !ok(d[2]) || !std::isfinite(d[4])) return p;
+    p = {d[0], d[1], d[2], d[4], true};
+    return p;
+}
+
 void SampleStandingPose() {
     void* pawn = coop::players::Registry::Get().Local();
     if (!pawn) return;
@@ -204,6 +236,10 @@ void ClientStreamTick(coop::net::Session* s) {
     if (now - g_lastPoll < kClientPoll) return;
     g_lastPoll = now;
     if (!g_profileApplied) return;  // this world holds no profile of ours to report
+    // On a pocket trip the stream stands down: the pocket's place means nothing in the host's world,
+    // and the carried state was flushed with the departure place at the trip's start and is flushed
+    // again at the way home (ClientFlushCarried).
+    if (coop::player::pocket_travel_client::LocalAway()) return;
     std::vector<uint8_t> items;
     void* const pawn = coop::players::Registry::Get().Local();
     if (!pawn || !ue_wrap::inventory_component::Capture(pawn, items)) return;  // world not up yet
@@ -265,6 +301,11 @@ void HostPersistTick(coop::net::Session* s) {
 // the stream stays shut for the session, so the profile on the host survives for the next join.
 void OnSaveObjectReady(void* saveSlotObject) {
     if (!g_joinApplyArmed.exchange(false, std::memory_order_acq_rel)) return;  // not a join's load
+    // A pocket trip's way home is this load (ClientRearmForReturn): the player is placed at the
+    // departure spot whatever its profile says, and alive whatever it held when it left.
+    const bool isReturn = g_returnArmed;
+    g_returnArmed = false;
+    g_returnSeeded = false;
     // The host's status effects are records among its world's in this save object, and a player
     // joins without them: the game's own reset takes them out before the world is built, ahead of
     // both branches below (the profile branch returns early).
@@ -304,7 +345,12 @@ void OnSaveObjectReady(void* saveSlotObject) {
             g_pawnVitalsPending = true;
         }
         namespace N = ue_wrap::profile::name;
-        if (g_joinPlacement == JoinPlacement::StartPoint)
+        if (isReturn && g_returnPose.valid) {
+            g_joinPose = g_returnPose;
+            g_joinPlacement = JoinPlacement::ProfilePose;
+            ue_wrap::vitals::WritePlayerTransform(saveSlotObject, g_joinPose.x, g_joinPose.y, g_joinPose.z,
+                                                  g_joinPose.yaw);
+        } else if (g_joinPlacement == JoinPlacement::StartPoint)
             ue_wrap::vitals::WritePlayerTransform(saveSlotObject, N::kKPPSpawnX, N::kKPPSpawnY,
                                                   N::kKPPSpawnZ, 0.f);
         UE_LOGE("player_inventory[client]: SaveObjectReady with no profile from the host -- the "
@@ -352,6 +398,12 @@ void OnSaveObjectReady(void* saveSlotObject) {
     // Where the game itself believes this player is: its anti-noclip check falls back there, and
     // in a join capture that is where the HOST stood.
     namespace N = ue_wrap::profile::name;
+    // The way home: the departure spot, also for a player who died in the pocket (who comes home
+    // alive, the vitals above being the game's defaults then).
+    if (isReturn && g_returnPose.valid) {
+        g_joinPose = g_returnPose;
+        g_joinPlacement = JoinPlacement::ProfilePose;
+    }
     if (g_joinPlacement != JoinPlacement::AtHost && g_joinPose.valid) g_joinPlacement = JoinPlacement::ProfilePose;
     bool placed = true;
     if (g_joinPlacement == JoinPlacement::ProfilePose)
@@ -388,6 +440,7 @@ void Substitute(void* player, const char* when) {
     ApplyPendingPawnVitals(when);
     if (g_subRefuseEmpty) {  // stays set for the repeat window: a later pass must not wipe either
         g_profileApplied = false;
+        if (g_carriedApply == CarriedApply::Armed) g_carriedApply = CarriedApply::Failed;
         UE_LOGW("player_inventory[client]: the inventory substitution was skipped %s -- the host's profile "
                 "held no item bytes, and the stream stays shut so it is not overwritten", when);
         return;
@@ -397,6 +450,7 @@ void Substitute(void* player, const char* when) {
     const bool ok = IC::Restore(player, g_subBytes);
     const IC::Counts after = IC::CountItems(player);
     g_profileApplied = ok && g_subFromProfile;
+    if (g_carriedApply == CarriedApply::Armed) g_carriedApply = ok ? CarriedApply::Applied : CarriedApply::Failed;
     if (!ok) {
         UE_LOGE("player_inventory[client]: the inventory substitution FAILED %s -- this player keeps "
                 "what the host's save gave them and the stream stays shut", when);
@@ -566,6 +620,8 @@ void Tick() {
 
 bool SendProfileNow(coop::net::Session* s) {
     if (!s || !s->connected() || !g_profileApplied) return false;
+    // A pocket's pawn and place are not the host's world's: the trip's own flushes carry the profile.
+    if (coop::player::pocket_travel_client::LocalAway()) return false;
     std::vector<uint8_t> items;
     void* const pawn = coop::players::Registry::Get().Local();
     if (!pawn || !ue_wrap::inventory_component::Capture(pawn, items)) return false;
@@ -589,6 +645,13 @@ void OnReliable(const coop::net::BlobChunkPayload& p, uint8_t senderPeerSlot) {
         if (!coop::inventory_wire::Deserialize(blob, inv)) {
             UE_LOGW("player_inventory[client]: host apply blob (%zu bytes) failed to deserialize "
                     "-- ignoring (will keep waiting / fall back)", blob.size());
+            return;
+        }
+        // The way home already carries this client's own capture (ClientRearmForReturn): the host's
+        // re-push is its held copy of what this client flushed, never newer, so it does not replace it.
+        if (g_returnSeeded) {
+            UE_LOGI("[POCKET] client: the host's re-push of the held profile (%zu bytes) is not used -- "
+                    "the way home carries this client's own capture", blob.size());
             return;
         }
         g_pendingApply = std::move(inv);
@@ -741,6 +804,124 @@ void OnDisconnect() {
     g_subBytes.clear();
     g_pendingApply = coop::player_profile::Profile{};
     g_clientAssembler.Clear();
+    ClientForgetCarried();
+}
+
+// ---- a pocket trip ----
+
+void HostRearmApplyForSlot(uint8_t slot) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || s->role() != coop::net::Role::Host) return;
+    if (slot < 1 || slot >= coop::net::kMaxPeers) return;
+    g_applySentToSlot[slot] = false;  // HostPersistTick pushes the held profile on its next pass
+    UE_LOGI("[POCKET] host: slot %u's held profile is pushed to it again, as at a join", static_cast<unsigned>(slot));
+}
+
+int ClientCaptureCarried(const char* why) {
+    void* const pawn = coop::players::Registry::Get().Local();
+    std::vector<uint8_t> items;
+    if (!pawn || !ue_wrap::inventory_component::Capture(pawn, items) || items.empty()) {
+        UE_LOGW("[POCKET] client: the carried state could not be read %s -- %s", why,
+                g_carried.valid ? "the previous capture stands" : "none is held");
+        return g_carried.valid ? g_carried.count : -1;
+    }
+    // A void death's emptied inventory is not what the player carries: the previous capture stands.
+    if (coop::inventory_death_keep::HoldCollapsedProfile(pawn)) {
+        UE_LOGW("[POCKET] client: the inventory read %s has collapsed against the death keep's sample -- "
+                "%s", why, g_carried.valid ? "the previous capture stands" : "none is held");
+        return g_carried.valid ? g_carried.count : -1;
+    }
+    const ue_wrap::inventory_component::Counts c = ue_wrap::inventory_component::CountItems(pawn);
+    g_carried.valid = true;
+    g_carried.items = std::move(items);
+    g_carried.hasVitals = ue_wrap::vitals::ReadSnapshot(g_carried.vitals);
+    g_carried.count = (c.carried > 0 ? c.carried : 0) + (c.hands > 0 ? c.hands : 0) +
+                      (c.equipment > 0 ? c.equipment : 0);
+    return g_carried.count;
+}
+
+bool ClientFlushCarried(const float departure[6]) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || s->role() != coop::net::Role::Client) return false;
+    // A world not built from a host profile carries nothing of the player's: the host keeps its copy.
+    if (!g_profileApplied || !g_carried.valid) return false;
+    const coop::player_profile::Pose pose = PoseOfDeparture(departure);
+    if (pose.valid) g_standingPose = pose;  // the place a host save and a sleeper read while away
+    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(true, g_carried.items);
+    const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
+    return SendProfile(s, std::move(blob), itemsHash, g_carried.items.size(), Clock::now());
+}
+
+void ClientArmCarriedApply() {
+    if (!g_carried.valid) {
+        g_carriedApply = CarriedApply::Failed;
+        return;
+    }
+    // The join's substitution path, fed this player's own bytes: the next player load or loadObjects
+    // return replaces the inventory the world restored from the join's save object.
+    g_subPending = true;
+    g_subAfterLoad = false;
+    g_subRepeatUntil = {};
+    g_subBytes = g_carried.items;
+    g_subFromProfile = true;
+    g_subRefuseEmpty = false;
+    if (g_carried.hasVitals) {
+        g_pawnVitals = g_carried.vitals;
+        g_pawnVitalsPending = true;
+    }
+    g_carriedApply = CarriedApply::Armed;
+}
+
+CarriedApply ClientCarriedApplyState() { return g_carriedApply; }
+
+bool ClientApplyCarriedNow(const char* when) {
+    if (g_carriedApply != CarriedApply::Armed || !g_subPending) return false;
+    void* const pawn = coop::players::Registry::Get().Local();
+    if (!pawn) return false;
+    g_subAfterLoad = false;
+    Substitute(pawn, when);
+    // A player load arriving late in this world puts the same bytes back again (OnPlayerLoaded).
+    g_subRepeatUntil = Clock::now() + std::chrono::seconds(10);
+    ue_wrap::inventory_component::CallUpdateEquipment(pawn);
+    return true;
+}
+
+void ClientRearmForReturn(const float departure[6]) {
+    g_returnPose = PoseOfDeparture(departure);
+    g_returnArmed = true;
+    if (g_carried.valid) {
+        coop::player_profile::Profile p;
+        p.hasItems = true;
+        p.items = g_carried.items;
+        p.hasVitals = g_carried.hasVitals;
+        p.vitals = g_carried.vitals;
+        p.pose = g_returnPose;
+        g_pendingApply = std::move(p);
+        g_hasPendingApply.store(true, std::memory_order_release);
+        g_returnSeeded = true;
+    } else {
+        // Nothing captured: the boot waits for the host's re-push of its held copy.
+        g_hasPendingApply.store(false, std::memory_order_release);
+        g_clientAssembler.Clear();
+        g_returnSeeded = false;
+    }
+    // The placement for a load that does not pass the save-object hook; the hook sets the same.
+    if (g_returnPose.valid) {
+        g_joinPose = g_returnPose;
+        g_joinPlacement = JoinPlacement::ProfilePose;
+    }
+    BeginJoinApply();
+    UE_LOGI("[POCKET] client: the way home's load is armed -- %s, placed at (%.0f, %.0f, %.0f)",
+            g_returnSeeded ? "this client's own carried state" : "the host's held profile (no capture)",
+            double(g_returnPose.x), double(g_returnPose.y), double(g_returnPose.z));
+}
+
+void ClientForgetCarried() {
+    g_carried = Carried{};
+    g_carriedApply = CarriedApply::Idle;
+    g_returnArmed = false;
+    g_returnSeeded = false;
+    g_returnPose = {};
 }
 
 }  // namespace coop::player_inventory_sync

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace ue_wrap::world_identity {
 
@@ -51,6 +52,12 @@ enum class WorldKind : uint8_t {
     Other,        // a world that is not the gameplay map: menu, preLoad, a tutorial map
 };
 WorldKind CurrentWorldKind();
+
+// The current world's object name, the map's short name ("untitled_1", "sl_poopdim", "menu"), read in
+// the same refresh as the kind, so it tells a pocket level from the menu where the kind says only
+// Other. Empty while the kind is Unknown. The string comes from the name pool, never from the world.
+// Game thread for a fresh read (it drives the refresh, as CurrentWorldKind does).
+std::wstring CurrentWorldName();
 
 // Bumped every time CurrentWorld is observed to change: a cheap staleness token for callers
 // that would rather compare one integer than two pointers. Starts at 1, so a zero-initialised

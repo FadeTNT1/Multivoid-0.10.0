@@ -52,7 +52,12 @@
 #include "coop/player/death_revive.h"
 #include "coop/player/revive_protection.h"
 #include "coop/player/pocket_travel.h"
+#include "coop/player/pocket_travel_client.h"  // the stand-down while away, and the away-pawn placement skip
 #include "coop/player/run_end_travel.h"
+#include "coop/player/player_damage.h"        // the away tick list
+#include "coop/items/hotbar_icon_edge.h"      // the away tick list
+#include "coop/session/pause_guard.h"         // the away tick list
+#include "coop/voice/voice_chat.h"            // the away tick list
 #include "coop/items/broom_stroke.h"
 #include "coop/props/trash_morph_gate.h"
 #include "coop/items/player_inventory_sync.h"  // TakeJoinPlacement: where the join's appearance goes
@@ -207,6 +212,27 @@ void FleeToMainMenu(coop::net::Session& session, const char* why, bool travel = 
                                                 "the session has ended; restart the game",
                                                 /*afterJoin=*/true);
     }
+}
+
+// What runs of the gameplay chain while this client is on a pocket trip
+// (coop/player/pocket_travel_client): only what is this machine's own and touches nobody's world --
+// voice, the no-pause invariant, the save-cycle hold, the run-ending seam's readiness, the pocket lane
+// itself, the inventory's load watches and the carried state's re-apply (its stream stands down by
+// itself), the puppets' skins and damage cancels (a puppet in the same pocket), the hotbar's icons.
+// Every lane that reads or writes the shared world, or sends a world intent or claim, waits for the
+// way home, whose replay rebuilds what it holds.
+void TickAwayLanes(coop::net::Session& session, bool isConnected) {
+    namespace PP = coop::dev::perf_probe;
+    PP::Scope _s{PP::Bucket::Interactable};
+    coop::voice_chat::Tick();
+    coop::pause_guard::Tick(isConnected);
+    coop::save_block::Tick(&session);
+    coop::player::run_end_travel::Tick();
+    coop::player::pocket_travel::Tick();
+    coop::player_inventory_sync::Tick();
+    coop::player_handshake::TickSkinConverge();
+    coop::player_damage::Tick();
+    coop::hotbar_icon_edge::Tick();
 }
 
 }  // namespace
@@ -563,9 +589,13 @@ void Tick(coop::net::Session& session) {
     }
     g_wasConnected = isConnected;
 
+    // A client on a pocket trip: the world lanes stand down (coop/player/pocket_travel_client); its
+    // own body's pose, voice and chat, and the puppets in the same level, go on.
+    const bool standDown = !isHost && coop::player::pocket_travel_client::WorldLanesStandDown();
+
     // Up to ~100 snapshot candidates per tick while an enumeration is in progress (a no-op on
     // empty).
-    if (isConnected && worldUp) { PP::Scope _s{PP::Bucket::SnapshotDrain}; coop::prop_snapshot::DrainChunk(); }
+    if (isConnected && worldUp && !standDown) { PP::Scope _s{PP::Bucket::SnapshotDrain}; coop::prop_snapshot::DrainChunk(); }
 
     // The host's once-a-second word to each joiner. Its owners: save_transfer (the chunk pump and
     // the capture), prop_snapshot::DrainChunk (the bracket, just now), and join_beacon itself for
@@ -581,8 +611,12 @@ void Tick(coop::net::Session& session) {
     // The per-tick gameplay subsystem chain (connect-broadcast drains, module polls and applies,
     // NPC streams, dev probes), world-up-gated whole: every one acts on gameplay-world state, and a
     // queued connect broadcast describes in-world state, so waiting costs nothing.
-    if (worldUp) {
+    if (worldUp && !standDown) {
         coop::subsystems::TickGameplay(session, isConnected, isHost, g_fleeing);
+    } else if (standDown) {
+        // The pocket lane ticks through a trip's loads too, where no local player exists.
+        if (worldUp) TickAwayLanes(session, isConnected);
+        else         coop::player::pocket_travel::Tick();
     }
 
     if (g_netLocal.Raw() && !g_netLocal.Alive()) { g_netLocal.Reset(); g_netLocalController.Reset(); }
@@ -594,7 +628,12 @@ void Tick(coop::net::Session& session) {
         // returning player appears once at the spot their profile says they were standing on (a
         // drill's join_at_host leaves that one appearance at the host's); every other body of the
         // session, a respawn included, at the start point.
-        if (localNow && isConnected && !isHost) {
+        // A pocket's pawn (or the old world's, before a trip's travel) is not placed: the join's
+        // placement waits for the way home, which places the player at its departure spot.
+        const bool skipPlacement = localNow && !isHost && coop::player::pocket_travel_client::SkipNewPawnPlacement();
+        if (skipPlacement)
+            UE_LOGI("[POCKET] client: a new local body on a pocket trip -- not placed (the pocket's own spawn stands)");
+        if (localNow && isConnected && !isHost && !skipPlacement) {
             namespace PIS = coop::player_inventory_sync;
             float x = 0, y = 0, z = 0, yaw = 0;
             switch (PIS::TakeJoinPlacement(x, y, z, yaw)) {
@@ -653,7 +692,11 @@ void Tick(coop::net::Session& session) {
                 // fallback that keeps a death survivable for our layer; the arm decision and this
                 // one are the same decision at the same instant. g_localDeathHandled stays unset on
                 // the armed path: it is shared with the host-close arm above.
-                if (!coop::death_revive::ArmedForThisDeath()) {
+                // A death on a pocket trip is answered by the way home, not by leaving the session.
+                if (!coop::death_revive::ArmedForThisDeath() && !isHost &&
+                    coop::player::pocket_travel_client::LocalAway()) {
+                    coop::player::pocket_travel_client::OnUnarmedDeathWhileAway();
+                } else if (!coop::death_revive::ArmedForThisDeath()) {
                     g_localDeathHandled = true;
                     UE_LOGW("net: LOCAL PLAYER DIED -- tearing down coop state synchronously + fleeing "
                             "to the main menu (role=%s; permadeath-rejoinable)",
@@ -683,7 +726,11 @@ void Tick(coop::net::Session& session) {
             isHost ? worldUp
                    : (IsWorldSettled() &&
                       coop::join_membership_sweep::HasLoadTailQuiesced());
-        if (poseAuthoritative)
+        // On a pocket trip the body's pose alone goes (the host relays it to a peer in the same
+        // pocket); the held-prop and hand-item streams name props of the host's world.
+        if (poseAuthoritative && standDown)
+            coop::local_streams::TickPoseOnly(session, g_netLocal.Raw(), g_netLocalController.Raw());
+        else if (poseAuthoritative)
             coop::local_streams::Tick(session, g_netLocal.Raw(), g_netLocalController.Raw());
     }
 
@@ -694,17 +741,20 @@ void Tick(coop::net::Session& session) {
         coop::puppet_drive::DriveTick(session,
                                       HasAnnouncedWorldReady());
 
-        // The vent-cover census: one summary when the world is ready, one 30 s on (host and client).
-        coop::vent_census::Tick(isHost, isHost || HasAnnouncedWorldReady());
+        if (!standDown) {
+            // The vent-cover census: one summary when the world is ready, one 30 s on (host and client).
+            coop::vent_census::Tick(isHost, isHost || HasAnnouncedWorldReady());
 
-        // The receiver-side held-prop driver: the latest PropPose applied (a Key lookup on first
-        // arrival, transform writes after); a stream stop over 500 ms is an implicit release.
-        { PP::Scope _s{PP::Bucket::RemoteProp}; coop::remote_prop::Tick(session); }
+            // The receiver-side held-prop driver: the latest PropPose applied (a Key lookup on first
+            // arrival, transform writes after); a stream stop over 500 ms is an implicit release.
+            { PP::Scope _s{PP::Bucket::RemoteProp}; coop::remote_prop::Tick(session); }
+        }
     }  // worldUp (puppet drive + ragdoll + pose-diag + remote prop)
 
     // Session events (joins, disconnects) to the feed, and our Join; g_netLocal goes along so
     // remote_prop::OnRelease can dispatch Aprop_C.thrown(player).
     { PP::Scope _s{PP::Bucket::EventFeed}; coop::event_feed::Update(session, g_netLocal.Raw()); }
+    if (isHost) coop::player::pocket_travel_client::TickHostLocationFeed();  // "<nick> went to ..." lines
 }
 
 }  // namespace coop::net_pump
