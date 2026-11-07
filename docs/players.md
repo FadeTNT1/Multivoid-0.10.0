@@ -80,7 +80,8 @@ the puppet stays attached as the anchor for the nameplate and the recovery hand-
 
 The item in a player's hand is player state, not a world entity: the game destroys and respawns
 the held actor on every hotbar switch. The owner polls its own holding actor and broadcasts the
-class and name on change, and every peer keeps a display-only mirror, physics and collision off,
+class and name on change, and every peer keeps a display-only mirror, physics and collision off and
+out of the save (`ignoreSav`, so the host's world save never writes one),
 attached to the puppet's weapon component at the native hold transform
 (`coop/player/hand_item`). The flashlight rides the item-activation kind
 (`coop/player/item_activate`). In 0.10.0 it is equipment: the beam is on while the player's

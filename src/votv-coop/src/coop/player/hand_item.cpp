@@ -15,6 +15,7 @@
 #include "coop/props/trash_collect_sync.h"  // EnsureHeldItemBroadcast (hand-edge world release)
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/actors/prop.h"
+#include "ue_wrap/actors/prop_flags.h"  // WriteIgnoreSav: the mirror stays out of the save
 #include "ue_wrap/core/fname_utils.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/hot_path_guard.h"  // UE_ASSERT_GAME_THREAD
@@ -334,6 +335,17 @@ void SpawnMirror(uint8_t slot, void* puppetActor) {
     // Suppress the Init spawn-catch echo: a display mirror must never be expressed as a world
     // prop.
     coop::prop_echo_suppress::MarkMirrorSpawn(actor);
+    // And out of the save: the host's world save walks every prop, so a mirror alive when it runs (a
+    // prop_waterShooter_C one was, at the 20:40:46 save in an audited log) would be written into the
+    // host's world as a real prop. Set before the finish, as a sleeper's loot crate is.
+    if (!ue_wrap::prop::WriteIgnoreSav(actor, true)) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGW("hand_item: a mirror's ignoreSav did not resolve (class '%ls') -- a mirror alive during a world "
+                    "save may be written into it", want.cls.c_str());
+        }
+    }
     if (!E::FinishDeferredSpawn(actor, loc, rot)) {
         // The begun actor is not left in the world, half made: it is destroyed, silently to the peers.
         UE_LOGW("hand_item: slot %u FinishDeferredSpawn '%ls' failed -- the begun actor is destroyed, and the "
