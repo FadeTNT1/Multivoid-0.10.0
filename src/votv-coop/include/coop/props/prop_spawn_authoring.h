@@ -61,8 +61,12 @@ void NoteTransientDeath();   // counted for the teardown verdict
 // The CLIENT's destroy seam, after it sent a keyed destroy of a shared prop: this dispatch has destroyed
 // a prop on every peer. A birth in the same dispatch is the destroyed prop's replacement
 // (lib_C::replaceProp, a morph, a slice, a glowstick lit) and crosses with it.
-void NoteSharedDestroy();
-bool SharedDestroyCrossedIn(uint64_t token);   // the last 16 such dispatches
+// `at` is the destroyed prop's world position (3 floats) or null when unreadable. A birth pairs with a destroy
+// only when both happened in one dispatch AND the birth stands within `radiusCm` of it: a replacement is born
+// where its original stood, while a long dispatch (a load tail) that destroys and births unrelated props is not
+// a replacement. The last 32 destroys.
+void NoteSharedDestroy(const float* at);
+bool SharedDestroyCrossedIn(uint64_t token, const float* birthAt, float radiusCm);
 
 // The drain: an authored birth crossed as an intent, by `rule`. Counted; a Replace is said once per
 // class. Game thread.
