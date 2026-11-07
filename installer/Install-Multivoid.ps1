@@ -39,6 +39,17 @@
 
 .PARAMETER NonInteractive
     Never ask a question (implied when both -Action and -GamePath are given).
+
+.PARAMETER Rescan
+    Forget the remembered game folder and the list of folders already searched (kept in
+    %LOCALAPPDATA%\Multivoid\installer-cache.json), then search everything again. Without it the installer goes
+    straight to the game folder it found last time and skips folders it already searched with no result.
+
+.PARAMETER Force
+    Install or Repair even when the remembered install already matches this payload ("already up to date").
+
+.PARAMETER DetectOnly
+    Only find the game (and update the remembered folder), print what was found, and change nothing in the game.
 #>
 [CmdletBinding()]
 param(
@@ -51,7 +62,10 @@ param(
     [switch]$SkipVersionCheck,
     [switch]$RemoveLogs,
     [switch]$RemoveUserData,
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+    [switch]$Rescan,
+    [switch]$Force,
+    [switch]$DetectOnly
 )
 
 Set-StrictMode -Version 2.0
@@ -67,6 +81,11 @@ $script:ExeName          = 'VotV-Win64-Shipping.exe'
 $script:ManifestName     = 'install-manifest.json'
 $script:BackupSuffix     = '.multivoid-backup'
 $script:OldLayoutDir     = 'multivoid-old-install-backup'
+$script:CacheSchema      = 1
+$script:Cache            = $null      # loaded lazily by Get-InstallerCache
+$script:CacheWarned      = $false
+$script:IgnoreScanned    = $false     # true: search every folder even if it was searched before
+$script:ScanSkipped      = 0
 $script:Interactive      = -not ($NonInteractive -or ($PSBoundParameters.ContainsKey('Action') -and $PSBoundParameters.ContainsKey('GamePath')))
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -112,6 +131,10 @@ function Get-Sha256([string]$Path) {
 }
 
 function Get-PeTimestamp([string]$Exe) {
+    try { return (Read-PeTimestamp $Exe) } catch { return $null }   # not a PE file, or unreadable
+}
+
+function Read-PeTimestamp([string]$Exe) {
     $fs = [System.IO.File]::OpenRead($Exe)
     try {
         $br = New-Object System.IO.BinaryReader($fs)
@@ -152,6 +175,225 @@ function Remove-EmptyDirs([string]$Dir) {
     if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { return }
     foreach ($sub in @(Get-ChildItem -LiteralPath $Dir -Directory -Force)) { Remove-EmptyDirs $sub.FullName }
     if (@(Get-ChildItem -LiteralPath $Dir -Force).Count -eq 0) { Remove-Item -LiteralPath $Dir -Force }
+}
+
+function Get-StringSha256([string]$Text) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text)) } finally { $sha.Dispose() }
+    return ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
+}
+
+function Get-NowText { return ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss') + ' UTC') }
+
+# ---------------------------------------------------------------------------------------------------------------
+# Installer cache: %LOCALAPPDATA%\Multivoid\installer-cache.json
+#   Remembers where the game is, what was last installed there, and which folders were searched with no hit, so
+#   the next run does not search again. It only ever speeds things up: a missing, corrupt or stale cache is
+#   ignored (and rewritten), never trusted blindly -- the remembered folder is re-validated on every use.
+# ---------------------------------------------------------------------------------------------------------------
+function Get-CachePath {
+    $base = $env:LOCALAPPDATA
+    if ([string]::IsNullOrWhiteSpace($base)) { return $null }
+    return (Join-Path $base 'Multivoid\installer-cache.json')
+}
+
+function Get-Prop($Obj, [string]$Name, $Default) {
+    # StrictMode-safe property read for objects that came out of ConvertFrom-Json.
+    if ($null -eq $Obj) { return $Default }
+    $p = $Obj.PSObject.Properties[$Name]
+    if ($null -eq $p -or $null -eq $p.Value) { return $Default }
+    return $p.Value
+}
+
+function New-EmptyCache {
+    return @{
+        lastGame = ''
+        games    = (New-Object System.Collections.Generic.List[object])
+        scanned  = (New-Object System.Collections.Generic.List[object])
+    }
+}
+
+function ConvertTo-CacheGame($G) {
+    $root = [string](Get-Prop $G 'gameRoot' '')
+    if ([string]::IsNullOrWhiteSpace($root)) { return $null }
+    $size = 0L
+    try { $size = [int64](Get-Prop $G 'exeSize' 0) } catch { $size = 0L }
+    return [ordered]@{
+        gameRoot         = $root
+        gameBuild        = [string](Get-Prop $G 'gameBuild' '')
+        gameBuildStamp   = [string](Get-Prop $G 'gameBuildStamp' '')
+        exeSize          = $size
+        lastSeen         = [string](Get-Prop $G 'lastSeen' '')
+        lastInstall      = [string](Get-Prop $G 'lastInstall' '')
+        payloadHash      = [string](Get-Prop $G 'payloadHash' '')
+        installerVersion = [string](Get-Prop $G 'installerVersion' '')
+    }
+}
+
+function ConvertTo-CacheScan($S) {
+    $path = [string](Get-Prop $S 'path' '')
+    $fp = [string](Get-Prop $S 'fingerprint' '')
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($fp)) { return $null }
+    $depth = 0
+    try { $depth = [int](Get-Prop $S 'depth' 0) } catch { $depth = 0 }
+    return [ordered]@{
+        path        = $path
+        depth       = $depth
+        mtimeUtc    = [string](Get-Prop $S 'mtimeUtc' '')
+        fingerprint = $fp
+        scannedAt   = [string](Get-Prop $S 'scannedAt' '')
+    }
+}
+
+function Get-InstallerCache {
+    if ($null -ne $script:Cache) { return $script:Cache }
+    $cache = New-EmptyCache
+    $path = Get-CachePath
+    if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+        try {
+            # Read as UTF-8 explicitly: Windows PowerShell 5.1's Get-Content would read a BOM-less file as ANSI.
+            $raw = [System.IO.File]::ReadAllText($path, (New-Object System.Text.UTF8Encoding($false)))
+            $doc = $raw | ConvertFrom-Json
+            if ($null -eq $doc) { throw 'the file is empty' }
+            if ([int](Get-Prop $doc 'schema' 0) -eq $script:CacheSchema) {
+                $cache.lastGame = [string](Get-Prop $doc 'lastGame' '')
+                foreach ($g in @(Get-Prop $doc 'games' @())) {
+                    $e = ConvertTo-CacheGame $g
+                    if ($e) { $cache.games.Add($e) }
+                }
+                foreach ($s in @(Get-Prop $doc 'scanned' @())) {
+                    $e = ConvertTo-CacheScan $s
+                    if ($e) { $cache.scanned.Add($e) }
+                }
+            }   # another schema: start fresh, the next save replaces it
+        } catch {
+            $why = ([string]$_.Exception.Message -split "`n")[0]
+            if ($why.Length -gt 80) { $why = $why.Substring(0, 80) }
+            Write-Warn ("The installer cache is unreadable ($why); ignoring it and starting a new one.")
+            $cache = New-EmptyCache
+        }
+    }
+    $script:Cache = $cache
+    return $cache
+}
+
+function Save-InstallerCache {
+    $path = Get-CachePath
+    if (-not $path) { return }
+    try {
+        $c = Get-InstallerCache
+        $doc = [ordered]@{
+            schema    = $script:CacheSchema
+            installer = ('Multivoid Installer ' + $script:InstallerVersion)
+            lastGame  = [string]$c.lastGame
+            games     = @($c.games.ToArray())
+            scanned   = @($c.scanned.ToArray())
+        }
+        $json = ConvertTo-Json -InputObject $doc -Depth 6
+        $dir = Split-Path -Parent $path
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $tmp = $path + '.tmp'
+        [System.IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $tmp -Destination $path -Force
+    } catch {
+        # Never fatal: the cache is only a speed-up.
+        if (-not $script:CacheWarned) {
+            $script:CacheWarned = $true
+            Write-Warn ("Could not save the installer cache ($($_.Exception.Message)); continuing without it.")
+        }
+    }
+}
+
+function Clear-InstallerCache {
+    $script:Cache = New-EmptyCache
+    $path = Get-CachePath
+    if ($path) {
+        try { if (Test-Path -LiteralPath $path -PathType Leaf) { Remove-Item -LiteralPath $path -Force } } catch { }
+    }
+    Write-Info 'Forgot the remembered game folder and the list of folders already searched.'
+}
+
+function Find-CachedGame([string]$Win64) {
+    foreach ($g in (Get-InstallerCache).games) {
+        if ($g['gameRoot'] -ieq $Win64) { return $g }
+    }
+    return $null
+}
+
+function Save-GameInCache([string]$Win64, $Extra) {
+    # Remember $Win64 as the game folder; $Extra (a hashtable) carries install facts when an install just finished.
+    try {
+        $c = Get-InstallerCache
+        $entry = Find-CachedGame $Win64
+        if ($null -eq $entry) {
+            $entry = ConvertTo-CacheGame ([pscustomobject]@{ gameRoot = $Win64 })
+            $c.games.Add($entry)
+        }
+        $exe = Join-Path $Win64 $script:ExeName
+        $stamp = Get-PeTimestamp $exe
+        $entry['gameBuildStamp'] = $(if ($null -eq $stamp) { '' } else { '0x{0:x8}' -f $stamp })
+        $entry['gameBuild']      = $(if ($null -ne $stamp -and $stamp -eq $script:ExpectedStamp) { 'VOTV ' + $script:GameTarget } else { 'other' })
+        $entry['exeSize']        = (New-Object System.IO.FileInfo($exe)).Length
+        $entry['lastSeen']       = Get-NowText
+        if ($Extra) { foreach ($k in $Extra.Keys) { $entry[$k] = $Extra[$k] } }
+        $c.lastGame = $Win64
+        Save-InstallerCache
+    } catch {
+        if (-not $script:CacheWarned) {
+            $script:CacheWarned = $true
+            Write-Warn ("Could not update the installer cache ($($_.Exception.Message)); continuing.")
+        }
+    }
+}
+
+function Remove-GameFromCache([string]$Win64) {
+    try {
+        $c = Get-InstallerCache
+        $entry = Find-CachedGame $Win64
+        if ($null -ne $entry) { [void]$c.games.Remove($entry) }
+        if ([string]$c.lastGame -ieq $Win64) { $c.lastGame = '' }
+        Save-InstallerCache
+        Write-Info 'Forgot this game folder in the installer cache.'
+    } catch { }
+}
+
+function Test-GameRoot([string]$Win64) {
+    # The Win64 folder is usable when the exe is there and the Content folder two levels up (VotV\Content) exists.
+    if ([string]::IsNullOrWhiteSpace($Win64)) { return $false }
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $Win64 $script:ExeName) -PathType Leaf)) { return $false }
+        $content = [System.IO.Path]::GetFullPath((Join-Path $Win64 '..\..\Content'))
+        return (Test-Path -LiteralPath $content -PathType Container)
+    } catch { return $false }
+}
+
+function Get-RememberedGame {
+    # The cached game folder if it is still a valid game, else $null (and the stale entry is dropped).
+    $c = Get-InstallerCache
+    $last = [string]$c.lastGame
+    if ([string]::IsNullOrWhiteSpace($last)) { return $null }
+    if (Test-GameRoot $last) { return $last }
+    Write-Warn 'Remembered folder no longer valid -- searching'
+    Write-Info "  (it was: $last)"
+    $stale = Find-CachedGame $last
+    if ($null -ne $stale) { [void]$c.games.Remove($stale) }
+    $c.lastGame = ''
+    Save-InstallerCache
+    return $null
+}
+
+function Get-FolderFingerprint([string]$Dir) {
+    # Changes when the folder, or any folder directly inside it, is added, removed or touched. Cheap (one listing).
+    $item = Get-Item -LiteralPath $Dir -Force
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append($item.LastWriteTimeUtc.Ticks)
+    foreach ($d in @(Get-ChildItem -LiteralPath $Dir -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        [void]$sb.Append('|').Append($d.Name).Append(':').Append($d.LastWriteTimeUtc.Ticks)
+    }
+    return [pscustomobject]@{
+        MtimeText   = ($item.LastWriteTimeUtc.ToString('yyyy-MM-dd HH:mm:ss') + ' UTC')
+        Fingerprint = (Get-StringSha256 $sb.ToString())
+    }
 }
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -215,31 +457,56 @@ function Find-GameCandidates {
         }
     }
 
+    # Folders that were searched before with no hit are skipped while nothing in them changed (see
+    # Get-FolderFingerprint). -Rescan, the menu's R, or answering the question below searches them all again.
+    $cache = Get-InstallerCache
+    $prior = @{}
+    if (-not $script:IgnoreScanned) {
+        foreach ($s in $cache.scanned) { $prior[(($s['path'].ToLowerInvariant()) + '|' + $s['depth'])] = $s['fingerprint'] }
+    }
+    $records = New-Object System.Collections.Generic.List[object]
+    $seen = @{}
+    $script:ScanSkipped = 0
+    $scanRoot = {
+        param([string]$Root, [int]$Depth)
+        if (-not $Root -or -not (Test-Path -LiteralPath $Root -PathType Container)) { return }
+        $key = $Root.ToLowerInvariant() + '|' + $Depth
+        if ($seen.ContainsKey($key)) { return }
+        $seen[$key] = $true
+        $fp = Get-FolderFingerprint $Root
+        if ($prior.ContainsKey($key) -and $prior[$key] -eq $fp.Fingerprint) {
+            $script:ScanSkipped++
+            $records.Add([ordered]@{ path = $Root; depth = $Depth; mtimeUtc = $fp.MtimeText; fingerprint = $fp.Fingerprint; scannedAt = '' })
+            return
+        }
+        $hits = 0
+        foreach ($f in @(Get-ChildItem -LiteralPath $Root -Recurse -Depth $Depth -Filter $script:ExeName -File -ErrorAction SilentlyContinue)) {
+            $w = Resolve-Win64Dir $f.DirectoryName
+            if ($w) { $hits++; & $add $w }
+        }
+        if ($hits -eq 0) {
+            $records.Add([ordered]@{ path = $Root; depth = $Depth; mtimeUtc = $fp.MtimeText; fingerprint = $fp.Fingerprint; scannedAt = (Get-NowText) })
+        }
+    }
+
     Write-Info 'Looking in the usual game folders...'
-    $roots = New-Object System.Collections.Generic.List[string]
     foreach ($drive in [System.IO.DriveInfo]::GetDrives()) {
         if ($drive.DriveType -ne [System.IO.DriveType]::Fixed -or -not $drive.IsReady) { continue }
         foreach ($rel in @('Games', 'Program Files (x86)\Steam\steamapps\common', 'SteamLibrary\steamapps\common', 'Program Files\Steam\steamapps\common')) {
-            $roots.Add((Join-Path $drive.RootDirectory.FullName $rel))
-        }
-    }
-    foreach ($root in $roots) {
-        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
-        foreach ($f in @(Get-ChildItem -LiteralPath $root -Recurse -Depth 6 -Filter $script:ExeName -File -ErrorAction SilentlyContinue)) {
-            $w = Resolve-Win64Dir $f.DirectoryName
-            if ($w) { & $add $w }
+            & $scanRoot (Join-Path $drive.RootDirectory.FullName $rel) 6
         }
     }
 
     Write-Info 'Looking on your Desktop and in Downloads (this can take a moment)...'
     $user = [Environment]::GetFolderPath('UserProfile')
-    $personal = @([Environment]::GetFolderPath('Desktop'), (Join-Path $user 'Downloads'), (Join-Path $user 'OneDrive\Desktop'))
-    foreach ($root in $personal) {
-        if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
-        foreach ($f in @(Get-ChildItem -LiteralPath $root -Recurse -Depth 7 -Filter $script:ExeName -File -ErrorAction SilentlyContinue)) {
-            $w = Resolve-Win64Dir $f.DirectoryName
-            if ($w) { & $add $w }
-        }
+    foreach ($root in @([Environment]::GetFolderPath('Desktop'), (Join-Path $user 'Downloads'), (Join-Path $user 'OneDrive\Desktop'))) {
+        & $scanRoot $root 7
+    }
+
+    $cache.scanned = $records
+    Save-InstallerCache
+    if ($script:ScanSkipped -gt 0) {
+        Write-Info ("Skipped {0} folder(s) scanned before (nothing found there, nothing changed since). Use -Rescan or menu R to search them again." -f $script:ScanSkipped)
     }
     return $found.ToArray()
 }
@@ -256,15 +523,33 @@ function Show-FolderPicker {
 }
 
 function Select-GameFolder {
+    # Whatever is chosen is remembered (installer cache), so the next run starts from it.
+    $w = Select-GameFolderCore
+    Save-GameInCache $w $null
+    return $w
+}
+
+function Select-GameFolderCore {
     if ($GamePath) {
         $w = Resolve-Win64Dir $GamePath
         if (-not $w) { Stop-Installer "No $script:ExeName found under '$GamePath'. Point -GamePath at the game folder." }
         return $w
     }
+    $remembered = Get-RememberedGame
+    if ($remembered) {
+        Write-Ok "Using remembered game folder: $remembered"
+        if ($script:Interactive) { Write-Info 'Wrong copy? Run with -Rescan, or press R in the menu, to search again.' }
+        return $remembered
+    }
     if (-not $script:Interactive) { Stop-Installer 'Unattended runs need -GamePath.' }
 
     # Copies that are the 0.10.0 build first; each is labelled so a friend with old copies lying around picks right.
     $cands = @(Find-GameCandidates | Sort-Object { if ((Get-PeTimestamp (Join-Path $_ $script:ExeName)) -eq $script:ExpectedStamp) { 0 } else { 1 } })
+    if ($cands.Count -eq 0 -and $script:ScanSkipped -gt 0 -and
+        (Read-YesNo 'Nothing new turned up. Search the skipped folders again too?' $true)) {
+        $script:IgnoreScanned = $true
+        $cands = @(Find-GameCandidates | Sort-Object { if ((Get-PeTimestamp (Join-Path $_ $script:ExeName)) -eq $script:ExpectedStamp) { 0 } else { 1 } })
+    }
     if ($cands.Count -eq 1) {
         Write-Ok "Found the game: $($cands[0])"
         if (Read-YesNo 'Use this one?' $true) { return $cands[0] }
@@ -379,10 +664,23 @@ function Get-Payload {
             $entries.Add([pscustomobject]@{ Base = 'pak'; Rel = (Get-RelativePath $pakRoot $f.FullName); Src = $f.FullName; Kind = 'pak' })
         }
     }
+    $loaderEntry = [pscustomobject]@{ Base = 'exe'; Rel = 'dwmapi.dll'; Src = $loader; Kind = 'loader' }
+
+    # Hash every payload file once (size + SHA256). The copy step and the "already up to date" check reuse it, and
+    # Hash (over all of them) is what the installer cache compares to know this exact payload is already installed.
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($e in (@($entries.ToArray()) + @($loaderEntry))) {
+        $e | Add-Member -NotePropertyName Size -NotePropertyValue ((New-Object System.IO.FileInfo($e.Src)).Length)
+        $e | Add-Member -NotePropertyName Sha256 -NotePropertyValue (Get-Sha256 $e.Src)
+        $lines.Add(($e.Base + '|' + $e.Rel.ToLowerInvariant() + '|' + $e.Sha256))
+    }
+    $sorted = $lines.ToArray()
+    [System.Array]::Sort($sorted, [System.StringComparer]::Ordinal)
     return [pscustomobject]@{
         Root    = $root
         Files   = $entries.ToArray()
-        Loader  = [pscustomobject]@{ Base = 'exe'; Rel = 'dwmapi.dll'; Src = $loader; Kind = 'loader' }
+        Loader  = $loaderEntry
+        Hash    = (Get-StringSha256 ($sorted -join "`n"))
     }
 }
 
@@ -445,7 +743,7 @@ function Resolve-LoaderPlan($Layout, $Payload, $OldManifest, [bool]$Repair) {
     $dwmExists = Test-Path -LiteralPath $dwmPath -PathType Leaf
     $dwmOurs   = $false
     if ($dwmExists) {
-        $dwmOurs = (Get-Sha256 $dwmPath) -eq (Get-Sha256 $Payload.Loader.Src) -or (Test-IsMultivoidLoader $dwmPath)
+        $dwmOurs = (Get-Sha256 $dwmPath) -eq $Payload.Loader.Sha256 -or (Test-IsMultivoidLoader $dwmPath)
     }
     $ue4ssFiles = @(Find-Ue4ssFiles $Layout)
     $plan = [pscustomobject]@{ Install = $true; Backups = @() }
@@ -527,12 +825,15 @@ function Move-OldLayoutLeftovers($Layout) {
 }
 
 function Copy-PayloadFile($Layout, $Entry) {
-    # Returns 'new', 'updated' or 'ok' (already identical). Verifies the copy by hash.
+    # Returns 'new', 'updated' or 'ok' (already identical). Verifies the copy by hash. The payload file's size and
+    # hash were taken once in Get-Payload; the file on disk is only hashed when its size already matches.
     $dest = Resolve-Dest $Layout $Entry.Base $Entry.Rel
-    $srcHash = Get-Sha256 $Entry.Src
+    $srcHash = $Entry.Sha256
     $status = 'new'
     if (Test-Path -LiteralPath $dest -PathType Leaf) {
-        if ((Get-Sha256 $dest) -eq $srcHash) { return [pscustomobject]@{ Status = 'ok'; Sha256 = $srcHash; Dest = $dest } }
+        if (((New-Object System.IO.FileInfo($dest)).Length -eq $Entry.Size) -and ((Get-Sha256 $dest) -eq $srcHash)) {
+            return [pscustomobject]@{ Status = 'ok'; Sha256 = $srcHash; Dest = $dest }
+        }
         $status = 'updated'
     }
     $dir = Split-Path -Parent $dest
@@ -540,6 +841,23 @@ function Copy-PayloadFile($Layout, $Entry) {
     Copy-Item -LiteralPath $Entry.Src -Destination $dest -Force
     if ((Get-Sha256 $dest) -ne $srcHash) { Stop-Installer "Copy verification failed for $($Entry.Rel) (the file on disk does not match the payload)." }
     return [pscustomobject]@{ Status = $status; Sha256 = $srcHash; Dest = $dest }
+}
+
+function Test-InstallUpToDate($Layout, $Payload, $OldManifest) {
+    # True when the cache says this exact payload was installed here, a manifest exists, and every file the payload
+    # puts down is still on disk at the right size. A quick check: it does not hash the installed files.
+    $entry = Find-CachedGame $Layout.Win64
+    if ($null -eq $entry -or [string]::IsNullOrEmpty($entry['payloadHash']) -or $entry['payloadHash'] -ne $Payload.Hash) { return $false }
+    if ($null -eq $OldManifest) { return $false }
+    $files = New-Object System.Collections.Generic.List[object]
+    foreach ($e in $Payload.Files) { $files.Add($e) }
+    if ([bool](Get-Prop $OldManifest 'loader' $true)) { $files.Add($Payload.Loader) }
+    foreach ($e in $files) {
+        $dest = Resolve-Dest $Layout $e.Base $e.Rel
+        if (-not (Test-Path -LiteralPath $dest -PathType Leaf)) { return $false }
+        if ((New-Object System.IO.FileInfo($dest)).Length -ne $e.Size) { return $false }
+    }
+    return $true
 }
 
 function Invoke-Install([bool]$Repair) {
@@ -550,9 +868,19 @@ function Invoke-Install([bool]$Repair) {
     $layout = Get-Layout $win64
     Write-Ok "Game: $win64"
     Confirm-GameVersion $layout
-    Assert-GameClosed $layout
 
     $old = Read-Manifest $layout
+    if (Test-InstallUpToDate $layout $payload $old) {
+        $cached = Find-CachedGame $win64
+        Write-Ok ("Multivoid is already up to date here (payload {0}, installed {1})." -f $payload.Hash.Substring(0, 12), $cached['lastInstall'])
+        if ($Force) {
+            Write-Info '-Force given: going on anyway.'
+        } elseif (-not (Read-YesNo ('Reinstall anyway (re-checks every file)?') $false)) {
+            Write-Info 'Nothing changed. (Use -Force, or answer y, to reinstall anyway.)'
+            return
+        }
+    }
+    Assert-GameClosed $layout
     if ($Repair -and $null -eq $old -and -not (Test-Path -LiteralPath $layout.ModDir -PathType Container)) {
         Stop-Installer 'Nothing to repair: Multivoid is not installed here. Choose Install instead.'
     }
@@ -612,6 +940,7 @@ function Invoke-Install([bool]$Repair) {
     $allOldMoved = @($oldLayout) + @(Get-ManifestArray $old 'oldLayoutMoved')
     Write-Manifest $layout $manifestFiles.ToArray() $backups.ToArray() $plan.Install @($allOldMoved)
     Write-Ok "Manifest written: Mods\Multivoid\$script:ManifestName"
+    Save-GameInCache $win64 @{ payloadHash = $payload.Hash; lastInstall = (Get-NowText); installerVersion = $script:InstallerVersion }
 
     Write-Step "$verb done"
     Write-Host ("  files: {0} added, {1} replaced, {2} already correct" -f $counts['new'], $counts['updated'], $counts['ok'])
@@ -713,6 +1042,7 @@ function Invoke-Uninstall {
         if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $layout.Manifest -Force }
         else { Write-Info 'The install manifest stays because kept data remains in the mod folder.' }
     }
+    Remove-GameFromCache $win64
     Remove-EmptyDirs $modDir
     Remove-EmptyDirs $layout.PakDir
     $modsRoot = Join-Path $layout.Win64 'Mods'
@@ -737,10 +1067,12 @@ function Read-MenuChoice {
     Write-Host '  1) Install'
     Write-Host '  2) Uninstall'
     Write-Host '  3) Repair'
+    Write-Host '  R) Forget the remembered game folder and search again'
     Write-Host '  Q) Quit'
     while ($true) {
         $a = (Read-Host 'Pick one').Trim().ToLowerInvariant()
         switch ($a) {
+            'r' { Clear-InstallerCache; Write-Host '  Next time the game is searched for from scratch. Pick 1, 2 or 3 (or Q).' }
             '1' { return 'Install' }
             '2' { return 'Uninstall' }
             '3' { return 'Repair' }
@@ -749,19 +1081,37 @@ function Read-MenuChoice {
     }
 }
 
+function Invoke-Detect {
+    # -DetectOnly: find the game exactly as Install would (remembered folder first), report, change nothing in it.
+    Write-Step 'Locating the game'
+    $win64 = Select-GameFolder
+    $layout = Get-Layout $win64
+    Write-Ok "Game: $win64"
+    $entry = Find-CachedGame $win64
+    if ($null -ne $entry) { Write-Info ("Build: {0} (exe stamp {1})" -f $entry['gameBuild'], $entry['gameBuildStamp']) }
+    $mf = Read-Manifest $layout
+    Write-Info $(if ($null -ne $mf) { 'Multivoid is installed here (manifest found).' } else { 'Multivoid is not installed here.' })
+    Write-Info ("Cache file: {0}" -f (Get-CachePath))
+}
+
 $exitCode = 0
 try {
     Show-Banner
-    $chosen = $Action
-    if (-not $chosen) {
-        if (-not $script:Interactive) { Stop-Installer 'Unattended runs need -Action.' }
-        $chosen = Read-MenuChoice
-    }
-    switch ($chosen) {
-        'Install'   { Invoke-Install $false }
-        'Repair'    { Invoke-Install $true }
-        'Uninstall' { Invoke-Uninstall }
-        default     { Write-Info 'Nothing done.' }
+    if ($Rescan) { Clear-InstallerCache }
+    if ($DetectOnly) {
+        Invoke-Detect
+    } else {
+        $chosen = $Action
+        if (-not $chosen) {
+            if (-not $script:Interactive) { Stop-Installer 'Unattended runs need -Action.' }
+            $chosen = Read-MenuChoice
+        }
+        switch ($chosen) {
+            'Install'   { Invoke-Install $false }
+            'Repair'    { Invoke-Install $true }
+            'Uninstall' { Invoke-Uninstall }
+            default     { Write-Info 'Nothing done.' }
+        }
     }
 } catch [System.InvalidOperationException] {
     Write-Host ''

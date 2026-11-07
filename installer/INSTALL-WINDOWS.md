@@ -16,6 +16,9 @@ Multivoid is a co-op mod for **Voices of the Void 0.10.0**. This guide is for in
 2. Double-click **`Install-Multivoid.bat`**.
 3. Press **1** (Install). The installer looks for the game by itself; if it cannot find it, a folder picker opens:
    choose the folder that contains `WindowsNoEditor`.
+   It remembers where the game is (in `%LOCALAPPDATA%\Multivoid\installer-cache.json`), so later runs skip the
+   search. If the game moved, it notices and searches again. To make it forget and search from scratch, press **R**
+   in the menu, or run `Install-Multivoid.bat -Rescan`.
 4. Start the game. The main menu now has a **Multiplayer** entry showing the Multivoid version.
 
 If Windows says the files are blocked (downloaded from the internet): right-click the zip, Properties, tick
@@ -24,6 +27,7 @@ If Windows says the files are blocked (downloaded from the internet): right-clic
 ## Update
 
 Unzip the new installer and run **1) Install** again. It replaces the changed files and keeps your settings.
+If this exact version is already installed it says "already up to date" and asks whether to reinstall anyway.
 
 ## Uninstall
 
