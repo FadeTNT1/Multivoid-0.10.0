@@ -129,6 +129,20 @@ struct SnoreSource {
 };
 size_t SnoreSources(SnoreSource* out, size_t max);
 
+// ---- the drag (coop/player/sleeper_drag) ----
+// An offline sleeper's body can be carried by any player (hold LMB on it). These are the seams the drag reads and
+// writes through; the wire and who carries what are coop/player/sleeper_drag's. Game thread.
+// The offline sleeper the local player aims at within reach (built, not a joining body), or 0 while a screen is up.
+uint32_t DragAimedId();
+// Whether `id` is a built offline sleeper on this peer (not a joining body), and where its body lies now.
+bool DragPoseOf(uint32_t id, ue_wrap::FVector& lie, float& yaw);
+// Put sleeper `id`'s body (and its loot crate) at `lie`, facing `yaw`, on this peer; the lying pitch and roll stay
+// its own and the record's lying pose follows. `settle` also pins the head along it (the drag's last placement).
+bool DragPlace(uint32_t id, const ue_wrap::FVector& lie, float yaw, bool settle);
+// Host: the carry of `id` ended where it lies: its standing spot follows (on the floor under it) and its owner's
+// profile pose is rewritten, so they wake there; the saved list reads it at the next scan.
+void DragCommit(uint32_t id, const char* why);
+
 // How many sleepers this peer holds (built or not), for a log line or a test.
 size_t Count();
 
