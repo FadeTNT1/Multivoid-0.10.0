@@ -1132,6 +1132,15 @@ inline constexpr const wchar_t* DoorLerpaLeftProp            = L"lerpa_l";
 // by the graph; only the save's load writes `superclosed`, and nothing in the captured graphs writes `cantclose`.
 inline constexpr const wchar_t* DoorSuperClosedProp          = L"superclosed";
 inline constexpr const wchar_t* DoorCantCloseProp            = L"cantclose";
+// door_C's physical end state, which the native sequence sets and a root write does not: `coll` is the box that
+// blocks the doorway (doorOpen and the open finish set it NoCollision, doorClose and the close finish
+// QueryAndPhysics, and the save's settime(opened) sets it from its argument -- betterloaddata passes false), and
+// `door_l` / `door_r` are the leaf meshes under the roots (both verbs set them QueryAndPhysics for the swing, the open
+// finish NoCollision). `upd` sets the door's nav area from Active and isOpened, no sound.
+inline constexpr const wchar_t* DoorBlockerCollProp          = L"coll";
+inline constexpr const wchar_t* DoorLeftLeafProp             = L"door_l";
+inline constexpr const wchar_t* DoorRightLeafProp            = L"door_r";
+inline constexpr const wchar_t* DoorNavUpdateFn              = L"upd";
 inline constexpr const wchar_t* GarageMoveTimelineProp       = L"move";
 inline constexpr const wchar_t* GarageMovingProp             = L"mov";
 // garage_C's door mesh (the skeletal mesh the swing montage plays on), its looping swing sound and its nav

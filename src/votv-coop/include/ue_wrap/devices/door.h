@@ -175,8 +175,8 @@ void SmartApply(void* door, bool open);
 
 // Whether the door stands at, or is swinging toward, the state `open`, body and all: a swing heading there, or a
 // settled door whose flag reads it AND whose leaf roots stand at that state's rest place (open: fully travelled; shut:
-// not both open, so a crack is allowed). The truth behind an apply's success: the flag alone is not it. False on a
-// null door or unresolved fields. Game thread.
+// not both open, so a crack is allowed) AND whose doorway blocker and leaf meshes carry that end's collision. The
+// truth behind an apply's success: the flag alone is not it. False on a null door or unresolved fields. Game thread.
 bool AtState(void* door, bool open);
 
 // Drain the smart apply's verify list: doors whose native swing completed are dropped, and

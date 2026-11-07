@@ -12,6 +12,7 @@
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile_names.h"
+#include "ue_wrap/engine/engine_attach.h"
 #include "ue_wrap/engine/engine_component.h"
 
 #include <atomic>
@@ -80,6 +81,11 @@ int32_t g_sensorOverlapsOff = -1;  // Adoor_C::sensorOverlaps (TArray<AActor*>)
 // door) and the save write it, and a level trigger's runTrigger 2/3 could; no power path does (the panel's
 // blackout leaves it alone, measured).
 int32_t g_activeOff      = -1;     // Adoor_C::Active (power)
+// The door's physical parts the native sequence switches and a root write does not: the doorway blocker box and the
+// two leaf meshes (UPrimitiveComponent*). Optional: unresolved, a converge moves the leaves and leaves collision alone.
+int32_t g_collOff        = -1;     // Adoor_C::coll
+int32_t g_doorLOff       = -1;     // Adoor_C::door_l
+int32_t g_doorROff       = -1;     // Adoor_C::door_r
 
 // A door class whose required fields or verbs did not resolve: asked again only when another class
 // object comes, said once for it.
@@ -227,6 +233,12 @@ bool EnsureResolved() {
     const int32_t openOffsetOff = R::FindPropertyOffset(doorCls, N::DoorOpenOffsetProp);
     const int32_t lerpaROff = R::FindPropertyOffset(doorCls, N::DoorLerpaRightProp);
     const int32_t lerpaLOff = R::FindPropertyOffset(doorCls, N::DoorLerpaLeftProp);
+    const int32_t collOff = R::FindPropertyOffset(doorCls, N::DoorBlockerCollProp);
+    const int32_t doorLOff = R::FindPropertyOffset(doorCls, N::DoorLeftLeafProp);
+    const int32_t doorROff = R::FindPropertyOffset(doorCls, N::DoorRightLeafProp);
+    if (collOff < 0 || doorLOff < 0 || doorROff < 0)
+        UE_LOGW("door: the blocker or leaf meshes did not resolve (coll=%d door_l=%d door_r=%d) -- a door converged "
+                "without its verb keeps whatever collision it had", collOff, doorLOff, doorROff);
     if (rRootOff < 0 || lRootOff < 0 || openOffsetOff < 0 || lerpaROff < 0 || lerpaLOff < 0)
         UE_LOGW("door: the leaf roots did not resolve (door_r_root=%d door_l_root=%d openDoor=%d lerpa_r=%d "
                 "lerpa_l=%d) -- a cracked door is not carried to the other peers", rRootOff, lRootOff,
@@ -285,6 +297,9 @@ bool EnsureResolved() {
     g_moveAlphaOff = moveAlphaOff;
     g_moveDirOff   = moveDirOff;
     g_activeOff      = activeOff;
+    g_collOff        = collOff;
+    g_doorLOff       = doorLOff;
+    g_doorROff       = doorROff;
     g_resolved.store(true, std::memory_order_release);
     UE_LOGI("door: resolved door_C=%p Key@0x%04X isOpened@0x%04X dir@0x%04X move@0x%04X "
             "sensorOverlaps@0x%04X Active@0x%04X doorOpen=%p doorClose=%p", doorCls, keyOff,
@@ -563,18 +578,74 @@ static Body BodyAtRest(void* door, bool open) {
     return bothOpen ? Body::Wrong : Body::Ok;
 }
 
+// The collision the native sequence leaves on the door's blocker box and leaf meshes at rest: the open finish sets
+// all three NoCollision (0); doorClose sets all three QueryAndPhysics (3) and the close finish keeps them there.
+constexpr uint8_t kCollNone = 0;
+constexpr uint8_t kCollQueryAndPhysics = 3;
+static uint8_t RestCollision(bool open) { return open ? kCollNone : kCollQueryAndPhysics; }
+
+// Whether the door's blocker and leaf meshes carry the collision the native end of `open` leaves. True when none
+// can be read (the parts unresolved or a destroyed blocker: `del` destroys `coll`), so it never reads as a failure.
+static bool PhysicsAtRest(void* door, bool open) {
+    const int want = RestCollision(open);
+    for (int32_t off : {g_collOff, g_doorLOff, g_doorROff}) {
+        void* c = RootAt(door, off);
+        if (!c) continue;
+        const int cur = ue_wrap::engine::GetComponentCollisionEnabled(c);
+        if (cur >= 0 && cur != want) return false;
+    }
+    return true;
+}
+
+// Give a door the native sequence did not bring to `open` that sequence's physical end state: the doorway blocker
+// (`coll`) and both leaf meshes set to the end's collision, and the nav area put by the door's own `upd` (Active or
+// isOpened, no sound). A root write moves the leaves' collision with them, but not the blocker, which only the verb,
+// the finish or the save's settime switch -- and the save's betterloaddata runs settime(false), so a joiner whose
+// load restored isOpened open has a shut doorway box behind open-looking leaves. Neither verb nor finish is run: no
+// sound, no delegate, no additive swing. One line with each part's collision before and after and each leaf's world
+// place. True when every resolved part reads the end's collision afterwards.
+static bool ApplyRestPhysics(void* door, bool open, const char* why) {
+    const uint8_t want = RestCollision(open);
+    struct Part { const char* name; int32_t off; int before = -1; int after = -1; FVector at{}; };
+    Part parts[] = {{"coll", g_collOff}, {"door_l", g_doorLOff}, {"door_r", g_doorROff}};
+    bool ok = true;
+    for (Part& p : parts) {
+        void* c = RootAt(door, p.off);
+        if (!c) continue;
+        p.before = ue_wrap::engine::GetComponentCollisionEnabled(c);
+        if (p.before != want) ue_wrap::engine::SetComponentCollisionEnabled(c, want);
+        p.after = ue_wrap::engine::GetComponentCollisionEnabled(c);
+        p.at = ue_wrap::engine::GetComponentLocation(c);
+        if (p.after >= 0 && p.after != want) ok = false;
+    }
+    bool navRan = false;
+    if (void* fn = EntryVerb(door, N::DoorNavUpdateFn)) {
+        ParamFrame u(fn);
+        navRan = u.valid() && Call(door, u);
+    }
+    UE_LOGI("door: key='%ls' rest physics %s (%s): want collision %u; coll %d->%d @(%.0f,%.0f,%.0f); door_l %d->%d "
+            "@(%.0f,%.0f,%.0f); door_r %d->%d @(%.0f,%.0f,%.0f); nav upd %s -- %s", GetKeyString(door).c_str(),
+            open ? "OPEN" : "SHUT", why, static_cast<unsigned>(want), parts[0].before, parts[0].after, parts[0].at.X,
+            parts[0].at.Y, parts[0].at.Z, parts[1].before, parts[1].after, parts[1].at.X, parts[1].at.Y, parts[1].at.Z,
+            parts[2].before, parts[2].after, parts[2].at.X, parts[2].at.Y, parts[2].at.Z, navRan ? "ran" : "not run",
+            ok ? "ok" : "MISMATCH");
+    return ok;
+}
+
 // Put a settled door's leaf roots at the rest place of `open` (fully travelled, or zero) through the same root
-// write the crack lane uses, and the timeline's value and direction to that end so a later verb starts from it.
-// Never runs the additive doorOpen again, which on an open door drives the leaves into the wall, and never the
-// finished function, which would play the open or close sound and fire the opened delegate a second time. True when
-// the roots took the write.
-static bool ConvergeLeaves(void* door, bool open) {
+// write the crack lane uses, and the timeline's value and direction to that end so a later verb starts from it,
+// then the end's physical state (ApplyRestPhysics: the blocker box and leaf collision, the nav area). Never runs the
+// additive doorOpen again, which on an open door drives the leaves into the wall, and never the finished function,
+// which would play the open or close sound and fire the opened delegate a second time. True when the roots took the
+// write.
+static bool ConvergeLeaves(void* door, bool open, const char* why) {
     const float f = open ? 1.f : 0.f;
     if (!WriteLeafPose(door, LeafPose{f, f})) return false;
     if (g_moveAlphaOff >= 0 && g_moveDirOff >= 0) {
         *reinterpret_cast<float*>(reinterpret_cast<char*>(door) + g_moveAlphaOff) = f;
         *reinterpret_cast<uint8_t*>(reinterpret_cast<char*>(door) + g_moveDirOff) = open ? 0 : 1;
     }
+    ApplyRestPhysics(door, open, why);
     return true;
 }
 
@@ -621,9 +692,11 @@ static bool ForceTo(void* door, bool open, bool seedLerpa = false) {
         if (!moving && BodyAtRest(door, open) == Body::Wrong) {
             char desc[160] = "";
             DescribeSwing(door, desc, sizeof desc);
-            const bool ok = ConvergeLeaves(door, open);
+            const bool ok = ConvergeLeaves(door, open, "force, flag already there");
             UE_LOGW("door: key='%ls' forced %s with its flag already there and the leaves elsewhere [%s] -- leaves "
                     "%s", GetKeyString(door).c_str(), open ? "OPEN" : "SHUT", desc, ok ? "converged" : "NOT written");
+        } else if (!moving && !PhysicsAtRest(door, open)) {
+            ApplyRestPhysics(door, open, "force, flag and leaves already there");
         }
         return true;
     }
@@ -642,6 +715,9 @@ static bool ForceTo(void* door, bool open, bool seedLerpa = false) {
     *reinterpret_cast<uint8_t*>(reinterpret_cast<char*>(door) + g_moveDirOff)  = open ? 0 : 1;  // Forward/Backward
     if (void* fn = EntryVerb(door, L"move__UpdateFunc")) { ParamFrame u(fn); if (u.valid()) Call(door, u); }  // the MESH
     if (void* fn = EntryVerb(door, L"move__FinishedFunc")) { ParamFrame f(fn); if (f.valid()) Call(door, f); }  // isOpened
+    // The finish switches the blocker (and, opening, the leaves), but the leaves' QueryAndPhysics for a closed door
+    // is set by doorClose, which a snap never ran: the end's physical state is put here, said with the parts' result.
+    ApplyRestPhysics(door, open, "force-snap");
     return g_isOpenedOff < 0 ||
            *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open;
 }
@@ -681,9 +757,14 @@ void SmartApply(void* door, bool open) {
         *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open) {
         if (BodyAtRest(door, open) == Body::Wrong) {
             LogApply(door, open, "leaf-converge");
-            const bool ok = ConvergeLeaves(door, open);
+            const bool ok = ConvergeLeaves(door, open, "apply, flag matched, leaves elsewhere");
             UE_LOGW("door: key='%ls' stood %s with its leaves %s -- leaves %s", GetKeyString(door).c_str(),
                     open ? "OPEN" : "SHUT", open ? "shut" : "open", ok ? "converged" : "NOT written");
+        } else if (!PhysicsAtRest(door, open)) {
+            // Flag and leaves agree and the doorway's collision does not (the save's settime(false) left the blocker
+            // up under a restored open flag): the physical end state alone.
+            LogApply(door, open, "physics-converge");
+            ApplyRestPhysics(door, open, "apply, flag and leaves matched");
         } else {
             LogApply(door, open, "noop");
         }
@@ -751,7 +832,8 @@ bool AtState(void* door, bool open) {
         return TryReadOpenIntent(door, heading) && heading == open;
     }
     bool cur = false;
-    return TryReadOpen(door, cur) && cur == open && BodyAtRest(door, open) != Body::Wrong;
+    return TryReadOpen(door, cur) && cur == open && BodyAtRest(door, open) != Body::Wrong &&
+           PhysicsAtRest(door, open);
 }
 
 void TickSmartApply() {
@@ -788,6 +870,7 @@ void TickSmartApply() {
                             if (u.valid()) Call(door, u);
                         }
                     }
+                    ApplyRestPhysics(door, true, "verify deadline, leaves only");
                 } else if (e.target) {
                     ForceTo(door, true, true);
                 } else {
@@ -821,18 +904,20 @@ void TickSmartApply() {
         // was rewritten behind the apply (a late load), and is put back with the root write.
         if (!moving && cur == e.target && now >= e.nextBody) {
             e.nextBody = now + kBodyCheckEvery;
-            if (BodyAtRest(door, e.target) == Body::Wrong) {
+            const bool bodyWrong = BodyAtRest(door, e.target) == Body::Wrong;
+            if (bodyWrong || !PhysicsAtRest(door, e.target)) {
                 if (e.corrections >= kMaxDriftCorrections) {
-                    UE_LOGW("door: key='%ls' keeps leaving its %s leaves after %d corrections -- the watch gives up",
+                    UE_LOGW("door: key='%ls' keeps leaving its %s rest place after %d corrections -- the watch gives up",
                             GetKeyString(door).c_str(), e.target ? "OPEN" : "SHUT", e.corrections);
                     it = g_verify.erase(it);
                     continue;
                 }
                 ++e.corrections;
-                const bool ok = ConvergeLeaves(door, e.target);
-                UE_LOGW("door: key='%ls' leaves drifted off the %s place after its apply landed -- %s (correction %d)",
-                        GetKeyString(door).c_str(), e.target ? "OPEN" : "SHUT", ok ? "converged again" : "NOT written",
-                        e.corrections);
+                const bool ok = bodyWrong ? ConvergeLeaves(door, e.target, "watch, leaves drifted")
+                                          : ApplyRestPhysics(door, e.target, "watch, collision drifted");
+                UE_LOGW("door: key='%ls' %s drifted off the %s place after its apply landed -- %s (correction %d)",
+                        GetKeyString(door).c_str(), bodyWrong ? "leaves" : "collision", e.target ? "OPEN" : "SHUT",
+                        ok ? "converged again" : (bodyWrong ? "NOT written" : "collision MISMATCH"), e.corrections);
             }
         }
         if (now >= e.holdUntil) it = g_verify.erase(it); else ++it;
