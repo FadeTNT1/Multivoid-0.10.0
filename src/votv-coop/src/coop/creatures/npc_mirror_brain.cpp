@@ -41,6 +41,14 @@ UE_FACT_FN(kRowSkerfuro, "npc_mirror_brain", L"npc_zombie_skerfuro_C", L"Execute
            Declared);
 UE_FACT_FN(kRowHound, "npc_mirror_brain", L"fossilhound_C", L"ExecuteUbergraph_fossilhound", Declared);
 UE_FACT_FN(kRowGeomOcta, "npc_mirror_brain", L"geomOcta_C", L"ExecuteUbergraph_geomOcta", Declared);
+// The Erie creatures and the rufus (coop/creatures/host_born_spawn): the living Erie's graph and its two children's,
+// and the rufus's, each refused whole on a mirror.
+UE_FACT_FN(kRowErieLive, "npc_mirror_brain", L"eriePlushLive_C", L"ExecuteUbergraph_eriePlushLive", Declared);
+UE_FACT_FN(kRowErieGood, "npc_mirror_brain", L"eriePlushLive_good_C", L"ExecuteUbergraph_eriePlushLive_good",
+           Declared);
+UE_FACT_FN(kRowErieEvil, "npc_mirror_brain", L"eriePlushLive_evil_C", L"ExecuteUbergraph_eriePlushLive_evil",
+           Declared);
+UE_FACT_FN(kRowRufus, "npc_mirror_brain", L"rufus_C", L"ExecuteUbergraph_rufus", Declared);
 
 constexpr int kTagZombie   = 0x4D505A30;  // 'MPZ0'
 constexpr int kTagSummoner = 0x4D505A41;  // 'MPZA'
@@ -48,6 +56,10 @@ constexpr int kTagCorpse   = 0x4D505A43;  // 'MPZC'
 constexpr int kTagSkerfuro = 0x4D505A53;  // 'MPZS'
 constexpr int kTagHound    = 0x4D504630;  // 'MPF0'
 constexpr int kTagGeomOcta = 0x4D504730;  // 'MPG0'
+constexpr int kTagErieLive = 0x4D504530;  // 'MPE0'
+constexpr int kTagErieGood = 0x4D504547;  // 'MPEG'
+constexpr int kTagErieEvil = 0x4D504556;  // 'MPEV'
+constexpr int kTagRufus    = 0x4D505230;  // 'MPR0'
 
 // ---- The mark ----
 
@@ -140,6 +152,10 @@ Watch g_watches[] = {
     {&kRowSkerfuro, kTagSkerfuro, R::ParamOffset{L"EntryPoint"}},
     {&kRowHound, kTagHound, R::ParamOffset{L"EntryPoint"}},
     {&kRowGeomOcta, kTagGeomOcta, R::ParamOffset{L"EntryPoint"}},
+    {&kRowErieLive, kTagErieLive, R::ParamOffset{L"EntryPoint"}},
+    {&kRowErieGood, kTagErieGood, R::ParamOffset{L"EntryPoint"}},
+    {&kRowErieEvil, kTagErieEvil, R::ParamOffset{L"EntryPoint"}},
+    {&kRowRufus, kTagRufus, R::ParamOffset{L"EntryPoint"}},
 };
 constexpr size_t kWatches = sizeof(g_watches) / sizeof(g_watches[0]);
 

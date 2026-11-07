@@ -49,6 +49,10 @@ std::atomic<coop::net::Session*> g_session{nullptr};
 // stalker-entity member; every row is per-peer-owned + cross-peer mirrored.
 constexpr const wchar_t* kOwnerEntityClasses[] = {
     L"eyer_C",   // classId 0: the night "Eyes" stalker (ticker_eyers)
+    // classId 1: the wasp swarm. Its nest rolls it while this machine's player 0 is near and it chases player 0, so
+    // each peer's swarm is its own; another peer's mirror is the swarm's display, and its BeginPlay still stings
+    // that peer's own player within reach (a puppet's sting is refused by coop/player/player_damage).
+    P::name::WaspSwarmClass,
 };
 constexpr size_t kOwnerEntityClassCount =
     sizeof(kOwnerEntityClasses) / sizeof(kOwnerEntityClasses[0]);
@@ -93,7 +97,7 @@ struct Owned {
 };
 std::vector<Owned> g_owned;
 uint16_t g_nextSeq = 1;
-constexpr size_t kMaxOwned = 8;   // eyers are rare singletons; runaway backstop
+constexpr size_t kMaxOwned = 8;   // eyers are rare singletons, a swarm lives seconds; runaway backstop
 
 // ---- RECEIVER side: mirrors of other peers' entities ----
 struct Mirror {
@@ -240,7 +244,7 @@ void Install(coop::net::Session* session) {
     }
     g_observerArmed = true;
     UE_LOGI("owner_entity: armed on the BeginDeferred Func thunk, every route (%zu member class(es); eyer_C "
-            "classId=0) -- per-peer owned, cross-peer mirrored", kOwnerEntityClassCount);
+            "classId=0, waspSwarm_C classId=1) -- per-peer owned, cross-peer mirrored", kOwnerEntityClassCount);
 }
 
 void Tick() {
@@ -396,8 +400,15 @@ void OnSpawnMsg(const coop::net::OwnerEntitySpawnPayload& p, int senderPeerSlot)
         }
     }
     // PARK the mirror: no AI (actor + CMC ticks off -> no isLooking/anger/dash
-    // loop). Collision was already dropped pre-Finish (F-4).
-    ue_wrap::puppet::DisableCharacterTicks(spawned);
+    // loop). Collision was already dropped pre-Finish (F-4). A member that is no Character (the swarm) has no
+    // movement component, so its actor tick goes off (the chase of this machine's player 0) and its root is held
+    // kinematic, the pose stream's alone.
+    if (E::GetCharacterMovementComponent(spawned)) {
+        ue_wrap::puppet::DisableCharacterTicks(spawned);
+    } else {
+        E::SetActorTickEnabled(spawned, false);
+        E::SetActorSimulatePhysics(spawned, false);
+    }
     g_mirrors[key] = Mirror{spawned, R::InternalIndexOf(spawned)};
     UE_LOGI("owner_entity: mirror '%ls' materialized for slot=%d seq=%u at (%.0f,%.0f,%.0f) "
             "(brain-parked, collision-off)",

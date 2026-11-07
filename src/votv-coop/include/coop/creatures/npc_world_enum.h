@@ -40,10 +40,10 @@ int RegisterExistingWorldNpcs(int joiningSlot);
 // client's own ticker is cancelled in the spawn authority -- the sell gun's coin mint,
 // whose deferred spawn is bytecode-internal and invisible to the world-actor interceptor,
 // and the story-event spawners (the eventer, the gray controller, the super egger and the
-// balls follower) whose event-creature output mints inside their own graphs.
-// The catch fires PRE-Finish, with the transform still unset, which is why it only QUEUES;
-// the drain enrolls next pump tick, when FinishSpawningActor has run and the transform is
-// real. Called by npc_sync::Install once the UFunction and the allowlist resolve and the
+// balls follower) whose event-creature output mints inside their own graphs; also CLASS-gated
+// (coop/creatures/host_born_spawn, which also takes every client birth for its dissolve).
+// The catch fires PRE-Finish, with the transform still unset, which is why it only QUEUES; the drain
+// enrolls next pump tick, when FinishSpawningActor has run and the transform is real. Called by npc_sync::Install once the UFunction and the allowlist resolve and the
 // lifecycle observers are live (the same gate as the interceptor -- an Element enrolled
 // here gets the same K2_DestroyActor close). Idempotent. Game thread.
 void InstallExSpawnCatch();

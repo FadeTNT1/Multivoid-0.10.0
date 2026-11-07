@@ -9,6 +9,7 @@
 #include "coop/creatures/npc_sync.h"
 #include "npc_sync_internal.h"  // the 5 shared globals (defined below) + the 3 callback decls
 
+#include "coop/creatures/host_born_spawn.h"  // ResolveNames: the class catch's rows
 #include "coop/creatures/npc_mirror.h"      // ClientRefs / SetClientRefs (receiver-side cache push)
 #include "coop/creatures/npc_world_enum.h"  // InstallExSpawnCatch (the EX_CallMath spawn catch)
 #include "ue_wrap/core/game_thread.h"
@@ -125,6 +126,8 @@ bool IsInstalled() {
 
 void Install(coop::net::Session* session) {
     SetSession(session);  // cache (caller guarantees outlives us)
+    // The class catch's names, converted here on the pump tick, never inside the catch's native callback; a latch.
+    coop::host_born_spawn::ResolveNames();
     if (g_installed.load(std::memory_order_acquire)) {
         if (g_lateResolvePending.load(std::memory_order_acquire)) ResolveLateClasses();
         return;
