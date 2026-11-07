@@ -25,6 +25,7 @@
 #include "coop/interactables/keypad_verbs.h"  // CLIENT->HOST digit, submit, cancel, keycard, reset
 #include "coop/interactables/laptop_tab.h"  // CLIENT->HOST the PC user's tab
 #include "coop/interactables/drone_call_intent.h"  // CLIENT->HOST press of the drone console
+#include "coop/interactables/cargolift_sync.h"  // CLIENT->HOST press of the cargo lift; HOST->CLIENT its trip and rest
 #include "coop/interactables/eraser_press_intent.h"  // CLIENT->HOST press of the drive eraser; HOST->CLIENT its show
 #include "coop/creatures/kerfus_intent.h"  // CLIENT->HOST a Kerfus verb (on/off, fix the servers, pat)
 #include "coop/interactables/desk_ping_sync.h"    // a ping's verdict on the main desk, and its answers
@@ -982,6 +983,34 @@ bool HandleIntentEvent(net::Session& session,
         net::EraserPressIntentPayload p{};
         std::memcpy(&p, msg.payload, sizeof(p));
         coop::eraser_press_intent::OnEraserPressIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::CargoLiftIntent: {
+        // CLIENT->HOST: a client pressed the cargo lift's button (coop::cargolift_sync). Client-authored only
+        // (client_authorship.h); the host tests the sender's reach and runs the press. Never relayed.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers ||
+            msg.payloadLen < sizeof(net::CargoLiftIntentPayload)) {
+            UE_LOGW("event_feed: CargoLiftIntent dropped (role, sender slot %d or length %zu)", msg.senderPeerSlot,
+                    static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        net::CargoLiftIntentPayload p{};
+        std::memcpy(&p, msg.payload, sizeof(p));
+        coop::cargolift_sync::OnIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::CargoLiftState: {
+        // HOST->CLIENT: a cargo lift's press or resting place (coop::cargolift_sync). Host-authored only
+        // (client_authorship.h); a client replays the press on its own lift.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0 ||
+            msg.payloadLen < sizeof(net::CargoLiftStatePayload)) {
+            UE_LOGW("event_feed: CargoLiftState dropped (role, sender slot %d or length %zu)", msg.senderPeerSlot,
+                    static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        net::CargoLiftStatePayload p{};
+        std::memcpy(&p, msg.payload, sizeof(p));
+        coop::cargolift_sync::OnState(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::DroneFlyIntent: {

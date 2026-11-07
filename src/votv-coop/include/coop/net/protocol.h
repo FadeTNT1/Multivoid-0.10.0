@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 328;
+inline constexpr uint16_t kProtocolVersion = 329;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1570,6 +1570,20 @@ enum class ReliableKind : uint8_t {
     // who carries it (Moved). The host never relays a client's: it sends its own Moved. Late join: none, the Add on
     // the sleepers lane carries the pose the drag left. SleeperDragPayload.
     SleeperDrag = 238,
+
+    // CLIENT->HOST: a client pressed the cargo lift's button (coop::cargolift_sync). cargolift_C.actionOptionIndex runs a
+    // timeline-driven car on whichever peer pressed, so each peer's lift moved alone. The client's own press is refused at
+    // the script-body gate and sent here, naming the lift by its key and the interaction action it pressed; the host
+    // judges it (reach, idle lift) and runs the game's own press on its lift, which CargoLiftState then carries to every
+    // peer. Never relayed. CargoLiftIntentPayload.
+    CargoLiftIntent = 236,
+
+    // HOST->ALL: a cargo lift's press, and where it came to rest (coop::cargolift_sync). op 1 Press: the host's lift just
+    // started a trip (the direction it left, from the direction it stood at); each client replays the game's own press on
+    // its copy, so its own timeline moves the car and the riders ride along. op 2 Rest: the host's lift stopped at an end
+    // (alpha 0 or 1, and the direction); a client whose car is not there yet is brought there once its own trip ends or
+    // after a grace. Late join: the host sends every lift's Rest at the joiner's world-ready. CargoLiftStatePayload.
+    CargoLiftState = 235,
 };
 
 #pragma pack(push, 1)
@@ -4970,6 +4984,29 @@ struct SleeperDragPayload {
 };
 static_assert(sizeof(SleeperDragPayload) == 24, "SleeperDragPayload must be 24 bytes");
 static_assert(sizeof(SleeperDragPayload) <= 256 - 20 - 8, "SleeperDragPayload must fit in one reliable datagram");
+
+// The cargo lift's button (CargoLiftIntent), client to host: the lift's key (coop::cargolift_sync::KeyOf) and the
+// interaction action the client pressed (the game's `Enum_InteractionActions` byte; only the lift's own, 4, does anything).
+struct CargoLiftIntentPayload {
+    WireKey key;      // 32 -- the lift
+    uint8_t action;   // 1  -- the interaction action pressed
+    uint8_t pad[3];   // 3  -- zero
+};
+static_assert(sizeof(CargoLiftIntentPayload) == 36, "CargoLiftIntentPayload must be 36 bytes");
+static_assert(sizeof(CargoLiftIntentPayload) <= 256 - 20 - 8, "CargoLiftIntentPayload must fit in one reliable datagram");
+
+// A cargo lift's press or resting place (CargoLiftState), host to every client. `op` is CargoLiftOp.
+enum class CargoLiftOp : uint8_t { Press = 1, Rest = 2 };
+struct CargoLiftStatePayload {
+    WireKey  key;     // 32 -- the lift
+    uint8_t  op;      // 1  -- CargoLiftOp
+    uint8_t  dir;     // 1  -- the lift's `dir` after the press (Press) or at rest (Rest): true is the way toward alpha 1
+    uint8_t  preDir;  // 1  -- Press: the `dir` the host's lift stood at before the press (a client replays only from it)
+    uint8_t  pad;     // 1  -- zero
+    float    alpha;   // 4  -- Rest: 0 or 1, the car's end; Press: the car's alpha as the press left it
+};
+static_assert(sizeof(CargoLiftStatePayload) == 40, "CargoLiftStatePayload must be 40 bytes");
+static_assert(sizeof(CargoLiftStatePayload) <= 256 - 20 - 8, "CargoLiftStatePayload must fit in one reliable datagram");
 
 // A lightning strike (LightningStrike): the strike's world location; the receiver spawns the
 // strike actor there, and it destroys itself.

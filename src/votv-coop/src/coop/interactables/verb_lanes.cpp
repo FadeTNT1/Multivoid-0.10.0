@@ -3,6 +3,7 @@
 #include "coop/interactables/verb_lanes.h"
 
 #include "coop/interactables/camera_toggle_intent.h"
+#include "coop/interactables/cargolift_sync.h"
 #include "coop/interactables/coffee_intent.h"
 #include "coop/interactables/coffee_state.h"
 #include "coop/interactables/cord_sync.h"
@@ -37,6 +38,7 @@ namespace coop::verb_lanes {
 void Install(coop::net::Session& session) {
     coop::drone_call_intent::Install(&session);  // a client's press of the drone console is run by the host
     coop::eraser_press_intent::Install(&session);  // a client's press of the drive eraser is run by the host
+    coop::cargolift_sync::Install(&session);     // a client's press of the cargo lift is run by the host, its trip replayed on every peer
     coop::door_verb_intent::Install(&session);   // a client's press, hit or pry of a base door is run by the host
     coop::camera_toggle_intent::Install(&session);  // a client's use of a security camera or its laptop light button is run by the host
     coop::door_state_verbs::Install(&session);   // a door's open state moves at doorOpen/doorClose: the host sends, a client refuses its own
@@ -65,6 +67,7 @@ void Install(coop::net::Session& session) {
 void Tick(coop::net::Session& session) {
     { ue_wrap::ScopedWalkTimer _w{"sync:drone_call"}; coop::drone_call_intent::Tick(session); }  // HOST: run one queued drone-console press a tick a client
     coop::eraser_press_intent::Tick(session);  // HOST: run one queued eraser press a tick a client, once its drive is seated
+    { ue_wrap::ScopedWalkTimer _w{"sync:cargolift"}; coop::cargolift_sync::Tick(session); }  // settle its gate; HOST: queued presses, the rest edge; CLIENT: rests waiting for a trip to end
     { ue_wrap::ScopedWalkTimer _w{"sync:door_verb"}; coop::door_verb_intent::Tick(session); }    // HOST: run one queued door verb a tick a client
     { ue_wrap::ScopedWalkTimer _w{"sync:camera_toggle"}; coop::camera_toggle_intent::Tick(session); }  // settle its gates; HOST: run one queued camera request a tick a client
     coop::door_state_verbs::Tick();     // settle the door state watches
@@ -102,6 +105,7 @@ void ConnectReplayForSlot(int slot) {
     coop::water_fill_sync::OnPeerWorldReady(slot);  // HOST: every bucket holding water to the joiner
     coop::basement_pipe_sync::OnPeerWorldReady(slot);  // HOST: every pipe's burst flag to the joiner
     coop::basement_flood_sync::OnPeerWorldReady(slot);  // HOST: the basement's water level to the joiner
+    coop::cargolift_sync::OnPeerWorldReady(slot);  // HOST: every cargo lift's resting place to the joiner
     coop::tool_action::ConnectReplayForSlot(slot);  // HOST: every stuck crowbar and running cut to the joiner
     coop::glowstick_hang_sync::ConnectReplayForSlot(slot);  // HOST: every glowstick hung on the ceiling or a wall to the joiner
 }
@@ -109,6 +113,7 @@ void ConnectReplayForSlot(int slot) {
 void OnDisconnect() {
     coop::drone_call_intent::OnDisconnect();  // its own console button stands
     coop::eraser_press_intent::OnDisconnect();  // its own eraser button stands
+    coop::cargolift_sync::OnDisconnect();   // a lift's own press runs where it is made
     coop::door_verb_intent::OnDisconnect();   // a door's own verbs run where they are used
     coop::camera_toggle_intent::OnDisconnect();  // a camera's own press runs where it is made
     coop::door_state_verbs::OnDisconnect();

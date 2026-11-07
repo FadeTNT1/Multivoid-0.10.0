@@ -513,6 +513,7 @@ state it shows, and the first rows a world takes play no sound.
 | the signal servers | `coop/interactables/serverbox_sync`, `coop/interactables/server_upgrade_sync`, `ue_wrap/devices/serverbox` |
 | the sink and shower dirt | `coop/interactables/surface_clean_sync`, `ue_wrap/devices/surface_clean` |
 | a bucket's water | `coop/props/water_fill_sync`, `ue_wrap/devices/water_container` |
+| the cargo lift | `coop/interactables/cargolift_sync`, `ue_wrap/actors/cargo_lift` (`CargoLiftIntent` 236, `CargoLiftState` 235: a client's press is the host's, its trip is replayed on every peer, the host's rest is sent at the end and to a joiner) |
 | the microwave | `coop/interactables/microwave_sync`, `ue_wrap/devices/microwave`, `coop/props/prop_food_state` (what it heats) |
 | identity | `coop/element/portable_identity` |
 | tests and probes | `coop/dev/container_selftest`, `coop/dev/door_drill`, `coop/dev/lightswitch_probe`, `coop/dev/drone_probe`, `coop/dev/drone_call_drill`, `coop/dev/light_group_census`, `coop/dev/tower_drill` |

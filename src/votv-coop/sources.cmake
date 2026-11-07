@@ -176,6 +176,7 @@ set(VOTVCOOP_SOURCES
     src/coop/player/washer_fx.cpp
     src/coop/player/blood_drop_fx.cpp
     src/coop/interactables/grime_sync.cpp
+    src/coop/interactables/cargolift_sync.cpp
     src/coop/session/player_handshake.cpp
     src/coop/session/player_handshake_prefs.cpp
     src/coop/session/player_handshake_nick.cpp

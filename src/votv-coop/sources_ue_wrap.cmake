@@ -219,6 +219,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/vitals.cpp
     src/ue_wrap/actors/effects.cpp
     src/ue_wrap/actors/blood_drops.cpp
+    src/ue_wrap/actors/cargo_lift.cpp
     src/ue_wrap/world/game_mode.cpp
     src/ue_wrap/world/world_singleton.cpp
     src/ue_wrap/world/world_instances.cpp
