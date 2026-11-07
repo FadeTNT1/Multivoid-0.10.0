@@ -91,12 +91,11 @@ void RunAutonomousFlashlightTest() {
     // synthesise, the graph being gated on the engine input system actually firing
     // an InputAction event. So the test bypasses it.
     // coop::item_activate::DebugForceToggle flips the player's flashlight bool and
-    // drives the local light_R Intensity through SetIntensity -- what the Blueprint
-    // would have done -- then builds and sends the ItemActivate packet itself,
-    // rather than through the POST observer that path never reaches. The sender's
-    // own light therefore toggles, a packet flies on every iteration since each is
-    // a genuine state change, and the receiver applies the same intensity to the
-    // puppet. The iteration count is ODD so both peers end ON, which is what an
+    // the local light_R's visibility -- what 'Flashlight Update' would have done --
+    // then builds and sends the ItemActivate packet itself, rather than through the
+    // poll. The sender's own light therefore toggles, a packet flies on every
+    // iteration since each is a genuine state change, and the receiver shows the
+    // same beam on the puppet. The iteration count is ODD so both peers end ON, which is what an
     // end-of-run screenshot should show.
     const int kIterations = 5;
     for (int i = 0; i < kIterations; ++i) {

@@ -26,7 +26,8 @@ struct FlashlightSnapshot {
     float  attenuationRadius;
     FColor color;
     void*  iesTexture;
-    bool   visible;
+    bool   visible;        // USceneComponent::bVisible, what 'Flashlight Update' toggles
+    bool   hiddenInGame;   // USceneComponent::bHiddenInGame; set, the light never renders whatever bVisible says
 };
 
 // Read the snapshot off a USpotLightComponent; false if `light` is null or dead. Game thread.
@@ -65,5 +66,21 @@ bool SetSpotLightInnerConeAngle(void* spotLight, float newAngle);
 bool SetLightAttenuationRadius(void* light, float radius);
 bool SetLightColor(void* light, FColor color);
 bool SetLightIESTexture(void* light, void* textureLightProfile);
+
+// ULightComponentBase::SetCastShadows (recreates the render state when it changes). The game's own tick turns
+// light_R's shadows off while the player's look trace hits something and on otherwise. Game thread.
+bool SetLightCastShadows(void* light, bool castShadows);
+
+// ULightComponent::MaxDrawDistance, read raw at its reflected offset; -1 when it does not resolve. Game thread.
+float ReadLightMaxDrawDistance(void* light);
+
+// A raw write of ULightComponent::MaxDrawDistance (no setter exists); the render proxy takes it on its next
+// recreation, so the caller writes it while the light is hidden and shows it after. False when it does not
+// resolve. Game thread.
+bool WriteLightMaxDrawDistance(void* light, float distance);
+
+// AmainPlayer_C::armLength, the reach of the look trace `arm` builds (the trace that drives the beam's
+// conditioning); -1 when it does not resolve. Game thread.
+float ReadMainPlayerArmLength(void* mainPlayer);
 
 }  // namespace ue_wrap::engine

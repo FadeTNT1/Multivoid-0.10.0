@@ -91,6 +91,22 @@ on more routes than a press -- hold-F, an empty battery, an unequip, another fla
 most of them are Blueprint-to-Blueprint calls, so the owner reads its own beam every tick and
 sends whatever a peer would see on a change, off included; the receiver drives the puppet's own
 light with all of it and plays a positional click (`coop/player/flashlight_click_sound`) `[RD]`.
+The beam is `light_R` on the pawn's `lag_fl` arm, aimed by the streamed pitch and head yaw; the hand
+mirror never carries it. The game toggles it with `SetVisibility` and keeps `Intensity` at the item's
+brightness (0.20 for the stock flashlight), and the receiver mirrors both. Each receiver keeps every
+peer's last beam for as long as that peer is in the session and puts it on whatever puppet the slot
+has now: a puppet spawned after a pocket trip, a level change or a respawn is lit silently from it
+(a pocket trip keeps the beam, a leave clears it), a light that drifts from it is re-applied (checked
+twice a second), and a slot with no known beam has a new puppet's light made dark once. The game's own
+tick conditions `light_R` every frame -- its look trace (`armLength` along the view) pulls the light
+back up to 50 cm as something comes within reach and turns its shadows off while it does -- and a
+puppet's actor tick is off, so the receiver runs the same rule for each lit puppet: a 10 Hz trace from
+its camera along the streamed aim, the offset eased every tick. It also lifts any `MaxDrawDistance` on
+the puppet's light, so a beam seen from across the yard is not cut. The log says `flashlight: slot N
+bound to puppet=..`, `.. applied slot=N (packet|held packet|new puppet|repair|direct)`, `.. beam
+shadows=0|1 (look trace ..)`, `.. beam drifted (..) -- re-applied`, `.. puppet gone -- beam waits` and
+`.. left the world -- beam kept`; the owner says `own light visible=.. vs sent state=..` when its light
+and the wire disagree. Only a press clicks: a first-seen off, a re-seed and a repair are silent.
 A host with no world-ready peer sends nothing and says nothing (`ItemActivate` is not a pre-world kind), and a send that
 fails is logged once per run of failures; the connect broadcast covers a peer that becomes ready later.
 The battery itself drains on the owner's machine only. A carried trash clump is driven to the puppet's hand on

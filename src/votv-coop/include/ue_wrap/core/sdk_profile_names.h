@@ -1061,8 +1061,9 @@ inline constexpr const wchar_t* MainPlayerUseInputEventFn    = L"InpActEvt_use_K
 // on ClientCarryEid so only the edge that finds a live carry acts.
 inline constexpr const wchar_t* MainPlayerFireInputEventFn58 = L"InpActEvt_fire_K2Node_InputActionEvent_58";
 // ULightComponent::SetIntensity(float) (Engine.hpp:13551), inherited by USpotLightComponent: the
-// receiver mirrors the sender's intensity on the puppet's light_R with it (the BP toggles
-// Intensity, not bVisible); it marks the render state dirty, which a direct field write does not.
+// receiver mirrors the sender's intensity (the equipped item's brightness) on the puppet's light_R
+// with it; 0.10.0's 'Flashlight Update' toggles the beam with SetVisibility, which the receiver
+// mirrors too. It pushes the change to the render thread, which a direct field write does not.
 inline constexpr const wchar_t* SetIntensityFn      = L"SetIntensity";
 
 // USpotLightComponent's cone-angle setters: both call MarkRenderStateDirty, so the receiver uses
@@ -1084,6 +1085,15 @@ inline constexpr const wchar_t* SetIESTextureFn            = L"SetIESTexture";
 // UTextureLightProfile objects the payload names by index.
 inline constexpr const wchar_t* TextureLightProfileClass = L"TextureLightProfile";
 inline constexpr const wchar_t* FlashlightIesProfiles[] = {L"complex_ies", L"narrowcomplex_ies", L"narrow10000"};
+// The per-tick beam conditioning mainPlayer_C's own tick runs on light_R and a puppet (tick off) never
+// runs: ULightComponentBase::SetCastShadows (off while the look trace hits something, on otherwise),
+// the look trace's length (mainPlayer_C.armLength, what `arm` traces with), and
+// ULightComponent::MaxDrawDistance (0 = no distance cut; a remote beam is seen from afar, where the
+// local one is always at the camera).
+inline constexpr const wchar_t* LightComponentBaseClass    = L"LightComponentBase";
+inline constexpr const wchar_t* SetCastShadowsFn           = L"SetCastShadows";
+inline constexpr const wchar_t* LightMaxDrawDistanceProp   = L"MaxDrawDistance";
+inline constexpr const wchar_t* MainPlayerArmLengthProp    = L"armLength";
 
 // The flashlight click is the USoundWave `/Game/audio/effects/flashlight.flashlight`; the receiver
 // plays it at the puppet's location through UGameplayStatics::PlaySoundAtLocation. Resolved by
