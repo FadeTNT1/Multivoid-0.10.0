@@ -103,8 +103,9 @@ uint64_t g_lastDataGen  = 0;   // the DATA generation the stamp above was taken 
 // "'layers: 2/4".
 struct Cell { float weight; };
 constexpr Cell kCells[4] = {
-    {0.40f},   // name        -- accent orange, left
-    {0.14f},   // mismatch    -- #FF0000, left, EMPTY unless the join gate would refuse
+    {0.35f},   // name        -- accent orange, left
+    {0.19f},   // version     -- the host's game ("0.10.0"); #FF0000 "!0.9.0n"/"!b146" when the join gate
+               //                would refuse. 0.14 clipped "!0.9.0n" to "!0.9.0"; 0.19 holds "!0.10.0n"
     {0.16f},   // link        -- dim, left: "Relay", "Direct", "LAN", or "--" when the host reports no one
     {0.30f},   // "Players: n/m" -- white, right
 };
@@ -244,6 +245,16 @@ std::string MismatchMark(const Row& r) {
     return {};
 }
 
+// The version cell: the red mismatch mark when the join gate would refuse, else the game the host
+// runs in the body colour, so a joinable row still says which VOTV it is instead of leaving a gap
+// beside the link word. A pre-field host (no `game`) shows nothing.
+std::string VersionCellText(const Row& r, bool& bad) {
+    std::string mark = MismatchMark(r);
+    bad = !mark.empty();
+    if (bad) return mark;
+    return r.game;
+}
+
 // A row's text colours, one owner, so un-hovering cannot restore the wrong base.
 void ApplyRowTextColors(const RowParts& rp, const Row& r, bool isOwn, bool stale,
                         bool hovered, bool selected) {
@@ -255,7 +266,9 @@ void ApplyRowTextColors(const RowParts& rp, const Row& r, bool isOwn, bool stale
     FLinearColor name = lit ? kHover : (isOwn ? kOwn : kAccent);
     FLinearColor body = lit ? kHover : kText;
     FLinearColor link = lit ? kHover : kDim;
-    FLinearColor flag = kBad;
+    bool flagBad = false;
+    (void)VersionCellText(r, flagBad);
+    FLinearColor flag = flagBad ? kBad : body;
     // Stale last, so it fades whatever the state above chose.
     if (stale) { name = Faded(name); body = Faded(body); link = Faded(link); flag = Faded(flag); }
     // The dispatch variant, never the raw write: UMG bakes the property into the Slate widget at
@@ -513,7 +526,8 @@ void Sync() {
         std::string nameText = r.name;
         if (isOwn) { nameText += "   "; nameText += l10n::T("(your server)"); }
         SetRowText(rp.text[kCellName], nameText);
-        SetRowText(rp.text[kCellFlag], MismatchMark(r));
+        bool versionBad = false;
+        SetRowText(rp.text[kCellFlag], VersionCellText(r, versionBad));
         SetRowText(rp.text[kCellLink], ui::link_format::LobbyLinkLabel(r.link));
         char players[256];
         l10n::Fmt(players, sizeof(players), l10n::T("Players: %1$d/%2$d"), r.playersCur, r.playersMax);
