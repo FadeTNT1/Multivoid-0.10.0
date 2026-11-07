@@ -256,6 +256,7 @@ docs/**
 !docs/feasibility.md
 !docs/install.md
 !docs/README.md
+!docs/pocket-dimensions.md
 !docs/release.md
 !docs/re-workflow.md
 !docs/roadmap.md
