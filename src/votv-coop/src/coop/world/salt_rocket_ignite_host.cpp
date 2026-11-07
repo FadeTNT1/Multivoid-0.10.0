@@ -113,7 +113,7 @@ void Refuse(uint8_t slot, Refusal r) {
 
 void HostServe(coop::net::Session& s) {
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot)
-        g_slots[slot].queue.Serve(kBudget, coop::net::NowMs, [&](const Item& it) { return Judge(s, slot, it); });
+        g_slots[slot].queue.Serve(slot, kBudget, coop::net::NowMs, [&](const Item& it) { return Judge(s, slot, it); });
 }
 
 void HostReset() {

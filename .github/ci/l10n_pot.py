@@ -52,6 +52,7 @@ ALLOWLIST = [
     "src/coop/commands/command_sync.cpp",
     "src/coop/comms/peer_action_feed.cpp",
     "src/coop/dispatch/event_feed.cpp",
+    "src/coop/interactables/atv_drive_gates.cpp",
     "src/coop/net/end_reason.cpp",
     "src/coop/player/local_body.cpp",
     "src/coop/player/nameplate.cpp",

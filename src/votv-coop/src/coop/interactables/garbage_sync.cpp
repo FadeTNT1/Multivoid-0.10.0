@@ -90,7 +90,8 @@ bool OnOpenContainerReceiveTickPre(void* self, void* /*params*/) {
 // the firing peer and broadcast from there. The underground garbage spawner is deliberately
 // unsuppressed too: it mints only buried-item mounds, not chip piles, outside the snapshot
 // and broadcast universe entirely, so suppressing it deleted the client's per-peer loot
-// mounds with no host replacement; dirt holes are per-peer local by design. All three use
+// mounds with no host replacement; loot mounds are per-peer local by design, while a hole or mound
+// a player makes is the host's (coop/props/dig_sync). All three use
 // one shared callback that role-gates on the client and returns true, cancel-throttled per
 // class to keep the log readable while still proving the path fires.
 

@@ -14,13 +14,19 @@
 #include "coop/config/config.h"
 #include "l10n/l10n.h"
 #include "ue_wrap/engine/engine.h"
+#include "ue_wrap/core/game_thread.h"   // the HUD tick post-observer -- the frame capture's clock
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/object_index.h"  // ClassByName -- the HUD widget class
+#include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/trace.h"   // LineBlockedStatDyn -- the occlusion (gray plate) check
 #include "ue_wrap/core/types.h"
+#include "ue_wrap/facts/function_row.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -50,6 +56,56 @@ std::atomic<int>  g_count{0};
 std::atomic<coop::net::Session*> g_session{nullptr};
 std::atomic<bool>                g_localVisible{true};
 std::array<std::atomic<bool>, coop::players::kMaxPeers> g_hiddenBySlot{};
+
+// ---- the frame capture (see the header) ----
+//
+// ui_ui_C::Tick(FGeometry, float), the in-game HUD widget's UMG tick: once per frame on the game thread,
+// in the Slate tick, after the camera manager wrote this frame's view and before the frame's present is
+// queued. A post-observer on it projects every plate with that view.
+UE_FACT_FN(kRowTickHud, "nameplate", L"ui_ui_C", L"Tick", Declared);
+
+using Clock = std::chrono::steady_clock;
+
+int64_t NowUs() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count();
+}
+
+// Game thread only: Update's latest decision (metadata plus world anchors) and the controller it
+// resolved, which the capture re-projects every frame until the next Update replaces them.
+Snapshot g_meta;
+void*    g_metaPc = nullptr;
+void*    g_hudTickFn = nullptr;      // the UFunction the observer is registered on (null: none)
+void*    g_hudSelf = nullptr;        // the widget instance the captures follow (one per frame)
+int64_t  g_hudSelfUs = 0;            // when that instance last ticked
+
+// The capture ring: every frame capture, numbered from 1. Written on the game thread, read on the
+// render thread; the mutex guards the copies, the atomics are the lock-free newest-and-age reads.
+constexpr int kRing = 8;
+struct FrameCapture {
+    uint64_t seq = 0;
+    Snapshot snap;
+};
+std::mutex                g_ringMu;
+FrameCapture              g_ring[kRing];
+std::atomic<uint64_t>     g_capSeq{0};    // the newest published capture's number (0 = none yet)
+std::atomic<int64_t>      g_capUs{0};     // when it was published
+std::atomic<bool>         g_frameSync{true};  // ui.nameplate.frame_sync, refreshed by Update
+
+// A capture older than this is not a frame-locked one any more (the HUD stopped ticking: hidden, a
+// menu, a world change); the render thread falls back to Update's projection.
+constexpr int64_t kCaptureStaleUs = 150000;
+// The pairing: present p shows the frame whose capture is p + c, with c a constant set by how far the
+// game thread runs ahead of the present. The newest capture at a present is that frame's or one past it
+// (two with a separate RHI thread), never older, since a frame's capture is published before its present
+// is queued. So c is the smallest newest-minus-present seen over the last one to two blocks.
+constexpr int     kPairBlock = 32;
+constexpr int64_t kMaxLeadFrames = 2;
+
+// The anchor of an online peer's plate: a lying online sleeper's fixed point over the body, else the
+// head bone. One function, so the pump and the frame capture can never anchor a plate differently.
+bool OnlineAnchor(int slot, RemotePlayer* p, ue_wrap::FVector& out) {
+    return coop::sleepers::OnlinePlateAnchor(slot, out) || p->TryGetHeadPosition(out);
+}
 
 // Distance fade (MTA nametag shape): fully opaque close up, fading to nothing far away so a
 // distant peer's label does not clutter the screen. Opaque within a room and gone just beyond
@@ -109,13 +165,18 @@ void AppendSleeperPlates(Snapshot& snap) {
         pl = Plate{};
         pl.x = screen.X;
         pl.y = screen.Y;
+        pl.wx = a.head.X;
+        pl.wy = a.head.Y;
+        pl.wz = a.head.Z;
+        pl.slot = -1;
         pl.alpha = alpha;
         pl.scale = DistanceScale(dist);
         pl.onScreen = true;
         pl.sleeping = true;
         pl.sleeper = true;
-        pl.showNick = dist <= nameCm;
+        pl.showNick = a.joining || dist <= nameCm;   // a joining player is named at any distance
         pl.lootHint = a.lootable;
+        pl.joining = a.joining;
         pl.linkKind = coop::net::LinkKind::Local;
         std::memcpy(pl.nick, a.nick, sizeof(pl.nick));
     }
@@ -127,6 +188,109 @@ void Publish(const Snapshot& s) {
         g_snap = s;
     }
     g_count.store(s.count, std::memory_order_relaxed);
+}
+
+// The frame capture: the HUD widget's tick, once per frame. Re-reads each online plate's anchor (the
+// puppet's head as this frame left it) and projects every plate with this frame's camera, then
+// publishes the result as the next numbered capture. Everything else on the plate is Update's.
+void OnHudTickPost(void* self, void* /*function*/, void* /*params*/) {
+    if (!ue_wrap::game_thread::IsGameThread()) return;
+    if (!g_frameSync.load(std::memory_order_relaxed)) return;
+    const int64_t now = NowUs();
+    // One capture per frame: follow one widget instance, and take a new one only once the followed one
+    // has stopped ticking (a world change rebuilt the HUD). Two live instances would otherwise publish
+    // two captures a frame and break the count the presents are paired by.
+    if (self != g_hudSelf) {
+        if (g_hudSelf && now - g_hudSelfUs < 250000) return;
+        if (g_hudSelf) UE_LOGI("nameplate: frame capture now follows HUD widget %p (was %p)", self, g_hudSelf);
+        g_hudSelf = self;
+    }
+    g_hudSelfUs = now;
+
+    // Projected outside the ring's lock, so the render thread never waits on a UFunction call; the lock
+    // covers only the copy in.
+    static Snapshot s;   // game thread only; static so the frame does not put a snapshot on the stack
+    s = g_meta;
+    if (s.count > 0 && g_metaPc) {
+        auto& reg = coop::players::Registry::Get();
+        for (int i = 0; i < s.count; ++i) {
+            Plate& pl = s.plates[i];
+            ue_wrap::FVector anchor{pl.wx, pl.wy, pl.wz};
+            if (pl.slot >= 0) {
+                // The puppet as this frame drew it; a puppet gone since Update keeps its last anchor
+                // (Update drops its plate on its next pass).
+                RemotePlayer* p = reg.Puppet(static_cast<uint8_t>(pl.slot));
+                ue_wrap::FVector fresh{};
+                if (p && p->valid() && OnlineAnchor(pl.slot, p, fresh)) anchor = fresh;
+            }
+            ue_wrap::FVector2D screen{};
+            const bool inFront = E::ProjectWorldToScreen(g_metaPc, anchor, screen, false);
+            pl.x = screen.X;
+            pl.y = screen.Y;
+            pl.wx = anchor.X;
+            pl.wy = anchor.Y;
+            pl.wz = anchor.Z;
+            // In front of the camera THIS frame; Update's fade, occlusion and sleeper rules stand.
+            pl.onScreen = inFront && pl.alpha > 0.02f;
+        }
+    }
+    const uint64_t seq = g_capSeq.load(std::memory_order_relaxed) + 1;
+    {
+        std::lock_guard<std::mutex> lk(g_ringMu);
+        FrameCapture& fc = g_ring[seq % kRing];
+        fc.seq = seq;
+        fc.snap = s;
+    }
+    g_capUs.store(now, std::memory_order_relaxed);
+    g_capSeq.store(seq, std::memory_order_release);
+}
+
+// Arm, re-arm or drop the frame capture's observer; from Update, about once a second. The HUD widget is a
+// Blueprint class that lives with its world, so its Tick can be a new UFunction after a world change: the
+// registration follows whatever the class resolves to now.
+void MaintainFrameCapture() {
+    static int64_t sNextUs = 0;
+    const int64_t now = NowUs();
+    if (now < sNextUs) return;
+    sNextUs = now + 1000000;
+
+    const bool on = coop::config::ResolveFlag(::coop::config_registry::rows::ui_nameplate_frame_sync);
+    if (g_frameSync.exchange(on, std::memory_order_relaxed) != on)
+        UE_LOGI("nameplate: ui.nameplate.frame_sync -> %s", on ? "on" : "off");
+
+    void* fn = nullptr;
+    if (on) {
+        if (void* cls = ue_wrap::object_index::ClassByName(ue_wrap::profile::name::HudWidgetClass)) {
+            const ue_wrap::facts::Resolved tick = ue_wrap::facts::ResolveOn(kRowTickHud, cls);
+            fn = tick.Fn();
+            if (fn && fn != g_hudTickFn) {
+                if (g_hudTickFn) ue_wrap::game_thread::UnregisterObservers(g_hudTickFn, &OnHudTickPost);
+                g_hudTickFn = nullptr;
+                g_hudSelf = nullptr;
+                if (ue_wrap::game_thread::RegisterPostObserver(tick, &OnHudTickPost)) {
+                    g_hudTickFn = fn;
+                    UE_LOGI("nameplate: frame capture armed on %ls::Tick (fn=%p) -- plates project with "
+                            "the camera of the frame they are drawn over",
+                            ue_wrap::profile::name::HudWidgetClass, fn);
+                } else {
+                    static bool sWarned = false;
+                    if (!sWarned) {
+                        sWarned = true;
+                        UE_LOGW("nameplate: RegisterPostObserver(%ls::Tick) refused -- plates keep the "
+                                "pump's projection", ue_wrap::profile::name::HudWidgetClass);
+                    }
+                }
+            }
+        }
+    }
+    // Off, or the class gone with its world: release the old function, since a stale pointer could
+    // later name another function at the same address.
+    if (!fn && g_hudTickFn) {
+        ue_wrap::game_thread::UnregisterObservers(g_hudTickFn, &OnHudTickPost);
+        UE_LOGI("nameplate: frame capture disarmed (%s)", on ? "the HUD widget class is not loaded" : "turned off");
+        g_hudTickFn = nullptr;
+        g_hudSelf = nullptr;
+    }
 }
 
 }  // namespace
@@ -173,7 +337,7 @@ void Update() {
 
         ue_wrap::FVector head{};
         // A lying online sleeper's plate floats at a fixed point over the body; the animated head bone would swing it.
-        if (!coop::sleepers::OnlinePlateAnchor(slot, head) && !p->TryGetHeadPosition(head)) continue;   // no anchor: no plate this pass
+        if (!OnlineAnchor(slot, p, head)) continue;   // no anchor: no plate this pass
         ue_wrap::FVector2D screen{};
         const bool inFront = E::ProjectWorldToScreen(pc, head, screen, false);
 
@@ -194,6 +358,10 @@ void Update() {
                       ue_wrap::trace::LineBlockedStatDyn(lp, camera, head) == 1;
         pl.x = screen.X;
         pl.y = screen.Y;
+        pl.wx = head.X;
+        pl.wy = head.Y;
+        pl.wz = head.Z;
+        pl.slot = slot;
         pl.flash = p->IsHurtFlashing();
         pl.sleeping = coop::sleep_sync::PeerState(slot) != coop::net::SleepPeerState::Awake;
         if (pl.sleeping) {
@@ -228,11 +396,129 @@ void Update() {
 
     AppendSleeperPlates(snap);
     Publish(snap);
+    // The frame capture's input: this decision and the controller it projected through, re-projected
+    // every frame by the HUD tick until the next Update.
+    if (!pc && snap.count > 0) {   // sleepers only: the controller AppendSleeperPlates projected through
+        if (void* const local = reg.Local()) pc = E::GetController(local);
+    }
+    g_meta = snap;
+    g_metaPc = pc;
+    MaintainFrameCapture();
+}
+
+namespace {
+
+// The present pairing (render thread; atomics because the overlay's present thread is the engine's to
+// choose). g_pairTarget is the capture this present should draw, 0 when there is none to pair.
+std::atomic<uint64_t> g_presents{0};
+std::atomic<uint64_t> g_pairTarget{0};
+std::atomic<int64_t>  g_pairLead{0};   // the calibrated c, for the log
+
+// The projection path the last drawn frame took, and the counts behind the periodic report.
+enum class Path : int { None, FrameLocked, Pump };
+const char* PathName(Path p) {
+    switch (p) {
+        case Path::FrameLocked: return "frame-locked (HUD tick capture, paired to the present)";
+        case Path::Pump:        return "pump (the ~60 Hz projection)";
+        default:                return "none";
+    }
+}
+struct PathStats {
+    Path     last = Path::None;
+    uint32_t exact = 0;     // frame-locked frames that found their paired capture
+    uint32_t nearest = 0;   // frame-locked frames that fell back to the newest capture
+    uint32_t pump = 0;      // frames drawn from the pump's projection
+    int64_t  nextReportUs = 0;
+};
+PathStats g_stats;   // render thread (the one that draws)
+
+// The debug log: every change of path at once, plus a summary every 10 s while plates draw.
+void NotePath(Path p, const char* why) {
+    PathStats& st = g_stats;
+    if (p != st.last) {
+        UE_LOGI("nameplate: projection path -> %s%s%s", PathName(p), why ? " -- " : "", why ? why : "");
+        st.last = p;
+    }
+    const int64_t now = NowUs();
+    if (now >= st.nextReportUs) {
+        if (st.nextReportUs != 0 && (st.exact + st.nearest + st.pump) > 0)
+            UE_LOGI("nameplate: last 10 s: frame-locked %u (+%u newest-capture), pump %u; present lead %lld "
+                    "frame(s), capture #%llu at present #%llu",
+                    st.exact, st.nearest, st.pump,
+                    static_cast<long long>(g_pairLead.load(std::memory_order_relaxed)),
+                    static_cast<unsigned long long>(g_capSeq.load(std::memory_order_relaxed)),
+                    static_cast<unsigned long long>(g_presents.load(std::memory_order_relaxed)));
+        st.exact = st.nearest = st.pump = 0;
+        st.nextReportUs = now + 10000000;
+    }
+}
+
+}  // namespace
+
+void NotePresent() {
+    const uint64_t p = g_presents.fetch_add(1, std::memory_order_relaxed) + 1;
+    const uint64_t newest = g_capSeq.load(std::memory_order_acquire);
+    // The running minimum over a block and the block before it, so the lead follows a change (a hitch
+    // that dropped a capture, a capture that came twice) within about two blocks.
+    static int64_t sMinCur = LLONG_MAX, sMinPrev = LLONG_MAX;
+    static int     sBlockN = 0;
+    if (newest == 0) {
+        g_pairTarget.store(0, std::memory_order_relaxed);
+        return;
+    }
+    const int64_t d = static_cast<int64_t>(newest) - static_cast<int64_t>(p);
+    sMinCur = std::min(sMinCur, d);
+    if (++sBlockN >= kPairBlock) {
+        sMinPrev = sMinCur;
+        sMinCur = LLONG_MAX;
+        sBlockN = 0;
+    }
+    const int64_t lead = std::min(sMinPrev, sMinCur);
+    g_pairLead.store(lead, std::memory_order_relaxed);
+    // This present's own frame: never past the newest, and never more than kMaxLeadFrames behind it,
+    // since the game thread cannot run further ahead of a present than that; a deeper "lead" is a
+    // count that slipped, and the newest is the better guess until it recalibrates.
+    int64_t target = static_cast<int64_t>(p) + lead;
+    const int64_t hi = static_cast<int64_t>(newest);
+    const int64_t lo = std::max<int64_t>(1, hi - kMaxLeadFrames);
+    target = std::clamp(target, lo, hi);
+    g_pairTarget.store(static_cast<uint64_t>(target), std::memory_order_relaxed);
 }
 
 void GetSnapshot(Snapshot& out) {
-    std::lock_guard<std::mutex> lk(g_mu);
-    out = g_snap;
+    const uint64_t newest = g_capSeq.load(std::memory_order_acquire);
+    const bool fresh = newest != 0 && g_frameSync.load(std::memory_order_relaxed) &&
+                       NowUs() - g_capUs.load(std::memory_order_relaxed) <= kCaptureStaleUs;
+    if (fresh) {
+        const uint64_t want = g_pairTarget.load(std::memory_order_relaxed);
+        bool exact = false;
+        {
+            std::lock_guard<std::mutex> lk(g_ringMu);
+            if (want != 0 && g_ring[want % kRing].seq == want) {
+                out = g_ring[want % kRing].snap;
+                exact = true;
+            } else {
+                out = g_ring[newest % kRing].snap;
+            }
+        }
+        // A plate set Update has since emptied (the menu, every peer gone) must not linger from a capture.
+        if (g_count.load(std::memory_order_relaxed) == 0) out.count = 0;
+        if (out.count > 0) {
+            ++(exact ? g_stats.exact : g_stats.nearest);
+            NotePath(Path::FrameLocked, nullptr);
+        }
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        out = g_snap;
+    }
+    if (out.count > 0) {
+        ++g_stats.pump;
+        NotePath(Path::Pump, !g_frameSync.load(std::memory_order_relaxed) ? "ui.nameplate.frame_sync is off"
+                             : newest == 0 ? "the HUD widget has not ticked yet"
+                                           : "the HUD widget stopped ticking");
+    }
 }
 
 bool HasAny() {

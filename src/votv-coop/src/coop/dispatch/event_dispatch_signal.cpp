@@ -29,6 +29,7 @@
 #include "coop/interactables/signal_catch_sync.h"
 #include "coop/interactables/signal_sync.h"
 #include "coop/interactables/tape_caddy_sync.h"  // ReelSlot
+#include "coop/world/daily_task_sale.h"          // TaskSaleHint
 #include "coop/world/daily_task_sync.h"          // TaskNewState
 
 #include "ue_wrap/core/log.h"
@@ -382,6 +383,18 @@ bool HandleSignalEvent(const net::Session::ReliableMessage& msg) {
         net::TaskNewStatePayload tnp{};
         std::memcpy(&tnp, msg.payload, sizeof(tnp));
         coop::daily_task_sync::OnTaskNewState(tnp);
+        break;
+    }
+    case net::ReliableKind::TaskSaleHint: {
+        // A corner hint of the host's drone sale (a client's copy is refused at the host's receive edge).
+        if (msg.payloadLen < sizeof(net::TaskSaleHintPayload)) {
+            UE_LOGW("event_feed: TaskSaleHint payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::TaskSaleHintPayload));
+            break;
+        }
+        net::TaskSaleHintPayload thp{};
+        std::memcpy(&thp, msg.payload, sizeof(thp));
+        coop::daily_task_sale::OnTaskSaleHint(thp);
         break;
     }
     case net::ReliableKind::DeskLogLine: {

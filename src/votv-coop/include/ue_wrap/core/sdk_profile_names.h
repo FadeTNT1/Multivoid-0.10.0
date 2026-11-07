@@ -111,6 +111,34 @@ inline constexpr const wchar_t* GamemodeSaveSlotPropLegacy = L"saveSlot";
 // mainGamemode_C::car: the world's ATV, the one the atvExplode special sets `trap` on.
 inline constexpr const wchar_t* GamemodeCarProp            = L"car";
 
+// ATV_C's battery and drive-gate fields. The ATV's own receiveTick ORs five terms before it applies wheel torque:
+// `battery` <= 0 (the inserted battery's charge, 0..100; -1 with none in), `empty` (set by runOut when fuel reaches 0,
+// cleared by fuelUp and by loadData), `Brake`, `brokenn` (set by runOut when health reaches 0, cleared by toolboxFix and
+// by loadData) and `underwater`; the driver's throttle is `input_forward` / `input_back`. updBattery re-derives the
+// battery's visuals (the back lights and `upd lights`).
+inline constexpr const wchar_t* AtvBatteryProp      = L"battery";
+inline constexpr const wchar_t* AtvEmptyLatchProp   = L"empty";
+inline constexpr const wchar_t* AtvBrokenLatchProp  = L"brokenn";
+inline constexpr const wchar_t* AtvUnderwaterProp   = L"underwater";
+inline constexpr const wchar_t* AtvInputForwardProp = L"input_forward";
+inline constexpr const wchar_t* AtvInputBackProp    = L"input_back";
+inline constexpr const wchar_t* AtvUpdBatteryFn     = L"updBattery";
+// ATV_C's repair look and its unscrew. lookAt writes the part the player looks at: `lookAtTire` (a fitted wheel,
+// -1 none), `lookAtTireSocket` (an empty wheel socket, -1 none), `lookAtSpareTireBox`, `lookAtContainer` (the
+// storage), and playerUsedOn keeps the wheel in hand as `playersWheel`. unscrewPanel(spawnAt) is the finished unscrew:
+// a fitted wheel comes off as a prop_atvWheel_C, an empty socket takes `playersWheel` (putTire), and with neither the
+// battery comes out as a prop_atvcarbattery_C carrying its charge; getUnscrewSpawn() names the component it spawns at,
+// from lookAtTire alone; resetUnscrew() ends the unscrew's widget, timer and look.
+inline constexpr const wchar_t* AtvLookAtTireProp       = L"lookAtTire";
+inline constexpr const wchar_t* AtvLookAtTireSocketProp = L"lookAtTireSocket";
+inline constexpr const wchar_t* AtvLookAtSpareBoxProp   = L"lookAtSpareTireBox";
+inline constexpr const wchar_t* AtvLookAtContainerProp  = L"lookAtContainer";
+inline constexpr const wchar_t* AtvPlayersWheelProp     = L"playersWheel";
+inline constexpr const wchar_t* AtvUnscrewPanelFn       = L"unscrewPanel";
+inline constexpr const wchar_t* AtvUnscrewSpawnAtParam  = L"spawnAt";
+inline constexpr const wchar_t* AtvGetUnscrewSpawnFn    = L"getUnscrewSpawn";
+inline constexpr const wchar_t* AtvResetUnscrewFn       = L"resetUnscrew";
+
 // The per-item save record struct (a BP UserDefinedStruct): struct_save1 on 0.10.0, struct_save
 // before. Its layout is MEASURED through reflection (ue_wrap/actors/save_record); the names are only
 // the fallback route to the struct when prop_C::getData has not loaded yet.
@@ -131,6 +159,20 @@ inline constexpr const wchar_t* DriveBoxClass       = L"prop_box_C";
 inline constexpr const wchar_t* DriveBoxDrivesProp  = L"drives";
 inline constexpr const wchar_t* DriveBoxDrivesInProp = L"drives_in";
 inline constexpr const wchar_t* DriveBoxUpdFn       = L"upd";
+
+// The daily task's grader, droneSellLocation_C::sell (0.10.0). It loads each boxed drive box of the
+// drone's inventory into its scratch box `ref_driveBox` and each zip floppy into `ref_zipDisc`, then grades
+// the rows against saveSlot.taskNew; a signal counts once, by its id in saveSlot.soldSignals (TArray<FString>).
+// A zip floppy's `data` is a TArray<FString> of "??"-separated rows whose third field names the dish.
+// lib_C::addHint(inText, type, debug, __WorldContext) is the corner hint the sale raises (a tape's fill).
+inline constexpr const wchar_t* DroneSellRefDriveBoxProp = L"ref_driveBox";
+inline constexpr const wchar_t* DroneSellRefZipDiscProp  = L"ref_zipDisc";
+inline constexpr const wchar_t* FloppyDataProp           = L"data";
+inline constexpr const wchar_t* SaveSlotSoldSignalsProp  = L"soldSignals";
+inline constexpr const wchar_t* LibAddHintFn             = L"addHint";
+inline constexpr const wchar_t* LibAddHintTextParam      = L"inText";
+inline constexpr const wchar_t* LibAddHintTypeParam      = L"type";
+inline constexpr const wchar_t* LibAddHintDebugParam     = L"debug";
 
 // 0.10.0's container inventory: prop_container_C.inventoryComponent (an inventoryComponent_C, the
 // grid inventory that replaced propInventory_C + saveSlot.GObjStack), whose `owner` its BeginPlay
@@ -465,6 +507,15 @@ inline constexpr const wchar_t* LibClass                = L"lib_C";
 inline constexpr const wchar_t* LibSetEventFn           = L"setEvent";
 inline constexpr const wchar_t* LibSetEventActiveParam  = L"isEventActive";
 inline constexpr const wchar_t* LibWorldContextParam    = L"__WorldContext";
+// lib_C::addHint(inText, type, debug, __WorldContext): every in-game hint (the info-icon toast, bottom right) runs
+// through it -- mainGamemode_C's "Add Hint from Gamemode" forwards to it, ui_ui_C::addHint has no caller. `type` is
+// enum_notifytype (the icon), `debug` hides the hint outside the editor. droneSellLocation_C::sell raises the sale's
+// hints with the sell location as the world context; its `drone` field names the drone that sold.
+inline constexpr const wchar_t* LibAddHintFn            = L"addHint";
+inline constexpr const wchar_t* LibAddHintTextParam     = L"inText";
+inline constexpr const wchar_t* LibAddHintTypeParam     = L"type";
+inline constexpr const wchar_t* LibAddHintDebugParam    = L"debug";
+inline constexpr const wchar_t* DroneSellLocationClass  = L"droneSellLocation_C";
 // Garage Soltomia: the eventer mints soltomiaCleaning_C hidden. A player's overlap of its box shows it (the
 // squeak, the particles, `active`, the talking timer) and moves the ATV and jams three doors; the garage door's
 // dooropened runs `opened`, which plays the montage on `solt`; the montage's `throw` notify mints the sponge.
@@ -926,6 +977,10 @@ inline constexpr const wchar_t* WidgetSetIsEnabledFn = L"SetIsEnabled";       //
 inline constexpr const wchar_t* WidgetSetRenderOpacityFn = L"SetRenderOpacity";  // UWidget::SetRenderOpacity(float InOpacity) -- brush-independent visual dim
 inline constexpr const wchar_t* WidgetGetIsEnabledFn = L"GetIsEnabled";       // UWidget::GetIsEnabled()->bool ReturnValue (read-back diagnostic)
 inline constexpr const wchar_t* UiMenuClass = L"ui_menu_C";                   // VOTV unified main+pause menu widget (GameInstance-owned, one live instance)
+// The in-game HUD widget. Its Blueprint Tick is a UMG tick: once per frame on the game thread, inside the
+// Slate tick, so after the world tick's camera update and before the frame's present is queued. The
+// nameplates project there, with the camera of the frame being drawn.
+inline constexpr const wchar_t* HudWidgetClass = L"ui_ui_C";
 inline constexpr const wchar_t* UiMenuButtonSaveProp = L"button_Save";        // UButton* @ ui_menu_C+0x2D0 (the "Save Game" button)
 inline constexpr const wchar_t* UiMenuIsPauseProp = L"isPause";               // bool @ ui_menu_C+0x4C0 (true => the in-game pause menu, not the main menu)
 
@@ -1109,6 +1164,35 @@ inline constexpr const wchar_t* MaterialInstanceConstantClassName = L"MaterialIn
 // UActorComponent::RegisterComponent (which creates the FSceneProxy); the class-default light_R's
 // SceneProxy stays null under reflection-only writes.
 inline constexpr const wchar_t* SpotLightComponentClass = L"SpotLightComponent";
+// The other two local-light classes, for the light census near a player (ue_wrap/world/sanity_ticker);
+// ULocalLightComponent::AttenuationRadius is the reach every one of them shares.
+inline constexpr const wchar_t* PointLightComponentClass = L"PointLightComponent";
+inline constexpr const wchar_t* RectLightComponentClass = L"RectLightComponent";
+inline constexpr const wchar_t* LocalLightAttenuationRadiusProp = L"AttenuationRadius";
+
+// The game's sanity, read-only (ue_wrap/world/sanity_ticker): mainGamemode_C.obj_tickerInsanity is
+// the world's one ticker_lightSanity_C, spawned by the gamemode's begin-play. Its tick samples the
+// light at its playerHold's hand (thingsAndStuffLib.getLightIntensityAtPoint), drains `sanity` below
+// sanityFloor and restores it above, and pauses while the gamemode sleeps; nothing saves it.
+inline constexpr const wchar_t* GamemodeSanityTickerProp   = L"obj_tickerInsanity";
+inline constexpr const wchar_t* SanityTickerSanity         = L"sanity";
+inline constexpr const wchar_t* SanityTickerLightLevel     = L"lightLevel";
+inline constexpr const wchar_t* SanityTickerLightLevelLerp = L"lightLevel_lerp";
+inline constexpr const wchar_t* SanityTickerPlayerLight1   = L"playerLight1";
+inline constexpr const wchar_t* SanityTickerPlayerLight2   = L"playerLight2";
+inline constexpr const wchar_t* SanityTickerFloor          = L"sanityFloor";
+inline constexpr const wchar_t* SanityTickerFloorOriginal  = L"sanityFloor_original";
+inline constexpr const wchar_t* SanityTickerDrain          = L"drain";
+inline constexpr const wchar_t* SanityTickerDrainLerp      = L"drain_lerp";
+inline constexpr const wchar_t* SanityTickerDayMult        = L"sanityDrainDayMult";
+inline constexpr const wchar_t* SanityTickerEventTier      = L"eventTier";
+inline constexpr const wchar_t* SanityTickerAboveFloorLerp = L"aboveSanityFloor_lerp";
+inline constexpr const wchar_t* SanityTickerShadowCast     = L"doShadowCast";
+inline constexpr const wchar_t* SanityTickerRuleEnable     = L"rule_enableSanity";
+inline constexpr const wchar_t* SanityTickerDrainManual    = L"drainSanity_manual";
+inline constexpr const wchar_t* SanityTickerPlayerHold     = L"playerHold";
+inline constexpr const wchar_t* PawnEnableSanity           = L"SAVE_enableSanity";
+inline constexpr const wchar_t* GamemodeIsSleep            = L"isSleep";
 
 // The autotest's give/equip/battery setup: AmainPlayer_C::addPropToPlayer(FName prop), the
 // cheat-menu path (spawns the actor, adds it to the inventory and may auto-equip an equipment
@@ -1760,6 +1844,69 @@ inline constexpr const wchar_t* WasherSplashFx = L"eff_waterThrowSplash";
 inline constexpr const wchar_t* WasherCue = L"wade_Cue";
 inline constexpr const wchar_t* ParticleSystemClass = L"ParticleSystem";
 inline constexpr const wchar_t* SoundCueClass = L"SoundCue";
+
+// Player-dug holes and what is put in them (coop/props/dig_sync, ue_wrap/actors/dirt). The shovel's
+// event_dighole spawns its `dirtholeType` (dirthole_C, a prop_C that mints no key: its getKey answers None) at the
+// point its trace struck, writing `matType` (0 dirt, 1 gravel, 2 sand: the hole's material) and `attachTo` in the
+// deferred window. A hole used with a held item runs processburieditem: a farm plant row spawns its plant, an erie
+// plush spawns erieRise, anything else spawns a dirthole_item_C and buries the item in it (the mound keeps the
+// item's whole save record in `betterData`, a struct_betterSave), and the hole destroys itself. A new hole's
+// BeginPlay digs the mound under it up (pullout) and destroys it. A mound with a valid betterData class is a player
+// burial; the underground loot mounds (ticker_susHoleSpawner) keep `object` or `name` instead and stay per-peer.
+inline constexpr const wchar_t* DirtHoleClass = L"dirthole_C";
+inline constexpr const wchar_t* DirtMoundClass = L"dirthole_item_C";
+inline constexpr const wchar_t* DirtShovelClass = L"prop_shovel_C";
+inline constexpr const wchar_t* GrowingPlantClass = L"growingPlant_C";
+inline constexpr const wchar_t* DirtHoleMatTypeProp = L"matType";
+inline constexpr const wchar_t* DirtMoundBetterDataProp = L"betterData";
+inline constexpr const wchar_t* GrowingPlantNameProp = L"plant";
+inline constexpr const wchar_t* GrowingPlantUpdFn = L"upd";
+inline constexpr const wchar_t* BetterGetDataFn = L"betterGetData";
+inline constexpr const wchar_t* BetterLoadDataFn = L"betterLoadData";
+inline constexpr const wchar_t* BetterDataParam = L"betterData";
+inline constexpr const wchar_t* ProcessBuriedItemFn = L"processBuriedItem";
+inline constexpr const wchar_t* FilterItemsFn = L"filterItems";
+inline constexpr const wchar_t* FilterItemsActorParam = L"object";
+inline constexpr const wchar_t* FilterItemsBlockedParam = L"blocked";
+inline constexpr const wchar_t* DirtBallClass = L"prop_dirtball_C";
+inline constexpr const wchar_t* ProcessBuriedItemActorParam = L"actor";
+inline constexpr const wchar_t* MainPlayerHoldingActorProp = L"holdingActor_main";
+// Irrigation. The held faucet (prop_faucet_C) on its left button, when the trace below the hit finds water under
+// grass, sand, gravel or dirt, spawns `faucet_C` (an actor_save_C) at the hit, yaw = the player's + 90, and destroys
+// itself. faucet_C: action 5 toggles `active` then upd() (the appliance lane's bit); action 7 spawns a prop_faucet_C,
+// clears `active`, and its `hose` (groundhose_C) is destroyed into a prop_hose_C when it has fewer than 3 points, else
+// loses point 0 and its `faucet`, then gen(); then the faucet destroys itself. Saved: bools {active}, names {hose_key}.
+// The held hose (prop_hose_C) on a faucet with no hose spawns `groundhose_C` at the faucet's `connect` with
+// `conntofauc` set, whose BeginPlay ticks it: it lays a spline point under the LOCAL player (getMainPlayer) every `max`
+// of path and, while its faucet is on, sprays from `pickup` (growingplant_C.water += 100/s below 600; buckets fill).
+// The next left button on a prop_sprinkler_C with no hose runs the sprinkler's connectHose(hose) (adds its point,
+// finish(), setPropProps(false, true, false, false), links both ways); elsewhere finish(): tick off, gen(), collision
+// on, faucet.upd(). The held hose then destroys itself. groundhose_C's action 4: a `doCollect` look (the hose's start)
+// or no faucet puts a prop_hose_C in the inventory and destroys the hose; else a held prop_hose_grab_C resume()s it.
+// Saved: vectors {points}, names {faucet_key, sprinkler_key}; processKeys links and finish()es. A sprinkler's
+// doWater (a 0.1 s timer) waters the growingplant_C in `wateringRadius` while its hose's faucet is on; grabbing it
+// or its action runs its hose's detachSprinkler(). [RD] the decoded bodies of the five classes.
+inline constexpr const wchar_t* IrrigationFaucetClass = L"faucet_C";
+inline constexpr const wchar_t* IrrigationHoseClass = L"groundhose_C";
+inline constexpr const wchar_t* IrrigationSprinklerClass = L"prop_sprinkler_C";
+inline constexpr const wchar_t* IrrigationFaucetItemClass = L"prop_faucet_C";
+inline constexpr const wchar_t* IrrigationHoseItemClass = L"prop_hose_C";
+inline constexpr const wchar_t* IrrigationFaucetActiveProp = L"active";
+inline constexpr const wchar_t* IrrigationFaucetHoseProp = L"hose";
+inline constexpr const wchar_t* IrrigationHoseFaucetProp = L"faucet";
+inline constexpr const wchar_t* IrrigationHoseSprinklerProp = L"sprinkler";
+inline constexpr const wchar_t* IrrigationHosePointsProp = L"points";
+inline constexpr const wchar_t* IrrigationHoseDoCollectProp = L"doCollect";
+inline constexpr const wchar_t* IrrigationSprinklerHoseProp = L"hose";
+inline constexpr const wchar_t* IrrigationGetDataFn = L"getData";
+inline constexpr const wchar_t* IrrigationLoadDataFn = L"loadData";
+inline constexpr const wchar_t* IrrigationGetKeyFn = L"getKey";
+inline constexpr const wchar_t* IrrigationHoseFinishFn = L"finish";
+inline constexpr const wchar_t* IrrigationHoseUpdEffectFn = L"updEffect";
+inline constexpr const wchar_t* IrrigationHoseDetachFn = L"detachSprinkler";
+inline constexpr const wchar_t* IrrigationUpdFn = L"upd";
+inline constexpr int IrrigationFaucetActionTake = 7;
+inline constexpr int IrrigationHoseActionPickup = 4;
 }  // namespace name
 
 }  // namespace ue_wrap::profile

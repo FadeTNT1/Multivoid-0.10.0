@@ -23,6 +23,8 @@
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/types.h"
 
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -152,6 +154,71 @@ void* Materialize(coop::element::ElementId eid, const std::wstring& className, u
     return native;
 }
 
+namespace {
+// The piles a land placed in the last two seconds, checked each client tick (WatchLandPose).
+struct LandWatch {
+    coop::element::ElementId eid = coop::element::kInvalidId;
+    void*            pile = nullptr;
+    int32_t          idx = -1;
+    ue_wrap::FVector loc{};
+    std::chrono::steady_clock::time_point until{};
+    int              resets = 0;
+};
+std::vector<LandWatch> g_landWatch;
+constexpr size_t kLandWatchMax = 256;
+constexpr float  kLandDriftCm = 1.0f;
+}  // namespace
+
+void WatchLandPose(coop::element::ElementId eid, void* pile, const ue_wrap::FVector& loc) {
+    UE_ASSERT_GAME_THREAD("trash_mirror::WatchLandPose");
+    if (!pile) return;
+    for (LandWatch& w : g_landWatch) {
+        if (w.eid == eid) {   // a newer land of the same entity replaces the watch
+            w = LandWatch{eid, pile, R::InternalIndexOf(pile), loc,
+                          std::chrono::steady_clock::now() + std::chrono::seconds(2), 0};
+            return;
+        }
+    }
+    if (g_landWatch.size() >= kLandWatchMax) g_landWatch.erase(g_landWatch.begin());
+    g_landWatch.push_back(LandWatch{eid, pile, R::InternalIndexOf(pile), loc,
+                                    std::chrono::steady_clock::now() + std::chrono::seconds(2), 0});
+}
+
+void TickLandWatch() {
+    UE_ASSERT_GAME_THREAD("trash_mirror::TickLandWatch");
+    if (g_landWatch.empty()) return;
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = g_landWatch.begin(); it != g_landWatch.end(); ) {
+        LandWatch& w = *it;
+        // The watch ends at its deadline, or when the pile is gone or no longer the entity's actor
+        // (a grab made it a clump; that convert placed the successor).
+        coop::element::Element* el = coop::element::Registry::Get().Get(w.eid);
+        const bool current = el && el->GetActor() == w.pile && R::IsLiveByIndex(w.pile, w.idx);
+        // A host drive moving it (a position correction's lerp) is the host's word, not a drift, and
+        // ends the watch.
+        const bool driven = current && coop::remote_prop::IsActorUnderAnyDrive(w.pile);
+        if (!current || driven || now >= w.until) {
+            it = g_landWatch.erase(it);
+            continue;
+        }
+        ue_wrap::FVector got{};
+        if (E::TryGetActorLocation(w.pile, got)) {
+            const float dx = got.X - w.loc.X, dy = got.Y - w.loc.Y, dz = got.Z - w.loc.Z;
+            const float drift = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (drift > kLandDriftCm) {
+                E::SetActorRootMovable(w.pile);
+                E::SetActorLocation(w.pile, w.loc);
+                if (++w.resets <= 2)
+                    UE_LOGW("[PILE] CLIENT land watch eid=%u -- the pile moved %.1f cm off the host's (%.1f,%.1f,%.1f) "
+                            "to (%.1f,%.1f,%.1f) after its land; set back (#%d)",
+                            static_cast<unsigned>(w.eid), drift, w.loc.X, w.loc.Y, w.loc.Z, got.X, got.Y, got.Z,
+                            w.resets);
+            }
+        }
+        ++it;
+    }
+}
+
 void Unpin(void* actor) {
     UE_ASSERT_GAME_THREAD("trash_mirror::Unpin");
     if (!actor) return;
@@ -218,6 +285,7 @@ void OnDisconnectForSlot(int slot) {
 
 void OnDisconnect() {
     UE_ASSERT_GAME_THREAD("trash_mirror::OnDisconnect");
+    g_landWatch.clear();
     if (g_made.empty()) return;
     const size_t n = g_made.size();
     // Destroy what we made: with no session there is no remote entity for a mirror to express, and

@@ -29,9 +29,11 @@ namespace coop::garbage_sync {
 // cleaner's BeginPlay on a client, so the host's rolls are the only ones -- named at the class
 // that DECLARES it, so every variant cancels and no leaf silently resolves to nothing.
 // tool_garbageSpawner is deliberately let through, being a per-shot player action, per principle 6.
-// The underground spawner is NOT gated: it mints only dirthole_item_C, which is outside the sync
-// universe, so suppressing it deleted the client's per-peer loot mounds with no host replacement --
-// dirtholes are per-peer local by doctrine.
+// The underground spawner is NOT gated: it mints only loot mounds (dirthole_item_C with no buried
+// class), which are outside the sync universe, so suppressing it deleted the client's per-peer loot
+// mounds with no host replacement -- the LOOT MOUNDS are per-peer local by doctrine. That doctrine is
+// narrowed to them: a hole or a mound a PLAYER makes (a shovel's dig, a burial, a planting) is the
+// host's and shared (coop/props/dig_sync).
 void Install();
 
 // Session pointer carrier. Mirrors the prop_lifecycle::SetSession pattern

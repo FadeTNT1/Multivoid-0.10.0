@@ -99,7 +99,7 @@ struct AtvEntry {
     void* condExpressedActor  = nullptr;  // reseed when the entry repoints to a new actor
     // Idle-syncer change gate, condition half: the payload's condition block as of the last
     // ACTUAL send. Pose-only gating would make a parked host eject wait out the 2 s keepalive.
-    uint8_t lastSentCond[64] = {};
+    uint8_t lastSentCond[68] = {};
     bool    haveLastSentCond = false;
     int      restReplaces = 0;     // re-places of a mirror whose syncer is at rest, WITHIN one
                                    // episode (see lastRestPlaceMs).
@@ -173,6 +173,13 @@ bool IsLocalGrabber(void* actor, void* localPlayer);
 // lane's map. StampHostTrap sets a block's trap bit from the host's own copy; TakeStampTrap is the client's take of
 // that bit; NoteSyncerHealth is the host's re-arm of an accepted explosion request; IdleWorthSending is the idle
 // syncer's change gate (it updates the entry's baseline on a yes). Game thread.
+// atv_drive_gates.cpp: the torque gates of one copy, every Tick for every live entry on either role. A stale `empty` or
+// `brokenn` latch (set while fuel or health is above zero) is cleared; a local driver whose throttle meets a set term
+// gets a log line naming each term and a chat line naming the first. ForgetDriveGates drops the per-key report state at
+// a disconnect. Game thread.
+void TickDriveGates(AtvEntry& e, const std::wstring& key, uint8_t localSlot, uint64_t nowMs);
+void ForgetDriveGates();
+
 void StampHostTrap(const AtvEntry& e, coop::net::AtvStatePayload& p);
 void TakeStampTrap(AtvEntry& e, bool stamped, bool owns);
 void NoteSyncerHealth(AtvEntry& e, uint8_t syncer, float health);

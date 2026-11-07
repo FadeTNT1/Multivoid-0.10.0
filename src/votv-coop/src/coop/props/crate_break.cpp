@@ -24,12 +24,14 @@
 #include "ue_wrap/actors/int_objects.h"
 #include "ue_wrap/actors/physics_impact.h"
 #include "ue_wrap/actors/prop.h"
+#include "ue_wrap/actors/prop_flags.h"
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/obj_keyed_cache.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/types.h"
+#include "ue_wrap/devices/asologo_piece.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/engine/hit_result.h"
 #include "ue_wrap/facts/function_row.h"
@@ -252,6 +254,7 @@ int      g_applying = 0;
 uint32_t g_swingsApplied = 0;
 uint32_t g_contactsApplied = 0;
 int      g_swingSaid = 0;
+int      g_pieceHitSaid = 0;
 int      g_appliedSaid = 0;
 
 void Refuse(int slot, const char* why) {
@@ -335,7 +338,7 @@ Served Serve(coop::net::Session& s, int slot, const Queued& q) {
 
 void ServeQueues(coop::net::Session& s) {
     for (int slot = 1; slot < coop::players::kMaxPeers; ++slot)
-        g_slots[slot].queue.Serve(kBudget, coop::net::NowMs, [&](const Queued& q) { return Serve(s, slot, q); });
+        g_slots[slot].queue.Serve(slot, kBudget, coop::net::NowMs, [&](const Queued& q) { return Serve(s, slot, q); });
 }
 
 // ---- the watches' settle --------------------------------------------------------------------------------------
@@ -374,8 +377,13 @@ bool IsHostDamaged(void* prop) {
     // source of that kind, vanish with no blast anywhere. The host's break and its blast travel the ordinary lanes.
     // A cubicle partition is one so that a client's swing breaks it at all (a level partition has no syncer for a swing
     // to elect) and its hit and break cues reach every peer from the one copy that runs them.
+    // An asologo piece (the basement's secret wall, a radiator, a security TV) is one because its health is its own and
+    // its breakingSequence frees the body from Static: a client's copy that took the swing broke alone, streamed a
+    // free panel the host's Static copy refused to follow, and left the host a wall nobody could see through. The
+    // host's copy takes the damage, and its break reaches the clients as the pried piece's does.
     return prop && (ue_wrap::container_inventory::IsContainer(prop) || ue_wrap::fire_extinguisher::IsExtinguisher(prop) ||
-                    ue_wrap::breakable_explosive::IsBreakableExplosive(prop) || ue_wrap::cubicle::IsCubicle(prop));
+                    ue_wrap::breakable_explosive::IsBreakableExplosive(prop) || ue_wrap::cubicle::IsCubicle(prop) ||
+                    ue_wrap::asologo_piece::IsPiece(prop));
 }
 
 void OnClientImpact(const sg::Call& c, void* container) {
@@ -490,10 +498,22 @@ bool HostApplySwing(uint32_t eid, uint8_t slot, const coop::net::HitIntentPayloa
     void* damager = rp ? rp->GetActor() : nullptr;
     if (damager && !R::IsLive(damager)) damager = nullptr;
     const FVector impact{judged.impact[0], judged.impact[1], judged.impact[2]};
+    const bool piece = ue_wrap::asologo_piece::IsPiece(prop);
+    const bool staticBefore = piece && ue_wrap::prop::IsStatic(prop);
     ++g_applying;
     const bool ran = ue_wrap::int_objects::InvokeAddDamageOn(prop, ue_wrap::prop::GetStaticMesh(prop), damager,
                                                              judged.damage, hitLoc, impact);
     --g_applying;
+    if (piece && g_pieceHitSaid < kMaxSaid * 2) {
+        ++g_pieceHitSaid;
+        // A piece's break is a latent sequence: Static may still be set when the call returns, and clears when the
+        // constraints go. The host's [PIECE-BREAK] line and the clients' "static released" line follow it.
+        UE_LOGI("[PIECE-HIT] host: slot=%u swing at %ls eid=%u (row '%ls') dmg=%.1f -- addDamage %s on the host's "
+                "copy, static before=%d after=%d", static_cast<unsigned>(slot), R::ClassNameOf(prop).c_str(),
+                static_cast<unsigned>(eid), ue_wrap::prop::GetPropNameString(prop).c_str(),
+                static_cast<double>(judged.damage), ran ? "ran" : "DID NOT RUN", staticBefore ? 1 : 0,
+                ue_wrap::prop::IsStatic(prop) ? 1 : 0);
+    }
     if (!ran) {
         why = "addDamage did not run";
         return false;
@@ -588,6 +608,7 @@ void OnDisconnect() {
     g_dissolved = 0;
     g_contactSaid = 0;
     g_swingSaid = 0;
+    g_pieceHitSaid = 0;
     g_appliedSaid = 0;
     g_spillSaid = 0;
     g_paramsSaid = false;

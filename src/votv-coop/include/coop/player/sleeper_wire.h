@@ -2,12 +2,14 @@
 // per blob. Pure byte work, no engine access; what a sleeper is and who may lay one down is coop/player/sleepers'.
 //
 //   add     [u8 op=1][u32 id][f32 x][f32 y][f32 z][f32 pitch][f32 yaw][f32 roll][u16 n][n bytes nick, UTF-8]
-//           [u8 m][m bytes skin, ASCII]
+//           [u8 m][m bytes skin, ASCII][u8 joinSlot]
 //   remove  [u8 op=2][u32 id]
 //
 // HOSTILE-INPUT CONTRACT: every length is bounded before it is used, the nick is decoded strictly (a malformed one
 // refuses the message whole), every float must be finite, and every byte after a message's tail is Malformed. The id
-// is the host's per-session number, never a pointer or a slot.
+// is the host's per-session number, never a pointer or a slot. `joinSlot` is the session slot of a player who is
+// connecting and whose body this is for now (a joining body: no loot, replaced by their puppet once their world is up),
+// or kNoJoinSlot for an offline sleeper; any other value past kMaxJoinSlot is Malformed.
 
 #pragma once
 
@@ -21,6 +23,8 @@ enum class Op : uint8_t { Add = 1, Remove = 2 };
 
 inline constexpr size_t kMaxNickBytes = 96;
 inline constexpr size_t kMaxSkinBytes = 64;
+inline constexpr uint8_t kNoJoinSlot = 0xFF;
+inline constexpr uint8_t kMaxJoinSlot = 63;   // a slot number past any session's peer count
 
 struct Message {
     Op op = Op::Add;
@@ -30,6 +34,7 @@ struct Message {
     float pitch = 0.f, yaw = 0.f, roll = 0.f;
     std::wstring nick;
     std::string skin;
+    uint8_t joinSlot = kNoJoinSlot;   // Add: the slot of the player joining as this body, or kNoJoinSlot
 };
 
 std::vector<uint8_t> Pack(const Message& m);

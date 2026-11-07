@@ -50,6 +50,10 @@ void OnBlob(const coop::net::BlobChunkPayload& chunk, uint8_t senderSlot);
 // HOST, a client's InventoryRestoreAck.
 void OnAck(const coop::net::InventoryRestoreAckPayload& ack, uint8_t senderSlot);
 
+// HOST, `slot` left: a restore still waiting for its answer is dropped, or a rejoin within the minute the request is
+// kept would be told "still waiting" and refused.
+void OnSlotLeft(int slot);
+
 // Session teardown.
 void OnDisconnect();
 

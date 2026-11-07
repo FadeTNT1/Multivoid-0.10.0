@@ -307,10 +307,10 @@ reason; the full list is in the code (`pocket_travel_host.cpp`, `pocket_travel_c
 
 | Kind | Direction | Payload | Late join |
 |---|---|---|---|
-| `PocketTravel` (244) | client to host, Default lane, never relayed | phase, pocket, reason, trip number, departure spot | none: the host's table is the state |
-| `PlayerLocation` (245) | host to all, High lane (not held by a join gate), pre-world and away sendable | slot, pocket, cause, trip number | the away slots' rows at every first announce (a join's or a return's) |
+| `PocketTravel` (247) | client to host, Default lane, never relayed | phase, pocket, reason, trip number, departure spot | none: the host's table is the state |
+| `PlayerLocation` (248) | host to all, High lane (not held by a join gate), pre-world and away sendable | slot, pocket, cause, trip number | the away slots' rows at every first announce (a join's or a return's) |
 
-Protocol 311.
+Protocol 321.
 
 ## Known limits
 

@@ -145,6 +145,8 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ToolActionIntent:
     case ReliableKind::MicrowaveIntent:
     case ReliableKind::PosterIntent:
+    case ReliableKind::DigIntent:
+    case ReliableKind::IrrigationCommit:
     case ReliableKind::ProjectileFired:
     case ReliableKind::ExplosionRequest:
     case ReliableKind::AtvExplodeRequest:
@@ -152,6 +154,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::AchievementClaim:
     case ReliableKind::AtvSeat:
     case ReliableKind::AtvTakeover:
+    case ReliableKind::AtvRepairIntent:
     case ReliableKind::PropActRequest:
     case ReliableKind::PropActCommit:
     case ReliableKind::ContainerActRequest:
@@ -183,6 +186,8 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::MicrowaveState:
     case ReliableKind::BucketFillState:
     case ReliableKind::PosterState:
+    case ReliableKind::DigState:
+    case ReliableKind::IrrigationState:
     case ReliableKind::ToolActionState:
     case ReliableKind::EventScenePhase:
     case ReliableKind::EventSoundCue:
@@ -235,6 +240,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DishHashcodes:
     case ReliableKind::ServerSetting:
     case ReliableKind::CommandReply:
+    case ReliableKind::HintRoute:
     case ReliableKind::PermissionGrants:
     case ReliableKind::CoinGunResult:
     case ReliableKind::OrderRefused:
@@ -251,6 +257,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DishSnapshot:
     case ReliableKind::DishCalib:
     case ReliableKind::TaskNewState:
+    case ReliableKind::TaskSaleHint:
     case ReliableKind::HookAnchored:
     case ReliableKind::RemoverResult:
     case ReliableKind::PropActReply:

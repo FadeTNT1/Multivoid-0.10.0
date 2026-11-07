@@ -15,6 +15,7 @@
 #include "coop/creatures/npc_mirror.h"
 #include "coop/creatures/owner_entity_sync.h"
 #include "coop/items/hook_anchor.h"
+#include "coop/items/irrigation_sync.h"
 #include "coop/items/hook_sync.h"  // the hook lane
 #include "coop/element/bind_wait.h"  // Holds: a held convert is no failed spawn
 #include "coop/element/quiescence_drain.h"  // the pending position corrections
@@ -497,6 +498,32 @@ bool HandleEntityEvent(net::Session& session,
                                  : static_cast<uint8_t>(0xFF);
         ue_wrap::game_thread::Post([c, slot] {
             ::coop::hook_anchor::OnAnchoredChunk(c, slot);
+        });
+        break;
+    }
+    case net::ReliableKind::IrrigationCommit: {
+        // Client to host only: a placed faucet or hose, or a take, a pickup or a detach of one. The host's lane judges.
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) break;
+        net::BlobChunkPayload c{};
+        std::memcpy(&c, msg.payload, sizeof(c));
+        const uint8_t slot = (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
+                                 ? static_cast<uint8_t>(msg.senderPeerSlot)
+                                 : static_cast<uint8_t>(0xFF);
+        ue_wrap::game_thread::Post([c, slot] {
+            ::coop::irrigation_sync::OnCommitChunk(c, slot);
+        });
+        break;
+    }
+    case net::ReliableKind::IrrigationState: {
+        // Host to all: a placed faucet or hose exists or is gone, or a joiner's snapshot of them.
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) break;
+        net::BlobChunkPayload c{};
+        std::memcpy(&c, msg.payload, sizeof(c));
+        const uint8_t slot = (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
+                                 ? static_cast<uint8_t>(msg.senderPeerSlot)
+                                 : static_cast<uint8_t>(0xFF);
+        ue_wrap::game_thread::Post([c, slot] {
+            ::coop::irrigation_sync::OnStateChunk(c, slot);
         });
         break;
     }

@@ -158,6 +158,16 @@ of thirty seconds or more, and a clean log diff. Every detector and gate
 is shown red before it is trusted, because a gate that cannot fire passes forever. Differential
 evidence beats absolute: baseline against change, with a negative control.
 
+## A recorded doctrine, narrowed: dug dirt
+
+`coop/interactables/garbage_sync` once recorded that "dirtholes are per-peer local by doctrine". That was written for
+the underground loot mounds (`ticker_susHoleSpawner`, per-peer loot a client's own game rolls and the host cannot
+replace), and it read as covering every hole. It does not. The test is who made the thing. Loot a spawner rolls for
+itself stays per-peer; a hole or a mound *a player* makes (a shovel's dig, a burial, a planting) is shared-world state, so
+it has one author, the host, and a client's verbs on it are intents ([props.md](props.md), "Holes and buried items").
+Left per-peer, a client's burial destroyed the item on the host and nothing came back, which the next host save made
+permanent.
+
 ## Forbidden patterns
 
 - A filter, skip or suppression added where the symptom appears instead of where the cause lives.

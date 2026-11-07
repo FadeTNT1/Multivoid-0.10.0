@@ -21,8 +21,15 @@
 //
 // A client who is still connected when the world is saved, or when the session ends, is written to the saved list as
 // well -- at their spot, facing, floor and name -- but laid down only when that world is loaded again, and only if they
-// are not back by then. Their inventory is the host's stored profile of them. Gameplay layer (principle 7).
-// Game thread.
+// are not back by then. Their inventory is the host's stored profile of them.
+//
+// A JOINING body: while a player is connecting (admitted, downloading and loading the world), every other peer sees
+// them lying asleep instead of nothing. A rejoiner's sleeper stays down through the join -- its loot is written back
+// and its crate goes the moment the host hands the profile over, so nothing can be looted from it -- and a player with
+// no sleeper gets the same body laid down at the spot they will appear (their profile's, else the start point), with no
+// loot at all. The body is swapped for their puppet, which appears standing where it lay, once their world is up and
+// the puppet exists on that peer. One who disconnects before that lies on as an ordinary sleeper (when their profile
+// holds items), else the body goes. Gameplay layer (principle 7). Game thread.
 
 #pragma once
 
@@ -71,10 +78,12 @@ bool OnlinePlateAnchor(int slot, ue_wrap::FVector& out);
 void OnPlayerLeaving(int slot, const coop::roster_ledger::Row& outgoing);
 // The host is kicking or banning this player: no sleeper for this departure, and one already lying goes.
 void NoteRemovedByHost(const std::string& guid);
-// The player is about to be handed their profile (a rejoin). False while a loot transaction on their sleeper is still
-// held (it settles first, and none starts meanwhile): the caller asks again. True once the sleeper's loot has been
-// written back and the sleeper is gone, or there was none. The profile the join then reads IS the sleeper's.
-bool OnOwnerJoining(const std::string& guid);
+// The player of `slot` is about to be handed their profile (a join). False while a loot transaction on their sleeper
+// is still held (it settles first, and none starts meanwhile): the caller asks again. True once the sleeper's loot has
+// been written back and its crate is gone -- the body stays down as the player's joining body until their puppet
+// stands up -- or, with no sleeper, once a joining body has been laid for them. The profile the join then reads IS
+// the sleeper's.
+bool OnOwnerJoining(const std::string& guid, int slot);
 // Host: the sleeper `id` is closing (its owner is coming back); storage_act refuses it new transactions.
 bool LootClosing(uint32_t id);
 // Host: this player has just woken from a sleeper and its record is being put on them; a profile they stream until
@@ -104,6 +113,7 @@ struct PlateAnchor {
     ue_wrap::FVector head{};
     char nick[coop::text::kNickBufBytes] = {};
     bool lootable = false;   // the local player is in reach of it and aiming at it: "E  Loot"
+    bool joining = false;    // a player who is connecting: "(joining...)", the name at any distance, never lootable
 };
 size_t PlateAnchors(PlateAnchor* out, size_t max);
 
