@@ -189,6 +189,9 @@ bool ApplyToLevel(const coop::net::EventScenePhasePayload& p) {
         const bool lit = ES::AgravPlayerLight(actor, on);
         UE_LOGI("event_scene[agrav]: player light %s%s", on ? "attached to the camera" : "taken back",
                 lit ? "" : " -- did not resolve");
+        // The host's float is streamed to this copy by the prop lane; its end is released here, whether or not the
+        // stream carried a fall for each copy.
+        detail::AgravClientEdge(on);
     }
     g_appliedByKey[key] = p.phase;
     UE_LOGI("event_scene[%s]: '%ls' phase %u%s applied%s",

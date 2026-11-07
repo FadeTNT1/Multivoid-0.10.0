@@ -37,6 +37,19 @@ bool GetComponentCenterOfMass(void* component, FVector& out);
 bool SetComponentEnableGravity(void* component, bool enabled);
 bool ReadComponentGravityEnabled(void* component, bool& enabled);
 
+// WakeRigidBody (the whole body): a body asleep in PhysX stays where it is when its gravity comes back on, so a
+// prop that came to rest while floating hangs in the air. True when the call ran.
+bool WakeComponentBody(void* component);
+
+// Gives a floated body back to the world: gravity on when it was off, and the body woken when it simulates, so it
+// falls. A component that is not a live primitive does nothing. `gravityRestored` is true when the gravity was off
+// and now is on, `woken` when the body simulates and was woken.
+struct GravityRelease {
+    bool gravityRestored = false;
+    bool woken = false;
+};
+GravityRelease ReleaseComponentGravity(void* component);
+
 // Every primitive component the actor's Blueprint chain declares as a member (a component variable) that
 // simulates is stopped; returns how many were. For an actor driven from elsewhere, which must not also
 // simulate. The members are found once per class name, a Blueprint's layout being the same in every world.
