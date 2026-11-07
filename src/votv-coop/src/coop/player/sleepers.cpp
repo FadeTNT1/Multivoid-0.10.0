@@ -1161,6 +1161,9 @@ void OnClientDisconnect() {
 
 void OnSessionEnd() {
     g_open = LootOpen{};   // its crate goes with the sleepers below
+    // Loot taken since the last 1 Hz write-back would be lost with the crates: write it back first.
+    if (IsHost())
+        for (auto& [id, s] : g_sleepers) Writeback(s, "session end");
     for (auto& [id, s] : g_sleepers) DestroyActors(s);
     if (!g_sleepers.empty()) UE_LOGI("sleeper: %zu sleeper(s) of this session dropped", g_sleepers.size());
     g_sleepers.clear();

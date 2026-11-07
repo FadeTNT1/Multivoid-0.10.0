@@ -61,8 +61,9 @@ struct Slot {
 // whole roster rather than a handful: peers install asymmetrically, so a table that fits one
 // role can be full on the other, and a hook that cannot install makes a fix work on one peer
 // and not the other. The count here covers the standing installs, a dev build's probes (the driver
-// natives and QuitGame among them) and the dev selftest's hooks, with headroom.
-constexpr int kMaxNativeHooks = 56;
+// natives and QuitGame among them) and the dev selftest's hooks, with headroom. At 56 the standing
+// installs alone reached ~51 (host) and the dev probes add ~18 more, so it is 96.
+constexpr int kMaxNativeHooks = 96;
 Slot g_slots[kMaxNativeHooks];
 int  g_slotCount = 0;
 // The VM's exec-handler table, taken from script_gate by the first pre hook's install.

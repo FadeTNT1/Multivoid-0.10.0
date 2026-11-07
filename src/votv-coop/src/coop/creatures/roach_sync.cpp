@@ -785,6 +785,7 @@ void ClientIngestPose(coop::net::Session* s, long long now) {
     for (int i = 0; i < body.count; ++i) {
         const auto& row = body.rows[i];
         if (row.ordinal >= g_tracked.size()) continue;
+        if (row.ordinal >= static_cast<size_t>(coop::net::kRoachSnapshotCap)) continue;  // g_glide's bound
         TrackedRoach& t = g_tracked[row.ordinal];
         if (!t.comp || !R::IsLiveByIndex(t.comp, t.idx)) continue;  // a tombstone: removed here, host not yet
         RoachGlide& g = g_glide[row.ordinal];
