@@ -1082,6 +1082,35 @@ inline constexpr const wchar_t* MaterialInstanceConstantClassName = L"MaterialIn
 // UActorComponent::RegisterComponent (which creates the FSceneProxy); the class-default light_R's
 // SceneProxy stays null under reflection-only writes.
 inline constexpr const wchar_t* SpotLightComponentClass = L"SpotLightComponent";
+// The other two local-light classes, for the light census near a player (ue_wrap/world/sanity_ticker);
+// ULocalLightComponent::AttenuationRadius is the reach every one of them shares.
+inline constexpr const wchar_t* PointLightComponentClass = L"PointLightComponent";
+inline constexpr const wchar_t* RectLightComponentClass = L"RectLightComponent";
+inline constexpr const wchar_t* LocalLightAttenuationRadiusProp = L"AttenuationRadius";
+
+// The game's sanity, read-only (ue_wrap/world/sanity_ticker): mainGamemode_C.obj_tickerInsanity is
+// the world's one ticker_lightSanity_C, spawned by the gamemode's begin-play. Its tick samples the
+// light at its playerHold's hand (thingsAndStuffLib.getLightIntensityAtPoint), drains `sanity` below
+// sanityFloor and restores it above, and pauses while the gamemode sleeps; nothing saves it.
+inline constexpr const wchar_t* GamemodeSanityTickerProp   = L"obj_tickerInsanity";
+inline constexpr const wchar_t* SanityTickerSanity         = L"sanity";
+inline constexpr const wchar_t* SanityTickerLightLevel     = L"lightLevel";
+inline constexpr const wchar_t* SanityTickerLightLevelLerp = L"lightLevel_lerp";
+inline constexpr const wchar_t* SanityTickerPlayerLight1   = L"playerLight1";
+inline constexpr const wchar_t* SanityTickerPlayerLight2   = L"playerLight2";
+inline constexpr const wchar_t* SanityTickerFloor          = L"sanityFloor";
+inline constexpr const wchar_t* SanityTickerFloorOriginal  = L"sanityFloor_original";
+inline constexpr const wchar_t* SanityTickerDrain          = L"drain";
+inline constexpr const wchar_t* SanityTickerDrainLerp      = L"drain_lerp";
+inline constexpr const wchar_t* SanityTickerDayMult        = L"sanityDrainDayMult";
+inline constexpr const wchar_t* SanityTickerEventTier      = L"eventTier";
+inline constexpr const wchar_t* SanityTickerAboveFloorLerp = L"aboveSanityFloor_lerp";
+inline constexpr const wchar_t* SanityTickerShadowCast     = L"doShadowCast";
+inline constexpr const wchar_t* SanityTickerRuleEnable     = L"rule_enableSanity";
+inline constexpr const wchar_t* SanityTickerDrainManual    = L"drainSanity_manual";
+inline constexpr const wchar_t* SanityTickerPlayerHold     = L"playerHold";
+inline constexpr const wchar_t* PawnEnableSanity           = L"SAVE_enableSanity";
+inline constexpr const wchar_t* GamemodeIsSleep            = L"isSleep";
 
 // The autotest's give/equip/battery setup: AmainPlayer_C::addPropToPlayer(FName prop), the
 // cheat-menu path (spawns the actor, adds it to the inventory and may auto-equip an equipment

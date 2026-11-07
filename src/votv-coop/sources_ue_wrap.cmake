@@ -98,6 +98,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/world/explosion.cpp
     src/ue_wrap/world/explosion_source.cpp
     src/ue_wrap/world/skysphere.cpp
+    src/ue_wrap/world/sanity_ticker.cpp
     src/ue_wrap/world/directionalwind.cpp
     src/ue_wrap/devices/lightswitch.cpp
     src/ue_wrap/devices/garage.cpp
