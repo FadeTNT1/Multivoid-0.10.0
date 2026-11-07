@@ -180,6 +180,9 @@ set(VOTVCOOP_SOURCES
     src/coop/player/death_revive.cpp
     src/coop/player/revive_protection.cpp
     src/coop/player/run_end_travel.cpp
+    src/coop/player/pocket_travel.cpp
+    src/coop/player/pocket_travel_host.cpp
+    src/coop/player/pocket_travel_client.cpp
     src/coop/player/skin_preview.cpp
     src/coop/player/flashlight_click_sound.cpp
     src/coop/props/prop_sound.cpp

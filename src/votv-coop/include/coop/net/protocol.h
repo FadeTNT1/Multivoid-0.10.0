@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 308;
+inline constexpr uint16_t kProtocolVersion = 311;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1456,6 +1456,22 @@ enum class ReliableKind : uint8_t {
     // The prop is named by its Element id. Never relayed; a client's copy is refused at the host's receive edge. Late
     // join: none -- a one-shot cue. PieceBreakFxPayload.
     PieceBreakFx = 243,
+
+    // CLIENT->HOST, never relayed: a client's own trip to a pocket dimension (coop::pocket_travel,
+    // docs/pocket-dimensions.md). `phase` is Enter (sent at the loadLevel decision, before the
+    // travel: the slot goes away and its world lanes stop), Arrived (the pocket level is up),
+    // ReturnRequest (the pocket's way home was taken: the host re-runs the save transfer for this
+    // admitted slot without dropping it) or Failed. The host judges the sender's slot only, never a
+    // named one, and answers with PlayerLocation. Late join: the host's location table is current
+    // state and rides PlayerLocation. PocketTravelPayload.
+    PocketTravel = 244,
+
+    // HOST->ALL: where a slot's player is: the main world (pocket 0) or a pocket level. The host
+    // is the one author; a client hides and parks a puppet whose player is not where it is, shows
+    // the ones in the same pocket, and words the status. Pre-world sendable: an away slot is not
+    // world-ready. Late join: the host sends every slot's row at the ready edge.
+    // PlayerLocationPayload.
+    PlayerLocation = 245,
 };
 
 #pragma pack(push, 1)
@@ -4745,6 +4761,34 @@ struct PieceBreakFxPayload {
 };
 static_assert(sizeof(PieceBreakFxPayload) == 8, "PieceBreakFxPayload must be 8 bytes");
 static_assert(sizeof(PieceBreakFxPayload) <= 256 - 20 - 8, "PieceBreakFxPayload must fit in one reliable datagram");
+
+// A client's pocket trip edge (PocketTravel). `phase` and `reason` are coop::pocket_travel's
+// Phase and Reason; `pocket` its Pocket (0 = the main world). `tripSeq` counts the sender's trips
+// this session, so a late edge of an older trip is told from the current one. `departure` is set on
+// Enter only: the local pawn's place before the travel, x, y, z (world cm), pitch, yaw, roll
+// (degrees) -- the return spot; zero otherwise.
+struct PocketTravelPayload {
+    uint8_t  phase;        // 1
+    uint8_t  pocket;       // 1
+    uint8_t  reason;       // 1
+    uint8_t  reserved;     // 1 -- zeroed
+    uint32_t tripSeq;      // 4
+    float    departure[6]; // 24
+};
+static_assert(sizeof(PocketTravelPayload) == 32, "PocketTravelPayload must be 32 bytes");
+static_assert(sizeof(PocketTravelPayload) <= 256 - 20 - 8, "PocketTravelPayload must fit in one reliable datagram");
+
+// Where one slot's player is (PlayerLocation): `pocket` 0 is the main world. `cause` is
+// coop::pocket_travel's Reason for the change. `tripSeq` echoes the trip that moved it.
+struct PlayerLocationPayload {
+    uint8_t  slot;         // 1
+    uint8_t  pocket;       // 1
+    uint8_t  cause;        // 1
+    uint8_t  reserved;     // 1 -- zeroed
+    uint32_t tripSeq;      // 4
+};
+static_assert(sizeof(PlayerLocationPayload) == 8, "PlayerLocationPayload must be 8 bytes");
+static_assert(sizeof(PlayerLocationPayload) <= 256 - 20 - 8, "PlayerLocationPayload must fit in one reliable datagram");
 
 // A pressure washer's spray (WasherFx): whose washer, which hold of it, whether it fires, and where its shots landed
 // since the last message. `handGen` counts the firing peer's distinct washer holds, so a stop of an older hold

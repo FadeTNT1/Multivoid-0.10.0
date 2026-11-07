@@ -21,6 +21,23 @@ inline constexpr const wchar_t* WorldClass = L"World";
 inline constexpr const wchar_t* SetActorLocationFn = L"K2_SetActorLocation";
 inline constexpr const wchar_t* GameplayLevel = L"untitled_1";
 
+// The pocket dimensions (coop/player/pocket_travel, docs/pocket-dimensions.md): the levels the
+// game's own triggers send one player to with lib_C::loadLevel, a full OpenLevel travel. Read off
+// the 0.10.0 bytecode: prop_biotoilet_C -> sl_poopdim, puddle_C -> sl_goop, wellTp_C and
+// prop_shake_C -> sl_place, skullzone_C -> sl_alexpdim, insomniac_C -> sl_woid. None is
+// "restricted" (lib_getFunc_C::isAreaLevelRestricted names only the menu), so each travel keeps the
+// save slot object and names the level as currentLevel.
+inline constexpr const wchar_t* PocketLevelPoopDim  = L"sl_poopdim";
+inline constexpr const wchar_t* PocketLevelGoop     = L"sl_goop";
+inline constexpr const wchar_t* PocketLevelPlace    = L"sl_place";
+inline constexpr const wchar_t* PocketLevelAlexPdim = L"sl_alexpdim";
+inline constexpr const wchar_t* PocketLevelWoid     = L"sl_woid";
+// The token every one of those trips passes as loadLevel's option. lib_C::loadLevel stores it in
+// mainGameInstance_C.NewVar_1, and the arriving mainGamemode_C::ReceiveBeginPlay quits the game when
+// the map is not one of its known maps and the token does not match: a travel the mod drives to a
+// pocket level must carry it.
+inline constexpr const wchar_t* PocketTravelToken   = L"PQXYyeofZ8cr5rJD4YXLVw";
+
 // The checkpoint spawn point at the base entrance (the actor centre, world cm; re-derive per game
 // version): every client appearance is teleported here (coop/session/teleport_client).
 inline constexpr float kKPPSpawnX = -37695.f;
