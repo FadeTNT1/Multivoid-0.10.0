@@ -77,6 +77,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/engine/engine_attach.cpp
     src/ue_wrap/devices/door.cpp
     src/ue_wrap/devices/pryable.cpp
+    src/ue_wrap/devices/asologo_piece.cpp
     src/ue_wrap/devices/cord.cpp
     src/ue_wrap/devices/base_window.cpp
     src/ue_wrap/devices/surface_clean.cpp

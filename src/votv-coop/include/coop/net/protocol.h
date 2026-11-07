@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 304;
+inline constexpr uint16_t kProtocolVersion = 306;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1448,6 +1448,14 @@ enum class ReliableKind : uint8_t {
     // dropped pack sends no grant, so a refusal costs the sender nothing. `reqId` echoes the
     // intent's, so a grant answers one press. Late join: nothing to replay. PackTrashGrantPayload.
     PackTrashGrant = 242,
+
+    // HOST->ALL: the host ran a prop_asologoPiece_C family prop's `break` (a pried wall radiator, a security TV; the
+    // break of a piece shot to pieces) and every client, the one whose player pried it too, plays that prop's own
+    // `break` cosmetics (coop::piece_break_fx): its break particles and its tear-off sound. The prop's physics and
+    // constraints ride the prop lanes, so a receiver runs `break` alone, never the breaking sequence that calls it.
+    // The prop is named by its Element id. Never relayed; a client's copy is refused at the host's receive edge. Late
+    // join: none -- a one-shot cue. PieceBreakFxPayload.
+    PieceBreakFx = 243,
 };
 
 #pragma pack(push, 1)
@@ -4718,6 +4726,14 @@ inline constexpr int kMeleeFxHeaderBytes = 60;  // everything before `text`
 static_assert(offsetof(MeleeFxPayload, text) == kMeleeFxHeaderBytes, "MeleeFxPayload's header must be 60 bytes");
 static_assert(sizeof(MeleeFxPayload) == 220, "MeleeFxPayload must be 220 bytes");
 static_assert(sizeof(MeleeFxPayload) <= 256 - 20 - 8, "MeleeFxPayload must fit in one reliable datagram");
+
+// The host ran a piece's break (PieceBreakFx): the prop's Element id. `reserved` is zero.
+struct PieceBreakFxPayload {
+    uint32_t targetEid;    // 4 -- the prop_asologoPiece_C family prop's Element id
+    uint32_t reserved;     // 4 -- zeroed
+};
+static_assert(sizeof(PieceBreakFxPayload) == 8, "PieceBreakFxPayload must be 8 bytes");
+static_assert(sizeof(PieceBreakFxPayload) <= 256 - 20 - 8, "PieceBreakFxPayload must fit in one reliable datagram");
 
 // A pressure washer's spray (WasherFx): whose washer, which hold of it, whether it fires, and where its shots landed
 // since the last message. `handGen` counts the firing peer's distinct washer holds, so a stop of an older hold
