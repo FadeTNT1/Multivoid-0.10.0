@@ -91,6 +91,8 @@ on more routes than a press -- hold-F, an empty battery, an unequip, another fla
 most of them are Blueprint-to-Blueprint calls, so the owner reads its own beam every tick and
 sends whatever a peer would see on a change, off included; the receiver drives the puppet's own
 light with all of it and plays a positional click (`coop/player/flashlight_click_sound`) `[RD]`.
+A host with no world-ready peer sends nothing and says nothing (`ItemActivate` is not a pre-world kind), and a send that
+fails is logged once per run of failures; the connect broadcast covers a peer that becomes ready later.
 The battery itself drains on the owner's machine only. A carried trash clump is driven to the puppet's hand on
 the host each tick (`coop/player/puppet_carry_drive`); a held physics prop is on the props lane.
 
