@@ -7,6 +7,7 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/object_index.h"
+#include "ue_wrap/core/sdk_profile.h"
 
 #include <cstring>
 
@@ -23,7 +24,7 @@ bool g_tried    = false;
 
 // Property offsets on ATV_C. -1 = unresolved.
 int32_t g_offTires = -1, g_offDur = -1, g_offDirtArr = -1, g_offFixes = -1, g_offTypes = -1;
-int32_t g_offBodyDirt = -1, g_offFuel = -1, g_offHealth = -1;
+int32_t g_offBodyDirt = -1, g_offFuel = -1, g_offHealth = -1, g_offBattery = -1;
 int32_t g_offHasSpare = -1, g_offSpareDur = -1, g_offSpareDirt = -1, g_offSpareFixes = -1;
 int32_t g_offSkip = -1;
 
@@ -32,6 +33,7 @@ void* g_fnUpdTires = nullptr;
 void* g_fnUpdDirt = nullptr;
 void* g_fnUpdSpare = nullptr;
 void* g_fnUpdHealth = nullptr;
+void* g_fnUpdBattery = nullptr;
 
 // FScriptArray head = { void* Data; int32 Num; int32 Max }. Returns Num (clamped view), or -1
 // when the head reads as garbage -- the caller's all-or-nothing contract needs "unreadable"
@@ -72,6 +74,7 @@ bool Resolve() {
     g_offBodyDirt   = R::FindPropertyOffset(cls, L"dirt");
     g_offFuel       = R::FindPropertyOffset(cls, L"fuel");
     g_offHealth     = R::FindPropertyOffset(cls, L"health");
+    g_offBattery    = R::FindPropertyOffset(cls, ue_wrap::profile::name::AtvBatteryProp);
     g_offHasSpare   = R::FindPropertyOffset(cls, L"hasSpareTire");
     g_offSpareDur   = R::FindPropertyOffset(cls, L"spareTire_durability");
     g_offSpareDirt  = R::FindPropertyOffset(cls, L"spareTire_dirt");
@@ -81,12 +84,13 @@ bool Resolve() {
     g_fnUpdDirt   = R::FindFunction(cls, L"updDirt");
     g_fnUpdSpare  = R::FindFunction(cls, L"updSpareTire");
     g_fnUpdHealth = R::FindFunction(cls, L"updHealth");
+    g_fnUpdBattery = R::FindFunction(cls, ue_wrap::profile::name::AtvUpdBatteryFn);
     const bool offsOk = g_offTires >= 0 && g_offDur >= 0 && g_offDirtArr >= 0 &&
                         g_offFixes >= 0 && g_offTypes >= 0 && g_offBodyDirt >= 0 &&
-                        g_offFuel >= 0 && g_offHealth >= 0 && g_offHasSpare >= 0 &&
+                        g_offFuel >= 0 && g_offHealth >= 0 && g_offBattery >= 0 && g_offHasSpare >= 0 &&
                         g_offSpareDur >= 0 && g_offSpareDirt >= 0 && g_offSpareFixes >= 0 &&
                         g_offSkip >= 0;
-    const bool fnsOk = g_fnUpdTires && g_fnUpdDirt && g_fnUpdSpare && g_fnUpdHealth;
+    const bool fnsOk = g_fnUpdTires && g_fnUpdDirt && g_fnUpdSpare && g_fnUpdHealth && g_fnUpdBattery;
     g_resolved = offsOk && fnsOk;
     if (!g_resolved) {
         UE_LOGE("atv_condition: resolve INCOMPLETE (offsets ok=%d fns ok=%d) -- the condition "
@@ -128,6 +132,7 @@ bool Read(void* atv, Snapshot& out) {
     out.bodyDirt   = *reinterpret_cast<float*>(base + g_offBodyDirt);
     out.fuel       = *reinterpret_cast<float*>(base + g_offFuel);
     out.health     = *reinterpret_cast<float*>(base + g_offHealth);
+    out.battery    = *reinterpret_cast<float*>(base + g_offBattery);
     out.spareDur   = *reinterpret_cast<float*>(base + g_offSpareDur);
     out.spareDirt  = *reinterpret_cast<float*>(base + g_offSpareDirt);
     out.spareFixes = ClampI8(*reinterpret_cast<int32_t*>(base + g_offSpareFixes));
@@ -164,6 +169,18 @@ bool WriteAccumulators(void* atv, const Snapshot& s) {
     return true;
 }
 
+bool ReadBattery(void* atv, float& out) {
+    if (!g_resolved || !atv) return false;
+    out = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(atv) + g_offBattery);
+    return true;
+}
+
+bool WriteBattery(void* atv, float battery) {
+    if (!g_resolved || !atv) return false;
+    *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(atv) + g_offBattery) = battery;
+    return true;
+}
+
 bool WritePresence(void* atv, uint8_t mask, bool hasSpare) {
     if (!g_resolved || !atv) return false;
     void* d = nullptr;
@@ -189,9 +206,10 @@ bool CallVerb(void* atv, Verb v) {
         case Verb::UpdDirt:      fn = g_fnUpdDirt;   break;
         case Verb::UpdSpareTire: fn = g_fnUpdSpare;  break;
         case Verb::UpdHealth:    fn = g_fnUpdHealth; break;
+        case Verb::UpdBattery:   fn = g_fnUpdBattery; break;
     }
     if (!fn) return false;
-    ue_wrap::ParamFrame frame(fn);   // all four are no-param self-calls
+    ue_wrap::ParamFrame frame(fn);   // all five are no-param self-calls
     if (!frame.valid()) return false;
     return ue_wrap::Call(atv, frame);
 }

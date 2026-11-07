@@ -20,6 +20,8 @@
 #include "coop/interactables/tool_action.h"
 #include "coop/props/glowstick_hang_sync.h"
 #include "coop/items/point_sack_intent.h"
+#include "coop/farming/plant_sync.h"
+#include "coop/items/irrigation_sync.h"
 #include "coop/items/poster_sync.h"
 #include "coop/items/save_actor_sync.h"
 #include "coop/net/session.h"
@@ -52,8 +54,10 @@ void Install(coop::net::Session& session) {
     coop::basement_pipe_sync::Install(&session);  // a pipe's burst flag is the host's: a client's own writers are parked, the host's flag reaches every peer
     coop::basement_flood_sync::Install(&session);  // the basement's water level is the host's: a client's drain, pipe and cheat writers are parked, the host's level reaches every peer
     coop::dig_sync::Install(&session);           // the holes a player digs are the host's: a client's dig, burial and fill run there, the dirt reaches every peer as DigState
+    coop::irrigation_sync::Install(&session);    // a placed faucet and hose are the host's: a client's placement is committed there, every peer mirrors them, linked
     coop::poster_sync::Install(&session);        // a poster is the host's: a client's put, take-down and picture run there, placed posters reach every peer as PosterState
     coop::save_actor_sync::Install(&session);    // a sticker, candle, light string, weld, nail, rug or wall a held tool leaves is the host's: a client's is an intent, every peer mirrors it
+    coop::farming::Install(&session);            // a growing plant is the host's: a client's harvest, tending and pot planting run there, plants reach every peer as PlantState
     coop::tool_action::Install(&session);        // a crowbar's pry and a hacksaw's cut: shown on every peer, their end run once on the host
     coop::piece_break_fx::Install(&session);     // a pried wall piece's break particles and tear-off sound: the host's break() is sent to every client
 }
@@ -78,8 +82,10 @@ void Tick(coop::net::Session& session) {
     { ue_wrap::ScopedWalkTimer _w{"sync:basement_pipe"}; coop::basement_pipe_sync::Tick(session); }
     { ue_wrap::ScopedWalkTimer _w{"sync:basement_flood"}; coop::basement_flood_sync::Tick(session); }  // settle its watches; HOST: the level when it moved; CLIENT: a level that waited for the water volume
     { ue_wrap::ScopedWalkTimer _w{"sync:dig"}; coop::dig_sync::Tick(session); }  // the watches' settle; HOST: the intents, the census; CLIENT: the captured digs, the parked rows
+    { ue_wrap::ScopedWalkTimer _w{"sync:irrigation"}; coop::irrigation_sync::Tick(session); }  // settle its watches; CLIENT: its own placements committed; HOST: the poll
     { ue_wrap::ScopedWalkTimer _w{"sync:poster"}; coop::poster_sync::Tick(session); }  // settle its watches; HOST: queued verbs, the placed posters' changes; CLIENT: parked states
     { ue_wrap::ScopedWalkTimer _w{"sync:save_actor"}; coop::save_actor_sync::Tick(session); }  // the births and deaths its seams caught, the mutators' records; CLIENT: parked births
+    { ue_wrap::ScopedWalkTimer _w{"sync:farming"}; coop::farming::Tick(session); }  // settle its watches; HOST: queued verbs, the 1 Hz plant census; CLIENT: parked rows, pockets
     { ue_wrap::ScopedWalkTimer _w{"sync:tool_action"}; coop::tool_action::Tick(session); }  // settle the pry and saw watches; the owner's progress; HOST: sessions whose target or tool left
     coop::piece_break_fx::Tick();       // settle the piece break watch; CLIENT: retry a cue whose copy had not resolved
 }
@@ -87,8 +93,10 @@ void Tick(coop::net::Session& session) {
 void ConnectReplayForSlot(int slot) {
     coop::microwave_sync::OnPeerWorldReady(slot);  // HOST: every noted microwave's state to the joiner
     coop::dig_sync::OnPeerWorldReady(slot);        // HOST: every named hole, mound and plant to the joiner, then the snapshot's end
+    coop::irrigation_sync::OnPeerWorldReady(slot);  // HOST: every placed faucet and hose to the joiner, bracketed
     coop::poster_sync::OnPeerWorldReady(slot);     // HOST: every placed poster to the joiner, then the snapshot's end
     coop::save_actor_sync::OnPeerWorldReady(slot);  // HOST: the deployed actors removed and born this session, to the joiner
+    coop::farming::OnPeerWorldReady(slot);         // HOST: every growing plant to the joiner, then the snapshot's end
     coop::cord_sync::QueueConnectBroadcastForSlot(slot);  // HOST: every corded prop's link to the joiner, then the seed's end
     coop::surface_clean_sync::QueueConnectBroadcastForSlot(slot);  // HOST: the sink's and the shower's dirt to the joiner (adopt)
     coop::water_fill_sync::OnPeerWorldReady(slot);  // HOST: every bucket holding water to the joiner
@@ -118,8 +126,10 @@ void OnDisconnect() {
     coop::basement_pipe_sync::OnDisconnect();
     coop::basement_flood_sync::OnDisconnect();  // the water stands where it is; the game's own writers run again
     coop::dig_sync::OnDisconnect();        // a hole stays where it is; the tables and queues go
+    coop::irrigation_sync::OnDisconnect();  // the placed faucets and hoses stay where they are
     coop::poster_sync::OnDisconnect();     // a poster's own verbs run where they are made
     coop::save_actor_sync::OnDisconnect();  // a deployed actor stays where it is; the tables and queues go
+    coop::farming::OnDisconnect();         // a plant ticks again where it stands
     coop::tool_action::OnDisconnect();      // a pry and a cut run whole where they are made
     coop::piece_break_fx::OnDisconnect();   // a waiting cue goes with its session
 }

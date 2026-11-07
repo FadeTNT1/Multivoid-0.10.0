@@ -24,6 +24,12 @@ void NoteSwept(void* clump);
 // Host, from the broom's push: `clump` was pushed by a stroke. Game thread.
 void NotePushed(void* clump);
 
+// Host, from trash_channel: `clump` was made of a pile something knocked (no hand, no broom), and
+// has already been expressed as a clump. Its roll streams like a pushed clump's until it re-piles
+// or rests; a clump re-made inside a lane already rolling moves that lane's stream onto itself.
+// Game thread.
+void NoteKicked(void* clump);
+
 // Host, per gameplay tick after trash_channel::TickCarry: open the carry of each clump swept since
 // the last tick and of each resting clump pushed, and publish the pose of every clump still rolling
 // whose turn it is. `localPlayer` is the local player, whose hand is read this tick.

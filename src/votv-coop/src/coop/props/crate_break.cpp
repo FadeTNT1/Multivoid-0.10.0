@@ -338,7 +338,7 @@ Served Serve(coop::net::Session& s, int slot, const Queued& q) {
 
 void ServeQueues(coop::net::Session& s) {
     for (int slot = 1; slot < coop::players::kMaxPeers; ++slot)
-        g_slots[slot].queue.Serve(kBudget, coop::net::NowMs, [&](const Queued& q) { return Serve(s, slot, q); });
+        g_slots[slot].queue.Serve(slot, kBudget, coop::net::NowMs, [&](const Queued& q) { return Serve(s, slot, q); });
 }
 
 // ---- the watches' settle --------------------------------------------------------------------------------------

@@ -100,4 +100,12 @@ bool IsWorldSettled();
 // host's save and runs natively. Game thread.
 bool IsInAnnouncedWorld(void* obj);
 
+// A pocket return (coop/player/pocket_return_client) loads the host's world in place: this
+// connection's announce state goes back to before its first announce (the flag, a re-announce owed,
+// the announced world, the baseline world), so the new world's announce is a FIRST announce, waits
+// on that world's save replay and load tail, runs its per-world resets, and the reaper's re-announce
+// path has no baseline to raise a second one from. Call after world_load_episode::ArmForReturn, so
+// no tick in between can stamp the world being left as the baseline. Client, game thread.
+void ForgetAnnounceForReturn();
+
 }  // namespace coop::net_pump

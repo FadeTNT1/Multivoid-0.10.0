@@ -374,6 +374,18 @@ latest one and retries it each second, and drops it if its world changes first; 
 task's state and pay no reward. The rewards land in the shared balance, on
 [base-computer.md](base-computer.md).
 
+The task is graded in one place, the drone sale (`droneSellLocation_C.sell`), which runs on the host
+whoever sent the package: a client's drive box, zip floppy and tape reels reach it as rows of the drone's
+inventory, each carrying the item's own saved properties (a box's `drives` rows with their levels). A boxed
+signal counts once, by its id in the save's sold list, and only for a level the task still asks for: a task of
+"3 signals of level 3" takes no level-0 signal, and the progress mail then reads "Signals: 0 out of 3" though
+the signals were sold. The host logs each sale item by item -- every boxed signal's level and whether it
+counted and why, the zip floppy's dishes, the task before and after (`coop/world/daily_task_sale`) -- and the
+corner hint the grader raises for a sent tape's fill, which the game shows on the machine the sale ran on,
+also goes to every client (`TaskSaleHint`). The sixteen `user` / `blank` mails of a night are the arirShip
+event's own: its fade-out mails them in a loop with a random 0.25-2 s pause, once, on the host; the email lane
+carries each to every client once.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -411,6 +423,7 @@ task's state and pay no reward. The rewards land in the shared balance, on
 | `BasementPipeState` | the host to all | one burst water pipe's portable key and its `damaged` flag |
 | `ChurchState` | the host to all | the church's broken, angry and struck flags and its harvest count |
 | `EmailAppend`, `EmailDelete`, `TaskNewState` | the host to all; either role; the host to all | an email; a deletion; the task |
+| `TaskSaleHint` | the host to all | a corner hint the drone sale's grader raised (a sent tape's fill) |
 
 ## Story scenes
 
@@ -509,5 +522,5 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | the story scenes | `coop/world/event_scene_sync`, `coop/world/event_scene_refuse`, `coop/world/event_scene_agrav`, `coop/world/event_scene_crawler`, `coop/world/event_sound_relay`, `ue_wrap/actors/event_scenes` |
 | the church | `coop/world/church_sync` |
 | the basement flood | `coop/world/basement_flood_sync`, `coop/world/basement_pipe_sync`, `ue_wrap/world/basement_flood`, `ue_wrap/actors/toolbox` |
-| the alarm, emails, the task | `coop/world/alarm_sync`, `coop/world/email_sync`, `coop/world/daily_task_sync`, `ue_wrap/world/email` |
+| the alarm, emails, the task | `coop/world/alarm_sync`, `coop/world/email_sync`, `coop/world/daily_task_sync`, `coop/world/daily_task_sale`, `ue_wrap/world/email`, `ue_wrap/desk/task_grade` |
 | tests | `harness/autotest/autotest_weather.cpp`, `autotest_fog_probe.cpp`, `autotest_eventforce.cpp`, `autotest_alarmforce.cpp`, `autotest_piramidforce.cpp`; the event drill, `coop/dev/event_drill`; the world roll drill, `coop/dev/world_roll_drill` |

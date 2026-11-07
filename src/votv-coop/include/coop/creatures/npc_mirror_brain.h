@@ -3,9 +3,10 @@
 // resumes, overlap and montage delegates, move callbacks) fires on the client's clock and acts there. The host's
 // copy decides; the pose stream moves the mirror. So a mirror of a parked class has its event graph refused
 // entry by entry but the few a table names (or only its decisions, the Octa), and our code redoes a refused BeginPlay.
-//   - FAMILIES: the zombie and every class below it, the fossilhound, and the Geom Octa, whose table lists all but
-//     the twelve entries that decide, relayed from the host by coop/creatures/geom_octa_sync; the table's class
-//     names decide it (IsParkedClass); the living Erie and the rufus allow none. Others keep their pair of hits.
+//   - FAMILIES: the zombie and every class below it, the fossilhound, the gore slither and every class below it, and
+//     the Geom Octa, whose table lists all but the twelve entries that decide, relayed from the host by
+//     coop/creatures/geom_octa_sync; the table's class names decide it (IsParkedClass); the living Erie and the rufus
+//     allow none. Every other family keeps its own pair of hits until it is parked.
 //   - THE MARK: set when a mirror is born, or when a client's own save-loaded twin is bound; a client's own creature
 //     is never marked and runs whole. It is the actor's slot and the slot's serial, true only while the slot holds
 //     that serial, so a recycled address is never a mirror and a mark nothing removed matches nothing.

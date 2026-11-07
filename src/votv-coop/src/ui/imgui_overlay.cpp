@@ -45,6 +45,7 @@
 #include "coop/dev/perf_probe.h"
 #include "coop/dev/input_focus_probe.h"
 #include "coop/dev/worldless_frames.h"
+#include "coop/player/nameplate.h"
 #include "coop/input/input_owner.h"
 #include "coop/input/game_window_proc.h"
 #include "ue_wrap/core/hook.h"
@@ -329,6 +330,9 @@ void OverlayFrame(const overlay_backend::FrameTarget& t) {
     // Count frames presented per WorldKind: the one place "does the game present frames when no
     // world exists" can be asked.
     coop::dev::worldless_frames::NoteFrame();
+    // The nameplates pair each present with the frame capture of its own frame by counting presents, so
+    // every present counts, drawn or not.
+    coop::nameplate::NotePresent();
     // The bring-up below is the DX targets'; a Vulkan target is brought up by its own engine seam
     // (BringUpFromSeam).
     const bool dxTarget = t.rhi == overlay_backend::Rhi::Dx11 || t.rhi == overlay_backend::Rhi::Dx12;

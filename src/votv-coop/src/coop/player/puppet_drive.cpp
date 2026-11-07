@@ -10,6 +10,8 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/player/pocket_travel.h"
+#include "coop/player/pocket_travel_client.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/sleepers.h"
 #include "coop/session/player_handshake.h"
@@ -17,9 +19,12 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/types.h"
+#include "ue_wrap/engine/engine.h"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 
@@ -34,7 +39,59 @@ namespace {
 // Each entry's actor / spawn-retry / Tick state is independent.
 std::array<coop::RemotePlayer, coop::players::kMaxPeers> g_puppets{};
 
+// The location rule (coop/player/pocket_travel): a puppet is shown only when its player is in the
+// same level as this machine's player. Per slot, set while the puppet is hidden for it.
+std::array<std::atomic<bool>, coop::players::kMaxPeers> g_hiddenByLocation{};
+
+bool CoLocated(int slot) {
+    return coop::player::pocket_travel::LocationOf(static_cast<uint8_t>(slot)) ==
+           coop::player::pocket_travel_client::ViewerLocation();
+}
+
+// One edge of the rule: hidden, no collision, the drive suspended, held where it stands; or back.
+// The ragdoll display body is a separate actor, so it goes along.
+void SetHiddenByLocation(int slot, bool hide) {
+    namespace E = ue_wrap::engine;
+    namespace PT = coop::player::pocket_travel;
+    coop::RemotePlayer& p = g_puppets[slot];
+    if (void* a = p.GetActor()) {
+        E::SetActorHiddenInGame(a, hide);
+        E::SetActorEnableCollision(a, !hide);
+    }
+    if (void* body = p.RagdollBody(); body && ue_wrap::reflection::IsLiveByIndex(body, p.RagdollBodyIdx())) {
+        E::SetActorHiddenInGame(body, hide);
+        E::SetActorEnableCollision(body, !hide);
+    }
+    p.SetDrivesSuspended(hide);
+    g_hiddenByLocation[slot].store(hide, std::memory_order_relaxed);
+    const PT::Pocket theirs = PT::LocationOf(static_cast<uint8_t>(slot));
+    UE_LOGI("[POCKET] puppet: slot %d %s -- its player is in %s (trip %u), this machine's in %s", slot,
+            hide ? "hidden where it stood" : "shown again", PT::LevelTag(theirs),
+            PT::TripSeqOf(static_cast<uint8_t>(slot)),
+            PT::LevelTag(coop::player::pocket_travel_client::ViewerLocation()));
+}
+
+// The rule's edges, per live puppet; a puppet gone (a world's end, a leave) forgets its flag, so the
+// next one starts shown.
+void TickLocationRule() {
+    for (int slot = 0; slot < coop::players::kMaxPeers; ++slot) {
+        const bool hidden = g_hiddenByLocation[slot].load(std::memory_order_relaxed);
+        if (!g_puppets[slot].valid()) {
+            if (hidden) g_hiddenByLocation[slot].store(false, std::memory_order_relaxed);
+            continue;
+        }
+        const bool here = CoLocated(slot);
+        if (here == !hidden) continue;
+        SetHiddenByLocation(slot, !here);
+    }
+}
+
 }  // namespace
+
+bool HiddenByLocation(int slot) {
+    return slot >= 0 && slot < coop::players::kMaxPeers &&
+           g_hiddenByLocation[slot].load(std::memory_order_relaxed);
+}
 
 coop::RemotePlayer& Puppet(int slot) {
     // g_puppets is a GT-only-by-convention side-table (no mutex). Enforce it.
@@ -99,6 +156,7 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
             coop::players::Registry::Get().SetLocalPeerId(coop::players::kPeerIdHost);
         }
         const uint8_t localSlot = coop::players::Registry::Get().LocalPeerId();
+        TickLocationRule();
         for (int slot = 0; slot < coop::players::kMaxPeers; ++slot) {
             // Never drive a puppet for our own slot. On the host localSlot==0;
             // on a client localSlot is its assigned slot (kPeerIdUnknown=0xFF
@@ -108,6 +166,11 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
             coop::net::PoseSnapshot remote;
             bool isNew = false;
             if (!session.TryGetRemotePose(slot, remote, &isNew)) continue;
+            // A player in another level: its puppet stands where it stood, fed nothing; none is
+            // spawned for it (a pocket's stale pose or the host world's would put a body in the
+            // wrong level).
+            if (g_hiddenByLocation[slot].load(std::memory_order_relaxed)) continue;
+            if (!g_puppets[slot].valid() && !CoLocated(slot)) continue;
             sPoseTarget[slot] = remote;  // pose-diag: latest stored pose (the interp target source)
             bool spawnedNow = false;  // a puppet spawned this tick is seeded from the held pose
             if (!g_puppets[slot].valid()) {
@@ -156,8 +219,15 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
                 // HOST: announce here only once the slot is world-ready, because a pre-world
                 // menu or loading pose can spawn the puppet early; in that order
                 // OnClientWorldReady announces instead (both funnel through the same latch).
-                if (session.role() == coop::net::Role::Client ||
-                    session.IsSlotWorldReady(slot))
+                // The host's puppet spawns again on a client back from a pocket trip, which is not a
+                // join: its "Joined" line is said once per session (keyed on the session's stop count).
+                static uint64_t sHostJoinSaidFor = ~0ull;
+                const bool hostAgain = session.role() == coop::net::Role::Client && slot == 0 &&
+                                       sHostJoinSaidFor == session.StopCount();
+                if (session.role() == coop::net::Role::Client && slot == 0)
+                    sHostJoinSaidFor = session.StopCount();
+                if (!hostAgain && (session.role() == coop::net::Role::Client ||
+                                   session.IsSlotWorldReady(slot)))
                     coop::player_handshake::AnnouncePeerSpawned(session.role(), slot);
             }
             // Only RE-BASE the interpolation on a NEW packet; re-pushing the
@@ -181,7 +251,7 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
     // body and stamps the streamed pelvis rotation for the next Tick's ApplyToEngine. Runs BEFORE
     // the Tick loop so the velocity is set before the same-frame ApplyToEngine reads the body.
     for (int slot = 0; slot < coop::players::kMaxPeers; ++slot) {
-        if (!g_puppets[slot].valid()) continue;
+        if (!g_puppets[slot].valid() || g_hiddenByLocation[slot].load(std::memory_order_relaxed)) continue;
         coop::net::RagdollPoseSnapshot rdoll;
         bool rdollNew = false;
         if (session.TryGetRemoteRagdollPose(slot, rdoll, &rdollNew) && rdollNew) {
@@ -192,13 +262,16 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
     // Tick every live puppet (independent of which slot received pose data
     // this frame -- the per-puppet interpolation needs Tick every frame even
     // when no fresh pose arrived).
+    // A puppet hidden by the location rule is held as it stands: no Tick, no sleeper drive.
     for (int slot = 0; slot < coop::players::kMaxPeers; ++slot) {
+        if (g_hiddenByLocation[slot].load(std::memory_order_relaxed) && g_puppets[slot].valid()) continue;
         if (g_puppets[slot].valid()) g_puppets[slot].Tick();
         else g_puppets[slot].ReleaseHurtFlash();  // a body gone mid-flash: its pins go with it
     }
     // A peer at rest lies as a sleeper (coop/player/sleepers): after the Tick, so the lying pose is the last write.
     for (int slot = 0; slot < coop::players::kMaxPeers; ++slot)
-        if (g_puppets[slot].valid()) coop::sleepers::DriveOnline(slot, g_puppets[slot]);
+        if (g_puppets[slot].valid() && !g_hiddenByLocation[slot].load(std::memory_order_relaxed))
+            coop::sleepers::DriveOnline(slot, g_puppets[slot]);
 
     // Killer-wisp grab-window body placement. MUST run AFTER the puppet Tick loop above: a held
     // victim puppet is snapped to the wisp's 'playerGrab' socket, overwriting the streamed pose

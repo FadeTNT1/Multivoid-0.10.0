@@ -43,6 +43,15 @@ constexpr int32_t kFossilhound[] = {
     10636,
 };
 
+// npc_goreSlither_C, and npc_goreslither_cheese_C (the blue brain cheese's hatchling) below it, allow none of the
+// graph: its entries are BeginPlay (the AI move, the sense timer), the sense timer's jump at the nearest pawn, the
+// damage sphere's begin-overlap (the bite: addDamage on what it touches, and on itself), the jump montage's notifies
+// (the damage sphere switched on), the move callbacks, and the int_objects verbs (addDamage's health, its death and
+// its drops). Each is a decision or a world write. The host's slither is the only one that bites: its bite on a
+// client's puppet is delivered to that client (coop/player/player_damage). BeginPlay's presentation is our setup
+// (ue_wrap::goreslither). The cheese class owns a graph too, but its one entry (preDied) is an empty return, so it
+// has no watch; its table row makes the class's own name known.
+
 // geomOcta_C
 //
 // Only the class's DECISIONS are refused; its BeginPlay, tick, timelines, montages and sounds run on the mirror, and
@@ -105,6 +114,8 @@ constexpr EntryTable kTables[] = {
     {L"eriePlushLive_good_C", nullptr, 0},
     {L"eriePlushLive_evil_C", nullptr, 0},
     {P::name::NpcClass_Rufus, nullptr, 0},
+    {P::name::NpcClass_GoreSlither, nullptr, 0},
+    {P::name::NpcClass_GoreSlitherCheese, nullptr, 0},
 };
 
 constexpr size_t kTableCount = sizeof(kTables) / sizeof(kTables[0]);

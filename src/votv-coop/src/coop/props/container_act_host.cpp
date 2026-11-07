@@ -535,7 +535,7 @@ void Tick() {
     UE_ASSERT_GAME_THREAD("container_act_host::Tick");
     overlap::Tick();
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot) {
-        g_slots[slot].queue.Serve(kBudget, coop::net::NowMs,
+        g_slots[slot].queue.Serve(slot, kBudget, coop::net::NowMs,
                                   [&](const Queued& q) { return ServeHead(slot, q); });
     }
     g_refusals.Flush(Now());

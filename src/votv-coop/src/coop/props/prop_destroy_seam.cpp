@@ -18,6 +18,7 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/hand_item.h"  // IsLocalHandViewActor
+#include "coop/player/pocket_travel_client.h"  // a pocket trip broadcasts no destroy
 #include "coop/props/prop_drop_intent.h"
 #include "coop/items/coingun_sync.h"
 #include "coop/props/prop_act_request.h"
@@ -111,6 +112,9 @@ void DestroySeamBody(void* self, HandView handView) {
     PT::UnmarkProcessedInit(self);
     PT::UnmarkKnownKeyedProp(self);
     if (!s->connected()) return;
+    // A client on a pocket trip: the world here is the pocket's, or the one it is leaving; no destroy in
+    // it is the host's world's (coop/player/pocket_travel_client).
+    if (s->role() == coop::net::Role::Client && coop::player::pocket_travel_client::WorldLanesStandDown()) return;
     if (coop::prop_echo_suppress::IsIncomingDestroy(self)) {
         UE_LOGI("grab_hook[destroy-seam]: actor %p was wire-received destroy -- skip rebroadcast",
                 self);

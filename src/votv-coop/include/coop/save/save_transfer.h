@@ -68,6 +68,14 @@ void TickHost();
 // A peer left mid-stream: drop its pump state (the disconnect edge).
 void CancelForSlot(int peerSlot);
 
+// A pocket trip's way home (coop/player/pocket_travel_host, docs/pocket-dimensions.md): the admitted
+// slot asks for the world save a second time in one visit, and is served exactly as at its join --
+// a fresh live capture, its join seeds and baselines taken in the same breath. Clears the slot's
+// one-shot request latch (MV-H33) and drops whatever its first join left (CancelForSlot). Effective
+// only for a slot pocket_travel_host holds as returning; any other repeat is still the protocol
+// error MV-H33 ends. Logged. Game thread.
+void HostArmReturnForSlot(int peerSlot);
+
 // Whether the host has taken `peerSlot`'s world for this connection's join, live or from the file on
 // disk: from that instant a change the host makes reaches the joiner only through the lanes' own
 // replays at its world-ready. False again when the slot leaves. Host, game thread.
@@ -91,6 +99,14 @@ void ClientArm();
 
 // The connect edge (client): send the request once if armed. Idempotent.
 void ClientNoteConnected();
+
+// A pocket trip's way home, client side (coop/player/pocket_return_client): the session is up and
+// this client's world is a pocket's, so the transfer runs again for the admitted slot. Resets the
+// client half (the latches, the state, the progress, the received blob, the identity map), arms,
+// and sends SaveTransferRequest now; GetClientState and GetProgress then track it as at a join, and
+// the blob is written over this instance's zcoop slot (the pocket's world reads its save object
+// from memory, never from that file). False, logged, when the session is not up.
+bool ClientArmForReturn();
 
 // The begin arrived. Net thread: the session's receive path diverts it to this module's begin
 // sink, deliberately the same thread as the chunk sink, since an announce processed on a

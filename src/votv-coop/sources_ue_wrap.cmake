@@ -41,7 +41,9 @@ set(VOTVCOOP_SOURCES_UE_WRAP_1
     src/ue_wrap/core/script_stack.cpp
     src/ue_wrap/engine/engine.cpp
     src/ue_wrap/engine/engine_save.cpp
+    src/ue_wrap/engine/engine_save_return.cpp
     src/ue_wrap/engine/save_restore_watch.cpp
+    src/ue_wrap/engine/travel_residue.cpp
     src/ue_wrap/engine/data_table.cpp
     src/ue_wrap/actors/inventory_component.cpp
     src/ue_wrap/actors/inventory_item_codec.cpp
@@ -104,6 +106,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/devices/lightswitch.cpp
     src/ue_wrap/devices/garage.cpp
     src/ue_wrap/devices/appliance.cpp
+    src/ue_wrap/devices/irrigation.cpp
     src/ue_wrap/devices/coffee.cpp
     src/ue_wrap/devices/microwave.cpp
     src/ue_wrap/devices/power_control.cpp
@@ -111,6 +114,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/devices/generator_panel.cpp
     src/ue_wrap/devices/atv.cpp
     src/ue_wrap/devices/atv_condition.cpp
+    src/ue_wrap/devices/atv_repair.cpp
     src/ue_wrap/devices/drone.cpp
     src/ue_wrap/devices/drone_console.cpp
     src/ue_wrap/devices/windturbine.cpp
@@ -141,6 +145,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/desk/drive_chain.cpp
     src/ue_wrap/desk/drive_eraser.cpp
     src/ue_wrap/desk/daily_task.cpp
+    src/ue_wrap/desk/task_grade.cpp
     src/ue_wrap/actors/sleep.cpp
     src/ue_wrap/world/email.cpp
     src/ue_wrap/devices/passwordlock.cpp
@@ -182,6 +187,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/kerfus.cpp
     src/ue_wrap/actors/zombie.cpp
     src/ue_wrap/actors/fossilhound.cpp
+    src/ue_wrap/actors/goreslither.cpp
     src/ue_wrap/actors/geom_octa.cpp
     src/ue_wrap/actors/int_objects.cpp
     src/ue_wrap/actors/physics_impact.cpp
@@ -206,6 +212,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/prop_fire.cpp
     src/ue_wrap/actors/poster.cpp
     src/ue_wrap/actors/save_actor.cpp
+    src/ue_wrap/actors/growing_plant.cpp
     src/ue_wrap/actors/dirt.cpp
     src/ue_wrap/actors/event_scenes.cpp
     src/ue_wrap/actors/garbage_bag.cpp

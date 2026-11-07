@@ -45,4 +45,9 @@ uint16_t CurrentHoldGen();
 // ragdolling (stop edge on recover). Game thread only.
 void Tick(coop::net::Session& session, void* local, void* controller);
 
+// The pose snapshot alone (and the own body's step effects), for a client on a pocket trip
+// (coop/player/pocket_travel_client): the held-prop, hand-item and ragdoll streams name or move
+// things of the host's world and stand down while away. Game thread only.
+void TickPoseOnly(coop::net::Session& session, void* local, void* controller);
+
 }  // namespace coop::local_streams

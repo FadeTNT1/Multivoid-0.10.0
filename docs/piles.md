@@ -62,6 +62,12 @@ and would otherwise block the player carrying it. It stays off for the flight to
 host-driven pose stream rather than local physics; the pile it lands as is a fresh actor with the
 game's own collision.
 
+A convert to the clump form for an id that is already a clump here places the clump at the host's
+pose when no carry pose drives it (a clump at rest the host's world has knocked again); a driven one is
+left to its stream. A pile a land spawns is read back and set to the host's location if its spawn or
+re-skin moved it, and watched for two seconds after (`coop/props/trash_mirror`, `[PILE] CLIENT land
+watch`): a pile the host left floating, when the clump under it rolled away, floats on every peer.
+
 A form change is a class change, so there is no re-skin in place: the successor is made parked,
 the one identity is rebound onto it at its birth, and only then is the predecessor destroyed. One
 mirror implementation serves both forms.
@@ -113,7 +119,14 @@ a simulating body. So a throw whose thrower's hand is busy at the land leaves on
 roll that ends before the clump arms, or with no such hit after. When such a clump re-piles later,
 its convert waits for the same settle, so every peer sets the pile down where it was placed and not
 where the clump was, a radius above; a settle whose pile is gone before it commits is dropped, since
-whatever took the pile reports itself. `[V]` a clump whose carry had closed at rest, knocked up by
+whatever took the pile reports itself. A pile something knocks into a clump -- a thrown prop or another clump
+overlapping it, with no hand and no broom -- is expressed as a clump when its birth certificate expires
+unclaimed (the birth-orphan express), and its roll then streams as a pushed clump's does
+(`coop/props/trash_sweep`) until it re-piles or rests; a clump re-made inside a lane already open moves
+that lane's stream onto itself. A carried land whose pile is knocked back into a clump inside its
+settle window commits nothing: the lane stays open and the new clump's own re-pile is the land. Before
+this, a knocked clump's roll reached no peer, a client's clump stayed where the convert put it, and a
+pile the host set down on that clump floated on the host over an empty spot on the client. `[V]` a clump whose carry had closed at rest, knocked up by
 the broom drill, landed as a pile 0.0 cm from the host's on the client.
 
 ### Trash-bits piles

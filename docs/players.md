@@ -121,6 +121,12 @@ them cannot draw the name.
 
 The nameplate is drawn by the mod's own overlay as a screen-space projection of the puppet's
 head: nickname, ping and a health bar, faded with distance (`coop/player/nameplate`, `ui/hud`).
+The pump decides which plates exist and what they say; where they sit is projected once per frame
+in the HUD widget's own tick (`ui_ui_C::Tick`), after the camera has moved for that frame, and the
+overlay pairs each present with the capture of its own frame. A plate projected on the ~60 Hz pump
+instead held one screen point over several rendered frames and shook against the body on a fast
+turn. `ui.nameplate.frame_sync=0` goes back to the pump's projection; the log line
+`nameplate: projection path -> ...` says which one is drawing.
 A per-player preference hides your own plate from others, and a nickname colour is a per-player
 preference that every surface (plate, chat, scoreboard) reads from one store
 (`coop/player/nick_color`). The scoreboard renders a game-thread snapshot of the roster
@@ -432,6 +438,16 @@ a key file in the mod's own folder, bound to the machine it was made on, under a
 account that made it (`coop/net/peer_identity`; [install.md](install.md) says where and
 what a second account on the same PC gets). The world-side effect of a pickup or a drop is
 on the props lane.
+
+### Pocket trips
+
+A client sent to a pocket dimension (the outhouse, the goop, the well, the shaker, the skull zone)
+keeps its session (`coop/player/pocket_travel`). Its inventory stream stands down
+for the trip: the profile is flushed with the departure spot as its place when the trip starts and
+again at the way home, and the client puts its own carried state back on its player in the pocket
+and in the host's world on return, a whole replacement, so no item is ever in two places. Every
+peer shows a puppet only when its player is in the same level: an away player's puppet is hidden
+where it stood, without collision or nameplate, and the scoreboard and the feed say where it went.
 
 ### Roster and moderation
 

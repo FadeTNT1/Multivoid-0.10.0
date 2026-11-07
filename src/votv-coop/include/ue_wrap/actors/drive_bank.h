@@ -16,6 +16,9 @@
 #pragma once
 
 #include "ue_wrap/actors/save_record.h"
+#include "ue_wrap/desk/signal_dynamic.h"
+
+#include <vector>
 
 namespace ue_wrap::drive_bank {
 
@@ -27,6 +30,10 @@ bool Capture(void* actor, ue_wrap::save_record::SaveRecord& rec);
 // write the rows into `drives` (occupied slots written, the others cleared) and call upd() last. A
 // refused bank is left untouched and said. Returns true when the slots were written (or already right).
 bool Apply(void* actor, const ue_wrap::save_record::SaveRecord& rec);
+
+// Every row of a drive box's `drives`, occupied or not, without the photos: what the drone sale's grader
+// walks (it keeps the rows of size > 0). False for any other actor or a box whose arrays do not read.
+bool ReadRows(void* actor, std::vector<ue_wrap::signal_dynamic::Row>& out);
 
 // Whether `actor` is a drive box whose arrays measured (the class gate Capture and Apply share).
 bool IsBank(void* actor);

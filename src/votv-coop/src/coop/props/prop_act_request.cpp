@@ -9,6 +9,7 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/props/prop_drop_intent.h"
 #include "coop/props/prop_hold.h"
 #include "coop/props/remote_prop.h"
 #include "coop/session/net_pump.h"
@@ -479,7 +480,16 @@ sg::Verdict PreAction(const sg::Call& c, uint8_t row, ActionParams& params, HitP
 }
 
 sg::Verdict PreFood(const sg::Call& c) { return PreAction(c, kFood, g_foodParams, g_foodHit, &FoodDestroys); }
-sg::Verdict PreMre(const sg::Call& c) { return PreAction(c, kMre, g_mreParams, g_mreHit, &MreDestroys); }
+// An MRE's body births the foods it opens into on whichever peer runs it, and the host's grant only destroys the MRE. So a
+// body this client lets run -- its own MRE natively, or a shared one's granted replay (the latch answers Run) -- is marked
+// as an unpack window: the drop-intent lane sends what it births to the host, which spawns it for every peer.
+sg::Verdict PreMre(const sg::Call& c) {
+    const sg::Verdict v = PreAction(c, kMre, g_mreParams, g_mreHit, &MreDestroys);
+    coop::net::Session* const s = LinkedSession();
+    if (v == sg::Verdict::Run && s && s->role() == coop::net::Role::Client)
+        coop::prop_drop_intent::MarkUnpackScope(c);
+    return v;
+}
 sg::Verdict PrePills(const sg::Call& c) { return PreAction(c, kPills, g_pillsParams, g_pillsHit, &PillsDestroys); }
 
 // The replay passes the hand it finds then, not the one captured here: only the hit and the hand item's name travel.

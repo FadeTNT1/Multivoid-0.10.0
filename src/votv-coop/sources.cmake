@@ -29,6 +29,7 @@ set(VOTVCOOP_SOURCES
     src/coop/items/vacuum_pile_intent.cpp
     ${VOTVCOOP_SOURCES_UE_WRAP_2}
     src/coop/player/movement_ledger.cpp
+    src/coop/player/hint_route.cpp
     src/coop/player/remote_player.cpp
     src/coop/player/remote_player_ragdoll.cpp
     src/coop/player/client_model.cpp
@@ -48,6 +49,7 @@ set(VOTVCOOP_SOURCES
     src/coop/save/save_guard.cpp
     src/coop/world/balance_sync.cpp
     src/coop/world/achievement_sync.cpp
+    src/coop/world/daily_task_sale.cpp
     src/coop/world/daily_task_sync.cpp
     src/coop/save/save_block.cpp
     src/coop/save/save_player_filter.cpp
@@ -110,6 +112,8 @@ set(VOTVCOOP_SOURCES
     src/coop/world/fuse_tower_rows.cpp
     src/coop/world/fuse_tower_kind.cpp
     src/coop/interactables/atv_sync.cpp
+    src/coop/interactables/atv_drive_gates.cpp
+    src/coop/interactables/atv_repair.cpp
     src/coop/interactables/atv_stream_gates.cpp
     src/coop/interactables/atv_authority.cpp
     src/coop/interactables/atv_body.cpp
@@ -129,6 +133,9 @@ set(VOTVCOOP_SOURCES
     src/coop/items/poster_sync.cpp
     src/coop/items/poster_mirror.cpp
     src/coop/items/save_actor_sync.cpp
+    src/coop/items/irrigation_sync.cpp
+    src/coop/items/irrigation_host.cpp
+    src/coop/items/irrigation_wire.cpp
     src/coop/items/order_sync.cpp
     src/coop/items/order_queue_sync.cpp
     src/coop/world/firefly_sync.cpp
@@ -153,6 +160,11 @@ set(VOTVCOOP_SOURCES
     src/coop/world/creature_event_relay_client.cpp
     src/coop/world/alarm_sync.cpp
     src/coop/world/church_sync.cpp
+    src/coop/farming/plant_sync.cpp
+    src/coop/farming/plant_host.cpp
+    src/coop/farming/plant_client.cpp
+    src/coop/farming/plant_client_verbs.cpp
+    src/coop/farming/plant_refusals.cpp
     src/coop/interactables/serverbox_sync.cpp
     src/coop/interactables/server_upgrade_sync.cpp
     src/coop/interactables/sat_console_table.cpp
@@ -182,6 +194,10 @@ set(VOTVCOOP_SOURCES
     src/coop/player/death_revive.cpp
     src/coop/player/revive_protection.cpp
     src/coop/player/run_end_travel.cpp
+    src/coop/player/pocket_travel.cpp
+    src/coop/player/pocket_travel_host.cpp
+    src/coop/player/pocket_travel_client.cpp
+    src/coop/player/pocket_return_client.cpp
     src/coop/player/skin_preview.cpp
     src/coop/player/flashlight_click_sound.cpp
     src/coop/props/prop_sound.cpp
@@ -373,6 +389,7 @@ set(VOTVCOOP_SOURCES
     src/coop/net/master_slots.cpp
     src/coop/save/join_window_baseline.cpp
     src/coop/save/save_transfer.cpp
+    src/coop/save/save_transfer_return.cpp
     src/coop/save/slot_file_read.cpp
     src/coop/save/save_indicator_suppress.cpp
     src/coop/session/session_join.cpp
@@ -460,6 +477,7 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/wisp_grab_hold.cpp
     src/coop/creatures/wisp_tear_mirror.cpp
     src/coop/items/player_inventory_sync.cpp
+    src/coop/items/player_inventory_pocket.cpp
     src/coop/player/player_profile_store.cpp
     src/coop/player/stat_orders.cpp
     src/coop/player/stat_orders_wire.cpp

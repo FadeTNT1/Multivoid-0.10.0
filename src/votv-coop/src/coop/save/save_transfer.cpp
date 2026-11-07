@@ -29,6 +29,7 @@
 #include "coop/save/join_window_baseline.h"  // the capture instant's baselines and their flush
 #include "coop/save/save_guard.h"
 #include "coop/save/save_indicator_suppress.h"  // detect the SAVED HUD across the join scratch save
+#include "save_transfer_internal.h"  // co-located: the return's re-arm of the request latch
 #include "coop/save/slot_file_read.h"  // the torn-read guard and the stream's CRC
 #include "ue_wrap/engine/engine.h"      // the host's current prop position
 #include "ue_wrap/core/log.h"
@@ -338,6 +339,7 @@ void Install(coop::net::Session* session) {
     session->SetBulkSink(&BulkSink_);
     // The announce lands on the same thread as the payload it announces.
     session->SetSaveBeginSink(&BeginSink_);
+    detail::InstallReturn(session);  // save_transfer_return.cpp: the way home's client re-arm
 }
 
 // The host.
@@ -645,6 +647,10 @@ void CancelForSlot(int peerSlot) {
     coop::email_sync::CancelJoinSnapshot(peerSlot);
     coop::download_arm_sync::CancelJoinSnapshot(peerSlot);
     coop::join_window_baseline::ClearForSlot(peerSlot);  // the unconsumed baseline and its late flush
+}
+
+void detail::ClearRequestLatchForReturn(int peerSlot) {
+    if (peerSlot >= 1 && peerSlot < coop::net::kMaxPeers) g_asked[peerSlot] = false;
 }
 
 // The client.

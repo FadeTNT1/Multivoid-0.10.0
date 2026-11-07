@@ -355,4 +355,10 @@ void* OfSellLocation(void* sellLocation) {
     return d && R::IsLive(d) ? d : nullptr;
 }
 
+void* OfSellLocationIfAny(void* obj) {
+    if (!obj || !R::IsLive(obj)) return nullptr;
+    if (R::ClassNameOf(obj) != ue_wrap::profile::name::DroneSellLocationClass) return nullptr;
+    return OfSellLocation(obj);
+}
+
 }  // namespace ue_wrap::drone

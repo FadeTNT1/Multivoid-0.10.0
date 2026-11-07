@@ -13,6 +13,7 @@
 #include "coop/player/puppet_carry_drive.h"  // OnTakenOver: a taker ends a client's carry drive
 #include "coop/props/pile_look.h"
 #include "coop/props/remote_prop.h"   // RegisterPropMirror (the single rebind entry point)
+#include "coop/props/trash_sweep.h"   // NoteKicked: a knocked clump's roll streams
 #include "ue_wrap/engine/engine.h"      // the per-form scale and the transform and velocity reads
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/actors/prop.h"        // IsGarbageClump (rest detection)
@@ -424,6 +425,18 @@ void TickCarry(coop::net::Session& s, void* localHeldActor) {
                                  ue_wrap::engine::GetActorScale3D(clump),
                                  it->second.chipType, NarrowAscii(R::ClassNameOf(clump)),
                                  "BIRTH-ORPHAN EXPRESS (grab denied; world converted)");
+                // A pile something knocked into a clump rolls under the host's physics, and the
+                // convert above is the only word a peer gets of it: without a stream the client's
+                // clump stays where the convert put it while the host's rolls on, and a pile that
+                // lands on that clump floats on the host over a spot that is empty everywhere else.
+                // It streams the way a broom's pushed clump does, until it re-piles or rests.
+                coop::trash_sweep::NoteKicked(clump);
+            } else if (stillOwns && !HeldByAny(beid) && g_carry.find(beid) != g_carry.end()) {
+                // A clump re-made inside an open roll or flight (the pile it landed as was knocked
+                // again): the same entity, a new actor. Its stream moves onto it.
+                coop::trash_sweep::NoteKicked(clump);
+                UE_LOGI("[TRASH-CH] HOST clump-birth certificate expired inside an open lane (clump %p, eid=%u) -- "
+                        "re-made by a knock, not a grab; its roll stream follows the new clump", clump, beid);
             } else {
                 UE_LOGI("[PILE] HOST clump-birth certificate expired (clump %p, pile eid=%u -- "
                         "never reached the hand; live=%d stillOwns=%d unowned=%d)",
@@ -457,6 +470,22 @@ void TickCarry(coop::net::Session& s, void* localHeldActor) {
                         "commit", static_cast<unsigned>(it->first));
                 it = g_settle.erase(it);
                 continue;
+            }
+            if (!reread && ls.carried) {
+                // A carried land whose pile was knocked back into a clump inside the window (a prop
+                // or another clump overlapped it). The entity is a clump again, still in its lane, so
+                // a to-pile at the clump's transform would set a pile down on every peer where the
+                // host has a rolling clump. The lane stays open: the new clump's roll streams and its
+                // own re-pile commits the land.
+                void* now = LiveActorOf(E);
+                if (now && ue_wrap::prop::IsGarbageClump(now)) {
+                    UE_LOGI("[TRASH-CH] HOST LAND COMMIT eid=%u withheld -- its pile was knocked back into a clump "
+                            "inside the window; the lane stays open (no to-pile at a clump's pose)",
+                            static_cast<unsigned>(it->first));
+                    if (!HeldByAny(it->first)) coop::trash_sweep::NoteKicked(now);   // a holder's stream carries it
+                    it = g_settle.erase(it);
+                    continue;
+                }
             }
             ue_wrap::FVector settled{};
             ue_wrap::FRotator settledRot{};

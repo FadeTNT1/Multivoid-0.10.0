@@ -88,6 +88,7 @@ leaving one leaves nothing to restore.
 | sky wisp spawner | tick refused | absolute map coordinates, not player-anchored |
 | night egg spawner | tick refused | a weighted night roll mints one egg at random absolute map coordinates; the host's egg mirrors through the source-gated catch |
 | jellyfish path | spawn refused | its seven fish are made inside its graph; the host's run is mirrored through the source-gated catch |
+| blue brain cheese (`prop_food_blueBrainCheese_C`) | its tick refused while the cheese is a shared prop (`coop/props/prop_food_state`) | its tick hatches a cheese gore slither (`npc_goreslither_cheese_C`) and destroys itself, under EX_CallMath; the host's hatchling mirrors through the cheese's row of the source-gated catch. The slither family is parked: a mirror never bites, and the host's slither's bite on a client's puppet is delivered to that client (`coop/player/player_damage`, `[HIT] sent`) |
 | vent crawler, grays, eggs, tentacle balls | gameplay entries refused (BeginPlay, tick, overlaps, AI and despawn verbs); the AnimBP and the pose stay | on a client they exist only as host mirrors through the npc lane's allowlist. A mirror loses what its BeginPlay also set up: the crawler's footsteps, vent break and metal-break burst, a ball's and a gray's mesh attach, a ball's ambient loop. A peer that joins mid-event gets every living creature from the npc lane's join census; the event's own scene is not replayed |
 | gray controller, balls follower, super egger | the mint and activation bodies refused | their creature BeginDeferred calls are bytecode-internal: no spawn interceptor can see them, so the bodies must not run |
 | the UFO controllers (knob, UK, enemy UK), the calvine saucer's fall | start, stop, tick and enemy pick refused; the calvine's fall verbs refused | the flocks are minted inside the controllers' graphs; the host's ships mirror on the world-actor lane through the source-gated catch, and a mirrored ship's own speed, enemy, shot and crash timers are refused (`docs/events-and-weather.md`) |
@@ -170,7 +171,9 @@ dispatch on both roles and re-runs the game's own verb with the kerfur serving t
 (`coop/creatures/served_player`), so its reads of the player answer that peer: follow follows it,
 patrol circles it. A request waits while the host has no body for its sender, and a verb the game
 refuses changes nobody's service. Nothing writes a puppet's hand yet, so a client's get the reports
-gets the game's refusal hint, shown on the host. On a client the chosen verb is read at the E-input seam, the
+gets the game's refusal hint, shown to that client (`coop/player/hint_route`). Every hint a command, a
+Kerfus verb or a robot's own job raises on the host for a client goes to that client: "Kerfur cannot find
+broken server" is the Kerfus's use verb's answer, raised in its findBrokenServer. On a client the chosen verb is read at the E-input seam, the
 one dispatched through the engine, before the local dispatch runs
 (`coop/creatures/kerfur_menu_input`). At a join a save-loaded kerfur prop is adopted by class and
 nearest pose once the load tail settles (`coop/creatures/kerfur_prop_adoption`), and a kerfur

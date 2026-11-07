@@ -13,6 +13,7 @@
 #include "coop/element/element.h"
 #include "coop/net/peer_identity.h"    // GuidForPublicKey -- the proved storage name
 #include "coop/player/players_registry.h"
+#include "coop/player/pocket_travel_host.h"  // the pocket rule of the send gate (SlotTakesKind_)
 #include "ice_config.h"         // co-located: TickTurnCredential
 #include "session_lanes.h"      // co-located private header (src tree, not include/)
 #include "signaling_client.h"   // co-located: complete type for the shared_ptr<SignalingClient> dtor + Poll()
@@ -113,7 +114,7 @@ bool Session::SendReliableToSlot(int peerSlot, ReliableKind kind, const void* pa
     // world-ready (a menu-mode joiner is connected 30-60 s before it has a world); the connect
     // replay rebuilds all of it. Not absorbed by the backlog: a queued gate-skip would deliver
     // stale mutations at ready time and duplicate the replay.
-    if (!IsSlotWorldReady(peerSlot) && !IsPreWorldSendableKind(kind)) return false;
+    if (!SlotTakesKind_(peerSlot, kind)) return false;
     const uint32_t hConn = peerConns_[peerSlot].load();
     if (hConn == 0) return false;
 
@@ -141,7 +142,7 @@ bool Session::TrySendReliableToSlot(int peerSlot, ReliableKind kind, const void*
                 peerSlot, len, cap);
         return false;
     }
-    if (!IsSlotWorldReady(peerSlot) && !IsPreWorldSendableKind(kind)) return false;
+    if (!SlotTakesKind_(peerSlot, kind)) return false;
     const uint32_t hConn = peerConns_[peerSlot].load();
     if (hConn == 0) return false;
 
@@ -250,7 +251,7 @@ bool Session::SendReliable(ReliableKind kind, const void* payload, int len, int 
         const uint32_t hConn = peerConns_[i].load();
         if (hConn == 0) continue;
         // The pre-world gate, per slot (SendReliableToSlot's rule).
-        if (!IsSlotWorldReady(i) && !IsPreWorldSendableKind(kind)) continue;
+        if (!SlotTakesKind_(i, kind)) continue;
         // Delivery per slot: the stream or the backlog counts as sent.
         const SendOutcome rc = backlog_.SendOrQueue(i, laneIdx, hConn, wire, total, admission_);
         if (rc == SendOutcome::Streamed) rateControl_.NoteReliableQueued(i, total);
@@ -280,7 +281,7 @@ bool Session::SendReliableBatchToSlot(int peerSlot, ReliableKind kind, const voi
         return true;
     }
     // SendReliableToSlot's pre-world gate and dead-slot rule, once for the whole batch.
-    if (!IsSlotWorldReady(peerSlot) && !IsPreWorldSendableKind(kind)) return false;
+    if (!SlotTakesKind_(peerSlot, kind)) return false;
     const uint32_t hConn = peerConns_[peerSlot].load();
     if (hConn == 0) return false;
 
@@ -318,7 +319,7 @@ bool Session::SendReliableBatch(ReliableKind kind, const void* payloads, int pay
     for (int i = 0; i < kMaxPeers; ++i) {
         const uint32_t hConn = peerConns_[i].load();
         if (hConn == 0) continue;
-        if (!IsSlotWorldReady(i) && !IsPreWorldSendableKind(kind)) continue;
+        if (!SlotTakesKind_(i, kind)) continue;
         int streamed = 0;
         const SendOutcome rc = backlog_.SendOrQueueBatch(i, laneIdx, hConn, t_batchWire.data(), total,
                                                          count, admission_, streamed);
@@ -492,6 +493,7 @@ void Session::NetThread() {
         zeroEpochRefusals_.Flush(RefusalTally::Clock::now());
         staleEpochRefusals_.Flush(RefusalTally::Clock::now());
         streamRateRefusals_.Flush(RefusalTally::Clock::now());
+        awayKindRefusals_.Flush(RefusalTally::Clock::now());
 
         // 1) Pump GNS's timers and dispatch pending status callbacks (the trampoline runs inline on
         // this thread).
@@ -734,6 +736,29 @@ bool Session::IsRelayEligible(int peerSlot, uint32_t hConn) const {
     return peerSlot >= 0 && peerSlot < kMaxPeers && hConn != 0 &&
            relayEligible_[peerSlot].load(std::memory_order_acquire) == hConn;
 }
+
+void Session::ClearRelayEligible(int peerSlot) {
+    if (peerSlot >= 0 && peerSlot < kMaxPeers)
+        relayEligible_[peerSlot].store(0, std::memory_order_release);
+}
+
+// The one per-slot send gate, so the five reliable send paths cannot disagree. The pre-world rule:
+// a slot that has not announced world-ready gets only the kinds that touch no world. The pocket rule,
+// host only: a slot away in a pocket dimension (or on its way back, before its return's announce
+// reached the net thread) is not world-ready either, and gets a narrower list still
+// (IsAwaySendableKind, session_lanes.h), because a pre-world kind meant for a joiner at the menu can
+// act on the pocket's own world. Asked here rather than at each producer: it is one table read on the
+// path every reliable send already takes, and a producer added later is covered without knowing the
+// lane exists. The state is one atomic per slot (pocket_travel_host), so the net thread's relay may
+// ask it too.
+bool Session::SlotTakesKind_(int peerSlot, ReliableKind kind) const {
+    if (cfg_.role == Role::Host && peerSlot > 0 && peerSlot < kMaxPeers &&
+        coop::player::pocket_travel_host::IsSlotIsolated(static_cast<uint8_t>(peerSlot)))
+        return IsAwaySendableKind(kind);
+    return IsSlotWorldReady(peerSlot) || IsPreWorldSendableKind(kind);
+}
+
+bool Session::IsAwaySendable(ReliableKind kind) { return IsAwaySendableKind(kind); }
 
 bool Session::AnyWorldReadyPeer(int skipSlot) const {
     for (int i = 0; i < kMaxPeers; ++i)

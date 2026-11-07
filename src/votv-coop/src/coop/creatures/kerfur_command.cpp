@@ -8,6 +8,7 @@
 #include "coop/element/mirror_manager.h"
 #include "coop/element/npc.h"
 #include "coop/element/registry.h"
+#include "coop/net/acting_slot.h"
 #include "coop/net/intent_queue.h"
 #include "coop/net/net_clock.h"
 #include "coop/net/protocol.h"
@@ -246,7 +247,7 @@ void RunRequest(const coop::net::KerfurCommandPayload& payload, uint8_t senderPe
 void ServeQueues() {
     for (uint8_t slot = 1; slot < coop::players::kMaxPeers; ++slot) {
         Slot& sl = g_slots[slot];
-        sl.queue.Serve(kBudget, coop::net::NowMs, [&](const coop::net::KerfurCommandPayload& p) {
+        sl.queue.Serve(slot, kBudget, coop::net::NowMs, [&](const coop::net::KerfurCommandPayload& p) {
             if (!CanRunFor(slot)) {
                 if (!sl.waitSaid) {
                     sl.waitSaid = true;
@@ -360,6 +361,8 @@ void Tick() {
                 UE_LOGW("kerfur_command[host]: own command on an UNTRACKED kerfur -- skipped");
                 continue;
             }
+            // The host's own command: its hints are the host's, whoever the kerfur served before.
+            const coop::acting_slot::Scope acting(coop::players::kPeerIdHost);
             ExecuteHostCommand(eid, pc.actor, pc.command, coop::players::kPeerIdHost);
         }
     }

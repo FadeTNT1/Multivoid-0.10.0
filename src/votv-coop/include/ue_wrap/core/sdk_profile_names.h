@@ -21,6 +21,33 @@ inline constexpr const wchar_t* WorldClass = L"World";
 inline constexpr const wchar_t* SetActorLocationFn = L"K2_SetActorLocation";
 inline constexpr const wchar_t* GameplayLevel = L"untitled_1";
 
+// The pocket dimensions (coop/player/pocket_travel, docs/pocket-dimensions.md): the levels the
+// game's own triggers send one player to with lib_C::loadLevel, a full OpenLevel travel. Read off
+// the 0.10.0 bytecode: prop_biotoilet_C -> sl_poopdim, puddle_C -> sl_goop, wellTp_C and
+// prop_shake_C -> sl_place, skullzone_C -> sl_alexpdim, insomniac_C -> sl_woid. None is
+// "restricted" (lib_getFunc_C::isAreaLevelRestricted names only the menu), so each travel keeps the
+// save slot object and names the level as currentLevel.
+inline constexpr const wchar_t* PocketLevelPoopDim  = L"sl_poopdim";
+inline constexpr const wchar_t* PocketLevelGoop     = L"sl_goop";
+inline constexpr const wchar_t* PocketLevelPlace    = L"sl_place";
+inline constexpr const wchar_t* PocketLevelAlexPdim = L"sl_alexpdim";
+inline constexpr const wchar_t* PocketLevelWoid     = L"sl_woid";
+// The token every one of those trips passes as loadLevel's option. lib_C::loadLevel stores it in
+// mainGameInstance_C.NewVar_1, and the arriving mainGamemode_C::ReceiveBeginPlay quits the game when
+// the map is not one of its known maps and the token does not match: a travel the mod drives to a
+// pocket level must carry it.
+inline constexpr const wchar_t* PocketTravelToken   = L"PQXYyeofZ8cr5rJD4YXLVw";
+// What a trip's trigger leaves behind on the machine that refuses it (the host while hosting,
+// ue_wrap/engine/travel_residue). skullzone_C and insomniac_C clear the game instance's
+// loadedSlotName before their travel, and saveSlot_C::save returns early while it is empty, so a
+// refused trip would leave the host unable to save; prop_biotoilet_C and puddle_C set
+// currentLevel = None; puddle_C sets the character's movement mode to MOVE_None through
+// UCharacterMovementComponent::SetMovementMode(NewMovementMode, NewCustomMode).
+inline constexpr const wchar_t* GameInstanceLoadedSlotNameProp = L"loadedSlotName";
+inline constexpr const wchar_t* CharacterSetMovementModeFn     = L"SetMovementMode";
+inline constexpr const wchar_t* CharacterSetMovementModeParam  = L"NewMovementMode";
+inline constexpr const wchar_t* CharacterSetCustomModeParam    = L"NewCustomMode";
+
 // The checkpoint spawn point at the base entrance (the actor centre, world cm; re-derive per game
 // version): every client appearance is teleported here (coop/session/teleport_client).
 inline constexpr float kKPPSpawnX = -37695.f;
@@ -84,6 +111,34 @@ inline constexpr const wchar_t* GamemodeSaveSlotPropLegacy = L"saveSlot";
 // mainGamemode_C::car: the world's ATV, the one the atvExplode special sets `trap` on.
 inline constexpr const wchar_t* GamemodeCarProp            = L"car";
 
+// ATV_C's battery and drive-gate fields. The ATV's own receiveTick ORs five terms before it applies wheel torque:
+// `battery` <= 0 (the inserted battery's charge, 0..100; -1 with none in), `empty` (set by runOut when fuel reaches 0,
+// cleared by fuelUp and by loadData), `Brake`, `brokenn` (set by runOut when health reaches 0, cleared by toolboxFix and
+// by loadData) and `underwater`; the driver's throttle is `input_forward` / `input_back`. updBattery re-derives the
+// battery's visuals (the back lights and `upd lights`).
+inline constexpr const wchar_t* AtvBatteryProp      = L"battery";
+inline constexpr const wchar_t* AtvEmptyLatchProp   = L"empty";
+inline constexpr const wchar_t* AtvBrokenLatchProp  = L"brokenn";
+inline constexpr const wchar_t* AtvUnderwaterProp   = L"underwater";
+inline constexpr const wchar_t* AtvInputForwardProp = L"input_forward";
+inline constexpr const wchar_t* AtvInputBackProp    = L"input_back";
+inline constexpr const wchar_t* AtvUpdBatteryFn     = L"updBattery";
+// ATV_C's repair look and its unscrew. lookAt writes the part the player looks at: `lookAtTire` (a fitted wheel,
+// -1 none), `lookAtTireSocket` (an empty wheel socket, -1 none), `lookAtSpareTireBox`, `lookAtContainer` (the
+// storage), and playerUsedOn keeps the wheel in hand as `playersWheel`. unscrewPanel(spawnAt) is the finished unscrew:
+// a fitted wheel comes off as a prop_atvWheel_C, an empty socket takes `playersWheel` (putTire), and with neither the
+// battery comes out as a prop_atvcarbattery_C carrying its charge; getUnscrewSpawn() names the component it spawns at,
+// from lookAtTire alone; resetUnscrew() ends the unscrew's widget, timer and look.
+inline constexpr const wchar_t* AtvLookAtTireProp       = L"lookAtTire";
+inline constexpr const wchar_t* AtvLookAtTireSocketProp = L"lookAtTireSocket";
+inline constexpr const wchar_t* AtvLookAtSpareBoxProp   = L"lookAtSpareTireBox";
+inline constexpr const wchar_t* AtvLookAtContainerProp  = L"lookAtContainer";
+inline constexpr const wchar_t* AtvPlayersWheelProp     = L"playersWheel";
+inline constexpr const wchar_t* AtvUnscrewPanelFn       = L"unscrewPanel";
+inline constexpr const wchar_t* AtvUnscrewSpawnAtParam  = L"spawnAt";
+inline constexpr const wchar_t* AtvGetUnscrewSpawnFn    = L"getUnscrewSpawn";
+inline constexpr const wchar_t* AtvResetUnscrewFn       = L"resetUnscrew";
+
 // The per-item save record struct (a BP UserDefinedStruct): struct_save1 on 0.10.0, struct_save
 // before. Its layout is MEASURED through reflection (ue_wrap/actors/save_record); the names are only
 // the fallback route to the struct when prop_C::getData has not loaded yet.
@@ -104,6 +159,20 @@ inline constexpr const wchar_t* DriveBoxClass       = L"prop_box_C";
 inline constexpr const wchar_t* DriveBoxDrivesProp  = L"drives";
 inline constexpr const wchar_t* DriveBoxDrivesInProp = L"drives_in";
 inline constexpr const wchar_t* DriveBoxUpdFn       = L"upd";
+
+// The daily task's grader, droneSellLocation_C::sell (0.10.0). It loads each boxed drive box of the
+// drone's inventory into its scratch box `ref_driveBox` and each zip floppy into `ref_zipDisc`, then grades
+// the rows against saveSlot.taskNew; a signal counts once, by its id in saveSlot.soldSignals (TArray<FString>).
+// A zip floppy's `data` is a TArray<FString> of "??"-separated rows whose third field names the dish.
+// lib_C::addHint(inText, type, debug, __WorldContext) is the corner hint the sale raises (a tape's fill).
+inline constexpr const wchar_t* DroneSellRefDriveBoxProp = L"ref_driveBox";
+inline constexpr const wchar_t* DroneSellRefZipDiscProp  = L"ref_zipDisc";
+inline constexpr const wchar_t* FloppyDataProp           = L"data";
+inline constexpr const wchar_t* SaveSlotSoldSignalsProp  = L"soldSignals";
+inline constexpr const wchar_t* LibAddHintFn             = L"addHint";
+inline constexpr const wchar_t* LibAddHintTextParam      = L"inText";
+inline constexpr const wchar_t* LibAddHintTypeParam      = L"type";
+inline constexpr const wchar_t* LibAddHintDebugParam     = L"debug";
 
 // 0.10.0's container inventory: prop_container_C.inventoryComponent (an inventoryComponent_C, the
 // grid inventory that replaced propInventory_C + saveSlot.GObjStack), whose `owner` its BeginPlay
@@ -249,6 +318,9 @@ inline constexpr const wchar_t* NpcClass_KerfurOmega  = L"kerfurOmega_C";
 inline constexpr const wchar_t* NpcClass_Krampus      = L"npc_krampus_C";
 inline constexpr const wchar_t* NpcClass_Funguy       = L"npc_funguy_C";
 inline constexpr const wchar_t* NpcClass_GoreSlither  = L"npc_goreSlither_C";
+// The blue brain cheese's hatchling (BlueBrainCheeseClass below). A child of npc_goreSlither_C, so the super-chain
+// walk already takes it; listed by name too, so the hatch mirrors whatever its parent becomes.
+inline constexpr const wchar_t* NpcClass_GoreSlitherCheese = L"npc_goreslither_cheese_C";
 inline constexpr const wchar_t* NpcClass_Insomniac    = L"insomniac_C";
 inline constexpr const wchar_t* NpcClass_Fossilhound  = L"fossilhound_C";
 inline constexpr const wchar_t* NpcClass_Antibreather = L"antibreather_C";
@@ -345,6 +417,7 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_EriePlushLive,     // the living Erie and its _good/_evil children; a mirror's graph is refused whole
     NpcClass_AngryErieFlesh,    // the angry flesh; a mirror keeps its tick (its kill of this machine's player)
     NpcClass_Rufus,             // the goose's rufus; a mirror's graph is refused whole
+    NpcClass_GoreSlitherCheese, // the blue brain cheese's hatchling; EX_CallMath, npc_world_enum source row
 };
 inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcAllowlist[0]);
 
@@ -444,6 +517,12 @@ inline constexpr const wchar_t* UfoDropperPigClass  = L"ufoDropper_pig_C";
 // npc_world_enum. The firetanks stay out of that row: a firetank_C mirror's BeginPlay arms five AI timers
 // (update, senseupdate, fire, speak, makehealthnoise) that no row refuses yet.
 inline constexpr const wchar_t* BoarInvasionClass = L"boarInvasion_C";
+// The blue brain cheese (prop_food_blueBrainCheese_C, a prop_food_C whose ReceiveTick replaces the food tick): every
+// 45 to 75 s it rolls 10 %, and with a pawn inside its sphere (else, at 50 %, another gore slither) it hatches into a
+// cheese gore slither (npc_goreslither_cheese_C, a child of npc_goreSlither_C that only blanks setMesh and preDied)
+// and destroys itself. The hatch is a BeginDeferred under EX_CallMath in the tick, so it crosses only through the
+// cheese's source row in npc_world_enum; a client's tick of a shared cheese is refused in coop/props/prop_food_state.
+inline constexpr const wchar_t* BlueBrainCheeseClass = L"prop_food_blueBrainCheese_C";
 // ---- The story-event scenes (coop/world/event_scene_sync, ue_wrap/actors/event_scenes) ----
 // Warning Obelisk: the obelisk box's trigger_spawnProp_C (its runTrigger mints the class its prop row names) mints
 // obelisk_C, an actor_save_C. Its BeginPlay rises the mesh, then plays the fall timeline `a`; the finish
@@ -463,6 +542,12 @@ inline constexpr const wchar_t* LibClass                = L"lib_C";
 inline constexpr const wchar_t* LibSetEventFn           = L"setEvent";
 inline constexpr const wchar_t* LibSetEventActiveParam  = L"isEventActive";
 inline constexpr const wchar_t* LibWorldContextParam    = L"__WorldContext";
+// lib_C::addHint(inText, type, debug, __WorldContext): every in-game hint (the info-icon toast, bottom right) runs
+// through it -- mainGamemode_C's "Add Hint from Gamemode" forwards to it, ui_ui_C::addHint has no caller. `type` is
+// enum_notifytype (the icon), `debug` hides the hint outside the editor. droneSellLocation_C::sell raises the sale's
+// hints with the sell location as the world context; its `drone` field names the drone that sold.
+// (LibAddHintFn and its three parameter names are declared once, above, with the lib_C names.)
+inline constexpr const wchar_t* DroneSellLocationClass  = L"droneSellLocation_C";
 // Garage Soltomia: the eventer mints soltomiaCleaning_C hidden. A player's overlap of its box shows it (the
 // squeak, the particles, `active`, the talking timer) and moves the ATV and jams three doors; the garage door's
 // dooropened runs `opened`, which plays the montage on `solt`; the montage's `throw` notify mints the sponge.
@@ -851,6 +936,10 @@ inline constexpr const wchar_t* SetRelativeLocationParam = L"NewLocation";
 inline constexpr const wchar_t* SetRelativeRotationParam = L"NewRotation";
 inline constexpr const wchar_t* SetWorldLocationFn = L"K2_SetWorldLocation";
 inline constexpr const wchar_t* SetWorldLocationParam = L"NewLocation";
+// K2_DetachFromComponent(LocationRule, RotationRule, ScaleRule, bCallModify): a scene component taken off its attach
+// parent. prop_glowstick_C detaches its `hook` this way (all three rules KeepRelative, bCallModify true) before every
+// move of it.
+inline constexpr const wchar_t* DetachFromComponentFn = L"K2_DetachFromComponent";
 inline constexpr const wchar_t* SetHiddenInGameFn = L"SetHiddenInGame";
 inline constexpr const wchar_t* GetComponentLocationFn = L"K2_GetComponentLocation";
 inline constexpr const wchar_t* GetComponentForwardFn = L"GetForwardVector";
@@ -924,6 +1013,10 @@ inline constexpr const wchar_t* WidgetSetIsEnabledFn = L"SetIsEnabled";       //
 inline constexpr const wchar_t* WidgetSetRenderOpacityFn = L"SetRenderOpacity";  // UWidget::SetRenderOpacity(float InOpacity) -- brush-independent visual dim
 inline constexpr const wchar_t* WidgetGetIsEnabledFn = L"GetIsEnabled";       // UWidget::GetIsEnabled()->bool ReturnValue (read-back diagnostic)
 inline constexpr const wchar_t* UiMenuClass = L"ui_menu_C";                   // VOTV unified main+pause menu widget (GameInstance-owned, one live instance)
+// The in-game HUD widget. Its Blueprint Tick is a UMG tick: once per frame on the game thread, inside the
+// Slate tick, so after the world tick's camera update and before the frame's present is queued. The
+// nameplates project there, with the camera of the frame being drawn.
+inline constexpr const wchar_t* HudWidgetClass = L"ui_ui_C";
 inline constexpr const wchar_t* UiMenuButtonSaveProp = L"button_Save";        // UButton* @ ui_menu_C+0x2D0 (the "Save Game" button)
 inline constexpr const wchar_t* UiMenuIsPauseProp = L"isPause";               // bool @ ui_menu_C+0x4C0 (true => the in-game pause menu, not the main menu)
 
@@ -1049,6 +1142,9 @@ inline constexpr const wchar_t* PhysAudioImpactProp          = L"sound_impact"; 
 inline constexpr const wchar_t* PhysAudioDamagedProp         = L"sound_damaged";    // damage taken, still standing
 inline constexpr const wchar_t* PhysAudioDestroyedProp       = L"sound_destroyed";  // the break
 inline constexpr const wchar_t* PropPhysicsImpactProp        = L"physicsImpact";      // prop_C -> comp_physicsImpact_C
+// The component class itself: its graph's `destroyed` entry (a break) mints the prop's gibs (struct_breakableprop's
+// propGibs, e.g. a cheese wheel's pieces) under EX_CallMath, with the component as the spawning frame's object.
+inline constexpr const wchar_t* PhysImpactComponentClass     = L"comp_physicsImpact_C";
 inline constexpr const wchar_t* PhysImpactMatOverrideProp    = L"physmat_override";   // comp_physicsImpact_C UPhysicalMaterial*, wins when valid
 inline constexpr const wchar_t* PhysImpactMatProp            = L"physmat";            // comp_physicsImpact_C UPhysicalMaterial*
 inline constexpr const wchar_t* PhysImpactDamageFn           = L"impactDamage";       // comp_physicsImpact_C (damage, impact, hit, actor)
@@ -1402,8 +1498,10 @@ inline constexpr const wchar_t* VentCrawlerVentProp                  = L"vent";
 // `sticked`, `loc` (the impact point), `stickstatic` (the hit component does not simulate), `stickcomp`, moves the
 // `hook` scene component to `loc`, and runs `hookdelay`, whose body (after a zero delay) constrains `hook` to the
 // stick's mesh through the `physicsconstraint` component and sets the constraint frames (`setframe`). It sets
-// neither the base prop's frozen nor its Static. `releaseglowstick` breaks the constraint and clears `sticked`; every
-// grab verb of the stick runs it first. Members are read from the pak's bytecode.
+// neither the base prop's frozen nor its Static. `releaseglowstick` breaks the constraint, detaches `hook` from its
+// parent and clears `sticked`; every grab verb of the stick runs it first, so the sticking peer's `hook` is already
+// free when stickto moves it. Every other move of `hook` (processkeys, fuckyou) detaches it first itself.
+// Members are read from the pak's bytecode.
 inline constexpr const wchar_t* GlowstickClass                       = L"prop_glowstick_C";
 inline constexpr const wchar_t* GlowstickStickedProp                 = L"sticked";
 inline constexpr const wchar_t* GlowstickStickStaticProp             = L"stickstatic";
@@ -1788,6 +1886,50 @@ inline constexpr const wchar_t* WasherCue = L"wade_Cue";
 inline constexpr const wchar_t* ParticleSystemClass = L"ParticleSystem";
 inline constexpr const wchar_t* SoundCueClass = L"SoundCue";
 
+// The growing plants, growingPlant_C (an actor_save_C, never a prop) and its descendants (grass patch, pine, Stolas herb,
+// shroom). `plant` names the list_farmplants row the static `data` (struct_farmPlant) is read from; growth, water,
+// dryness (-1 = dead), fertilizer, fruit timer, disease pool and the berry `amount` are instance floats and ints. upd(false)
+// re-reads the row and rebuilds the look and sets the tick from dryness; updLoc scales and wets the mesh; processGrown
+// latches `grew` and the ripe mesh; actionOptionIndex(action 4) is the harvest and the discard. A pot (prop_farmPot_C)
+// holds its plant in `plant` and plants the hand item mainPlayer_C.holdingActor_main names. The watched verbs are fact
+// rows in coop/farming.
+inline constexpr const wchar_t* GrowingPlantStolasHerbClass     = L"growingplant_stolasherb_C";
+inline constexpr const wchar_t* GrowingPlantPlantProp           = L"plant";
+inline constexpr const wchar_t* GrowingPlantGrowProp            = L"grow";
+inline constexpr const wchar_t* GrowingPlantGrewProp            = L"grew";
+inline constexpr const wchar_t* GrowingPlantWaterProp           = L"water";
+inline constexpr const wchar_t* GrowingPlantDrynessProp         = L"dryness";
+inline constexpr const wchar_t* GrowingPlantFertilizerProp      = L"fertilizer";
+inline constexpr const wchar_t* GrowingPlantFruitGrowProp       = L"fruitgrow";
+inline constexpr const wchar_t* GrowingPlantHealthProp          = L"health";
+inline constexpr const wchar_t* GrowingPlantAmountProp          = L"amount";
+inline constexpr const wchar_t* GrowingPlantDiseaseNameProp     = L"activeDisease_name";
+inline constexpr const wchar_t* GrowingPlantDiseaseCompProp     = L"diseaseComponent";
+inline constexpr const wchar_t* GrowingPlantDiscardProp         = L"discard";
+inline constexpr const wchar_t* GrowingPlantHideDirtProp        = L"hidedirt";
+inline constexpr const wchar_t* GrowingPlantAttachToProp        = L"attachTo";
+inline constexpr const wchar_t* GrowingPlantDataProp            = L"data";
+inline constexpr const wchar_t* FarmPlantTypeMember             = L"planttype_";
+inline constexpr const wchar_t* FarmPlantAmountRangeMember      = L"amount_range_";
+inline constexpr const wchar_t* FarmPlantCanGrowInPotsMember    = L"cangrowinpots_";
+inline constexpr const wchar_t* FarmPlantMinSizeMember          = L"minsize_";
+inline constexpr const wchar_t* FarmPlantTable                  = L"list_farmplants";
+inline constexpr const wchar_t* GrowingPlantUpdSkipParam        = L"skipDataTable";
+inline constexpr const wchar_t* GrowingPlantUpdLocFn            = L"updLoc";
+inline constexpr const wchar_t* GrowingPlantProcessGrownFn      = L"processGrown";
+inline constexpr const wchar_t* GrowingPlantProcessGrownParam   = L"skipGrowCheck";
+inline constexpr const wchar_t* GrowingPlantAddDiseaseFn        = L"addDisease";
+inline constexpr const wchar_t* GrowingPlantAddDiseaseNameParam = L"name";
+inline constexpr const wchar_t* GrowingPlantAddMedicineFn       = L"addMedicine";
+inline constexpr const wchar_t* GrowingPlantMedicineTypeParam   = L"type";
+inline constexpr const wchar_t* GrowingPlantMedicineTimeParam   = L"time";
+inline constexpr const wchar_t* GrowingPlantHarvestSoundFn      = L"harvestSound";
+inline constexpr const wchar_t* PlantDiseaseHealFn              = L"heal";
+inline constexpr const wchar_t* FarmPotClass                    = L"prop_farmPot_C";
+inline constexpr const wchar_t* FarmPotPlantProp                = L"plant";
+inline constexpr const wchar_t* MainPlayerInputAltProp          = L"input_alt";
+inline constexpr const wchar_t* MainPlayerRetargetAddFn         = L"retarget add object to inventory";
+inline constexpr const wchar_t* MainPlayerRetargetItemParam     = L"item";
 // Player-dug holes and what is put in them (coop/props/dig_sync, ue_wrap/actors/dirt). The shovel's
 // event_dighole spawns its `dirtholeType` (dirthole_C, a prop_C that mints no key: its getKey answers None) at the
 // point its trace struck, writing `matType` (0 dirt, 1 gravel, 2 sand: the hole's material) and `attachTo` in the
@@ -1899,6 +2041,42 @@ inline constexpr const wchar_t* ActorSaveGetKeyParam = L"key";
 inline constexpr const wchar_t* ActorSaveGetDataFn = L"getData";
 inline constexpr const wchar_t* ActorSaveLoadDataFn = L"loadData";
 inline constexpr const wchar_t* ActorSaveProcessKeysFn = L"processKeys";
+// Irrigation. The held faucet (prop_faucet_C) on its left button, when the trace below the hit finds water under
+// grass, sand, gravel or dirt, spawns `faucet_C` (an actor_save_C) at the hit, yaw = the player's + 90, and destroys
+// itself. faucet_C: action 5 toggles `active` then upd() (the appliance lane's bit); action 7 spawns a prop_faucet_C,
+// clears `active`, and its `hose` (groundhose_C) is destroyed into a prop_hose_C when it has fewer than 3 points, else
+// loses point 0 and its `faucet`, then gen(); then the faucet destroys itself. Saved: bools {active}, names {hose_key}.
+// The held hose (prop_hose_C) on a faucet with no hose spawns `groundhose_C` at the faucet's `connect` with
+// `conntofauc` set, whose BeginPlay ticks it: it lays a spline point under the LOCAL player (getMainPlayer) every `max`
+// of path and, while its faucet is on, sprays from `pickup` (growingplant_C.water += 100/s below 600; buckets fill).
+// The next left button on a prop_sprinkler_C with no hose runs the sprinkler's connectHose(hose) (adds its point,
+// finish(), setPropProps(false, true, false, false), links both ways); elsewhere finish(): tick off, gen(), collision
+// on, faucet.upd(). The held hose then destroys itself. groundhose_C's action 4: a `doCollect` look (the hose's start)
+// or no faucet puts a prop_hose_C in the inventory and destroys the hose; else a held prop_hose_grab_C resume()s it.
+// Saved: vectors {points}, names {faucet_key, sprinkler_key}; processKeys links and finish()es. A sprinkler's
+// doWater (a 0.1 s timer) waters the growingplant_C in `wateringRadius` while its hose's faucet is on; grabbing it
+// or its action runs its hose's detachSprinkler(). [RD] the decoded bodies of the five classes.
+inline constexpr const wchar_t* IrrigationFaucetClass = L"faucet_C";
+inline constexpr const wchar_t* IrrigationHoseClass = L"groundhose_C";
+inline constexpr const wchar_t* IrrigationSprinklerClass = L"prop_sprinkler_C";
+inline constexpr const wchar_t* IrrigationFaucetItemClass = L"prop_faucet_C";
+inline constexpr const wchar_t* IrrigationHoseItemClass = L"prop_hose_C";
+inline constexpr const wchar_t* IrrigationFaucetActiveProp = L"active";
+inline constexpr const wchar_t* IrrigationFaucetHoseProp = L"hose";
+inline constexpr const wchar_t* IrrigationHoseFaucetProp = L"faucet";
+inline constexpr const wchar_t* IrrigationHoseSprinklerProp = L"sprinkler";
+inline constexpr const wchar_t* IrrigationHosePointsProp = L"points";
+inline constexpr const wchar_t* IrrigationHoseDoCollectProp = L"doCollect";
+inline constexpr const wchar_t* IrrigationSprinklerHoseProp = L"hose";
+inline constexpr const wchar_t* IrrigationGetDataFn = L"getData";
+inline constexpr const wchar_t* IrrigationLoadDataFn = L"loadData";
+inline constexpr const wchar_t* IrrigationGetKeyFn = L"getKey";
+inline constexpr const wchar_t* IrrigationHoseFinishFn = L"finish";
+inline constexpr const wchar_t* IrrigationHoseUpdEffectFn = L"updEffect";
+inline constexpr const wchar_t* IrrigationHoseDetachFn = L"detachSprinkler";
+inline constexpr const wchar_t* IrrigationUpdFn = L"upd";
+inline constexpr int IrrigationFaucetActionTake = 7;
+inline constexpr int IrrigationHoseActionPickup = 4;
 }  // namespace name
 
 }  // namespace ue_wrap::profile

@@ -43,6 +43,13 @@ enum class Action : uint8_t {
     OrderNoCatalog,
     OrderCommitFailed,
     OrderRefused,
+    // A player's pocket trip (coop/player/pocket_travel): where they went, and their way home.
+    WentToPoopDim,
+    WentToGoop,
+    WentToPlace,
+    WentToAlexPdim,
+    WentToWoid,
+    CameBack,
     kCount
 };
 

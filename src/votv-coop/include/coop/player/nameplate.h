@@ -1,16 +1,13 @@
 // coop/player/nameplate.h -- floating nickname labels above remote players (ImGui screen-space).
 //
-// Gameplay/network layer (principle 7). The label is drawn by our OWN ImGui overlay as a
-// screen-space PROJECTION -- the MTA nametag shape: project the head world point to the
-// screen, fade with distance, draw centred outlined text. It takes an ImGui canvas of our
-// own, because VOTV never runs the stock HUD canvas.
-//
-// This module is the GAME-THREAD half: Update() projects each live remote puppet's
-// head world point to viewport-pixel screen coords via the local player's
-// PlayerController (engine::ProjectWorldToScreen -- a UFunction, so game thread)
-// and publishes a thread-safe POD snapshot. The RENDER-THREAD half (ui::hud) copies
-// the snapshot and draws nick + ping + health bar at each screen point. Same split
-// as coop::roster -> ui::scoreboard (game-thread snapshot, render-thread draw).
+// Gameplay/network layer (principle 7), the MTA nametag shape drawn by our own ImGui overlay (VOTV never
+// runs the stock HUD canvas). Update() (the ~60 Hz pump) decides WHAT each plate shows and its WORLD
+// anchor. The frame capture decides WHERE: a post-observer on the HUD widget's per-frame UMG Tick, which
+// runs after the camera update and before the present is queued, re-reads each anchor and projects it
+// with that frame's camera into a numbered ring. The render thread (ui::hud) counts presents
+// (NotePresent) and draws the capture paired with its own frame. Projected on the pump, a plate held one
+// screen point over several frames and shook on fast turns. No HUD tick, or ui.nameplate.frame_sync off:
+// Update's own projection is drawn.
 
 #pragma once
 
@@ -28,6 +25,10 @@ namespace coop::nameplate {
 struct Plate {
     float x = 0.f;           // screen px (viewport pixels, top-left origin) -- the head anchor
     float y = 0.f;
+    float wx = 0.f;          // the WORLD anchor (cm) the screen point projects; the frame capture
+    float wy = 0.f;          // re-reads it for an online peer and reuses it for an offline sleeper
+    float wz = 0.f;
+    int   slot = -1;         // the peer slot of an online plate; -1 for an offline sleeper
     float alpha = 0.f;       // distance fade 0..1 (0 => skip)
     float scale = 1.f;       // distance SIZE scale: 1 = base size up close, shrinks ~1/dist far away
     bool  onScreen = false;  // projected in FRONT of the camera AND within fade range
@@ -70,8 +71,14 @@ struct Snapshot {
 // snapshot self-clears to empty at the menu (the HUD then auto-hides).
 void Update();
 
-// Copy the latest snapshot. Safe from ANY thread (the render thread reads it).
+// Copy the snapshot to draw this frame: the frame capture paired with the present being built, or
+// Update's own projection when there is no live capture. Render thread (it reads the present pairing
+// NotePresent set up); safe from any thread.
 void GetSnapshot(Snapshot& out);
+
+// RENDER THREAD, once per overlay frame (each present), before any GetSnapshot of that frame: advances
+// the present count the frame captures are paired against. Cheap; called whether or not a plate draws.
+void NotePresent();
 
 // True if there is at least one label to draw -- the overlay uses this (lock-free)
 // to decide whether to run the always-on HUD pass. Any thread.

@@ -31,6 +31,10 @@ void TickApplyAndDrive(coop::net::Session& s);
 // Idempotent. Game thread.
 void ClearDriveForEid(coop::element::ElementId eid);
 
+// Client: is a host carry pose currently driving eid's clump (a drive with a live actor)? A
+// convert for a clump no drive owns has nothing else to place it by. Game thread.
+bool HasDriveForEid(coop::element::ElementId eid);
+
 // Full reset (net disconnect): clear every per-eid carry drive. Game thread.
 void OnDisconnect();
 

@@ -4,9 +4,10 @@
 
 The tools that leave a persistent actor behind (the grappling hook and rope, the nail gun, the wall
 builder), timed explosives, the fishing rod and the physgun, each reverse-engineered with a design.
-The hook and the rope are built, and so is one shared lane for the save actors a held tool leaves
-(below); timed explosives, the fishing rod and the physgun are not. A prop a hook drags is the props
-page's driven-prop channel ([props.md](props.md)).
+The hook and the rope are built, and so are the irrigation set (the faucet, the ground hose and the
+sprinkler they feed) and one shared lane for the save actors a held tool leaves (below); timed
+explosives, the fishing rod and the physgun are not. A prop a hook drags is the props page's
+driven-prop channel ([props.md](props.md)).
 
 ## The deployed save actors
 
@@ -72,6 +73,42 @@ the hook lane did not have in front of it:
   its head still rides what it bit. Two players hooking one prop is then two host constraints on
   one host body, which is what single-player physics would do (`coop/items/hook_constraint`).
 
+## Irrigation
+
+The held faucet (`prop_faucet_C`) placed on soil over water spawns `faucet_C`; the held hose
+(`prop_hose_C`) used on a faucet spawns `groundhose_C`, a spline that follows the player who lays it
+and is finished where they click again, or on a sprinkler (`prop_sprinkler_C`), whose `connectHose`
+takes it and freezes the sprinkler. The faucet and the hose are `actor_save_C`, not props; the
+sprinkler is a prop. The faucet saves `active` and its hose's key; the hose saves its points and its
+faucet's and sprinkler's keys, and its `processKeys` links and finishes it. Water reaches plants two
+ways: a sprinkler whose hose's faucet is on runs `doWater` every 0.1 s on the `growingplant_C` in its
+`wateringRadius`, and a hose held while its faucet is on sprays from its end. `[RD]` the decoded
+bodies; the class notes are beside their names in `sdk_profile_names.h`.
+
+Before this lane a client's faucet or hose stood in its own world alone and never reached anyone
+else: the placement is a birth of a class no prop lane carries, so the client's drop-intent seam
+returns at its prop-lineage test (`coop/props/prop_drop_intent`) and the host never heard of it,
+while the held item's consumption crossed. `[V]` a host log: slot 1 held a faucet and a hose over
+and over, and no `faucet_C` or `groundhose_C` ever appeared on the host.
+
+Both are the host's, named by their `actor_save` key (`coop/items/irrigation_sync`). A client's
+placement runs natively; a post on the finish of a deferred spawn, armed only inside the held item's
+own left-button body, catches the birth, and its record (its own `getData`, links rewritten to the
+live ones) goes to the host as `IrrigationCommit`; a hose's once it settles (its tick off, which
+`finish()` does). The host refuses a sender that is not alive, out of reach, over its budget, a key
+another actor holds, or a faucet that already has another hose, and tells the sender's copy to go;
+otherwise it spawns its own copy under the same key, loads the record, links it and finishes it. The
+host polls its placed faucets and hoses four times a second and sends `IrrigationState`: the record
+on a birth or a change of links or points, the key alone when one is gone. A client creates, updates
+and destroys its copies from it and links them; a hose it spawns never ticks. A client's take of a
+faucet (action 7) is cancelled and run on the host; a hose's pickup (action 4) runs where it is made,
+and the host destroys a collected hose and keeps a resumed one until its new commit; a sprinkler's
+detach runs on both. Turning the faucet on and off is the appliance lane's (the keyed devices of
+[props.md](props.md)), and the faucet's `upd()` repaints the faucet, the hose's water and the
+sprinkler on every peer. A client's `doWater` is cancelled: a sprinkler waters the host's plants,
+and a client's plants are the farming lane's to carry (`SprinklerWatersHere`). The lines say
+`[IRRIGATION]` on both ends. `[?]` until a two-peer run reads them.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -79,6 +116,9 @@ the hook lane did not have in front of it:
 | a deployed hook, while its thrower still holds it | that peer | keyed by (slot, sequence); the others render a parked mirror |
 | a deployed hook once both ends are anchored | the host | the thrower hands over the hook's own save record; it is a save actor from then on |
 | a hook's tie, the physics constraint | the host | a client breaks every tie a hook builds on it; the host builds a client's tie on its mirror of that hook |
+| a placed faucet and a ground hose: existence, points and links | the host | `IrrigationState` on a birth, a change or an end; a client's placement, take, pickup and detach are `IrrigationCommit` |
+| a faucet's on/off | each peer that toggles it | the appliance lane's symmetric bit |
+| a hose being laid | the peer laying it | local until it settles; the others see it then |
 
 ## Wire messages
 
@@ -90,24 +130,30 @@ the hook lane did not have in front of it:
 | `HookAnchored` | the host to all | an anchored hook exists, as the same record |
 | `SaveActorIntent` | a client to the host | a deployed save actor's birth (request id, key, both records), a state after a mutator, or a removal by key; chunked |
 | `SaveActorState` | the host to all | the same ops as the host holds them, and a refused birth to its client alone; chunked |
+| `IrrigationCommit` | a client to the host | a placed faucet or hose as its own record, or a take, a pickup or a detach by key; chunked, never relayed |
+| `IrrigationState` | the host to all, or to a joiner | a placed faucet or hose as its record with live links, or its key when gone; a joiner's bracketed by a snapshot's begin and end |
 
 ## Late join
 
 A hook its thrower still owns reaches a joiner on its keepalive. An anchored hook is a save actor
 of the host's and arrives with the save, and the game's own load re-resolves both of its attach
-keys in the joiner's world. A deployed save actor arrives with the save too; the ones born and
-removed since the save was taken follow at the joiner's ready edge. The deployables that are not
-built reach a joiner only through the save.
+keys in the joiner's world. A placed faucet and hose arrive with the save too, keyed; the world-ready
+edge then sends every one, bracketed, and the joiner destroys any the host did not name. A deployed
+save actor arrives with the save as well; the ones born and removed since the save was taken follow
+at the joiner's ready edge. The deployables that are not built reach a joiner only through the save.
 
 ## Known limits
 
 | Limit | Evidence |
 |---|---|
 | Explosives, the fishing rod and the physgun are not synced | `[V]` no lane catches them |
-| A client's deployed save actor crosses only when `prop_spawn_authoring` calls the birth a player's; with the menu-and-toolgun reading of it, a client's sticker or nail stays on that client | `[?]` the hand-item reading lands with the authorship generalization |
+| A client's deployed save actor crosses only when `prop_spawn_authoring` calls the birth a player's (the hand item, the player's action events, a widget, an authored projectile's own birth); a save actor a device or a timer makes on a client with no such act behind it stays on that client | `[?]` not measured on two peers |
 | The cigarette, a printed object, a wire, the ceiling stars and a transmitted signal are not carried (each said why in `sdk_profile_names.h`) | `[V]` absent from the allowlist |
 | A string of lights still being laid trails its last cable to the viewing player on a mirror (`genInstances` reads the local player until `finish`) | `[V]` capture, `xmaslight_C.genInstances` |
 | A record applied twice (a mutator's republish) re-runs the class's load verbs; whether every class's load is idempotent is not measured | `[?]` |
+| A hose being laid shows only to the peer laying it, and a client's resumed hose stays on the other peers in its old shape until it settles again | `[RD]` the lane commits a hose once it settles |
+| A client's held-hose spray waters only that client's copies of the plants | `[RD]` the spray is groundhose_C's own tick on the layer's machine; plant water is the farming lane's |
+| A refused placement leaves the client without the held item: the game consumed it before the host answered | `[RD]` the placement runs natively, then commits |
 | A client's hook into the ATV ties the host's ATV against the client's puppet; whether the ATV lane's corrector carries that pull back to the client's copy is not measured | `[?]` `coop/items/hook_constraint` ties any keyed actor the bite resolves; `coop/interactables/atv_sync` corrects rather than parks |
 
 ## Code map
@@ -120,3 +166,5 @@ built reach a joiner only through the save.
 | the props a tie claims for the driven-prop channel | `coop/items/hook_prop_claim` |
 | the deployed save actors: the seams, the host's copies, a client's intents and mirrors | `coop/items/save_actor_sync` |
 | their classes, key, save flag and records | `ue_wrap/actors/save_actor` |
+| the irrigation set: the client's commits, the host's judge and poll, the grammar and the apply | `coop/items/irrigation_sync`, `irrigation_host`, `irrigation_wire` |
+| the faucet, hose and sprinkler engine access | `ue_wrap/devices/irrigation` |

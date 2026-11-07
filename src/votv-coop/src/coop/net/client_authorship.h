@@ -131,6 +131,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DeskPingVerdict:
     case ReliableKind::ServerRepair:
     case ReliableKind::CommandRequest:
+    case ReliableKind::PocketTravel:      // a client's own trip edges (coop/player/pocket_travel_client)
     case ReliableKind::StatOrderReply:
     case ReliableKind::StatQueryReply:
     case ReliableKind::PointSackRedeem:
@@ -144,8 +145,10 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ToolActionIntent:
     case ReliableKind::MicrowaveIntent:
     case ReliableKind::PosterIntent:
+    case ReliableKind::PlantIntent:
     case ReliableKind::DigIntent:
     case ReliableKind::SaveActorIntent:
+    case ReliableKind::IrrigationCommit:
     case ReliableKind::ProjectileFired:
     case ReliableKind::ExplosionRequest:
     case ReliableKind::AtvExplodeRequest:
@@ -153,6 +156,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::AchievementClaim:
     case ReliableKind::AtvSeat:
     case ReliableKind::AtvTakeover:
+    case ReliableKind::AtvRepairIntent:
     case ReliableKind::PropActRequest:
     case ReliableKind::PropActCommit:
     case ReliableKind::ContainerActRequest:
@@ -184,8 +188,10 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::MicrowaveState:
     case ReliableKind::BucketFillState:
     case ReliableKind::PosterState:
+    case ReliableKind::PlantState:
     case ReliableKind::DigState:
     case ReliableKind::SaveActorState:
+    case ReliableKind::IrrigationState:
     case ReliableKind::ToolActionState:
     case ReliableKind::EventScenePhase:
     case ReliableKind::EventSoundCue:
@@ -194,6 +200,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::BasementPipeState:
     case ReliableKind::AchievementState:
     case ReliableKind::SleeperState:
+    case ReliableKind::PlayerLocation:    // where each slot is: the host's location table
     case ReliableKind::ExplosionSpawn:
     case ReliableKind::AssignPeerSlot:
     case ReliableKind::RosterRow:
@@ -237,6 +244,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DishHashcodes:
     case ReliableKind::ServerSetting:
     case ReliableKind::CommandReply:
+    case ReliableKind::HintRoute:
     case ReliableKind::PermissionGrants:
     case ReliableKind::CoinGunResult:
     case ReliableKind::OrderRefused:
@@ -253,6 +261,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DishSnapshot:
     case ReliableKind::DishCalib:
     case ReliableKind::TaskNewState:
+    case ReliableKind::TaskSaleHint:
     case ReliableKind::HookAnchored:
     case ReliableKind::RemoverResult:
     case ReliableKind::PropActReply:

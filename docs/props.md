@@ -411,11 +411,20 @@ read `HOST release eid=3317 -> (-459.2,2348.1,6049.1)`, the ceiling, then the co
 `stickto` (post) and `releaseglowstick` (pre) records the edge, and the next pump pass, before the hold's release edge,
 broadcasts: flags bit 2 for a hang, with the hook point in the message's `linVel`; flags 0 for the release, with the
 pose and velocities as the component's unstick sends them. A receiver closes the sender's hold, stops any drive on the
-copy, poses and simulates it, and replays the tail of `stickto` on its own copy: the members, the hook at the impact
-point, the stick's own `hookdelay`. A release runs the stick's own `releaseglowstick` and lets the copy go from the
-sender's pose. A peer's grab of a stick hung here releases it too (the stick's grab verbs run `releaseglowstick` first,
+copy, poses and simulates it, and replays the tail of `stickto` on its own copy: the hook detached from the stick's mesh
+(`K2_DetachFromComponent`, KeepRelative, as `processkeys`, `fuckyou` and `releaseglowstick` do before they move it; the
+sticking peer's grab verb already ran `releaseglowstick`, a receiver's copy never did, and a constraint from the mesh to
+its own child holds nothing), the members, the hook at the impact point, the stick's own `hookdelay`. A copy the host's
+driven-prop stream still has parked is not simulated: the stream's End gives its physics back. A release runs the
+stick's own `releaseglowstick` and lets the copy go from the sender's pose. `hookdelay` rebuilds the constraint after a
+zero delay whenever `stickstatic` is set, and `releaseglowstick` does not clear it, so a release (or a peer's grab) that
+lands within three pump passes and 100 ms of a hang applied here waits until that delay has fired. Clearing
+`stickstatic` instead would send the delay down its other branch, which constrains the mesh to `stickcomp`, null on a
+copy, and so to the world. About a second after each hang it applies, a receiver logs the stick's z against its
+hook's (`HANG check +1s ... STAYS UP` or `FELL below its hook`). A peer's grab of a stick hung here releases it too (the stick's grab verbs run `releaseglowstick` first,
 the base prelude the hold replays does not). A joiner is sent every hung stick at its ready edge, after the snapshot's
-end. The version is unchanged: a peer that does not know the bit drops the message as one for a prop with no component.
+end. The layout is unchanged, but the bit's new meaning took protocol 308: a peer from before it would drop the hang as
+a message for a prop with no component, so it does not connect.
 `[V]` the `prop_glowstick_C` bytecode in the fingerprint capture (`stickto`, `hookdelay`, `releaseglowstick`,
 `receivetick`, `getData`). `[?]` all of it in play: the constraint holding a copy the host's motion scan and a thrower's
 rows have also moved, and whether the game restores a hung stick from a save (`loadData` writes the members only; the
@@ -964,7 +973,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | A prop whose own grab prelude adds to the base one gets only the base one on a receiver: the sprinkler's also detaches its hose, so the hose stays tied to a sprinkler another peer carries away. The glowstick's replaces the base one with its own release, and a receiver runs the base one | `[V]` the sprinkler and glowstick Blueprints: `prop_sprinkler_C`'s prelude calls `prop_C::playerGrabbed_pre` and `hose->detachSprinkler`, `prop_glowstick_C`'s calls `releaseGlowstick` alone; `coop/props/remote_prop` runs the base prelude |
 | A prop the toolgun freezes, unfreezes or makes static changes on the tool user's machine only; the next hold of it converges frozen and sleep, never static, and a copy static on one peer, without a wall-attach component's unstick, is not driven there while another peer holds the prop -- a refusal that lasts until a lane carries static | `[V]` no lane under `src/coop` catches `setPropProps`; `coop/props/remote_prop` refuses a stream for a copy static here |
 | Another peer's hold can carry away the chair this peer sits in at the laptop, which single player never allows: the laptop freezes the seat only on the machine whose player sits | `[V]` the laptop Blueprint: `stabilizeSeat` sets the seat frozen, and the exit's `setPropProps` clears it; `coop/props/remote_prop` unfreezes a held copy at the hold's first pose |
-| A keyed prop a client creates that no rule of "Who authors a prop" names (a device's timed birth) never reaches the host. The drain names its exit, and `[dev] prop_birth_key_probe` tallies every exit by name | `[V]` `coop/props/prop_drop_intent` drops it at the drain; `coop/dev/prop_birth_key_probe` |
+| A keyed prop a client creates that no rule of "Who authors a prop" names (a device's timed birth; the routes besides authorship are a place after a pickup, the whitelisted births, a container extract, an MRE's unpack and a gib of its own break) never reaches the host. The drain names its exit, and `[dev] prop_birth_key_probe` tallies every exit by name | `[V]` `coop/props/prop_drop_intent` drops it at the drain; `coop/dev/prop_birth_key_probe` |
 | The hand-axis test that keeps a hand's display actor from crossing knows the main hand only: an offhand display actor born under a player's act, or in a dispatch that destroyed a shared prop, would cross as a world prop | `[RD]` `coop/player/hand_item` reads `holdingActor` alone; `[?]` whether a pickup ever lands in the offhand directly |
 | Concrete and every other local-accumulator prop but food drift between peers; the tape reel has its corrector and food its lane | `[V]` `coop/interactables/tape_caddy_sync`, `coop/props/prop_food_state` |
 | A prop tied by any hook -- a player's, an anchored one, the level's own -- is parked on every client for as long as the tie holds, since the host streams it, so it cannot be grabbed there until the hook lets go. A joiner parks one at rest on the host's ready-edge re-send, a single unreliable datagram: lost, it leaves that prop unparked there until it moves | `[V]` `coop/items/hook_prop_claim` claims every tied prop on the host every pass; `coop/props/prop_drive_stream` parks it; `coop/props/prop_drive_host` re-sends at the ready edge |
