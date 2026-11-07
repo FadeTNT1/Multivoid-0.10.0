@@ -9,6 +9,7 @@
 
 #include "coop/creatures/piramid_sync.h"  // the heading, look and wisp-target consumers
 #include "coop/world/event_scene_sync.h"     // a story scene's phase that arrived before its mirror
+#include "coop/world/ufo_event_sync.h"       // the gamemode UFOs' birth setups
 
 #include "coop/element/identity_create.h"  // the single WorldActor mirror create funnel
 #include "coop/items/coingun_sync.h"
@@ -252,6 +253,11 @@ void OnWorldActorSpawn(const coop::net::WorldActorSpawnPayload& payload) {
             break;
         }
     }
+    // The gamemode UFOs' mirrors: their own BeginPlay rolled a random heading, endpoints or course, so lay the host's over
+    // them before their first tick (the same frame as the finish), and put a joiner mid-flight where the host's flight
+    // is. Their tick or timeline then flies the same course.
+    if (coop::ufo_event_sync::IsBirthActor(spawned))
+        coop::ufo_event_sync::SeedMirror(spawned, payload.elementId, payload.birth, payload.birthLen);
     // A pose-driven mirror must not also simulate: the two fight and the mirror drifts off the
     // host's transform. The coin simulates with its sphere and the jellyfish with its capsule, each its
     // root; whatever component a mirrored class simulates with is stopped, found from its members.
@@ -356,6 +362,8 @@ void TickClientWorldActors() {
         if (!batch.empty() && !s_loggedFirst) { s_loggedFirst = true;
             UE_LOGI("world-actor-pose: client applying %zu WorldActor pose(s) (first batch)", batch.size()); }
     }
+
+    coop::ufo_event_sync::TickClient();   // a UFO mirror's seek that waits for its timeline
 
     // Second, advance the interpolation and drive every live mirror, every frame (smooth between
     // packets). Reused scratch, no per-tick heap allocation; client game thread only.

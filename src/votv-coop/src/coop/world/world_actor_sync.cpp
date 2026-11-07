@@ -16,6 +16,7 @@
 #include "coop/creatures/piramid_sync.h"  // the piramid heading
 
 #include "coop/items/coingun_sync.h"   // the coin birth value
+#include "coop/world/ufo_event_sync.h"  // the gamemode UFOs' birth setups
 #include "coop/element/element_deleter.h"
 #include "coop/element/mirror_manager.h"
 #include "coop/element/mirror_managers.h"  // PropMirrors/NpcMirrors/WaMirrors
@@ -144,6 +145,11 @@ bool IsSaveCarriedClassName(const std::string& nm) {
 // connect snapshot, which the repair path re-fires per slot.
 void FillBirthBlob(coop::net::WorldActorSpawnPayload& p, void* cls, void* actor) {
     p.birthLen = 0;
+    if (actor && coop::ufo_event_sync::IsBirthActor(actor)) {
+        // The gamemode's UFOs: what their setup randomized and how far their flight has come (ufo_event_sync).
+        coop::ufo_event_sync::FillBirth(actor, p.elementId, p.birth, sizeof(p.birth), p.birthLen);
+        return;
+    }
     if (!actor || !coop::coingun_sync::IsCoinClass(cls)) return;
     const int32_t pts = coop::coingun_sync::ReadCoinPoints(actor);
     if (pts < 0) {
@@ -450,6 +456,7 @@ void OnDisconnect() {
         g_actorToWaId.clear();
     }
     g_incomingWorldActorClass.store(nullptr, std::memory_order_release);
+    coop::ufo_event_sync::OnDisconnect();
 }
 
 void TickPoseStream() {

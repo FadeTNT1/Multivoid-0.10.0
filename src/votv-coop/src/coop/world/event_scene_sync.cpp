@@ -43,9 +43,12 @@ long long NowMs() {
 }
 
 // A level-placed scene's target is found by name; the others are world-actor mirrors by element id.
-bool IsLevelScene(uint8_t scene) { return scene == ids::kBoarShield || scene == ids::kAgrav; }
+bool IsLevelScene(uint8_t scene) {
+    return scene == ids::kBoarShield || scene == ids::kAgrav || scene == ids::kMidas;
+}
 
 const wchar_t* LevelClassOf(uint8_t scene) {
+    if (scene == ids::kMidas) return P::name::MidasUfoClass;
     return scene == ids::kBoarShield ? P::name::UfoShieldShaderClass : P::name::TriggerAgravClass;
 }
 
@@ -56,6 +59,7 @@ uint8_t LastPhaseOf(uint8_t scene) {
     case ids::kObelisk:    return ph::kObeliskLanded;
     case ids::kBoarShield: return ph::kShieldFlyAway;
     case ids::kAgrav:      return ph::kAgravCloakOff;
+    case ids::kMidas:      return ph::kMidasEnd;
     default:               return 0;
     }
 }
@@ -64,7 +68,8 @@ uint8_t LastPhaseOf(uint8_t scene) {
 // once sent.
 bool IsRestingPhase(uint8_t scene, uint8_t phase) {
     return (scene == ids::kBoarShield && phase == ph::kShieldHidden) ||
-           (scene == ids::kAgrav && phase == ph::kAgravCloakOff);
+           (scene == ids::kAgrav && phase == ph::kAgravCloakOff) ||
+           (scene == ids::kMidas && phase == ph::kMidasEnd);
 }
 
 // ---- the host's table ----
@@ -87,6 +92,15 @@ coop::net::EventScenePhasePayload PayloadOf(const HostScene& h, bool snapshot) {
     p.flags = snapshot ? fl::kSnapshot : 0;
     p.eid = h.eid;
     if (IsLevelScene(h.scene)) coop::net::WireKeyFromString(h.key, p.key);
+    // A joiner mid-flight lands where the flight is, not at its start.
+    if (snapshot && h.scene == ids::kMidas && h.phase == ph::kMidasRun) {
+        float frac = 0.f;
+        if (ES::MidasProgress(h.actor, frac)) {
+            if (frac < 0.f) frac = 0.f;
+            if (frac > 1.f) frac = 1.f;
+            p.progress = static_cast<uint8_t>(frac * 255.f + 0.5f);
+        }
+    }
     return p;
 }
 
@@ -148,11 +162,17 @@ bool ApplyToLevel(const coop::net::EventScenePhasePayload& p) {
         else if (p.phase == ph::kShieldHidden) ok = ES::UfoShieldSetActive(actor, false);
         // A joiner lands after the exit: the shader is hidden.
         else ok = snapshot ? ES::UfoShieldSetActive(actor, false) : ES::UfoShieldFlyAway(actor);
+    } else if (p.scene == ids::kMidas) {
+        // The flight ends itself on this machine (its tick switches it off at the end of the spline), so the host's
+        // end only closes the row; the run starts it, from where the host's is for a joiner.
+        ok = true;
+        if (p.phase == ph::kMidasRun) ok = ES::MidasRun(actor, snapshot ? static_cast<float>(p.progress) / 255.f : 0.f);
     } else {
         ok = ES::AgravCloak(actor, p.phase == ph::kAgravCloakOn);
     }
     g_appliedByKey[key] = p.phase;
-    UE_LOGI("event_scene[%s]: '%ls' phase %u%s applied%s", p.scene == ids::kBoarShield ? "boarShield" : "agrav",
+    UE_LOGI("event_scene[%s]: '%ls' phase %u%s applied%s",
+            p.scene == ids::kBoarShield ? "boarShield" : (p.scene == ids::kMidas ? "midas" : "agrav"),
             key.c_str(), p.phase, snapshot ? " (snapshot)" : "", ok ? "" : " -- a verb did not dispatch");
     return true;
 }
@@ -266,7 +286,9 @@ void QueueConnectBroadcastForSlot(int slot) {
 bool WellFormed(const coop::net::EventScenePhasePayload& p) {
     if (p.scene == 0 || p.scene > ids::kLast) return false;
     if (p.phase == 0 || p.phase > LastPhaseOf(p.scene)) return false;
-    if ((p.flags & ~fl::kKnown) != 0 || p.reserved != 0) return false;
+    if ((p.flags & ~fl::kKnown) != 0) return false;
+    // Only a snapshot of the Midas flight carries a progress.
+    if (p.progress != 0 && !(p.scene == ids::kMidas && (p.flags & fl::kSnapshot) != 0)) return false;
     if (p.key.len > sizeof(p.key.data)) return false;
     // A mirror scene names its element and no key; a level scene names its key and no element.
     if (IsLevelScene(p.scene)) return p.eid == 0 && p.key.len > 0;

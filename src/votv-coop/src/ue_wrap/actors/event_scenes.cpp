@@ -13,6 +13,7 @@
 #include "ue_wrap/world/world_instances.h"
 #include "ue_wrap/world/world_singleton.h"
 
+#include <cmath>
 #include <cstring>
 
 namespace ue_wrap::event_scenes {
@@ -178,6 +179,26 @@ bool AgravCloak(void* actor, bool forward) {
     bool ok = CallBoolVerb(actor, P::name::AgravCloakFn, P::name::AgravForwardParam, forward);
     if (void* hover = MemberObject(actor, P::name::AgravHoverProp)) ok &= CC::SetActive(hover, forward, false);
     return ok;
+}
+
+bool MidasProgress(void* actor, float& out) {
+    if (!actor || !R::IsLive(actor)) return false;
+    const int32_t off = R::FindPropertyOffset(R::ClassOf(actor), P::name::MidasUfoProgressProp);
+    if (off < 0) return false;
+    out = *reinterpret_cast<const float*>(static_cast<const uint8_t*>(actor) + off);
+    return std::isfinite(out);
+}
+
+bool MidasRun(void* actor, float fraction) {
+    if (!CallBoolVerb(actor, P::name::MidasUfoSetActiveFn, P::name::MidasUfoActiveParam, true)) return false;
+    if (fraction > 0.f) {
+        // setActive reset `a` to 0 and placed the UFO at the spline's start; its tick eases it from there to where `a`
+        // says, so a joiner's UFO flies in to the host's place.
+        const int32_t off = R::FindPropertyOffset(R::ClassOf(actor), P::name::MidasUfoProgressProp);
+        if (off < 0) return false;
+        *reinterpret_cast<float*>(static_cast<uint8_t*>(actor) + off) = fraction;
+    }
+    return true;
 }
 
 bool ReadVentCrawlerBox(void* crawler, FVector& center, FVector& extent, FRotator& rotation) {

@@ -2,6 +2,7 @@
 
 #include "ue_wrap/engine/engine_timeline.h"
 
+#include "ue_wrap/core/call.h"
 #include "ue_wrap/core/component_calls.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
@@ -61,6 +62,21 @@ bool Read(void* timeline, State& out) {
 
 bool PlayFromStart(void* timeline) {
     return timeline && R::IsLive(timeline) && component_calls::CallParamlessNamed(timeline, L"PlayFromStart");
+}
+
+bool Stop(void* timeline) {
+    return timeline && R::IsLive(timeline) && component_calls::CallParamlessNamed(timeline, L"Stop");
+}
+
+bool SetPosition(void* timeline, float position) {
+    if (!timeline || !R::IsLive(timeline)) return false;
+    void* fn = R::FindDispatchFunctionCached(R::ClassOf(timeline), L"SetPlaybackPosition");
+    ParamFrame f(fn);
+    if (!fn || !f.valid()) return false;
+    f.Set<float>(L"NewPosition", position);
+    f.Set<bool>(L"bFireEvents", true);
+    f.Set<bool>(L"bFireUpdate", true);
+    return Call(timeline, f);
 }
 
 bool ReverseFromEnd(void* timeline) {

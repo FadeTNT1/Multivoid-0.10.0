@@ -168,9 +168,11 @@ constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
                                               P::name::UfoDropperPigClass, P::name::SoltomiaCleaningClass,
                                               nullptr};
 // The gamemode mints many classes besides these, and most of its other spawners are not refused on a client yet,
-// so its source is narrowed to the two outputs of the night roll (mainGamemode_C::CustomEvent_5, an Octa or a
-// night egg), whose client roll the spawn authority refuses.
-constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", nullptr};
+// so its source is narrowed to the outputs of the rolls whose client copies the spawn authority refuses: the night
+// roll (mainGamemode_C::CustomEvent_5, an Octa or a night egg) and the UFO rolls (mainGamemode_C::ufo_ball, ufo_boo,
+// ufo_joel and ufo_pill; ufo_midas mints nothing).
+constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", P::name::UfoBallClass, P::name::UfoBoofoClass,
+                                                  P::name::UfoJoelClass, P::name::UfoPillfoClass, nullptr};
 // The gamemode's other natural birth: tickerFunguy (a timer body that rolls a Funguy at a random absolute map
 // point at night). A row of its own beside the Octa's, so the two output lists stay separate.
 constexpr const wchar_t* kGamemodeFunguyOutputs[] = {P::name::NpcClass_Funguy, nullptr};
@@ -205,7 +207,7 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {L"prop_coingun_C",          nullptr},          // the sell gun's coin mint
     {L"jellyfishPath_C",         nullptr},          // the space jellyfish's seven (world-actor lane)
     {L"trigger_eventer_C",       kEventerOutputs},  // the scheduler's dispatcher
-    {L"mainGamemode_C",          kGeomOctaNpcOutputs}, // the night roll's Octa or egg, and the spawn menu's Octa
+    {L"mainGamemode_C",          kGeomOctaNpcOutputs}, // the night roll's Octa or egg, the spawn menu's Octa, the UFOs
     {L"mainGamemode_C",          kGamemodeFunguyOutputs}, // tickerFunguy's Funguy (a second row: any row of the class may pass)
     {L"grayEventController_C",   nullptr},          // graysforest: spawn() mints the grayTest_C pack
     {L"superEgger_C",            nullptr},          // eggvasion: spwn() mints the eg_C children
@@ -334,7 +336,7 @@ void InstallExSpawnCatch() {
                 "trigger_spawnFollowingArir_C -> npc_arirFollower_C, boarInvasion_C -> npc_ariral_shooter_C + "
                 "firetank_C, "
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
-                "mainGamemode_C -> geomOcta_C + eg_C + npc_funguy_C, "
+                "mainGamemode_C -> geomOcta_C + eg_C + npc_funguy_C + ufo_ballfo_C + ufo_boofo_spawn1_C + ufo_joel_C + ufo_pillfo_C, "
                 "ticker_fossilhoundSpawner_C + event_fossilboarwar_C -> fossilhound_C, "
                 "ticker_insomniacSpawner_C -> insomniac_C + insomniac_child_C, "
                 "ticker_yellowWispSpawner_C -> killerwisp_C, "
