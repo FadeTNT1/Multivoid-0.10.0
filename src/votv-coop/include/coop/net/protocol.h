@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 322;
+inline constexpr uint16_t kProtocolVersion = 324;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1378,7 +1378,8 @@ enum class ReliableKind : uint8_t {
     // source classes the relay lists (the vent crawler's footsteps and vent break), whose client mirrors have the
     // playing bodies refused, so a client plays each once and never sends one back. Cosmetic, a one-shot: never
     // relayed; a client's copy is refused at the host's receive edge; not pre-world. Late join: none, a sound that
-    // has played is gone. EventSoundCuePayload.
+    // has played is gone. Op kFlick carries the host's ticker_flickerer flick (every light root's lamps blink and
+    // return to the group's state), which a client's own flickerer has refused. EventSoundCuePayload.
     EventSoundCue = 228,
 
     // HOST->ALL: the basement's water level (coop::basement_flood_sync). The flood is the host's: its level moves
@@ -2784,7 +2785,9 @@ constexpr uint8_t kObelisk    = 2;   // obelisk_C, a world-actor mirror
 constexpr uint8_t kBoarShield = 3;   // ufoShieldShader_C, level-placed (boarwar's UFO shader)
 constexpr uint8_t kAgrav      = 4;   // trigger_agrav_C, level-placed (the anti-gravity prank)
 constexpr uint8_t kMidas      = 5;   // midasufotest_C, level-placed (the gamemode's ufo_midas flight)
-constexpr uint8_t kLast       = kMidas;
+constexpr uint8_t kDropper    = 6;   // a ufoDropper_C child (the eventer's droppers), a world-actor mirror
+constexpr uint8_t kMorningUfo = 7;   // morningUfo_C (morningGay), a world-actor mirror
+constexpr uint8_t kLast       = kMorningUfo;
 }  // namespace event_scene_ids
 namespace event_scene_phases {
 // kSoltoClean, monotonic:
@@ -2803,6 +2806,10 @@ constexpr uint8_t kAgravCloakOff = 2;  // cloak(false): both end
 // kMidas:
 constexpr uint8_t kMidasRun      = 1;  // setActive(true): the flight along its spline begins
 constexpr uint8_t kMidasEnd      = 2;  // setActive(false): the flight is over (a client's own tick ends it too)
+// kDropper:
+constexpr uint8_t kDropperDeployed = 1;  // the box overlap or forceDeploy: shown, its descent timeline playing
+// kMorningUfo:
+constexpr uint8_t kMorningUfoFly   = 1;  // a player's box overlap: `fly` set, shown
 constexpr uint8_t kLast          = 3;
 }  // namespace event_scene_phases
 namespace event_scene_flags {
@@ -2825,6 +2832,7 @@ static_assert(sizeof(EventScenePhasePayload) <= 256 - 20 - 8, "EventScenePhasePa
 namespace event_sound_ops {
 constexpr uint8_t kSound   = 1;   // PlaySoundAtLocation: loc, volume, pitch, attenuation
 constexpr uint8_t kEmitter = 2;   // SpawnEmitterAtLocation: loc, rot, scale
+constexpr uint8_t kFlick   = 3;   // the flickerer's flick on every light root: no text, no place (all zero)
 }  // namespace event_sound_ops
 inline constexpr int kEventSoundTextCap = 172;
 struct EventSoundCuePayload {

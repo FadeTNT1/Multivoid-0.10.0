@@ -87,6 +87,13 @@ UE_FACT_FN(kRowShieldFlyAway, "event_scene_sync", L"ufoShieldShader_C", L"flyawa
 UE_FACT_FN(kRowAgravCloak, "event_scene_sync", L"trigger_agrav_C", L"cloak", Declared);
 // The gamemode's ufo_midas flight: the level-placed UFO's setActive is the host's phase edge.
 UE_FACT_FN(kRowMidasSetActive, "event_scene_sync", L"midasufotest_C", L"setActive", Declared);
+// The eventer's walk-in saucers: a dropper's box overlap (any actor) and its forceDeploy run one DoOnce body that
+// shows it and plays its descent; the morning UFO's box overlap sets `fly` and shows it for a player only. Each is
+// the host's phase edge, so a client's mirror starts with the host's and not only on its own player's walk-in.
+// The dropper's rows are ufoDropper_C's bodies, which its four children inherit.
+UE_FACT_FN(kRowDropperOverlap, "event_scene_sync", L"ufoDropper_C", L"BndEvt__ufoDropper_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
+UE_FACT_FN(kRowDropperForceDeploy, "event_scene_sync", L"ufoDropper_C", L"forceDeploy", Declared);
+UE_FACT_FN(kRowMorningUfoOverlap, "event_scene_sync", L"morningUfo_C", L"BndEvt__morningUfo_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
 
 // What a row does on each side.
 enum class Kind : uint8_t {
@@ -101,6 +108,8 @@ enum class Kind : uint8_t {
     ShieldFlyAway,    // HOST: flying away
     AgravCloak,       // HOST: the shimmer on or off
     MidasSetActive,   // HOST: the flight begun or ended
+    DropperDeploy,    // HOST: deployed
+    MorningUfoFly,    // HOST (after the body): flying, once the body set `fly`
 };
 
 struct Row {
@@ -148,6 +157,9 @@ constexpr Row kRows[] = {
     {&kRowShieldFlyAway,      "ufoShield.flyaway",         Kind::ShieldFlyAway},
     {&kRowAgravCloak,         "agrav.cloak",               Kind::AgravCloak},
     {&kRowMidasSetActive,     "midas.setActive",           Kind::MidasSetActive},
+    {&kRowDropperOverlap,     "ufoDropper.BoxOverlap",     Kind::DropperDeploy},
+    {&kRowDropperForceDeploy, "ufoDropper.forceDeploy",    Kind::DropperDeploy},
+    {&kRowMorningUfoOverlap,  "morningUfo.BoxOverlap",     Kind::MorningUfoFly},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x45530000;   // 'ES', then the row
@@ -254,6 +266,11 @@ SG::Verdict OnRowPre(const SG::Call& call) {
             NoteHostPhase(ids::kMidas, active ? ph::kMidasRun : ph::kMidasEnd, obj);
         return SG::Verdict::Run;
     }
+    case Kind::DropperDeploy:
+        if (host) NoteHostPhase(ids::kDropper, ph::kDropperDeployed, obj);
+        return SG::Verdict::Run;
+    case Kind::MorningUfoFly:
+        return SG::Verdict::Run;   // the post reads what the body decided
     case Kind::AgravCloak: {
         bool forward = false;
         if (host && ES::ReadBoolParam(call.function, call.locals, P::name::AgravForwardParam, forward)) {
@@ -266,12 +283,21 @@ SG::Verdict OnRowPre(const SG::Call& call) {
     return SG::Verdict::Run;
 }
 
+// After the body: the morning UFO's overlap sets `fly` only for a player, which its own flag tells.
+void OnRowPost(const SG::Call& call) {
+    const int row = call.tag - kTagBase;
+    if (row < 0 || row >= kRowCount || kRows[row].kind != Kind::MorningUfoFly || !IsHost()) return;
+    bool fly = false;
+    if (ES::ReadMorningUfoFly(call.object, fly) && fly) NoteHostPhase(ids::kMorningUfo, ph::kMorningUfoFly, call.object);
+}
+
 }  // namespace
 
 void InstallWatches() {
     int watched = 0;
     for (int i = 0; i < kRowCount; ++i) {
-        if (SG::WatchName(*kRows[i].row, kTagBase + i, &OnRowPre, nullptr)) {
+        const SG::PostFn post = kRows[i].kind == Kind::MorningUfoFly ? &OnRowPost : nullptr;
+        if (SG::WatchName(*kRows[i].row, kTagBase + i, &OnRowPre, post)) {
             ++watched;
         } else {
             UE_LOGE("event_scene: the watch on %ls::%ls did not register -- its scene edge or refusal is lost",

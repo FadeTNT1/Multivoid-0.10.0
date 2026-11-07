@@ -190,4 +190,18 @@ bool CallSetBreaker(void* root, bool open) {
     return Call(root, f);
 }
 
+bool CallFlick(void* root) {
+    if (!root || !EnsureResolved() || !IsLightRoot(root)) return false;
+    static void* s_flickFn = nullptr;
+    if (!s_flickFn) s_flickFn = R::FindFunction(g_rootCls, L"flick");
+    if (!s_flickFn) return false;
+    ParamFrame f(s_flickFn);
+    if (!f.valid()) return false;
+    return Call(root, f);
+}
+
+std::vector<void*> FindLightRoots() {
+    return R::FindObjectsByClass(L"trigger_lightRoot_C");
+}
+
 }  // namespace ue_wrap::lightswitch

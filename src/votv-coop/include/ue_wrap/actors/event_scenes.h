@@ -77,6 +77,19 @@ bool MidasProgress(void* actor, float& out);
 // alone). False when the verb did not dispatch.
 bool MidasRun(void* actor, float fraction);
 
+// ---- the eventer's walk-in saucers ----
+
+// A ufoDropper_C child's own `forceDeploy`, the box overlap's DoOnce body: shown, its descent timeline from the
+// start (a no-op once deployed). False when the verb did not dispatch.
+bool UfoDropperDeploy(void* actor);
+
+// morningUfo_C's `fly`, which its box overlap sets for a player; false when the member does not resolve.
+bool ReadMorningUfoFly(void* actor, bool& out);
+
+// What morningUfo_C's box overlap does for a player: `fly` set and the actor shown. False when either does not
+// resolve.
+bool MorningUfoFly(void* actor);
+
 // ---- the vent crawler (ventCrawler_C) ----
 
 // Its `Box`, the crawl's start: the box's world centre, its scaled half extent and its world rotation. False

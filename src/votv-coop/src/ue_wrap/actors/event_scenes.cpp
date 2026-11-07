@@ -201,6 +201,20 @@ bool MidasRun(void* actor, float fraction) {
     return true;
 }
 
+bool UfoDropperDeploy(void* actor) {
+    if (!actor || !R::IsLive(actor)) return false;
+    return CC::CallParamlessNamed(actor, P::name::UfoDropperDeployFn);
+}
+
+bool ReadMorningUfoFly(void* actor, bool& out) {
+    return ReadBoolMember(actor, P::name::MorningUfoFlyProp, out);
+}
+
+bool MorningUfoFly(void* actor) {
+    if (!WriteBoolMember(actor, P::name::MorningUfoFlyProp, true)) return false;
+    return E::SetActorHiddenInGame(actor, false);
+}
+
 bool ReadVentCrawlerBox(void* crawler, FVector& center, FVector& extent, FRotator& rotation) {
     void* box = MemberObject(crawler, P::name::VentCrawlerBoxProp);
     if (!box) return false;

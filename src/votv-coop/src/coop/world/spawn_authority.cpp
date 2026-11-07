@@ -129,7 +129,9 @@ constexpr Row kRows[] = {
     // The night-egg ticker: the same world-anchored shape -- its tick re-arms a 60-300 s
     // interval and rolls a weighted night spawn of one eg_C at random absolute map coordinates,
     // writing gamemode->eg (ticker_egSpawner_C UG:6-44). The host rolls, the catch mirrors the
-    // egg; a client's own tick would mint a second, unsynced egg.
+    // egg; a client's own tick would mint a second, unsynced egg. The 0.9.0n class: the 0.10.0 capture has no
+    // ticker_egSpawner_C (no body and no reference), its night egg is mainGamemode_C::CustomEvent_5's (a row
+    // below), so on 0.10.0 this watch never resolves.
     {&kRowReceiveTickTickerEgSpawner,     "egSpawner.ReceiveTick"},
     // The space jellyfish: the host's run is mirrored through the source-gated catch.
     {&kRowSpawnJellyfishPath,             "jellyfishPath.spawn"},
@@ -220,7 +222,7 @@ constexpr Row kRows[] = {
     // mainGamemode_C: the night roll. CustomEvent_5 is a one-shot timer's body, and the body is the roll AND its
     // own re-arm (eleven blocks of the graph: the 3 % night roll that mints a Geom Octa or a night egg, and the next
     // 120-300 s timer), so a client's timer simply ends here. The host rolls and the source-gated catch mirrors the
-    // Octa and the egg; the level-placed egg roller is already a row above.
+    // Octa and the egg; on 0.9.0n the egg roller was ticker_egSpawner_C, a row above.
     {&kRowCustomEvent5Gamemode,           "gamemode.CustomEvent_5"},
     // mainGamemode_C::CustomEvent_3: a timer body that rolls 1 % and mints one figura_C 200 m from player 0's pawn and
     // 50 m up (its only spawn site in the 0.10.0 capture). The figure is a world occurrence, not a scare built on the

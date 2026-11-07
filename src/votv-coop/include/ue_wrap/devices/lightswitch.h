@@ -12,6 +12,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace ue_wrap::lightswitch {
 
@@ -93,5 +94,13 @@ bool TryReadBreaker(void* root, bool& open);
 // The group's own setActive(bool), the verb that sets its breaker. Game thread. False on
 // null/unresolved.
 bool CallSetBreaker(void* root, bool open);
+
+// The group's own flick(): every lamp and ambient light off, then back to isActive, one to four times
+// over a fraction of a second (a latent chain in its ubergraph). Cosmetic: isActive is not written.
+// ticker_flickerer_C is its only caller. Game thread. False on null/unresolved.
+bool CallFlick(void* root);
+
+// Every live light root (CDO skipped), by a linear object walk: a low-rate use only. Game thread.
+std::vector<void*> FindLightRoots();
 
 }  // namespace ue_wrap::lightswitch

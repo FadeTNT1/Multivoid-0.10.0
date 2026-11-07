@@ -112,8 +112,11 @@ bool Install(coop::net::Session* session, bool isHost) {
 }
 
 void OnDisconnect() {
-    // Hook + minted names persist (process-lifetime; self-gated on session).
+    // Hook + minted names persist (process-lifetime; self-gated on session). The role drops with the
+    // session, as the fog lane's does, so an ex-client's own weather births are never destroyed; the
+    // next session's Install sets it again.
     for (int i = 0; i < kNumClasses; ++i) g_suppressed[i] = 0;
+    g_isClient.store(false, std::memory_order_release);
 }
 
 }  // namespace coop::weather_event_births

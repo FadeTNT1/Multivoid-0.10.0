@@ -496,6 +496,10 @@ void OnDisconnect() {
     g_spawnFogEchoSuppress.store(false, std::memory_order_release);
     g_superFogEchoSuppress.store(false, std::memory_order_release);
     g_clientSessionActive.store(false, std::memory_order_release);
+    // The spawnFog interceptor gates on this role flag alone (no connected check), and Install, which
+    // refreshes it, runs only while a session runs: an ex-client's flag left set kept cancelling its own
+    // rolling fog in the single-player world it went back to, until a next session re-installed.
+    g_isClient.store(false, std::memory_order_release);
     coop::weather_blackfog::OnDisconnect();
     g_superFogMirror     = nullptr;  // a live mirror is left to its own tick, which destroys it
     g_superFogMirrorIdx  = -1;

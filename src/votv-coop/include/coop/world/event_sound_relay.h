@@ -10,6 +10,11 @@
 // take each call whose calling graph is such an actor's, and send it as EventSoundCue: the asset by its full
 // name, the place, the volume, the pitch and the attenuation. A client plays it once through the same engine
 // calls; its own copy never plays one, so nothing echoes. Host authoritative, cosmetic; game thread.
+//
+// The same lane carries the light flicker (op kFlick): ticker_flickerer_C calls trigger_lightRoot_C::flick on
+// every light group, bypassing runTrigger and so the light group lane. A script-body watch on flick refuses a
+// client's own call and marks the host's; the host sends one cue per tick that flicked, and a client calls flick
+// on every light root of its announced world.
 
 #pragma once
 
