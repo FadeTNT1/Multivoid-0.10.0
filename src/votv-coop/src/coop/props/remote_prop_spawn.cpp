@@ -652,6 +652,15 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
     // the sender included, binds the host's identity by key.
     const bool hostTakes = coop::prop_element_tracker::SessionIsHost() && senderSlot != 0 && !fromConvert &&
                            !skipBind && !outSpawned && !eidOnly && WireClassIsProp(classW, classResolve);
+    // The deciding line for a container the joiner lacked: the host's row named a world container (a barrel) and
+    // nothing here held its key or sat within reach of its pose, so a mirror is built now. Seen at the join's
+    // close, after the sweep, it means the first row was lost or its copy died; seen inside the bracket it is the
+    // ordinary spawn of a container the save did not carry.
+    if (senderSlot == 0 && !eidOnly && !fromConvert && classW.find(L"container") != std::wstring::npos)
+        UE_LOGW("[JOIN-CONTAINERS] CLIENT host row for container cls='%ls' key='%ls' eid=%u at (%.1f,%.1f,%.1f) "
+                "found NO copy here (no key match, no neighbour) -- spawning it now; bracket-claim=%d",
+                classW.c_str(), keyW.c_str(), payload.elementId, payload.locX, payload.locY, payload.locZ,
+                coop::join_membership_sweep::IsClaimTrackingActive() ? 1 : 0);
     // No local match anywhere: materialise a fresh mirror (prop_fresh_spawn); with skipBind,
     // OnConvert binds the element itself.
     void* spawned = coop::prop_fresh_spawn::Materialize(payload, senderSlot, classW, keyW,
