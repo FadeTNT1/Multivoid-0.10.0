@@ -159,6 +159,7 @@ void __fastcall NativeThunk(void* context, void* stack, void* result) {
         frame.function = ReadPtr(stack, P::off::FFrame_Node);
         frame.locals = static_cast<uint8_t*>(ReadPtr(stack, P::off::FFrame_Locals));
         frame.codeOffset = CodeOffsetOf(stack);
+        frame.stack = stack;
     }
     // *Result = the native fn's RESULT_PARAM (the spawned actor for BeginDeferred). NULL-safe:
     // a failed spawn leaves it null -> the cb gets null + logs it (never derefs blind).
@@ -217,7 +218,7 @@ void __fastcall PreThunk(void* context, void* stack, void* result) {
     Verdict verdict = Verdict::Run;
     t_inCb = true;
     t_frame = CallerFrame{ReadPtr(stack, P::off::FFrame_Node),
-                          static_cast<uint8_t*>(ReadPtr(stack, P::off::FFrame_Locals))};
+                          static_cast<uint8_t*>(ReadPtr(stack, P::off::FFrame_Locals)), -1, stack};
     const int rc = RunPreCbSEH(s.pre, context, srcObj, parms, &verdict);
     t_frame = CallerFrame{nullptr, nullptr};
     t_inCb = false;

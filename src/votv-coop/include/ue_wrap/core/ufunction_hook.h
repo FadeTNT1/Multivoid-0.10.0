@@ -48,10 +48,14 @@ using PostNativeCallback = void(*)(void* context, void* sourceObject, void* spaw
 // parameters opcode by then, so this is the END of the call expression that reached it, the `end` of the
 // matching script_calls::CallSite. -1 when no bytecode reached it (a native called through ProcessEvent, as
 // our own calls do) and in a pre callback, which stands before the call. A frame of two values leaves it -1.
+//
+// `stack` is that frame itself, the raw FFrame, for a walk of the chain above it
+// (ue_wrap/core/script_stack.h); null outside a callback.
 struct CallerFrame {
     void*    function;
     uint8_t* locals;
     int32_t  codeOffset = -1;
+    void*    stack = nullptr;
 };
 CallerFrame CurrentCallerFrame();
 

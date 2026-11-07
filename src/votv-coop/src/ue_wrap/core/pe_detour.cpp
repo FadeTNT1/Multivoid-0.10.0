@@ -13,6 +13,7 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/pe_diag.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/script_stack.h"  // the open-dispatch stack this scope keeps
 #include "ue_wrap/core/sdk_profile.h"
 
 #include <windows.h>
@@ -281,12 +282,17 @@ constexpr int kPeDepthWarnStart = 128;  // engine-normal nesting is O(10); 128 =
 thread_local int t_peDepth = 0;
 thread_local int t_peDepthNextWarn = kPeDepthWarnStart;
 
-// The scope is trivial (an int, cannot fault) and the logging is a separate function called
+// The scope is trivial (an int and the dispatch's {object, function} pushed on script_stack's
+// per-thread stack, neither of which can fault) and the logging is a separate function called
 // after construction: if the warn path ever faults (absorbed by RunDetourSEH), the /EHa unwind
-// still runs the destructor and the depth cannot drift upward.
+// still runs the destructor and neither depth can drift upward.
 struct PeDepthScope {
-    PeDepthScope() { ++t_peDepth; }
+    PeDepthScope(void* self, void* function) {
+        ++t_peDepth;
+        ue_wrap::script_stack::detail::PushDispatch(self, function);
+    }
     ~PeDepthScope() {
+        ue_wrap::script_stack::detail::PopDispatch();
         if (--t_peDepth == 0) t_peDepthNextWarn = kPeDepthWarnStart;  // episode over -> re-arm
     }
 };
@@ -308,7 +314,7 @@ void MaybeWarnPeDepth(void* self, void* function) {
 // the trampoline, the depth warning's name reads, the pump's plumbing, the registry walks) and logs
 // it instead of crashing the engine. Callbacks and posted tasks carry guards of their own.
 void __fastcall ProcessEventDetourImpl(void* self, void* function, void* params) {
-    const PeDepthScope depthScope;      // trivial ++ (constructed BEFORE the fallible warn)
+    const PeDepthScope depthScope(self, function);  // trivial (constructed BEFORE the fallible warn)
     MaybeWarnPeDepth(self, function);
     // The game thread id, recorded on the first dispatch by CAS so a racing worker thread cannot
     // overwrite it.
@@ -422,7 +428,7 @@ __declspec(noinline) void __fastcall ProcessEventDetour(void* self, void* functi
         } else if (NowMs() < until) {
             // Counted, though nothing else of ours runs: a bypass that ends while a body it let
             // through is still running must not read that body's next dispatch as the outermost.
-            const PeDepthScope depthScope;
+            const PeDepthScope depthScope(self, function);
             if (g_peTrampoline) g_peTrampoline(self, function, params);
             return;
         } else {
