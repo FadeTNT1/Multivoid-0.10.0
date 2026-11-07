@@ -327,8 +327,23 @@ the round trip it needs (the looter asks the host, the host asks the owner's mac
 through the game's own verbs under the same escrow and commit) is a follow-up. `sleepers.loot_online` is reserved
 for it and off; on, it only says so in the log.
 
-**Follow-ups, not in v1:** looting an online sleeper; damage to a sleeper, carrying or moving one, a sleeper for players online when the server
-shuts down, a timeout after which a sleeper goes.
+**Players still online when the world is saved or the session ends.** Every world save also writes each connected
+client (on a listen host, never the host's own player; on the dedicated server, all of them) into `sleepers.txt` as a
+sleeper entry: their spot and facing now, the floor traced under it, their name, skin and stable id. Their inventory is
+not in the file -- it is the host's stored profile of them, which the client keeps streaming. These entries are not laid
+down while their owner is online; the file is simply the list the world will have when it is loaded again. The same
+list is written when the host quits (the game window closes, or the session is torn down on the way to the menu), before
+the players' puppets go, so a host that stops with clients connected still has them in the file. It is written once per
+session and never over a list that was not read. When the world is hosted again every entry is laid down at its saved
+spot -- unless that player is already back in -- and a player who joins wakes through the rejoin path above (the sleeper
+goes, the record is theirs, nothing is duplicated). A sleeper's saved spot is the last one the host knew: it is updated
+at every save while they are online, and at the moment they log off. A player who is dead at the save is skipped, as
+one who leaves dead is; one in a bed or asleep is saved at the lying spot every peer saw; one who is ragdolled but alive
+is saved where their body is. The log says `sleeper: saved N online player(s) as sleepers at world save`,
+`sleeper: session ending -- N connected player(s) laid down` and, at load, `sleeper: N of N saved sleepers laid down again`.
+
+**Follow-ups, not in v1:** looting an online sleeper; damage to a sleeper, carrying or moving one, a timeout after
+which a sleeper goes.
 
 ### Inventory
 

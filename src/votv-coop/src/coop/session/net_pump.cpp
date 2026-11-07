@@ -277,6 +277,7 @@ void TearDownSession(coop::net::Session& session, const char* why) {
         ~FinishGuard() { g_tornDownFinished.store(stops, std::memory_order_release); }
     } finish{stops};
     coop::revive_protection::End(coop::revive_protection::EndWhy::Session);
+    coop::sleepers::OnSessionEnding("session teardown");  // a host's connected clients, written as sleepers before their puppets go
     g_wasConnected = false;
     g_wasConnectedBySlot.fill(false);
     ForgetWorldReadyAnnounce();

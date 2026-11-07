@@ -5,6 +5,7 @@
 
 #include "coop/input/game_window_proc.h"
 #include "coop/net/session.h"
+#include "coop/player/sleepers.h"
 #include "ui/overlay_backend.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/hook.h"
@@ -106,6 +107,7 @@ void DoShutdown() {
     UE_LOGI("shutdown: BEGIN cleanup (flag set; session=%p hwnd=%p)",
             g_session, coop::input::game_window_proc::Hwnd());
 
+    coop::sleepers::OnSessionEnding("the game is closing");  // the connected clients, written as sleepers before the session stops
     if (g_session) g_session->Stop();
     ::Sleep(100);  // let detached pollers observe g_shuttingDown
     ue_wrap::game_thread::Uninstall();
