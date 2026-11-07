@@ -34,21 +34,10 @@ namespace coop::trash_collect_sync {
 // world-gated subsystem install. Game thread.
 void Install(coop::net::Session* session);
 
-// Game thread. If `heldActor` is a live, UNKEYED (Key=None) Aprop_C, force-mint a stable Key on
-// it and broadcast a PropSpawn under that Key, so peers spawn a mirror the held-pose stream can
-// then drive into the collector's hands. Returns true iff it minted and broadcast.
-//
-// The gate is IsKeyedInteractable, so the non-Aprop_C chipPile, trashBitsPile and garbageClump
-// DO pass and ARE broadcast; crash safety lives on the RECEIVER, which spawns them physics-free
-// (GetStaticMesh returns null for a non-Aprop_C) and drives them kinematically. Resolving their
-// real mesh and physics-driving a self-morphing actor is a use-after-free.
-//
-// A no-op (false) for: a null or dead actor; anything that is not a keyed interactable at all;
-// an actor that is both keyed AND already tracker-known, since the pose stream alone mirrors it
-// -- "has a key" is not "the peer has it", and a keyed-but-untracked prop IS expressed; a
-// kerfur, whose lane is KerfurConvert; the host-authoritative garbageClump on a client, which
-// trash_channel owns through the grabbed pile's eid; a pending sweep candidate; and anything at
-// all before quiescence. Idempotent: once minted the Key is non-None, so a repeat returns false.
+// Game thread. Express eligible held items so peers can resolve the held-pose stream.
+// The host also re-expresses tracked keyed props; clients never re-author tracked mirrors.
+// Returns true when a spawn is broadcast. Kerfurs, clumps, swingers and pending sweep
+// candidates remain on their own synchronization paths.
 bool EnsureHeldItemBroadcast(void* heldActor, coop::net::Session* session);
 
 // Drop the cached session (full session teardown / aggregate disconnect). The trash entity ctx
