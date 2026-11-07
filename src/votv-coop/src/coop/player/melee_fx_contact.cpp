@@ -76,10 +76,12 @@ bool HeldHere(void* prop) {
 }
 
 sg::Verdict OnImpactPre(const sg::Call& c) {
-    if (!Enabled() || !LiveSession()) return sg::Verdict::Run;
+    // One read: LiveSession() is null once the link drops, which the net thread can do between two calls.
+    coop::net::Session* const session = Enabled() ? LiveSession() : nullptr;
+    if (!session) return sg::Verdict::Run;
     // The host's own prop damage or break reaches every client from the host's cue watch for any cause
     // (coop/props/prop_impact_fx): a second event here would show a held prop's particles twice.
-    if (LiveSession()->role() == coop::net::Role::Host) return sg::Verdict::Run;
+    if (session->role() == coop::net::Role::Host) return sg::Verdict::Run;
     void* owner = R::OuterOf(c.object);
     // A host-damaged prop's cues are the host's (coop/props/prop_impact_fx), held or not.
     if (!owner || !ue_wrap::prop::IsDescendantOfProp(owner) || coop::props::crate_break::IsHostDamaged(owner))
