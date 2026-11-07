@@ -48,6 +48,12 @@ void DrainChunk();
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/CStaticFunctionDefinitions.cpp).
 void ExpressIncrementalSpawn(void* actor);
 
+// The same payload for ONE peer, and the prop's save record behind it: the host's answer to a client
+// whose drop intent named a key the host still holds live, so that client's own copy binds to it by key
+// (coop/props/prop_drop_intent). Host-only; false for a client, a kerfur, an actor with no host element
+// or one the payload builder refuses, or a send that did not go.
+bool ExpressSpawnToSlot(void* actor, int peerSlot);
+
 // Does the express path above actually BROADCAST right now? It returns immediately on a client,
 // so a caller that narrates "broadcasting one PropSpawn each" owes this question first -- one
 // printed that sentence over 3,102 adoptions and broadcast nothing. Reads the same session

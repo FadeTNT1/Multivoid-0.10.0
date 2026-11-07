@@ -30,7 +30,15 @@ Nothing about a prop is reflected as replication, so the mod watches four seams:
 | came from the save | the shared discovery pass at world start (`coop/element/object_scan_hub`, over the object index the engine's own notifications keep) |
 | was born by a spawner (mushrooms, pinecones, forage) | the prop's initialisation on the host; a client's shared-world spawners are refused (`coop/world/spawn_authority`) and the host mirrors what its own produce (`coop/props/host_spawn_watcher`) |
 | was spawned by the spawn menu or extracted from a container on the host | the engine's finish-spawning call, because those births run their initialisation inside the Blueprint and that call is where the actor is finished |
+| was born on a client by that client's player | the same finish-spawning call, where the mod reads who asked for it ("Who authors a prop", below) and the drop-intent lane takes it to the host (`coop/props/prop_drop_intent`) |
 | was destroyed | the engine's destroy call on either role: eaten, broken, picked up into a pocket (`coop/props/prop_lifecycle`); a prop that vanishes inside a Blueprint (the truck, culling, a lifespan) is caught by the host's death-watch and destroyed by id on every peer (`coop/props/registry_reaper`) |
+
+Two deaths at that call are not sent. A per-player class (a washer shot, the inventory container, a
+hallucination) never crossed at its birth, so its key can only name another peer's actor. And a scratch
+actor -- one a Blueprint spawns to read and destroys inside the same dispatch, as an inventory slot's
+`respawnReset` and a double click do -- was never told to anyone, while its key is the item's saved one:
+sent, it destroyed that item's world copy on every other peer. `[RD]` the inventory Blueprints spawn and
+destroy in one function; `[?]` until a run reads `dies in the dispatch it was born in`.
 
 A birth message carries the prop's class, key, id, transform and physics flags. For a class that
 keeps save state of its own -- a tape reel's progress, a floppy disc's files -- a second message
@@ -105,16 +113,40 @@ performs (`coop/props/prop_drop_intent`):
 - **Births the client cannot avoid.** A reel ejected from a caddy, a module or a drive taken from
   a rack, an item extracted from a container all materialise on the client first; they go
   through the same door, class-checked at the host, born asleep where the class needs it.
-- **Births a player asked for.** The sandbox spawn menu and the toolgun. These cannot be named by
-  class -- the menu is the whole catalog, and the world's own spawners, morphs and impacts mint
-  those same classes per peer, so a class test would double the world. They are admitted on
-  AUTHORSHIP instead: the birth seam asks whether a player's own spawn verb is on the stack, which
-  is a fact only that instant holds, since the VM still has the calling Blueprint frame there
-  (`coop/props/prop_spawn_authoring`). Such a birth crosses as an ordinary drop intent and is NOT
-  slept on the host -- it was dropped at the player's aim and must fall there as it falls here.
+- **Births a player asked for.** These cannot be named by class -- the menu is the whole catalog,
+  and the world's own spawners, morphs and impacts mint those same classes per peer, so a class test
+  would double the world. They are admitted on AUTHORSHIP instead, read at the finish-spawning seam,
+  the one instant the VM still holds the chain that made the birth: the Blueprint frames above the
+  call, and the engine dispatches that started them, which the mod's ProcessEvent detour keeps per
+  thread (`ue_wrap/core/script_stack`, `coop/props/prop_spawn_authoring`). A birth is the player's
+  when that chain holds the spawn menu's or the toolgun's or shovel's own verb; the player's hand
+  item (a tool's use, a camera's photo after its delay); one of the player's own action events or
+  verbs on its own pawn, by pointer (fire, use, drop, the rotate and alt clicks, the E menu's
+  action, the melee swing -- not movement, look, menus or the hotbar); a widget the player clicked,
+  as the outermost dispatch, its tick excluded (an inventory drop, a crafted item, a crumpled sheet);
+  a granted take's replay (an opened meal's contents); or an actor such a birth made in the last 30
+  s and still this peer's alone (the nail a fired nail projectile leaves). Such a birth crosses as
+  an ordinary drop intent and is NOT slept on the host, unless its class is one of the whitelisted
+  device births above, which keep their route.
+- **Replacements.** A birth in the same dispatch that sent a keyed destroy of a shared prop is that
+  prop's replacement -- `lib_C::replaceProp`, a knife's slice, a glowstick lit -- and crosses after
+  it, decided at the drain since the replacement is often born first.
+
+Three births are left to the lanes that carry them whoever asked: a launcher's rocket and sticky
+bomb (the explosion lane's shot), the coin gun's coins (the sale) and a kerfur's prop form (the
+conversion). A per-player or wire-suppressed class is dropped before anything is sent. When the
+host already holds the key an intent names, it spawns nothing and sends that prop's birth row to the
+sender alone, so the sender's copy binds to it. A class the host has never loaded (the lit
+glowstick's) is loaded from the game's props folder by name, there and on any receiver of its birth.
+A client's untracked prop that reaches the host as a held item's birth row (`coop/props/trash_collect_sync`)
+is taken by the host as its own and expressed back, so every peer binds the host's identity.
 
 Any other keyed prop a client creates is dropped at that door and never reaches the host: that is
-the world's own churn, which every peer produces for itself.
+the world's own churn, which every peer produces for itself. What the rules cannot see: a device
+whose birth follows the player's press by a timer of its own (a 3D printer, the fax, the cremator)
+has no player frame left, and an act a lane both lets run here and replays on the host would cross
+twice. `[RD]` the call shapes are read from the 0.10.0 bytecode; `[?]` until a two-peer run reads
+each rule's `prop_spawn_authoring: <rule> authored birth` line and the teardown `VERDICT`.
 
 ### The data row a prop carries
 
@@ -932,7 +964,8 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | A prop whose own grab prelude adds to the base one gets only the base one on a receiver: the sprinkler's also detaches its hose, so the hose stays tied to a sprinkler another peer carries away. The glowstick's replaces the base one with its own release, and a receiver runs the base one | `[V]` the sprinkler and glowstick Blueprints: `prop_sprinkler_C`'s prelude calls `prop_C::playerGrabbed_pre` and `hose->detachSprinkler`, `prop_glowstick_C`'s calls `releaseGlowstick` alone; `coop/props/remote_prop` runs the base prelude |
 | A prop the toolgun freezes, unfreezes or makes static changes on the tool user's machine only; the next hold of it converges frozen and sleep, never static, and a copy static on one peer, without a wall-attach component's unstick, is not driven there while another peer holds the prop -- a refusal that lasts until a lane carries static | `[V]` no lane under `src/coop` catches `setPropProps`; `coop/props/remote_prop` refuses a stream for a copy static here |
 | Another peer's hold can carry away the chair this peer sits in at the laptop, which single player never allows: the laptop freezes the seat only on the machine whose player sits | `[V]` the laptop Blueprint: `stabilizeSeat` sets the seat frozen, and the exit's `setPropProps` clears it; `coop/props/remote_prop` unfreezes a held copy at the hold's first pose |
-| A keyed prop a client creates outside the intent door (a place after a pickup, the whitelisted births, a container extract, a player's own spawn verb) never reaches the host. It is logged now: the drain names its exit, and `[dev] prop_birth_key_probe` tallies every exit by name | `[V]` `coop/props/prop_drop_intent` drops it at the drain; `coop/dev/prop_birth_key_probe` |
+| A keyed prop a client creates that no rule of "Who authors a prop" names (a device's timed birth) never reaches the host. The drain names its exit, and `[dev] prop_birth_key_probe` tallies every exit by name | `[V]` `coop/props/prop_drop_intent` drops it at the drain; `coop/dev/prop_birth_key_probe` |
+| The hand-axis test that keeps a hand's display actor from crossing knows the main hand only: an offhand display actor born under a player's act, or in a dispatch that destroyed a shared prop, would cross as a world prop | `[RD]` `coop/player/hand_item` reads `holdingActor` alone; `[?]` whether a pickup ever lands in the offhand directly |
 | Concrete and every other local-accumulator prop but food drift between peers; the tape reel has its corrector and food its lane | `[V]` `coop/interactables/tape_caddy_sync`, `coop/props/prop_food_state` |
 | A prop tied by any hook -- a player's, an anchored one, the level's own -- is parked on every client for as long as the tie holds, since the host streams it, so it cannot be grabbed there until the hook lets go. A joiner parks one at rest on the host's ready-edge re-send, a single unreliable datagram: lost, it leaves that prop unparked there until it moves | `[V]` `coop/items/hook_prop_claim` claims every tied prop on the host every pass; `coop/props/prop_drive_stream` parks it; `coop/props/prop_drive_host` re-sends at the ready edge |
 | A wall-attachable whose stick replay finds no surface here is frozen in place without the attach, so when the thing it stuck to is destroyed it stays in the air here while every other copy falls | `[V]` `coop/props/prop_stick_sync`'s fallback writes the flag without the component's attach or its destroy binding; `[RD]` the stick carries no parent |
@@ -956,7 +989,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | the birth and death seams | `coop/props/prop_lifecycle`, `coop/props/host_spawn_watcher`, `coop/props/prop_element_tracker`, `coop/props/prop_synth_key`, `coop/props/registry_reaper`, `coop/props/prop_echo_suppress` |
 | the receivers | `coop/props/remote_prop` (held), `coop/props/remote_prop_spawn` (birth: adopt, converge, create), `coop/props/prop_fresh_spawn` (the materialiser), `coop/props/prop_wire_parity`, `coop/props/active_drive`, `coop/props/prop_sound` |
 | a body's push on props | `coop/player/local_push` (the local pawn's push and standing force, held down in a session), `ue_wrap/actors/character_push` (the movement component's values by reflection), `coop/props/client_shove` (a client's shove becomes a claim) |
-| a client's intents | `coop/props/prop_drop_intent`; a thrown prop: `coop/props/prop_throw`, `coop/net/throw_bounds` |
+| a client's intents | `coop/props/prop_drop_intent`; who authored a birth: `coop/props/prop_spawn_authoring`, `ue_wrap/core/script_stack`; a thrown prop: `coop/props/prop_throw`, `coop/net/throw_bounds` |
 | the stick | `coop/props/prop_stick_sync` |
 | the wall vent the ventCrawler pulls down; the vent census | `coop/props/vent_drive` (the host's feeder), `coop/props/prop_wire_parity` (`ConvergeStaticRelease`), `ue_wrap/actors/vent_crawler`; `coop/props/vent_census`, `ue_wrap/actors/prop` (`ReadPropVisibility`) |
 | a prop under a hook's drive or a broom's push | `coop/props/prop_drive_host` (the host's set and stream), `coop/props/prop_drive_stream` (the receiver), `coop/items/hook_prop_claim` (the hook lane feeding it), `coop/items/hook_constraint` (the tie itself, host-only), `coop/items/broom_push` (the broom's push feeding it) |

@@ -641,6 +641,20 @@ void ExpressIncrementalSpawn(void* actor) {
     BroadcastIncrementalPropSpawn_(s, actor, /*kindTag=*/"");
 }
 
+bool ExpressSpawnToSlot(void* actor, int peerSlot) {
+    auto* s = g_session_ptr.load(std::memory_order_acquire);
+    if (!s || s->role() != coop::net::Role::Host) return false;
+    if (!actor || !R::IsLive(actor)) return false;
+    if (coop::kerfur_entity::IsKerfurActor(actor)) return false;   // KerfurConvert is a kerfur's only signal
+    const coop::element::ElementId eid = PT::GetPropElementIdForActor(actor);
+    if (eid == coop::element::kInvalidId) return false;
+    coop::net::PropSpawnPayload p{};
+    if (!BuildPropSpawnPayload_(actor, eid, -1, p, -1)) return false;
+    if (!s->SendReliableToSlot(peerSlot, coop::net::ReliableKind::PropSpawn, &p, sizeof(p))) return false;
+    coop::prop_save_data::PublishWithSpawn(s, actor, p.key, peerSlot);
+    return true;
+}
+
 void ExpressIncrementalKerfurOffProp(void* actor) {
     auto* s = g_session_ptr.load(std::memory_order_acquire);
     if (!s || s->role() != coop::net::Role::Host) return;

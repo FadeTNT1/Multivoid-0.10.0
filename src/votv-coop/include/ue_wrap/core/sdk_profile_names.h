@@ -1789,6 +1789,41 @@ inline constexpr const wchar_t* FilterItemsBlockedParam = L"blocked";
 inline constexpr const wchar_t* DirtBallClass = L"prop_dirtball_C";
 inline constexpr const wchar_t* ProcessBuriedItemActorParam = L"actor";
 inline constexpr const wchar_t* MainPlayerHoldingActorProp = L"holdingActor_main";
+
+// Who authored a client's birth (coop/props/prop_spawn_authoring). mainPlayer_C's own input events are
+// named InpActEvt_<action>_K2Node_Input{Action,Key}Event_<n> (70 of them on 0.10.0); a birth under one of
+// these actions is the player's. Movement, look, menus, saves and the hotbar are not listed: they author no
+// world prop, and a hand switch's display actor is the hand lane's.
+inline constexpr const wchar_t* kPlayerActionInputPrefixes[] = {
+    L"InpActEvt_Fire_",              // playerHandUse_LMB on the hand item, playerUsedOn on the target
+    L"InpActEvt_Use_",               // E: the look-at actor's use, the grab
+    L"InpActEvt_Drop_",
+    L"InpActEvt_Rotate_",            // the hand item's RMB use and release
+    L"InpActEvt_Alt_",
+    L"InpActEvt_LeftMouseButton_",
+    L"InpActEvt_ActivateEquipment_",
+    L"InpActEvt_LockObject_",
+};
+inline constexpr size_t kPlayerActionInputPrefixesSize =
+    sizeof(kPlayerActionInputPrefixes) / sizeof(kPlayerActionInputPrefixes[0]);
+// mainPlayer_C verbs that act for the player when they are reached through a dispatch of their own (a timer, the
+// E menu's widget): the selected E-menu action, the melee swing, the simulated clicks and the drops.
+inline constexpr const wchar_t* kPlayerActionVerbs[] = {
+    L"useSelectedAction", L"attack", L"simulateLMB", L"simulateRMB",
+    L"dropItem_mainhand", L"dropItem_offhand", L"dropGrabObject", L"dropEquipmentByName",
+};
+inline constexpr size_t kPlayerActionVerbsSize = sizeof(kPlayerActionVerbs) / sizeof(kPlayerActionVerbs[0]);
+// A widget's per-frame event: a HUD's tick is no player's act.
+inline constexpr const wchar_t* WidgetTickFn = L"Tick";
+// The game's hallucinations: each peer's own, drawn around its own player. maingamemode_C::addHallFood spawns
+// the burger from the player's hunger (ticker_foodHall_C), ticker_lightSanity_C::spawnInsanityProp the dissolving
+// prop from its sanity (prop_lifecycle::IsPerPlayerPropClass).
+inline constexpr const wchar_t* BurgerHallucinationClass = L"prop_burgerHallucinate_C";
+inline constexpr const wchar_t* InsanityPropClass = L"insanityProp_C";
+// Where the game's prop classes live, as /Game/objects/<stem>.<stem>_C: the load of a prop class no instance on
+// this peer has loaded yet (ue_wrap::prop::ResolveOrLoadPropClass).
+inline constexpr const wchar_t* PropsContentDir = L"/Game/objects/";
+inline constexpr const wchar_t* BlueprintGeneratedClassName = L"BlueprintGeneratedClass";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

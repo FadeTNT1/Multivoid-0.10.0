@@ -36,6 +36,7 @@
 #include "coop/props/prop_drive_stream.h"  // IsParked: a prop the host's driven stream owns
 #include "coop/props/prop_snapshot.h"      // ExpressIncrementalSpawn, the handback re-express
 #include "coop/props/prop_fresh_spawn.h"   // the deferred-spawn materialiser
+#include "coop/props/prop_save_data.h"     // ExpectRecordFor: a taken client prop's record is the sender's
 #include "coop/props/prop_lifecycle.h"
 #include "coop/props/prop_stick_sync.h"    // ConvergeStuck, a wall-attach copy's stuck state
 #include "coop/props/prop_throw.h"         // SeqFor: the actor this peer just threw or swung is not converged
@@ -128,6 +129,33 @@ static bool HostAuthorityHandback_(void* actor, const std::wstring& keyW,
     }
     coop::prop_snapshot::ExpressIncrementalSpawn(actor);
     return true;
+}
+
+// Whether the wire class is a prop class (prop_C or below), through the caller's resolver, loading it
+// when no instance here has.
+static bool WireClassIsProp(const std::wstring& classW, void* (*resolve)(const wchar_t*)) {
+    void* cls = resolve ? resolve(classW.c_str()) : nullptr;
+    if (!cls) cls = ue_wrap::prop::ResolveOrLoadPropClass(classW);
+    return cls && ue_wrap::prop::IsClassDescendantOfProp(cls);
+}
+
+// The host's take of a client's untracked prop it just built (unbound): enrolled under its own key as
+// the host's element, marked known so the steady-world re-seed does not adopt it a second time, and
+// expressed, so the sender binds its copy to the host's identity by key and every other peer gets it.
+// The sender's save record is still in flight behind its spawn row, so the host's class-default record
+// is held back until it lands.
+static void HostTakeClientProp(void* actor, const std::wstring& keyW, const std::wstring& classW,
+                               int senderSlot) {
+    coop::prop_save_data::ExpectRecordFor(actor, keyW, static_cast<uint8_t>(senderSlot));
+    const std::wstring enrolled = coop::prop_element_tracker::MarkPropElement(
+        actor, keyW, classW, coop::prop_element_tracker::EnrollSource::kExpressSeam);
+    coop::prop_element_tracker::MarkKnownKeyedProp(actor);
+    const coop::element::ElementId eid = coop::prop_element_tracker::GetPropElementIdForActor(actor);
+    UE_LOGI("remote_prop::OnSpawn: HOST took slot=%d's untracked prop as its own -- %p cls='%ls' key='%ls' "
+            "host eid=%u; expressed, so its sender binds the host identity",
+            senderSlot, actor, classW.c_str(), enrolled.c_str(),
+            (eid == coop::element::kInvalidId) ? 0u : static_cast<unsigned>(eid));
+    coop::prop_snapshot::ExpressIncrementalSpawn(actor);
 }
 
 // The adopt of a position match: the actor the caller chose within the fuzzy radius becomes the
@@ -617,10 +645,21 @@ void OnSpawn(const coop::net::PropSpawnPayload& payload, int senderSlot,
             coop::element::bind_wait::MarkDeferred(payload.elementId, "kerfur prop awaiting its local twin");
         return;
     }
+    // A CLIENT's own keyed prop that names nothing here -- an untracked prop it took in hand and
+    // expressed (trash_collect_sync::EnsureHeldItemBroadcast). A client never authors the existence of
+    // a shared-world prop, so the host does not mirror it under the client's identity: it builds the
+    // prop and takes it as its own, as the handback above does for one it already had, and every peer,
+    // the sender included, binds the host's identity by key.
+    const bool hostTakes = coop::prop_element_tracker::SessionIsHost() && senderSlot != 0 && !fromConvert &&
+                           !skipBind && !outSpawned && !eidOnly && WireClassIsProp(classW, classResolve);
     // No local match anywhere: materialise a fresh mirror (prop_fresh_spawn); with skipBind,
     // OnConvert binds the element itself.
     void* spawned = coop::prop_fresh_spawn::Materialize(payload, senderSlot, classW, keyW,
-                                                        propNameW, skipBind, classResolve);
+                                                        propNameW, skipBind || hostTakes, classResolve);
+    if (spawned && hostTakes) {
+        HostTakeClientProp(spawned, keyW, classW, senderSlot);
+        return;
+    }
     if (spawned && outSpawned) *outSpawned = spawned;
 }
 

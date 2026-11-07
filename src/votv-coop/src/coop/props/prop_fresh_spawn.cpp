@@ -89,6 +89,9 @@ void* Materialize(const coop::net::PropSpawnPayload& payload, int senderSlot,
         return nullptr;
     }
     void* actorClass = resolve ? resolve(classW.c_str()) : R::FindClass(classW.c_str());
+    // A prop class no instance on this peer has made yet -- the lit glowstick another peer made from
+    // its own -- is loaded from the props folder, by a plain name only, once per name.
+    if (!actorClass) actorClass = ue_wrap::prop::ResolveOrLoadPropClass(classW);
     if (!actorClass) {
         UE_LOGW("remote_prop::OnSpawn: class '%ls' not found -- dropping (likely cooked-content class not loaded)",
                 classW.c_str());
