@@ -117,6 +117,20 @@ void BuildIndex(uint64_t now) {
     g_indexBuilt = true;
 }
 
+}  // namespace
+
+void ClientOnBeginPlay(void* plant) {
+    if (!g_indexBuilt || !plant) return;   // the next build lists it
+    Local l;
+    l.actor.Set(plant);
+    l.id = IdentityOf(plant);
+    l.cls = Narrow(R::ClassNameOf(plant));
+    E::TryGetActorLocation(plant, l.loc);
+    g_index.push_back(std::move(l));
+}
+
+namespace {
+
 void* FindLocal(const W::Row& row, bool& byPlace) {
     byPlace = false;
     const uint64_t now = NowMs();

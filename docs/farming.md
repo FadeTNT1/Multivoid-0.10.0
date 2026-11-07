@@ -96,13 +96,13 @@ session.
 
 ## Wire messages
 
-Protocol 312. Both kinds are `BlobChunkPayload`, one message per blob, bytes in `coop/farming/plant_wire.h`; strings
+Protocol 322. Both kinds are `BlobChunkPayload`, one message per blob, bytes in `coop/farming/plant_wire.h`; strings
 are printable ASCII up to 96 bytes and the parse refuses anything else whole.
 
 | Kind | Direction | Ops |
 |---|---|---|
-| `PlantIntent` (248) | client to host | `Harvest`, `Discard` (key), `Tend` (key, mask, water, fertilizer, grow, fruit), `Medicine` (key, type, time), `PotPlant` (pot key, seed class, seed row) |
-| `PlantState` (249) | host to all, or one slot | `Row`, `Gone` (harvested bit), `SnapshotEnd`, `Ack` (request id, ok, the harvested item's key) |
+| `PlantIntent` (254) | client to host | `Harvest`, `Discard` (key), `Tend` (key, mask, water, fertilizer, grow, fruit), `Medicine` (key, type, time), `PotPlant` (pot key, seed class, seed row) |
+| `PlantState` (255) | host to all, or one slot | `Row`, `Gone` (harvested bit), `SnapshotEnd`, `Ack` (request id, ok, the harvested item's key) |
 
 ## Late join
 
@@ -125,11 +125,14 @@ edge.
 
 - `[?]` Not yet run in a two-peer session: every claim above is read from the bytecode and the code.
 - A client's melee or fire damage to a plant is refused locally; the host's own physics still kills its plants.
-- Ground planting (`dirthole_C.processBuriedItem`) is not carried here: a client's ground-planted seed stays local,
-  and its plant never grows (its tick is refused).
-- Beehives, sprinklers, ground hoses, grow areas and UV lights write a client's plants into parked fields only; nothing
-  there reads them, and the host's own run reaches the row. The irrigation lane tells this one through
-  `HostNotePlantWatered`.
+- Ground planting (`dirthole_C.processBuriedItem`) is the dig lane's (`coop/props/dig_sync`): a client's burial is
+  its DigIntent, the host's burial spawns the plant, and this lane's census names it like any other. The dig lane's own
+  plant row (DigState op 3) and this lane's row bind the same client actor: each adopts a plant of the row's class
+  within 6 uu, and a client plant that begins play is listed here at once, so neither spawns a second one.
+- The irrigation lane (`coop/items/irrigation_sync`) cancels a sprinkler's doWater on a connected client, so only the
+  host's sprinklers water and the drift rows carry it. A ground hose's spray, beehives, grow areas and UV lights still
+  write a client's plants into parked fields only; nothing there reads them, and the host's own run reaches the row.
+  `HostNotePlantWatered` has no caller yet: the 1 Hz census's drift rows already carry a sprinkler's water.
 - The client's `medicines` map is not mirrored, so a client's plant shows no healing mood; a client's second dose of
   a type already running on the host restarts it at 30 s (the host does not read its own map).
 - A plant attached to something other than a keyed prop is mirrored at its place, unattached.

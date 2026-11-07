@@ -102,7 +102,9 @@ void OnActionPost(const sg::Call& c) {
 
 // HOST: a plant began play (a save load, a spawner, a pot, a burial); its first row waits for its loaded data.
 void OnBeginPlayPost(const sg::Call& c) {
-    if (IsHost() && c.object) HostOnBeginPlay(c.object);
+    if (!c.object) return;
+    if (IsHost()) HostOnBeginPlay(c.object);
+    else ClientOnBeginPlay(c.object);
 }
 
 // A plant's destroy. CLIENT: its body drops the seed or the produce, which are the host's births; refused. HOST: the

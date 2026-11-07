@@ -49,6 +49,9 @@ void HostReset();
 
 // ---- plant_client.cpp ----
 void ClientApply(const W::State& m);
+// CLIENT: a plant began play (a mirror the dig lane spawned for a burial, a pot's plant): listed at once, so a row that
+// names it in the same tick binds it by place instead of spawning a second plant.
+void ClientOnBeginPlay(void* plant);
 void ClientTick();
 void ClientReset();
 // The host key this client's plant is bound to, or "" when it is not bound.
