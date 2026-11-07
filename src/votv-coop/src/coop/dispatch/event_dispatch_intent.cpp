@@ -40,6 +40,7 @@
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/player/washer_fx.h"  // a firing pressure washer's jet, hiss and splashes on every other peer
 #include "coop/player/blood_drop_fx.h"  // a bleeding player's blood drops, fallen on every other peer
+#include "coop/player/sleeper_drag.h"  // a sleeper's body carried by a player; the host owns its pose
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
 #include "coop/props/prop_food_state.h"  // HOST->CLIENT a world food's state; CLIENT->HOST a bite of one
 #include "coop/props/water_fill_sync.h"  // HOST->CLIENT a world bucket's water level
@@ -763,6 +764,19 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::blood_drop_fx::OnReliable(p, static_cast<int>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::SleeperDrag: {
+        // CLIENT->HOST a carry's start, pose and end; HOST->ALL the carried body's pose (coop::sleeper_drag). Never
+        // relayed: the host answers with its own Moved. The handler checks the phase against the sender's role.
+        if (msg.payloadLen != sizeof(net::SleeperDragPayload)) {
+            UE_LOGW("event_feed: SleeperDrag from slot %d is %zu bytes, not %zu -- dropping", msg.senderPeerSlot,
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::SleeperDragPayload));
+            break;
+        }
+        net::SleeperDragPayload p{};
+        std::memcpy(&p, msg.payload, sizeof(p));
+        coop::sleeper_drag::OnReliable(p, static_cast<int>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::ProjectileFired: {

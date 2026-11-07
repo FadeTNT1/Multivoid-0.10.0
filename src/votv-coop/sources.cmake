@@ -470,6 +470,7 @@ set(VOTVCOOP_SOURCES
     src/coop/player/sleep_rest.cpp
     src/coop/player/sanity_watch.cpp
     src/coop/player/sleep_sync.cpp
+    src/coop/player/sleeper_drag.cpp
     src/coop/player/sleeper_wire.cpp
     src/coop/player/sleepers.cpp
     src/coop/player/sleeper_snore.cpp

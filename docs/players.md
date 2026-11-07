@@ -343,6 +343,17 @@ sleeper holds, never their older, fuller inventory:
   item arrays' entries the client held just before.
 - The player appears where the sleeper lay, with what is left.
 
+**Carrying.** Any player can move an offline sleeper: hold the left mouse button while aiming at its body within
+reach, walk, release to put it down (`coop/player/sleeper_drag`, `ReliableKind::SleeperDrag`, protocol 328). The body
+follows a point 1.5 m in front of the carrier's camera, on the floor traced under it, still lying and turned toward the
+carrier; its loot crate goes with it. The host owns the pose and takes one carrier per body: a client asks (Start),
+the host's Moved naming that client is the go-ahead (naming another slot is a refusal), the carrier streams its spot
+at 10 Hz and ends with the last one, and the host checks each lies within 4.5 m of the carrier's own puppet. When it is
+put down the host writes the spot into the sleeper and its owner's profile, so the player wakes there and a saved
+world keeps it. A carrier who leaves, goes quiet for 3 s, or whose body stops being a sleeper puts it down where it
+is. Log: `sleeper_drag: slot N picks sleeper ID up`, `.. put sleeper ID down at ..`, `sleeper: <name> (id ID) carried
+to (x, y, z) -- ..; wakes standing at ..`, `.. carried by slot N -- refused`.
+
 **Joining.** While a player connects, every other peer sees them asleep on the floor, not nothing: a rejoiner's sleeper
 stays down (its crate gone at the profile hand-over, so nothing is looted meanwhile); anyone else gets a crate-less body
 at the spot they will appear (profile, else start point), plate "(joining...)". It reaches later joiners too. Each peer

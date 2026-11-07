@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 327;
+inline constexpr uint16_t kProtocolVersion = 328;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1563,6 +1563,13 @@ enum class ReliableKind : uint8_t {
     // drop falls and stains the floor there too. The host checks a client's names its own player. Late join: none,
     // a drop is a moment (a decal already on the floor rides the save). BloodDropFxPayload.
     BloodDropFx = 237,
+
+    // CLIENT->HOST and HOST->ALL: a sleeper's body carried by a player (coop::sleeper_drag). A client asks to start
+    // carrying an offline sleeper, streams the spot it holds the body at (about 10 Hz) and ends with the final spot;
+    // the host owns the sleeper's pose, takes one carrier at a time, and answers every peer with the body's pose and
+    // who carries it (Moved). The host never relays a client's: it sends its own Moved. Late join: none, the Add on
+    // the sleepers lane carries the pose the drag left. SleeperDragPayload.
+    SleeperDrag = 238,
 };
 
 #pragma pack(push, 1)
@@ -4949,6 +4956,20 @@ struct BloodDropFxPayload {
 };
 static_assert(sizeof(BloodDropFxPayload) == 136, "BloodDropFxPayload must be 136 bytes");
 static_assert(sizeof(BloodDropFxPayload) <= 256 - 20 - 8, "BloodDropFxPayload must fit in one reliable datagram");
+
+// A sleeper's body carried by a player (SleeperDrag). `phase` 1 Start, 2 Pose, 3 End (client -> host), 4 Moved
+// (host -> every client: the body's pose now, and `carrier` the slot carrying it, kSleeperDragNoCarrier when none).
+inline constexpr uint8_t kSleeperDragNoCarrier = 0xFF;
+struct SleeperDragPayload {
+    uint32_t id;       // 4  -- the sleeper's id (the host's per-session number on the sleepers lane)
+    uint8_t  phase;    // 1  -- 1 Start, 2 Pose, 3 End, 4 Moved
+    uint8_t  carrier;  // 1  -- Moved: the carrying slot or kSleeperDragNoCarrier; else zero
+    uint16_t seq;      // 2  -- the sender's running message number
+    float    x, y, z;  // 12 -- where the body lies (world cm)
+    float    yaw;      // 4  -- the lying body's yaw (its pitch and roll stay the sleeper's own)
+};
+static_assert(sizeof(SleeperDragPayload) == 24, "SleeperDragPayload must be 24 bytes");
+static_assert(sizeof(SleeperDragPayload) <= 256 - 20 - 8, "SleeperDragPayload must fit in one reliable datagram");
 
 // A lightning strike (LightningStrike): the strike's world location; the receiver spawns the
 // strike actor there, and it destroys itself.

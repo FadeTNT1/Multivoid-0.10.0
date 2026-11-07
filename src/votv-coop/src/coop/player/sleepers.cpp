@@ -15,6 +15,7 @@
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
 #include "coop/player/sleep_sync.h"
+#include "coop/player/sleeper_drag.h"
 #include "coop/player/sleeper_snore.h"
 #include "coop/player/sleeper_wire.h"
 #include "coop/props/prop_echo_suppress.h"
@@ -1264,6 +1265,7 @@ bool IsLyingOnline(int slot) {
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
+    coop::sleeper_drag::Install(session);
     InstallPress();
 }
 
@@ -1294,6 +1296,7 @@ void Tick() {
         TickBuilds(now);
         TickJoining();
     }
+    coop::sleeper_drag::Tick();
     coop::sleeper_snore::Tick();
     if (IsHost() && !g_wakes.empty()) {
         auto* sess = Session();
@@ -1330,6 +1333,7 @@ void OnClientDisconnect() {
 
 void OnSessionEnd() {
     coop::sleeper_snore::StopAll();
+    coop::sleeper_drag::OnSessionEnd();
     g_open = LootOpen{};   // its crate goes with the sleepers below
     // Loot taken since the last 1 Hz write-back would be lost with the crates: write it back first.
     if (IsHost())
@@ -1394,6 +1398,8 @@ void OnSessionEnding(const char* why) {
 
 void OnPlayerLeaving(int slot, const coop::roster_ledger::Row& outgoing) {
     if (slot <= 0 || slot >= static_cast<int>(coop::players::kMaxPeers)) return;
+    // A body this slot carried is put down where it is (host), or stops waiting on them (client).
+    coop::sleeper_drag::OnPlayerLeaving(slot);
     // The slot's rest pose goes with its occupant on every peer.
     const OnlineRest rest = g_online[slot];
     g_online[slot] = OnlineRest{};
@@ -1662,6 +1668,58 @@ size_t SnoreSources(SnoreSource* out, size_t max) {
         ++n;
     }
     return n;
+}
+
+uint32_t DragAimedId() {
+    void* const local = coop::players::Registry::Get().Local();
+    if (!local || g_sleepers.empty() || g_open.active || SI::ShownStorage()) return 0;
+    Sleeper* const s = AimedSleeper(local);   // a joining body has no crate, so it is never aimed at
+    return (s && !s->joining) ? s->id : 0;
+}
+
+bool DragPoseOf(uint32_t id, FVector& lie, float& yaw) {
+    const auto it = g_sleepers.find(id);
+    if (it == g_sleepers.end()) return false;
+    const Sleeper& s = it->second;
+    if (!s.built || s.joining || !Live(s.body, s.bodyIdx)) return false;
+    lie = s.lie;
+    yaw = s.lieRot.Yaw;
+    return true;
+}
+
+bool DragPlace(uint32_t id, const FVector& lie, float yaw, bool settle) {
+    const auto it = g_sleepers.find(id);
+    if (it == g_sleepers.end()) return false;
+    Sleeper& s = it->second;
+    if (!s.built || s.joining || !Live(s.body, s.bodyIdx)) return false;
+    s.lie = lie;
+    s.lieRot.Yaw = yaw;
+    s.poseFinal = true;
+    E::SetActorRotation(s.body, s.lieRot);
+    E::SetActorLocation(s.body, s.lie);
+    if (Live(s.crate, s.crateIdx)) {
+        E::SetActorLocation(s.crate, s.lie);
+        E::SetActorRotation(s.crate, FRotator{0.f, yaw, 0.f});
+    }
+    if (settle) PinHead(s.body, s.lie);
+    return true;
+}
+
+void DragCommit(uint32_t id, const char* why) {
+    if (!IsHost()) return;
+    const auto it = g_sleepers.find(id);
+    if (it == g_sleepers.end()) return;
+    Sleeper& s = it->second;
+    if (s.joining) return;
+    s.stand = FVector{s.lie.X, s.lie.Y, s.lie.Z + 60.f};
+    SnapStandToFloor(s.stand);
+    s.standYaw = s.lieRot.Yaw;
+    coop::player_profile::Profile p;
+    const bool profiled = !s.guid.empty() && ReadProfile(s.guid, p);
+    if (profiled) PutProfile(s, std::move(p));
+    UE_LOGI("sleeper: %s (id %u) carried to (%.0f, %.0f, %.0f) -- %s; wakes standing at (%.0f, %.0f, %.0f)%s",
+            Utf8(s.nick).c_str(), id, s.lie.X, s.lie.Y, s.lie.Z, why, s.stand.X, s.stand.Y, s.stand.Z,
+            profiled ? "" : " (no profile to rewrite: the saved list keeps the spot)");
 }
 
 size_t Count() { return g_sleepers.size(); }
