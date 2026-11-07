@@ -7,12 +7,14 @@
 
 #include "coop/element/registry.h"   // EidForActor, the release's log line
 #include "coop/net/protocol.h"
+#include "coop/player/players_registry.h"  // the local player, for the hold check of a Static set
 #include "coop/props/prop_stick_sync.h"  // IsWallAttachable
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/engine/engine_attach.h"  // IsActorRootBodyAtRest
+#include "ue_wrap/engine/engine_mainplayer.h"  // IsMainPlayerGrabbing
 #include "ue_wrap/engine/engine_physics.h"  // the body's gravity, the anti-gravity prank's floating props
 
 namespace coop::prop_wire_parity {
@@ -119,11 +121,46 @@ void ConvergeFrozenSleep(void* actor, uint8_t physFlags) {
     }
 }
 
+// The reverse of the release: the host's copy is Static and this one is not. A prop the host's rest left Static
+// (a heavy one it came to rest, a thrown prop's End carries 0x4a where the client's own copy reads 0x43) kept a
+// non-Static copy here, so the client could grab and stream a body the host refuses to hold ("streams a prop that
+// is STATIC here"). Same guards as the release -- the host's word only, a live-state row, a wall-attachable and a
+// trash clump left to their own lanes -- plus one: a copy the local hand is holding right now is left, because a
+// Static body cannot be held and the hold's own end converge reaches this again.
+static bool ConvergeStaticSet(void* actor, uint8_t physFlags) {
+    namespace pf = coop::net::propspawn_flags;
+    if (!(physFlags & pf::kLiveState) || !(physFlags & pf::kStatic)) return false;
+    if (!actor || !ue_wrap::prop::IsDescendantOfProp(actor)) return false;
+    if (ue_wrap::prop::IsStatic(actor)) return false;                               // already matches
+    if (coop::prop_stick_sync::IsWallAttachable(actor)) return false;
+    if (ue_wrap::prop::IsGarbageClump(actor)) return false;
+    void* const local = coop::players::Registry::Get().Local();
+    if (local && ue_wrap::engine::IsMainPlayerGrabbing(local, actor)) return false;
+    const bool wantFrozen = (physFlags & pf::kFrozen) != 0;
+    const bool wantSleep  = (physFlags & pf::kSleep) != 0;
+    const coop::element::ElementId eid = coop::element::Registry::Get().EidForActor(actor);
+    const std::wstring cls = R::ClassNameOf(actor);
+    if (!ue_wrap::prop::CallBaseSetPropProps(actor, /*isStatic=*/true, wantFrozen, wantSleep)) {
+        UE_LOGW("prop_wire_parity: static set FAILED for eid %u class %ls actor %p -- the game's setter did not "
+                "dispatch; the copy stays non-Static", static_cast<unsigned>(eid), cls.c_str(), actor);
+        return false;
+    }
+    if (void* mesh = ue_wrap::prop::GetStaticMesh(actor))
+        ue_wrap::engine::SetComponentSimulatePhysics(mesh, /*simulate=*/false);
+    UE_LOGI("prop_wire_parity: static set for eid %u class %ls actor %p (the host's copy is Static; frozen=%d sleep=%d)",
+            static_cast<unsigned>(eid), cls.c_str(), actor, wantFrozen ? 1 : 0, wantSleep ? 1 : 0);
+    return true;
+}
+
 bool ConvergeStaticRelease(void* actor, uint8_t physFlags, bool hostAuthored, bool restorePhysics) {
     namespace pf = coop::net::propspawn_flags;
     // Only the host's word releases a Static: a flag a client authored is that client's own copy, never ours to adopt.
     if (!hostAuthored) return false;
-    if (!(physFlags & pf::kLiveState) || (physFlags & pf::kStatic)) return false;  // the host's copy is still Static
+    if ((physFlags & pf::kLiveState) && (physFlags & pf::kStatic)) {
+        ConvergeStaticSet(actor, physFlags);   // the host's copy is still Static: this one follows it there
+        return false;                          // not a release
+    }
+    if (!(physFlags & pf::kLiveState)) return false;
     if (!actor || !ue_wrap::prop::IsDescendantOfProp(actor)) return false;
     if (!ue_wrap::prop::IsStatic(actor)) return false;                              // already released
     // A wall-attachable's stuck state belongs to its component: the stick lane's unstick (and ConvergeStuck on a

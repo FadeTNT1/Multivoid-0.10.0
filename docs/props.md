@@ -275,7 +275,10 @@ is released on the host's word only (`hostAuthored`): a drive end the host sent,
 join correction from slot 0, the end of a hold from slot 0, and the first pose of a host hold on a copy that is
 Static here (the host held it, so its copy is free). A client-authored flag never releases a Static; a wall-attachable
 keeps its component's unstick (`prop_stick_sync`) and a trash clump its own lane. The log says `static released for eid
-X class Y` and `physics restored: yes|no`. `[?]` Whether the game keeps a second native "pryable" state that the
+X class Y` and `physics restored: yes|no`. The converge also goes the other way, on the same host-only terms: a row
+with the static flag reaching a copy that is not Static sets Static there (`static set for eid X class Y`), unless the local
+hand holds the copy right now; before this a client copy of a prop the host had left Static could be grabbed and
+streamed, and the host answered `streams a prop that is STATIC here`. `[?]` Whether the game keeps a second native "pryable" state that the
 prompt reads has not been confirmed in a two-peer run.
 
 ### The vent-cover census
