@@ -3,6 +3,7 @@
 
 #include "coop/creatures/host_born_spawn.h"
 
+#include "coop/props/prop_act_request.h"     // ReplayRunning: the host's granted eat, replayed here
 #include "coop/props/prop_echo_suppress.h"   // InMirrorSpawnScope: a spawn of ours, never dissolved
 #include "coop/world/spawn_authority.h"      // IsActiveClientSession
 
@@ -30,6 +31,7 @@ namespace E  = ue_wrap::engine;
 struct Row {
     const wchar_t*        cls;
     const wchar_t* const* sources;   // null-terminated
+    bool                  clientReplayOnly = false;   // a client dissolves it only inside the host's act replay
 };
 constexpr const wchar_t* kStolasSources[] = {P::name::StolasProtectionVolumeClass, nullptr};
 constexpr Row kRows[] = {
@@ -47,6 +49,10 @@ constexpr Row kRows[] = {
     {P::name::UfoAlienDropperClass,     nullptr},   // the alien summoner's landing and its death
     {P::name::ArirShipClass,            nullptr},   // the alien dropper's BeginPlay
     {P::name::LightningStrikeClass,     kStolasSources},  // the volume's strike at the pawns inside it
+    // A puffball's cloud: the host's burst is carried by the world-actor lane (a source row in npc_world_enum). A
+    // client's own burst stands when the puffball is its hand's (no lane carries that one), and is dissolved when it is
+    // the replay of a granted eat of a world puffball, which the host bursts itself (prop_act_host).
+    {P::name::PuffballExplosionClass,   nullptr, true},
 };
 constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
 constexpr int kMaxSources = 2;
@@ -135,6 +141,7 @@ void OnClientBirth(void* sourceObject, void* spawned) {
     if (coop::prop_echo_suppress::InMirrorSpawnScope()) return;
     const int row = RowOf(R::ClassOf(spawned));
     if (row < 0) return;
+    if (kRows[row].clientReplayOnly && !coop::prop_act_request::ReplayRunning()) return;
     if (g_sourceCount[row] > 0 ? !SourceListed(row, sourceObject) : IsGamemode(sourceObject)) return;
     // The Blueprint reads a null result (FinishSpawningActor passes a null actor through); the unfinished actor is
     // destroyed by a posted task, never inside the native call still on the stack, and validated by its slot.
