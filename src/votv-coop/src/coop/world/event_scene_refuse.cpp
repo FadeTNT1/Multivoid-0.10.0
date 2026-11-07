@@ -85,6 +85,8 @@ UE_FACT_FN(kRowTankExploded, "event_scene_sync", L"firetank_C", L"exploded", Dec
 UE_FACT_FN(kRowShieldSetActive, "event_scene_sync", L"ufoShieldShader_C", L"setActive", Declared);
 UE_FACT_FN(kRowShieldFlyAway, "event_scene_sync", L"ufoShieldShader_C", L"flyaway", Declared);
 UE_FACT_FN(kRowAgravCloak, "event_scene_sync", L"trigger_agrav_C", L"cloak", Declared);
+// The gamemode's ufo_midas flight: the level-placed UFO's setActive is the host's phase edge.
+UE_FACT_FN(kRowMidasSetActive, "event_scene_sync", L"midasufotest_C", L"setActive", Declared);
 
 // What a row does on each side.
 enum class Kind : uint8_t {
@@ -98,6 +100,7 @@ enum class Kind : uint8_t {
     ShieldSetActive,  // HOST: shown or hidden
     ShieldFlyAway,    // HOST: flying away
     AgravCloak,       // HOST: the shimmer on or off
+    MidasSetActive,   // HOST: the flight begun or ended
 };
 
 struct Row {
@@ -144,6 +147,7 @@ constexpr Row kRows[] = {
     {&kRowShieldSetActive,    "ufoShield.setActive",       Kind::ShieldSetActive},
     {&kRowShieldFlyAway,      "ufoShield.flyaway",         Kind::ShieldFlyAway},
     {&kRowAgravCloak,         "agrav.cloak",               Kind::AgravCloak},
+    {&kRowMidasSetActive,     "midas.setActive",           Kind::MidasSetActive},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x45530000;   // 'ES', then the row
@@ -244,6 +248,12 @@ SG::Verdict OnRowPre(const SG::Call& call) {
     case Kind::ShieldFlyAway:
         if (host) NoteHostPhase(ids::kBoarShield, ph::kShieldFlyAway, obj);
         return SG::Verdict::Run;
+    case Kind::MidasSetActive: {
+        bool active = false;
+        if (host && ES::ReadBoolParam(call.function, call.locals, P::name::MidasUfoActiveParam, active))
+            NoteHostPhase(ids::kMidas, active ? ph::kMidasRun : ph::kMidasEnd, obj);
+        return SG::Verdict::Run;
+    }
     case Kind::AgravCloak: {
         bool forward = false;
         if (host && ES::ReadBoolParam(call.function, call.locals, P::name::AgravForwardParam, forward)) {

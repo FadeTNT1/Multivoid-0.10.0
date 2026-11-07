@@ -169,8 +169,10 @@ constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
                                               nullptr};
 // The gamemode mints many classes besides these, and most of its other spawners are not refused on a client yet,
 // so its source is narrowed to the outputs of the rolls whose client copies the spawn authority refuses: the night
-// roll (mainGamemode_C::CustomEvent_5, an Octa or a night egg) and the ball UFO roll (mainGamemode_C::ufo_ball).
-constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", P::name::UfoBallClass, nullptr};
+// roll (mainGamemode_C::CustomEvent_5, an Octa or a night egg) and the UFO rolls (mainGamemode_C::ufo_ball, ufo_boo,
+// ufo_joel and ufo_pill; ufo_midas mints nothing).
+constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", P::name::UfoBallClass, P::name::UfoBoofoClass,
+                                                  P::name::UfoJoelClass, P::name::UfoPillfoClass, nullptr};
 constexpr const wchar_t* kUfoKnobOutputs[] = {P::name::UfoKnobClass, nullptr};
 constexpr const wchar_t* kUfoUkOutputs[] = {P::name::UfoUkClass, P::name::UfoUkEnemyClass, nullptr};
 constexpr const wchar_t* kSuperFogOutputs[] = {P::name::HoelUfoClass, nullptr};
@@ -192,7 +194,7 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {L"prop_coingun_C",          nullptr},          // the sell gun's coin mint
     {L"jellyfishPath_C",         nullptr},          // the space jellyfish's seven (world-actor lane)
     {L"trigger_eventer_C",       kEventerOutputs},  // the scheduler's dispatcher
-    {L"mainGamemode_C",          kGeomOctaNpcOutputs}, // the night roll's Octa or egg, the spawn menu's Octa, the ball UFO
+    {L"mainGamemode_C",          kGeomOctaNpcOutputs}, // the night roll's Octa or egg, the spawn menu's Octa, the UFOs
     {L"grayEventController_C",   nullptr},          // graysforest: spawn() mints the grayTest_C pack
     {L"superEgger_C",            nullptr},          // eggvasion: spwn() mints the eg_C children
     {L"tentacleBallsFollower_C", nullptr},          // tentacleBalls: runTrigger() mints the pack
@@ -313,7 +315,7 @@ void InstallExSpawnCatch() {
                 "trigger_spawnFollowingArir_C -> npc_arirFollower_C, boarInvasion_C -> npc_ariral_shooter_C + "
                 "firetank_C, "
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
-                "mainGamemode_C -> geomOcta_C + eg_C + ufo_ballfo_C, "
+                "mainGamemode_C -> geomOcta_C + eg_C + ufo_ballfo_C + ufo_boofo_spawn1_C + ufo_joel_C + ufo_pillfo_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
                 "ufo_UK_enemy_C, superFog_C -> HoelUfo_C; EX_CallMath spawns now enroll)");
     } else {

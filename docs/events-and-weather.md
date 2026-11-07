@@ -115,6 +115,29 @@ egg. A client's body of it is refused at the script gate, which also ends its ow
 either; the host's roll is a spawn source of the character lane, and the Octa or the egg reaches every client as
 a mirror `[V]` (`octa_drill` births). The Octa's attack on a player is relayed from the host (`docs/npcs-and-kerfur.md`).
 
+The gamemode's UFO rolls are the host's too. Five timer bodies in `mainGamemode_C` roll on their own and bypass the
+eventer, so the event-fire lane never sees them: `ufo_ball`, `ufo_boo`, `ufo_joel`, `ufo_pill` and `ufo_midas`. Each is
+refused on a client at the script gate (tags `gamemode.ufo_*`), which also ends its re-arm; the host's four spawns are
+outputs of the gamemode's source row and ride the world-actor lane (`coop/world/ufo_event_sync`, protocol 305), and
+`ufo_midas`, which mints nothing, is an event scene (below).
+
+| Roll | Chance and window | Mints | What crosses |
+|---|---|---|---|
+| `ufo_ball` | 20 %, every 40-75 min | `ufo_ballfo_C` above the host's camera | the heading, both endpoints and the ball's place |
+| `ufo_boo` | 40 %, from day 21, 20:00-04:59, every 40-75 min | `ufo_boofo_spawn1_C` at a random place and facing | the random course (one angle per spline point) and `alpha` |
+| `ufo_joel` | 50 %, from day 14, 08:00-16:59, with a player at the radio tower's top, every 5-10 min | `ufo_joel_C` over the tower | the `moveufo` timeline's place, for a joiner |
+| `ufo_pill` | 20 %, from day 7, 20:00-04:59, every 90-112 min | `ufo_pillfo_C` at the lake glow | the `a` / `timeline_0` place, for a joiner |
+| `ufo_midas` | 15 %, from day 14, 18:00-06:59, every 100-120 min | nothing: `runTrigger` on the level-placed `midasufotest_C` | `EventScenePhase` (kMidas): the run, and for a joiner the flight so far |
+
+The ball is described below; the others follow the same shape. The boofo's `gen` lays its flight spline as `splinepoints + 1`
+points, each the travel spline's point pushed out by `radius` at a random angle and scaled by `squish`; the host recovers
+each angle from its spline and the mirror lays the same points with `gen`'s own arithmetic (angles in 256ths of a turn),
+so the course matches to a fraction of a degree. Its tick is switched on by its begin-play five seconds in; a flight already
+under way has its mirror's tick switched on at once. The joel and the pillfo have nothing random: their timelines fly them, a
+mirror starts them at its own begin-play, and a joiner's mirror seeks them to the host's place (a joel's a second after its
+begin-play, when its timeline starts). A boofo whose course has more than 56 points or whose `squish` is near zero cannot
+cross; its mirror then flies its own course and the log says so.
+
 The gamemode's ball UFO is the host's too. `mainGamemode_C::ufo_ball` is a timer body, re-armed every 40 to 75
 minutes, that rolls a one-in-five chance and mints `ufo_ballfo_C` 500 m above the local camera. It is not the eventer's,
 so the event-fire lane never sees it; a client's body is refused at the script gate (tag `gamemode.ufo_ball`), which
@@ -128,7 +151,9 @@ spawning; both balls then fly one course. A joiner mid-flight gets the ball's pl
 snapshot, the host's destroy (or the ball's arrival) retires the mirror, and `event_active_sync` leaves the class to
 the world-actor lane at the join edge, so its `setEvent` is not replayed a second time. Host log: `ufo_ball[host]:
 eid=... yaw=... a=... b=... balls=...` at the enroll; client log: `ufo_ball[client]: eid=... seeded ...`. `[RD]`
-until two peers have run it.
+until two peers have run it. Host logs for the others: `ufo_event[host]: boofo eid=... alpha=... points=...` and
+`ufo_event[host]: joel|pillfo eid=... phase=... position=...`; client: `ufo_event[client]: ... seeded ...` or `... seeked ...`;
+for Midas, `event_scene: host scene 5 reached phase 1` and `event_scene[midas]: ... phase 1 applied`. All `[RD]`.
 
 ### Story and scheduled events
 

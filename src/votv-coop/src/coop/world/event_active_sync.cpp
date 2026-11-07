@@ -126,6 +126,10 @@ const LaneOwned kLaneOwnedClasses[] = {
     // The gamemode's ball UFO: the mirror's own BeginPlay registers its setEvent on a client, and a joiner's
     // mirror comes from the world-actor connect snapshot, so a replay here would only be a second begin.
     { "ufo_ballfo_C", "world_actor_sync" },
+    { "ufo_boofo_spawn1_C", "world_actor_sync" },   // the boofo, joel and pillfo likewise
+    { "ufo_joel_C", "world_actor_sync" },
+    { "ufo_pillfo_C", "world_actor_sync" },
+    { "midasufotest_C", "event_scene" },            // the ufo_midas flight: the host's phase switches a client's on
 };
 const char* LaneFor(const std::string& className) {
     for (const auto& e : kLaneOwnedClasses)

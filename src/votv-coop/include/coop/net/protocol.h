@@ -2688,7 +2688,8 @@ constexpr uint8_t kSoltoClean = 1;   // soltomiaCleaning_C, a world-actor mirror
 constexpr uint8_t kObelisk    = 2;   // obelisk_C, a world-actor mirror
 constexpr uint8_t kBoarShield = 3;   // ufoShieldShader_C, level-placed (boarwar's UFO shader)
 constexpr uint8_t kAgrav      = 4;   // trigger_agrav_C, level-placed (the anti-gravity prank)
-constexpr uint8_t kLast       = kAgrav;
+constexpr uint8_t kMidas      = 5;   // midasufotest_C, level-placed (the gamemode's ufo_midas flight)
+constexpr uint8_t kLast       = kMidas;
 }  // namespace event_scene_ids
 namespace event_scene_phases {
 // kSoltoClean, monotonic:
@@ -2704,6 +2705,9 @@ constexpr uint8_t kShieldFlyAway = 3;  // flyaway(): the shader's exit timeline,
 // kAgrav:
 constexpr uint8_t kAgravCloakOn  = 1;  // cloak(true): the shimmer and the hover sound
 constexpr uint8_t kAgravCloakOff = 2;  // cloak(false): both end
+// kMidas:
+constexpr uint8_t kMidasRun      = 1;  // setActive(true): the flight along its spline begins
+constexpr uint8_t kMidasEnd      = 2;  // setActive(false): the flight is over (a client's own tick ends it too)
 constexpr uint8_t kLast          = 3;
 }  // namespace event_scene_phases
 namespace event_scene_flags {
@@ -2714,7 +2718,7 @@ struct EventScenePhasePayload {
     uint8_t  scene;        // 1 -- event_scene_ids
     uint8_t  phase;        // 1 -- event_scene_phases, per scene
     uint8_t  flags;        // 1 -- event_scene_flags
-    uint8_t  reserved;     // 1 -- zero
+    uint8_t  progress;     // 1 -- a snapshot's flight so far in 255ths (kMidas, flagged kSnapshot); zero otherwise
     uint32_t eid;          // 4 -- the world-actor element, or 0 for a level-placed target
     WireKey  key;          // 32 -- the level-placed target's short name when eid is 0, else empty
 };
@@ -3716,8 +3720,10 @@ struct WorldActorSpawnPayload {
     uint8_t       _pad[3];                     // 3  -- explicit; the struct is 4-aligned for the floats
     // The payload uses 172 of the 228 usable bytes. A class whose birth content does not
     // fit length-prefixed in 64 bytes needs the blob sized first.
-    // ufo_ballfo_C (protocol 305) carries 32 bytes: eight floats, the heading, the two endpoints and the ball's
-    // place (coop/world/ufo_ball_sync.h). A 304 peer ignores them and flies its own random course.
+    // Protocol 305: the gamemode's UFO rolls carry their setup in the blob (coop/world/ufo_event_sync.h) -- ufo_ballfo_C
+    // 32 bytes of floats (the heading, the two endpoints, the ball's place), ufo_boofo_spawn1_C its alpha and the
+    // angles of its random spline, ufo_joel_C and ufo_pillfo_C their timelines' places. A 304 peer ignores them and
+    // flies its own random course.
 };
 static_assert(sizeof(WorldActorSpawnPayload) == 172,
               "WorldActorSpawnPayload must be 172 bytes");

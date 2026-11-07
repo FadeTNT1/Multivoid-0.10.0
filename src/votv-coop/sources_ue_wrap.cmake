@@ -194,6 +194,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/prop_flags.cpp
     src/ue_wrap/actors/vent_crawler.cpp
     src/ue_wrap/actors/ufo_ball.cpp
+    src/ue_wrap/actors/ufo_events.cpp
     src/ue_wrap/actors/prop_gather.cpp
     src/ue_wrap/actors/spawner_stamp.cpp
     src/ue_wrap/actors/prop_events.cpp

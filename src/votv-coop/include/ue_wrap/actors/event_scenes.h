@@ -67,6 +67,16 @@ bool UfoShieldFlyAway(void* actor);
 // Its own cloak(forward), the shimmer timeline, and its hover sound started or stopped with it.
 bool AgravCloak(void* actor, bool forward);
 
+// ---- the Midas UFO (midasufotest_C, level-placed) ----
+
+// The flight so far, `a` in 0..1 (its tick advances it from 0 to 1 along the level spline). False when the field does
+// not resolve.
+bool MidasProgress(void* actor, float& out);
+
+// Its own setActive(true), the flight's start, then `a` written to `fraction` (a joiner's, mid-flight; 0 leaves the start
+// alone). False when the verb did not dispatch.
+bool MidasRun(void* actor, float fraction);
+
 // ---- the vent crawler (ventCrawler_C) ----
 
 // Its `Box`, the crawl's start: the box's world centre, its scaled half extent and its world rotation. False

@@ -379,6 +379,11 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     // mirror it: its `set` randomizes the heading and the endpoints, which the birth blob carries
     // (coop/world/ufo_ball_sync).
     L"ufo_ballfo_C",
+    // The gamemode's other UFO rolls (ufo_boo, ufo_joel, ufo_pill), minted the same way and refused on a client the same
+    // way; each carries its own setup or progress in the birth blob (coop/world/ufo_event_sync).
+    L"ufo_boofo_spawn1_C",         // the boofo fly-by (a ufo_boofo_C child; ufo_boo)
+    L"ufo_joel_C",                 // the radio tower's UFO (ufo_joel)
+    L"ufo_pillfo_C",               // the lake glow's UFO (ufo_pill)
     // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
     // base classes are unverified -- a prop-derived wreck would ride the prop lane as well.
 };
@@ -504,11 +509,52 @@ inline constexpr const wchar_t* UfoBallAProp           = L"a";
 inline constexpr const wchar_t* UfoBallBProp           = L"b";
 inline constexpr const wchar_t* UfoBallBallsProp       = L"balls";
 
+// The gamemode's other UFO rolls (0.10.0 bytecode capture). Each timer body rolls, mints its actor under EX_CallMath and
+// re-arms itself: ufo_boo (the boofo fly-by over the map, a night roll), ufo_joel (the radio tower's UFO, rolled while a
+// player stands at the tower's top), ufo_pill (the lake glow's UFO), and ufo_midas, which mints nothing: it runs the
+// level-placed midasufotest_C through its trigger interface.
+//   ufo_boofo_c: gen() (the construction script's and BeginPlay's) lays `flyspline` as splinepoints+1 points, each the
+//   `travelspline` point at i/splinepoints pushed out by `radius` at a random angle about the spline's forward axis and
+//   scaled by `squish`; the tick advances `alpha` along it (length = the flyspline's length) and destroys the actor at
+//   the end. Its tick is enabled by BeginPlay five seconds in.
+//   ufo_joel_c, ufo_pillfo_c: no randomness; a timeline each (joel's `moveufo`; pill's `a`, whose finish plays
+//   `timeline_0`, whose finish destroys the actor) drives the flight.
+inline constexpr const wchar_t* UfoBoofoClass          = L"ufo_boofo_spawn1_C";
+inline constexpr const wchar_t* UfoBoofoTravelSplineProp = L"travelspline";
+inline constexpr const wchar_t* UfoBoofoFlySplineProp  = L"flyspline";
+inline constexpr const wchar_t* UfoBoofoSplinePointsProp = L"splinepoints";
+inline constexpr const wchar_t* UfoBoofoRadiusProp     = L"radius";
+inline constexpr const wchar_t* UfoBoofoSquishProp     = L"squish";
+inline constexpr const wchar_t* UfoBoofoAlphaProp      = L"alpha";
+inline constexpr const wchar_t* UfoBoofoLengthProp     = L"length";
+inline constexpr const wchar_t* UfoJoelClass           = L"ufo_joel_C";
+inline constexpr const wchar_t* UfoJoelMoveTimelineProp = L"moveufo";
+inline constexpr const wchar_t* UfoPillfoClass         = L"ufo_pillfo_C";
+inline constexpr const wchar_t* UfoPillfoTimelineAProp = L"a";
+inline constexpr const wchar_t* UfoPillfoTimeline0Prop = L"timeline_0";
+// USplineComponent verbs the boofo's course is read and laid with.
+inline constexpr const wchar_t* SplineLocationAtPointFn = L"GetLocationAtSplinePoint";
+inline constexpr const wchar_t* SplineLocationAtTimeFn  = L"GetLocationAtTime";
+inline constexpr const wchar_t* SplineRightAtTimeFn     = L"GetRightVectorAtTime";
+inline constexpr const wchar_t* SplineUpAtTimeFn        = L"GetUpVectorAtTime";
+inline constexpr const wchar_t* SplineClearPointsFn     = L"ClearSplinePoints";
+inline constexpr const wchar_t* SplineAddPointFn        = L"AddSplinePoint";
+inline constexpr const wchar_t* SplineUpdateFn          = L"UpdateSpline";
+inline constexpr const wchar_t* SplineLengthFn          = L"GetSplineLength";
+// midasufotest_C: the level-placed UFO ufo_midas switches on (runTrigger -> setActive(true)); its tick advances `a`
+// along `spline` and switches it off at 1.
+inline constexpr const wchar_t* MidasUfoClass          = L"midasufotest_C";
+inline constexpr const wchar_t* MidasUfoSetActiveFn    = L"setActive";
+inline constexpr const wchar_t* MidasUfoActiveParam    = L"active";
+inline constexpr const wchar_t* MidasUfoProgressProp   = L"a";
+
 // World-actor mirrors whose whole presentation is their own deterministic tick on a component, not
 // the root the pose drive moves: the client mirror keeps its actor tick (world_actor_mirror). Every
 // entry's tick must write no shared state.
 inline constexpr const wchar_t* kWorldActorTickDrivenClasses[] = {
     RozitBorgClass,  // the tick lerps `ships` by its alpha, shakes the local camera, destroys itself at alpha 1
+    UfoJoelClass,    // the tick spins its components and eases its look; its moveufo timeline flies it
+    UfoPillfoClass,  // the tick spins its saucer; its two timelines fly and end it
     UfoBallClass,    // the tick spins and slides `balls` from a to b at a constant speed and destroys the actor on
                      // arrival; the birth blob seeds its endpoints and position (coop/world/ufo_ball_sync)
 };

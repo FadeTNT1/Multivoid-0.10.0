@@ -24,4 +24,13 @@ bool Read(void* timeline, State& out);
 bool PlayFromStart(void* timeline);
 bool ReverseFromEnd(void* timeline);
 
+// UTimelineComponent::Stop: the timeline stops where it is and fires no finish. False when it is dead or the call fails.
+bool Stop(void* timeline);
+
+// UTimelineComponent::SetPlaybackPosition(NewPosition, bFireEvents=true, bFireUpdate=true): the timeline's place moved,
+// its update running once at the new place and the event tracks between the old place and the new firing (a flag a
+// device sets mid-timeline is set). A timeline that was playing keeps playing from there; its finish does not fire.
+// False when it is dead or the call fails.
+bool SetPosition(void* timeline, float position);
+
 }  // namespace ue_wrap::engine_timeline

@@ -74,6 +74,10 @@ UE_FACT_FN(kRowReceiveBeginPlaySuperEgger, "spawn_authority", L"superEgger_C", L
 UE_FACT_FN(kRowSpwnSuperEgger, "spawn_authority", L"superEgger_C", L"spwn", Declared);
 UE_FACT_FN(kRowCustomEvent5Gamemode, "spawn_authority", L"mainGamemode_C", L"CustomEvent_5", Declared);
 UE_FACT_FN(kRowUfoBallGamemode, "spawn_authority", L"mainGamemode_C", L"ufo_ball", Declared);
+UE_FACT_FN(kRowUfoBooGamemode, "spawn_authority", L"mainGamemode_C", L"ufo_boo", Declared);
+UE_FACT_FN(kRowUfoJoelGamemode, "spawn_authority", L"mainGamemode_C", L"ufo_joel", Declared);
+UE_FACT_FN(kRowUfoPillGamemode, "spawn_authority", L"mainGamemode_C", L"ufo_pill", Declared);
+UE_FACT_FN(kRowUfoMidasGamemode, "spawn_authority", L"mainGamemode_C", L"ufo_midas", Declared);
 // The 0.10.0 UFO encounters (untitled_1): the bodies the controllers' and the ships' ubergraphs own.
 UE_FACT_FN(kRowStartEventKnobController, "spawn_authority", L"ufo_knob_controller_C", L"startEvent", Declared);
 UE_FACT_FN(kRowStopEventKnobController, "spawn_authority", L"ufo_knob_controller_C", L"stopEvent", Declared);
@@ -214,6 +218,17 @@ constexpr Row kRows[] = {
     // client through the source-gated catch onto the world-actor lane, with its heading and endpoints in the birth
     // blob (coop/world/ufo_ball_sync); a client's own would be a second, differently-randomized ball over its head.
     {&kRowUfoBallGamemode,                "gamemode.ufo_ball"},
+    // The other three UFO rolls are the same shape (a timer body that rolls, mints its actor under EX_CallMath, and
+    // re-arms itself 40-75 min (ufo_boo), 5-10 min (ufo_joel) or 90-112 min (ufo_pill) on): ufo_boo mints the boofo fly-by
+    // at a random place over the map, ufo_joel the radio tower's UFO while a player stands at the tower's top, ufo_pill the
+    // lake glow's. The host's reach a client through the same source row and the world-actor lane
+    // (coop/world/ufo_event_sync). ufo_midas mints nothing: it switches on the level-placed Midas UFO, and a client's
+    // copy is switched on by the host's event-scene phase instead (coop/world/event_scene_sync), so a client's roll would
+    // be a second, early flight.
+    {&kRowUfoBooGamemode,                 "gamemode.ufo_boo"},
+    {&kRowUfoJoelGamemode,                "gamemode.ufo_joel"},
+    {&kRowUfoPillGamemode,                "gamemode.ufo_pill"},
+    {&kRowUfoMidasGamemode,               "gamemode.ufo_midas"},
 
     // The 0.10.0 UFO encounters. The knob controller starts its flock 0.2 s after its BeginPlay and
     // re-rolls it from its tick; the UK controller starts 5 s after BeginPlay when beginSpawn is set,
