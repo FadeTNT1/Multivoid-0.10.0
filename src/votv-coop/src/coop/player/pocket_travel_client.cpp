@@ -77,6 +77,7 @@ bool     g_sawPocket = false;    // a pocket world has been current since the de
 bool     g_watchdogSaid = false;
 bool     g_reaperSaid = false;
 bool     g_arrivedSent = false;
+bool     g_enterSent = false;    // this trip's Enter has gone to the host (EnterWork ran)
 Clock::time_point g_arrivedAt{};
 bool     g_deathHandled = false;
 Clock::time_point g_deadSince{};
@@ -192,6 +193,7 @@ bool ReadDeparture(float out[6]) {
 // same frame, before the engine takes the travel.
 void EnterWork(uint32_t trip) {
     if (trip != g_tripSeq || g_state.load() != State::Entering) return;  // a newer decision took over
+    g_enterSent = true;
     const PT::Pocket pocket = g_pocket.load();
     const bool placed = ReadDeparture(g_departure);
     g_carriedCount = PIS::ClientCaptureCarried("at the trip's start");
@@ -258,6 +260,7 @@ void ResetTrip() {
     g_watchdogSaid = false;
     g_reaperSaid = false;
     g_arrivedSent = false;
+    g_enterSent = false;
     g_arrivedAt = {};
     g_deathHandled = false;
     g_deadSince = {};
@@ -436,9 +439,23 @@ sg::Verdict OnLocalLoadLevel(PT::Pocket dest, const wchar_t* level, void* author
             ue_wrap::game_thread::Post([trip] { EnterWork(trip); });
             return sg::Verdict::Run;
         }
-        if (st == State::Entering || st == State::Away) {
-            // One pocket's exit into another: still away; the carried state goes along.
+        if (st == State::Entering && !g_enterSent) {
+            // A second decision before the first one's Enter went: the same trip, re-aimed. EnterWork
+            // reads the pocket when it runs, so the host hears one Enter, for the pocket travelled to.
             const PT::Pocket from = g_pocket.load();
+            g_pocket.store(dest);
+            UE_LOGI("[POCKET] client: the trip to %s re-aimed at %s before it left (slot %u, trip %u, reason %s)",
+                    PT::LevelTag(from), PT::LevelTag(dest), LocalSlot(), g_tripSeq,
+                    PT::ReasonTag(PT::Reason::Trip));
+            return sg::Verdict::Run;
+        }
+        if (st == State::Entering || st == State::Away) {
+            // One pocket's exit into another: still away, the carried state goes along, and it is a new
+            // trip for the host -- its own Enter, so the host's table, the co-location rule, the feed and
+            // the scoreboard follow it, and its Arrived names the trip the host holds. The departure stays
+            // the first one (the host keeps the first departure for a trip that starts in a pocket).
+            const PT::Pocket from = g_pocket.load();
+            ++g_tripSeq;
             g_pocket.store(dest);
             g_state.store(State::Entering);
             g_arrivedSent = false;
@@ -446,11 +463,14 @@ sg::Verdict OnLocalLoadLevel(PT::Pocket dest, const wchar_t* level, void* author
             g_enterAt = Clock::now();
             g_enterGen = WI::Generation();
             g_watchdogSaid = false;
+            g_reaperSaid = false;
             const uint32_t trip = g_tripSeq;
-            UE_LOGI("[POCKET] client: from %s on to %s (trip %u) -- still away, the carried state goes along",
-                    PT::LevelTag(from), PT::LevelTag(dest), trip);
-            ue_wrap::game_thread::Post([trip] {
+            UE_LOGI("[POCKET] client: from %s on to %s (slot %u, trip %u, reason %s) -- still away, the carried "
+                    "state goes along", PT::LevelTag(from), PT::LevelTag(dest), LocalSlot(), trip,
+                    PT::ReasonTag(PT::Reason::Trip));
+            ue_wrap::game_thread::Post([trip, dest] {
                 if (trip != g_tripSeq) return;
+                SendTravel(PT::Phase::Enter, dest, PT::Reason::Trip, g_departure);
                 g_carriedCount = PIS::ClientCaptureCarried("between pockets");
                 for (int slot = 0; slot < coop::players::kMaxPeers; ++slot) coop::puppet_drive::DestroySlot(slot);
                 PIS::ClientArmCarriedApply();

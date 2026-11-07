@@ -151,7 +151,9 @@ three.
   its place, sends `PocketTravel{Enter}`, raises the reload window, releases the world-object half
   of the teardown (puppets, prop, trash, NPC, world-actor, owner-entity and hook mirrors, parks,
   rider holds, the client's sleepers; `GcPin::ReportWorldScopedPins` names what is left) and arms
-  the carried state's re-apply.
+  the carried state's re-apply. A trip on from one pocket to another is a new trip number with its
+  own `Enter` (the host keeps the first departure); a second decision before the first `Enter` went
+  re-aims the same trip.
 - **Arrived**: the pocket's world is current and has a local pawn. The carried state goes back on
   the player at the world's own load (its player load or its `loadObjects` return, the join's
   substitution path), or after 4 s of settle; then `PocketTravel{Arrived}`.
