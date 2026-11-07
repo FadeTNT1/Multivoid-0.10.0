@@ -469,7 +469,11 @@ void Tick(coop::net::Session* session) {
         // needs the host-authoritative keyed-prop birth route or it exists only for the client that
         // tore it out. Like a menu prop and unlike a freshBirth it is not born into a hand: it falls
         // where it was torn, so it goes as an ordinary drop intent and its host copy is not put to sleep.
-        const bool isNotebookSheet = ue_wrap::notebook::IsNotebookSheet(e.actor);
+        // A drawn sheet (prop_paper_drawable_C, the pencil's paper) is born the same way and went the
+        // same way before this: dropped at the drain, so the sheet only ever existed for the one who drew
+        // it. It rides the notebook sheet's route; its pixels still do not cross (docs/props.md).
+        const bool isNotebookSheet = ue_wrap::notebook::IsNotebookSheet(e.actor) ||
+                                     ue_wrap::notebook::IsDrawablePaper(e.actor);
         const bool freshBirth = !parked &&
             (isDiscBirth ||
              (ue_wrap::tape_caddy::EnsureResolved() &&

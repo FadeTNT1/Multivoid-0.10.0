@@ -570,9 +570,11 @@ text is the prop's save record and crosses on the record lane above with no mess
   denied the editor while another peer holds it; the close then reaches it as an ordinary record.
 - **The ceiling.** A record over 32 KiB is refused with a log line and stays on the editing peer.
 
-A page torn out of a notebook is `prop_notebook_paper_C`, born by a client's prop birth route
-(`coop/props/prop_drop_intent`). The drawn pixels of `prop_paper_drawable_C` are in no save
-record and do not cross; that paper has a claim only. `[RD]` for the Blueprints, `[?]` until the
+A page torn out of a notebook is `prop_notebook_paper_C`, and a sheet the pencil draws on is
+`prop_paper_drawable_C`; a client's birth of either goes through the prop birth route
+(`coop/props/prop_drop_intent`), so the sheet exists for the other peers. The drawn pixels of
+`prop_paper_drawable_C` are in no save record and do not cross: the other peers hold a blank sheet of that
+paper, which has a claim only. `[RD]` for the Blueprints, `[?]` until the
 notebook drill has run.
 
 ### Sleeping bags and mattresses
