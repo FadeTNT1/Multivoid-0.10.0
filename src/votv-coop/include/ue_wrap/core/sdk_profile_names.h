@@ -181,6 +181,9 @@ inline constexpr const wchar_t* ScreenGridSizeProp            = L"gridSize";
 // the one the drone, the sack and the ATV hand their container to. A sleeper's loot opens through it.
 inline constexpr const wchar_t* GamemodeOpenPropInvFn         = L"openPropInv";
 inline constexpr const wchar_t* GamemodeOpenPropInvParam      = L"prop";
+// prop_container_C's own verb for a person's interact: it opens the screen onto that container. The second way a
+// sleeper's loot is opened when openPropInv leaves the screen closed.
+inline constexpr const wchar_t* ContainerOpenFn               = L"openContainer";
 // A sleeper (an offline player lying in the world, coop/player/sleepers) carries its inventory in a hidden container
 // of this class, spawned on every peer and never saved, enrolled or drawn: a plain crate, whose begin-play only
 // makes itself its storage's owner. Loaded by path when no instance has loaded the class yet.

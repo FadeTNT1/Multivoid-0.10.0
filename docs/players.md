@@ -276,7 +276,17 @@ laid out on the crate's grid. Its volume is unbounded, so a put is never refused
 
 **Looting.** E on the body (within 2.5 m, aiming at it, with nothing in between) opens the crate in the game's own
 container screen through the gamemode's `openPropInv`; that press, its second dispatch and its release are kept from
-the game's own use, so nothing behind the body is grabbed. A plate shows "[E] Loot" while you can.
+the game's own use, so nothing behind the body is grabbed. A plate shows "[E] Loot" while you can. The open is judged
+over the next ticks, not on the press: if the screen does not show the crate within 0.4 s, the crate's own
+`openContainer` is tried, then `openPropInv` on the crate made visible with collision for the moment; a failure after
+1.8 s logs what the screen read (held, `inventoryActive`, `isInContainer`, what it shows, the crate's distance).
+
+**Lying height.** A body on its side lies with its centre 25 cm over the surface the host traced under it, corrected
+by the drawn mesh's box only when that box is the lying body's: a parked puppet's skeleton never ticks, so right after
+the roll the box can still be the standing one (half height ~90), which once put the lowest point 70 cm under the floor
+and the body 96 cm above it. A box taller than 50 cm is ignored, a correction past 30 cm is ignored, and the centre is
+held within 45 cm of the surface. The log says `sleeper: <name> floor traced at z=.., mesh box read|still the
+standing one -- ignored, settled by .. cm`.
 
 **Write-back.** The host reads the crate's rows once a second and, when they changed, rebuilds the player's profile
 items from the ones the crate was filled from (`storage_inventory::RebuildProfileItems`): an item they held or wore

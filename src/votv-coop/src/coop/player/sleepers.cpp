@@ -75,7 +75,10 @@ constexpr float kReachCm = 250.f;          // the loot press reaches this far fr
 constexpr float kAimRadiusCm = 45.f;       // and this close to the body's line
 constexpr float kLyingRoll = 90.f;         // on the side: the body's forward axis stays level
 constexpr float kFloorClearanceCm = 1.f;   // the body's lowest point this far above the traced floor
-constexpr float kMaxSettleCm = 80.f;       // a bounds correction past this is not trusted
+constexpr float kMaxSettleCm = 30.f;       // a bounds correction past this is not trusted
+constexpr float kLieCentreCm = 25.f;       // a body on its side: its centre this far above the surface it lies on
+constexpr float kLieMaxAboveCm = 45.f;     // ... and never more than this, whatever the bounds say
+constexpr float kLyingHalfZMaxCm = 50.f;   // a mesh box taller than this (half-extent) is still the standing one
 constexpr auto kBuildRetry = std::chrono::milliseconds(1000);
 constexpr int kMaxBuildTries = 60;
 constexpr auto kWritebackEvery = std::chrono::milliseconds(1000);
@@ -84,7 +87,6 @@ constexpr auto kWakeDebounce = std::chrono::milliseconds(1000);     // an awake 
 constexpr auto kSettleStill = std::chrono::milliseconds(300);       // the streamed spot held still this long: settle
 constexpr auto kSettleMax = std::chrono::milliseconds(1500);        // ... or this long after the rest began
 constexpr float kSpotStillCm = 20.f;                                // "held still": moved less than this
-constexpr float kOnlineMaxSettleCm = 30.f;                          // a mesh-bounds correction past this is not trusted
 constexpr float kOnlinePlateLiftCm = 40.f;                          // the plate floats this far above the body's centre
 constexpr const wchar_t* kSidecar = L"sleepers.txt";
 constexpr const char* kSidecarMagic = "VCSL1";
@@ -239,40 +241,65 @@ void* SpawnCrate(const Sleeper& s) {
     return actor;
 }
 
-// The lowest point of the body's drawn mesh, or false.
-bool BodyBottom(void* body, float& z) {
+// The drawn mesh's box: its lowest point and half height. False when it does not read.
+bool BodyBox(void* body, float& bottom, float& halfZ) {
     FVector o{}, e{};
     void* const mesh = ue_wrap::puppet::GetMeshPlayerVisibleComponent(body);
-    if (mesh && E::GetComponentBounds(mesh, o, e)) { z = o.Z - e.Z; return true; }
+    if (mesh && E::GetComponentBounds(mesh, o, e)) { bottom = o.Z - e.Z; halfZ = e.Z; return true; }
     return false;
 }
 
 bool IsLying(const FRotator& r) { return std::fabs(r.Roll) > 60.f || std::fabs(r.Pitch) > 60.f; }
 
-// The pose a body lies in under `stand` facing `yaw`, measured on `body` (rotated and moved there to measure it).
-// `maxSettleCm` bounds the mesh-bounds correction that is trusted. True when the surface under `stand` was traced.
+// What the last MeasureLie saw, for the log.
+struct LieDiag {
+    bool traced = false;    // the surface under the spot was hit
+    bool boxRead = false;   // the mesh box read
+    bool boxLying = false;  // ... and was the lying body's, not a stale standing one
+    float bottom = 0.f;
+    float halfZ = 0.f;
+    float settle = 0.f;     // the correction applied
+};
+
+// The pose a body lies in over `surfaceZ` (a traced bed or floor top) facing `yaw`, measured on `body`: rotated onto
+// its side with its centre kLieCentreCm over the surface, then corrected so its lowest point meets the surface -- but
+// only by a box that is the LYING body's. The drawn mesh's box is refreshed by the skeleton's tick, which a parked
+// puppet never runs, so right after the roll it can still be the standing one (half height ~90): read as the lying
+// body's it put the lowest point 70 cm under the floor and the body 96 cm over it. A box still that tall is ignored,
+// a correction past kMaxSettleCm is ignored, and the result is held within kLieMaxAboveCm of the surface either way.
+void PlaceOnSurface(void* body, float surfaceZ, float yaw, const FVector& at, FVector& lie, FRotator& rot, LieDiag& d) {
+    rot = FRotator{0.f, yaw, kLyingRoll};
+    lie = FVector{at.X, at.Y, surfaceZ + kLieCentreCm};
+    E::SetActorRotation(body, rot);
+    E::SetActorLocation(body, lie);
+    d.boxRead = BodyBox(body, d.bottom, d.halfZ);
+    d.boxLying = d.boxRead && d.halfZ <= kLyingHalfZMaxCm;
+    d.settle = 0.f;
+    if (d.boxLying) {
+        const float settle = (surfaceZ + kFloorClearanceCm) - d.bottom;
+        if (std::fabs(settle) <= kMaxSettleCm) d.settle = settle;
+    }
+    lie.Z += d.settle;
+    lie.Z = std::clamp(lie.Z, surfaceZ + kFloorClearanceCm, surfaceZ + kLieMaxAboveCm);
+    E::SetActorLocation(body, lie);
+}
+
+// Trace down from `stand` for the surface under it, then lay `body` on it (PlaceOnSurface). `floorOut` is the surface.
 bool MeasureLie(void* body, const FVector& stand, float yaw, FVector& lie, FRotator& rot, float* floorOut,
-                float maxSettleCm = kMaxSettleCm) {
+                LieDiag* diagOut = nullptr) {
     void* const local = coop::players::Registry::Get().Local();
     const float halfH = local ? E::GetActorCharacterHalfHeight(local) : 0.f;
     float floorZ = stand.Z - (halfH > 1.f ? halfH : 90.f);
     ue_wrap::trace::Hit hit;
     const FVector from{stand.X, stand.Y, stand.Z + 50.f};
     const FVector to{stand.X, stand.Y, stand.Z - 600.f};
-    const bool traced = ue_wrap::trace::LineHitStatDyn(local ? local : body, from, to, &hit) && hit.blocked;
-    if (traced) floorZ = hit.point.Z;
-    rot = FRotator{0.f, yaw, kLyingRoll};
-    lie = FVector{stand.X, stand.Y, floorZ + 25.f};
-    E::SetActorRotation(body, rot);
-    E::SetActorLocation(body, lie);
-    float bottom = 0.f;
-    if (BodyBottom(body, bottom)) {
-        const float settle = (floorZ + kFloorClearanceCm) - bottom;
-        if (std::fabs(settle) <= maxSettleCm) lie.Z += settle;
-        E::SetActorLocation(body, lie);
-    }
+    LieDiag d;
+    d.traced = ue_wrap::trace::LineHitStatDyn(local ? local : body, from, to, &hit) && hit.blocked;
+    if (d.traced) floorZ = hit.point.Z;
+    PlaceOnSurface(body, floorZ, yaw, stand, lie, rot, d);
     if (floorOut) *floorOut = floorZ;
-    return traced;
+    if (diagOut) *diagOut = d;
+    return d.traced;
 }
 
 // Lay the body: on its side, its forward axis level at the player's facing, its lowest point on the floor. The host
@@ -282,30 +309,18 @@ void Lay(Sleeper& s, bool measure) {
     if (measure) {
         void* const local = coop::players::Registry::Get().Local();
         const float halfH = local ? E::GetActorCharacterHalfHeight(local) : 0.f;
-        float floorZ = s.stand.Z - (halfH > 1.f ? halfH : 90.f);
-        ue_wrap::trace::Hit hit;
-        const FVector from{s.stand.X, s.stand.Y, s.stand.Z + 50.f};
-        const FVector to{s.stand.X, s.stand.Y, s.stand.Z - 600.f};
-        const bool traced = ue_wrap::trace::LineHitStatDyn(local ? local : body, from, to, &hit) && hit.blocked;
-        if (traced) floorZ = hit.point.Z;
-        s.lieRot = FRotator{0.f, s.standYaw, kLyingRoll};
-        s.lie = FVector{s.stand.X, s.stand.Y, floorZ + 25.f};
-        E::SetActorRotation(body, s.lieRot);
-        E::SetActorLocation(body, s.lie);
-        float bottom = 0.f;
-        float settle = 0.f;
-        if (BodyBottom(body, bottom)) {
-            settle = (floorZ + kFloorClearanceCm) - bottom;
-            if (std::fabs(settle) > kMaxSettleCm) settle = 0.f;
-            s.lie.Z += settle;
-            E::SetActorLocation(body, s.lie);
-        }
+        float floorZ = 0.f;
+        LieDiag d;
+        const bool traced = MeasureLie(body, s.stand, s.standYaw, s.lie, s.lieRot, &floorZ, &d);
         // The rejoin pose: standing on the same floor.
         if (traced && halfH > 1.f) s.stand.Z = floorZ + halfH + 2.f;
         s.poseFinal = true;
-        UE_LOGI("sleeper: %s floor %s at z=%.1f, mesh bottom %s, settled by %.1f cm", Utf8(s.nick).c_str(),
-                traced ? "traced" : "NOT traced (the capsule's foot is used)", floorZ,
-                BodyBottom(body, bottom) ? "measured" : "not measured", settle);
+        UE_LOGI("sleeper: %s floor %s at z=%.1f, mesh box %s, settled by %.1f cm (centre %.1f over the floor)",
+                Utf8(s.nick).c_str(), traced ? "traced" : "NOT traced (the capsule's foot is used)", floorZ,
+                !d.boxRead ? "not read" : d.boxLying ? "read" : "still the standing one -- ignored", d.settle,
+                s.lie.Z - floorZ);
+        if (d.boxRead)
+            UE_LOGI("sleeper: %s mesh box bottom=%.1f half-height=%.1f", Utf8(s.nick).c_str(), d.bottom, d.halfZ);
     } else {
         E::SetActorRotation(body, s.lieRot);
         E::SetActorLocation(body, s.lie);
@@ -658,21 +673,112 @@ Sleeper* AimedSleeper(void* local) {
     return best;
 }
 
+// ---- opening the loot ----
+// One open at a time. openPropInv dispatches at once but the screen is only seen to show the crate's storage a few
+// ticks later (or not at all), so the open is judged over the next ticks, not on the press: an attempt that has not
+// taken in kOpenStep is followed by the next way -- the crate prop's own openContainer, then the same with the crate
+// revealed (visible, collision on) for the moment, since a verb that checks its prop may refuse a hidden one -- and a
+// failure says what the screen read.
+struct LootOpen {
+    bool active = false;
+    uint32_t id = 0;
+    void* crate = nullptr;
+    int32_t crateIdx = -1;
+    std::wstring nick;
+    Clock::time_point began{};
+    int attempt = 0;          // 1 openPropInv, 2 openContainer, 3 openPropInv on a revealed crate
+    bool revealed = false;
+    bool dispatched[4] = {};
+};
+LootOpen g_open;
+constexpr auto kOpenStep = std::chrono::milliseconds(400);
+constexpr auto kOpenGiveUp = std::chrono::milliseconds(1800);
+constexpr const char* kOpenWay[4] = {"", "openPropInv", "the crate's openContainer", "openPropInv on a revealed crate"};
+
+void Reveal(LootOpen& o, bool on) {
+    if (!Live(o.crate, o.crateIdx)) return;
+    E::SetActorHiddenInGame(o.crate, !on);
+    E::SetActorEnableCollision(o.crate, on);
+    o.revealed = on;
+}
+
+void EndOpen() {
+    if (g_open.revealed) Reveal(g_open, false);
+    g_open = LootOpen{};
+}
+
+void DescribeScreen(const LootOpen& o) {
+    const SI::ScreenState st = SI::ReadScreenState();
+    FVector crateAt{}, playerAt{};
+    void* const local = coop::players::Registry::Get().Local();
+    const bool haveCrate = E::TryGetActorLocation(o.crate, crateAt);
+    const bool havePlayer = local && E::TryGetActorLocation(local, playerAt);
+    UE_LOGW("sleeper: the loot of %ls did not open -- screen %s, inventoryActive=%d, isInContainer=%s, shows %s "
+            "(the crate's storage is %s); crate %.0f cm from the player; dispatched: openPropInv=%d openContainer=%d "
+            "revealed=%d",
+            o.nick.c_str(), st.screen ? "held" : "NOT held by the gamemode", st.active ? 1 : 0,
+            !st.inContainerKnown ? "unread" : st.inContainer ? "1" : "0",
+            !st.storage ? "nothing" : st.storage == SI::StorageOf(o.crate) ? "the crate" : "another storage",
+            SI::StorageOf(o.crate) ? "live" : "NOT readable", (haveCrate && havePlayer) ? Len(Sub(crateAt, playerAt)) : -1.f,
+            o.dispatched[1] ? 1 : 0, o.dispatched[2] ? 1 : 0, o.dispatched[3] ? 1 : 0);
+}
+
+void TickLootOpen() {
+    LootOpen& o = g_open;
+    if (!o.active) return;
+    if (!Live(o.crate, o.crateIdx)) { UE_LOGW("sleeper: the crate went while its loot was opening"); EndOpen(); return; }
+    const auto now = Clock::now();
+    void* const want = SI::StorageOf(o.crate);
+    if (want && SI::ShownStorage() == want) {
+        UE_LOGI("sleeper: opened the loot of %ls (id %u) by %s after %lld ms", o.nick.c_str(), o.id, kOpenWay[o.attempt],
+                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now - o.began).count()));
+        EndOpen();
+        return;
+    }
+    const auto age = now - o.began;
+    if (age >= kOpenGiveUp) {
+        DescribeScreen(o);
+        EndOpen();
+        return;
+    }
+    const int due = 1 + static_cast<int>(age / kOpenStep);
+    while (o.attempt < due && o.attempt < 3) {
+        ++o.attempt;
+        bool ok = false;
+        if (o.attempt == 2) {
+            ok = SI::OpenScreenViaContainer(o.crate);
+        } else {
+            Reveal(o, true);
+            ok = SI::OpenScreenOnto(o.crate);
+        }
+        o.dispatched[o.attempt] = ok;
+        UE_LOGI("sleeper: the loot of %ls: %s %s after %lld ms without the screen", o.nick.c_str(), kOpenWay[o.attempt],
+                ok ? "dispatched" : "did not dispatch",
+                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(age).count()));
+    }
+}
+
 bool OnUsePress(void* self, void* /*params*/) {
     if (!IsHost() && !IsClient()) return false;
     void* const local = coop::players::Registry::Get().Local();
     if (!self || self != local || g_sleepers.empty()) return false;
+    if (g_open.active) return true;   // an open is in flight: a repeated press is held with it, not given to the game
     if (SI::ShownStorage()) return false;   // a screen is up: the press is the game's
     Sleeper* const s = AimedSleeper(local);
     if (!s) return false;
-    if (!SI::OpenScreenOnto(s->crate)) {
-        UE_LOGW("sleeper: the loot of %s could not be opened (openPropInv did not dispatch)", Utf8(s->nick).c_str());
-        return false;
-    }
+    g_open = LootOpen{};
+    g_open.active = true;
+    g_open.id = s->id;
+    g_open.crate = s->crate;
+    g_open.crateIdx = s->crateIdx;
+    g_open.nick = s->nick;
+    g_open.began = Clock::now();
+    g_open.attempt = 1;
+    g_open.dispatched[1] = SI::OpenScreenOnto(s->crate);
     g_swallowUntil = Clock::now() + std::chrono::milliseconds(600);
     g_swallowRelease = true;
-    UE_LOGI("sleeper: opened the loot of %s (id %u)%s", Utf8(s->nick).c_str(), s->id,
-            SI::ShownStorage() == SI::StorageOf(s->crate) ? "" : " -- the screen does not show it yet");
+    UE_LOGI("sleeper: opening the loot of %s (id %u): openPropInv %s", Utf8(s->nick).c_str(), s->id,
+            g_open.dispatched[1] ? "dispatched" : "did NOT dispatch");
     return true;
 }
 
@@ -774,7 +880,8 @@ void SettleOnline(int slot, OnlineRest& o, coop::RemotePlayer& p, void* body, co
     o.anchor = anchor;
     o.standYaw = p.GetSyncedAimRotation().Yaw;
     float surfaceZ = 0.f;
-    const bool traced = MeasureLie(body, anchor, o.standYaw, o.lie, o.rot, &surfaceZ, kOnlineMaxSettleCm);
+    LieDiag d;
+    const bool traced = MeasureLie(body, anchor, o.standYaw, o.lie, o.rot, &surfaceZ, &d);
     o.surfaceZ = surfaceZ;
     ue_wrap::puppet::DriveCharacterMovement(body, FVector{0.f, 0.f, 0.f}, false);
     PinHead(body, o.lie);
@@ -792,6 +899,9 @@ void SettleOnline(int slot, OnlineRest& o, coop::RemotePlayer& p, void* body, co
     E::TryGetActorLocation(body, at);
     UE_LOGI("sleeper: %s pose settled at (%.0f, %.0f, %.0f) on %s z=%.1f%s", Utf8(p.GetNickname()).c_str(), at.X, at.Y,
             at.Z, on, surfaceZ, traced ? "" : " (surface NOT traced; the capsule's foot is used)");
+    UE_LOGI("sleeper: slot %d mesh box %s (bottom %.1f half-height %.1f), settled by %.1f cm, centre %.1f over the surface",
+            slot, !d.boxRead ? "not read" : d.boxLying ? "read" : "still the standing one -- ignored", d.bottom, d.halfZ,
+            d.settle, o.lie.Z - surfaceZ);
     UE_LOGI("sleeper: %s (online, slot %d) lying at (%.0f, %.0f, %.0f) pitch/roll=%.0f/%.0f floor z=%.1f",
             Utf8(p.GetNickname()).c_str(), slot, at.X, at.Y, at.Z, got.Pitch, got.Roll, surfaceZ);
     UE_LOGI("sleeper: drives suspended for slot %d", slot);
@@ -897,6 +1007,7 @@ void Install(coop::net::Session* session) {
 void Tick() {
     if (!IsHost() && !IsClient()) return;
     InstallPress();
+    TickLootOpen();
     if (!g_onlineLootSaid && coop::config::ResolveFlag(::coop::config_registry::rows::sleepers_loot_online)) {
         g_onlineLootSaid = true;
         UE_LOGW("sleeper: sleepers.loot_online is on, but looting a player who is asleep online is not in this build "
@@ -946,6 +1057,7 @@ void OnClientDisconnect() {
 }
 
 void OnSessionEnd() {
+    g_open = LootOpen{};   // its crate goes with the sleepers below
     for (auto& [id, s] : g_sleepers) DestroyActors(s);
     if (!g_sleepers.empty()) UE_LOGI("sleeper: %zu sleeper(s) of this session dropped", g_sleepers.size());
     g_sleepers.clear();

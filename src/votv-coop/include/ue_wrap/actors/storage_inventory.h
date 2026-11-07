@@ -93,6 +93,16 @@ bool PeekPlacement(const std::vector<uint8_t>& row, float& x, float& y, float& r
 
 // The inventory screen: the storage it shows beside the player's, or null when it is closed or shows none.
 void* ShownStorage();
+// What the inventory screen reads right now, whether or not it is open: for a log line that says why an open did not
+// take. `screen` is false when the gamemode holds none.
+struct ScreenState {
+    bool screen = false;
+    bool active = false;            // inventoryActive
+    bool inContainer = false;       // isInContainer (only if inContainerKnown)
+    bool inContainerKnown = false;
+    void* storage = nullptr;        // containerInventoryComponent, live or null
+};
+ScreenState ReadScreenState();
 // Whether `obj` is the inventory screen (a ui_freeLayoutInventory_C): the caller a drag's own verbs name.
 bool IsInventoryScreen(void* obj);
 
@@ -205,5 +215,8 @@ bool SetInfiniteVolume(void* component, bool on);
 // Open the local player's inventory screen onto `containerActor` (a prop_container_C) through the gamemode's own
 // openPropInv, as the drone and the ATV open theirs. False when the gamemode or the verb does not resolve.
 bool OpenScreenOnto(void* containerActor);
+// The same open through the container prop's own interact verb (prop_container_C::openContainer). False when the
+// actor has no such verb or it did not dispatch.
+bool OpenScreenViaContainer(void* containerActor);
 
 }  // namespace ue_wrap::storage_inventory

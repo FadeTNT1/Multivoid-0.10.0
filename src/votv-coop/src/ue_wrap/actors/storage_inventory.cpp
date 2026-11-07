@@ -447,6 +447,19 @@ void* ShownStorage() {
     return LiveObjAt(screen, g_offScreenStorage.Of(screen));
 }
 
+ScreenState ReadScreenState() {
+    static BoolField sActive{N::ScreenActiveProp}, sInContainer{N::ScreenInContainerProp};
+    ScreenState st;
+    void* const gm = ue_wrap::world_singleton::Gamemode();
+    void* const screen = gm ? LiveObjAt(gm, g_offScreen.Of(gm)) : nullptr;
+    if (!screen) return st;
+    st.screen = true;
+    sActive.Read(screen, st.active);
+    st.inContainerKnown = sInContainer.Read(screen, st.inContainer);
+    st.storage = LiveObjAt(screen, g_offScreenStorage.Of(screen));
+    return st;
+}
+
 bool IsInventoryScreen(void* obj) {
     return obj && IsA(obj, N::InventoryScreenClass);
 }
@@ -864,6 +877,14 @@ bool OpenScreenOnto(void* containerActor) {
     if (!f.valid()) return false;
     f.Set<void*>(N::GamemodeOpenPropInvParam, containerActor);
     return Call(gm, f);
+}
+
+bool OpenScreenViaContainer(void* containerActor) {
+    if (!containerActor || !R::IsLive(containerActor)) return false;
+    void* const fn = R::FindDispatchFunctionCached(R::ClassOf(containerActor), N::ContainerOpenFn);
+    if (!fn) return false;
+    ParamFrame f(fn);
+    return f.valid() && Call(containerActor, f);
 }
 
 }  // namespace ue_wrap::storage_inventory
