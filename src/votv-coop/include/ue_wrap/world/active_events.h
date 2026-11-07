@@ -21,6 +21,10 @@ bool EnsureResolved();
 // activeEvents, the refcount. False while unresolved or without a gamemode.
 bool ReadCount(int32_t& out);
 
+// Set the refcount. Only to take back a count no live sender holds (an event whose actor was destroyed or
+// retired without its setEvent(false)); the caller proves that first. False while unresolved or without a gamemode.
+bool WriteCount(int32_t value);
+
 // activeEvents_senders: the engine's own array, valid only for the current game-thread slice.
 struct Senders {
     void* const* data;
