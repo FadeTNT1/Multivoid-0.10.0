@@ -22,6 +22,8 @@
 #include "coop/session/rig_ready.h"
 #include "coop/props/prop_element_tracker.h"
 #include "coop/session/world_load_episode.h"  // the announce waits on the load-tail quiescence latch
+#include "coop/player/pocket_return_client.h"  // a return's no-world tick and its announce
+#include "coop/player/pocket_travel_client.h"  // LocalAway: no announce from a pocket
 
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/log.h"
@@ -72,6 +74,14 @@ void ForgetWorldReadyAnnounce() {
     g_failureActed = false;
     g_noBaselineSaid = false;
     coop::world_load_episode::ClearBaselineWorld();
+}
+
+void ForgetAnnounceForReturn() {
+    const bool was = g_worldReadyAnnounced.load(std::memory_order_relaxed);
+    const bool owed = g_reAnnounceWorldReady.load(std::memory_order_relaxed);
+    ForgetWorldReadyAnnounce();
+    UE_LOGI("net_pump: announce state forgotten for a pocket return (was announced=%d, re-announce owed=%d) "
+            "-- the new world's announce is a first one", was ? 1 : 0, owed ? 1 : 0);
 }
 
 // The announce axis' one owner; registry_reaper only requests through here. No-op on the host.
@@ -131,6 +141,20 @@ const char* TickWorldReadyAnnounce(coop::net::Session& session, void* localNow, 
     // failed watch or a world change's bound ends by name; the probe after it is deadline-capped, so a
     // pathological load still announces. Re-fires on a re-announce request under the same coherence
     // gate.
+    if (!isHost) {
+        // A pocket return's phases run on while no local player exists (its load's world swap), so its
+        // bounds run out even when no world comes up; with a player, pocket_travel_client::Tick drives
+        // it from the gameplay chain.
+        if (!worldUp) coop::player::pocket_return_client::Tick();
+        // An away client announces nothing until its return has loaded the host's world: neither the
+        // pocket level nor the stale main world the game may bring back is the shared world.
+        // The probe still runs every tick (its reconcile-window ceiling lives there).
+        if (coop::player::pocket_travel_client::LocalAway() &&
+            !coop::player::pocket_return_client::AnnounceOwed()) {
+            (void)coop::world_load_episode::TickQuiesceProbe();
+            return nullptr;
+        }
+    }
     const bool reAnnounce = g_reAnnounceWorldReady.load(std::memory_order_relaxed);
     if (!isHost && isConnected &&
         (!g_worldReadyAnnounced.load(std::memory_order_relaxed) || reAnnounce)) {

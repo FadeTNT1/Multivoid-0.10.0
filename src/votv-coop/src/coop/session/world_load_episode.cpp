@@ -52,6 +52,11 @@ std::atomic<uint64_t> g_requestRaisedAtMs{0};  // coop::net::NowMs() when a worl
 // The world this connection last settled on; its identity, not its address.
 ue_wrap::CachedObjRef g_baseline;
 
+// A pocket return's request (ArmForReturn): the world being left, whose own replay must not satisfy
+// it. Game thread; cleared when the request is consumed and at Reset.
+ue_wrap::CachedObjRef g_requestNotIn;
+bool g_notInSaid = false;
+
 // Per request: the log said once, and why the request failed.
 bool g_sweepSkipSaid = false;
 RequestFailureInfo g_failure;
@@ -181,6 +186,21 @@ void Latch_(const char* how) {
             closesEpisode ? " -- episode CLOSED, KEYED-prop destroy broadcasts resume" : "");
 }
 
+// The pending request's world has replayed its save: the replay returned in the world the player
+// stands in (or the red arm skips the wait), and that world is not the one a pocket return is
+// leaving. `cw` gets the world tested, read once.
+bool ReplayReturnedForRequest_(void** cw) {
+    const bool returned = save_replay_watch::ReturnedInThisWorld(cw);
+    if (g_requestNotIn.Raw() && g_requestNotIn.Is(*cw)) {
+        if (!g_notInSaid)
+            UE_LOGI("world_load_episode: the return's request waits for the next world (the replay of %p, "
+                    "the world being left, does not count)", *cw);
+        g_notInSaid = true;
+        return false;
+    }
+    return returned || save_replay_watch::GateBreak();
+}
+
 }  // namespace
 
 void Arm() {
@@ -198,6 +218,30 @@ void Arm() {
     UE_LOGI("world_load_episode: ARMED -- client world-load starting; KEYED-prop destroy broadcasts "
             "suppressed until load-tail quiescence (host-wipe root fix); probe session opens once "
             "the world's save replay has returned");
+}
+
+void ArmForReturn(void* leavingWorld) {
+    UE_ASSERT_GAME_THREAD("world_load_episode::ArmForReturn");
+    // Arm's shape on the game thread, where the plain fields may be written directly. Arm itself is
+    // a no-op while an episode stands, and it cannot touch the weak identity off the game thread.
+    g_inEpisode.store(true, std::memory_order_relaxed);
+    g_requestNotIn.Set(leavingWorld);  // null resets: no world to exclude
+    g_notInSaid = false;
+    g_failure = {};
+    g_sweepSkipSaid = false;
+    g_probeOpen = false;
+    g_quiesced = false;
+    // The load-kind reconcile window, restamped: an away client's window may have been raised at
+    // the trip, and its ceiling must count from this load.
+    g_reconRaiseRequested.store(false, std::memory_order_relaxed);
+    g_reconCompleteSinceArm = false;
+    g_reconKindLoad.store(true, std::memory_order_relaxed);
+    g_reconUp.store(true, std::memory_order_relaxed);
+    g_reconRaisedAt = std::chrono::steady_clock::now();
+    g_request.store(static_cast<uint8_t>(Request::Join), std::memory_order_release);
+    UE_LOGI("world_load_episode: ARMED for a pocket return (leaving world %p) -- KEYED-prop destroy "
+            "broadcasts suppressed and the reconcile window up (kind=load) until the next world's save "
+            "replay and load-tail quiescence", leavingWorld);
 }
 
 void ArmQuiesceProbe(const char* reason) {
@@ -284,14 +328,15 @@ bool TickQuiesceProbe() {
             UE_LOGE("world_load_episode: the save-replay watch (%s) is not live -- %s", row.c_str(),
                     save_replay_watch::Refused() ? "the script gate refused it"
                                                  : "its function does not exist in this game build");
-        } else if (g_failure.failure == Failure::None &&
-                   (save_replay_watch::ReturnedInThisWorld(&cw) || save_replay_watch::GateBreak())) {
+        } else if (g_failure.failure == Failure::None && ReplayReturnedForRequest_(&cw)) {
             // (3) the replay returned: the request is consumed and its session opens. An Arm that
             // replaced the request this tick, off the game thread, fails the exchange; the next tick
             // sees the new one.
             uint8_t expect = static_cast<uint8_t>(req);
             if (g_request.compare_exchange_strong(expect, 0, std::memory_order_acq_rel)) {
                 SetBaselineWorld(cw);
+                g_requestNotIn.Reset();
+                g_notInSaid = false;
                 g_sweepSkipSaid = false;
                 OpenProbeSession_(static_cast<Request>(expect) == Request::Join ? "join world-load"
                                                                                 : "world-change re-announce",
@@ -361,6 +406,8 @@ void Reset() {
     g_request.store(0, std::memory_order_relaxed);
     save_replay_watch::Reset();
     g_baseline.Reset();
+    g_requestNotIn.Reset();
+    g_notInSaid = false;
     g_failure = {};
     g_sweepSkipSaid = false;
     g_probeOpen = false;

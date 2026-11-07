@@ -299,8 +299,9 @@ void DriveMenuModeJoinWorldBoot() {
     // during that load the destroy seam suppresses the keyed-prop destroys this client's world
     // rebuild churns, which would otherwise reach the host and destroy its authoritative copies by
     // key (a bare join once emptied the host from 3,345 keyed props to 1,255).
-    // join_membership_sweep ends the episode at load-tail quiescence. The sole, client-only arm
-    // site, causally before the burst on every path.
+    // join_membership_sweep ends the episode at load-tail quiescence. The join's sole, client-only
+    // arm site, causally before the burst on every path; a pocket return re-arms the same episode in
+    // place with world_load_episode::ArmForReturn (coop/player/pocket_return_client).
     coop::world_load_episode::Arm();
 
     if (ST::GetClientState() == ST::ClientState::ReadySlotWritten) {

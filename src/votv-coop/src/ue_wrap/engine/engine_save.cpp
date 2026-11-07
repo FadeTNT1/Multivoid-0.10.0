@@ -5,6 +5,7 @@
 // StartFreshGame are retried until the save class and the world are live.
 
 #include "ue_wrap/engine/engine.h"
+#include "engine_save_internal.h"  // co-located private header (src tree, not include/)
 
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/fname_utils.h"
@@ -558,17 +559,11 @@ void SetLoadObjects(void* gi) {
     *(reinterpret_cast<uint8_t*>(gi) + s_off) = 1;
 }
 
-bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
-    if (!slot || !*slot) return false;
-
-    // The boot survey, shared with StartFreshGame.
-    const BootWorldView w = SurveyBootWorld("LoadStorySave");
-    if (w.inGameplay) return RestoreSettled("LoadStorySave");
-    if (w.gameplayLoading) return false;  // in/loading the gameplay world -> wait, no re-open
-
-    // (c) Still before gameplay: register the save (once per campaign) and re-issue the open. The
-    // campaign scope first, so a re-host never reuses the previous campaign's save object.
-    ValidateCachedSaveForCampaign(slot, w.curWorld);
+// LoadStorySave's step (c), shared with the pocket return (engine_save_internal.h).
+bool detail::RegisterStorySaveAndOpen(const wchar_t* slot, int forceGameMode, void* curWorld,
+                                      const char* who, bool* slotMissing) {
+    // The campaign scope first, so a re-host never reuses the previous campaign's save object.
+    ValidateCachedSaveForCampaign(slot, curWorld);
     auto makeFStr = [](std::wstring& b) {
         R::FString fs{};
         fs.Data = b.data();
@@ -582,7 +577,7 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
     }
     void* gi = world_singleton::GameInstance();
     if (!g_storyGsCdo || !g_loadGameFn || !gi) {
-        UE_LOGW("engine: LoadStorySave -- not up yet (cdo=%p fn=%p gi=%p); retry", g_storyGsCdo, g_loadGameFn, gi);
+        UE_LOGW("engine: %s -- not up yet (cdo=%p fn=%p gi=%p); retry", who, g_storyGsCdo, g_loadGameFn, gi);
         return false;
     }
     // The slot loaded from disk once.
@@ -596,13 +591,17 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
             ParamFrame f(g_loadGameFn);
             f.SetRaw(L"SlotName", &fs, sizeof(fs));
             f.Set<int32_t>(L"UserIndex", 0);
-            if (!Call(g_storyGsCdo, f)) { UE_LOGE("engine: LoadStorySave -- LoadGameFromSlot call failed"); return false; }
+            if (!Call(g_storyGsCdo, f)) { UE_LOGE("engine: %s -- LoadGameFromSlot call failed", who); return false; }
             g_storySave = f.Get<void*>(L"ReturnValue");
         }
-        if (!g_storySave) { UE_LOGW("engine: LoadStorySave -- slot '%ls' missing/empty", slot); return false; }
+        if (!g_storySave) {
+            UE_LOGW("engine: %s -- slot '%ls' missing/empty", who, slot);
+            if (slotMissing) *slotMissing = true;
+            return false;
+        }
         g_storySaveIdx = R::InternalIndexOf(g_storySave);  // IsLiveByIndex guard for reuse
         g_storySaveSlot = slot;                            // campaign identity
-        UE_LOGI("engine: LoadStorySave -- loaded save '%ls' = %p (idx %d)", slot, g_storySave, g_storySaveIdx);
+        UE_LOGI("engine: %s -- loaded save '%ls' = %p (idx %d)", who, slot, g_storySave, g_storySaveIdx);
         // The save's inventory arrays are present and the world is not yet built from them: the one
         // moment a coop client can substitute its per-player inventory. Fires once.
         FireSaveObjectReadyHook(g_storySave);
@@ -610,9 +609,9 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
 
     // Registered on the persistent GameInstance and flagged for the game to apply on BeginPlay;
     // re-asserted each retry (no disk) so it is fresh at the travel.
-    RegisterSave(gi, g_storySave, slot, std::wstring(), nullptr, nullptr, "LoadStorySave");
-    PutSaveRulesInForce(gi, g_storySave, "LoadStorySave");
-    PutSaveStartDayInForce(gi, g_storySave, "LoadStorySave");
+    RegisterSave(gi, g_storySave, slot, std::wstring(), nullptr, nullptr, who);
+    PutSaveRulesInForce(gi, g_storySave, who);
+    PutSaveStartDayInForce(gi, g_storySave, who);
     SetLoadObjects(gi);
 
     // The game mode from the slot prefix before the travel, retried each poll until the widget is
@@ -622,11 +621,28 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
     // The level the game's own launch names before its travel; a flat slot has no metadata and
     // starts in the gameplay level.
     const std::wstring level = P::name::GameplayLevel;
-    ue_wrap::save_restore_watch::Arm("LoadStorySave");
-    if (!PutLaunchLevelInForce(gi, nullptr, level, g_storySave, std::wstring(), "LoadStorySave")) return false;
-    IssueOpen(level, "LoadStorySave", std::wstring(L"save '") + slot + L"' registered");
+    ue_wrap::save_restore_watch::Arm(who);
+    if (!PutLaunchLevelInForce(gi, nullptr, level, g_storySave, std::wstring(), who)) return false;
+    IssueOpen(level, who, std::wstring(L"save '") + slot + L"' registered");
+    return true;
+}
+
+bool LoadStorySave(const wchar_t* slot, int forceGameMode) {
+    if (!slot || !*slot) return false;
+
+    // The boot survey, shared with StartFreshGame.
+    const BootWorldView w = SurveyBootWorld("LoadStorySave");
+    if (w.inGameplay) return RestoreSettled("LoadStorySave");
+    if (w.gameplayLoading) return false;  // in/loading the gameplay world -> wait, no re-open
+
+    // (c) Still before gameplay: register the save (once per campaign) and re-issue the open.
+    detail::RegisterStorySaveAndOpen(slot, forceGameMode, w.curWorld, "LoadStorySave");
     return false;  // not in gameplay yet -> caller keeps retrying
 }
+
+bool detail::PawnPlacedInCurrentWorld(const char* who) { return SurveyBootWorld(who).inGameplay; }
+
+bool detail::RestoreSettledFor(const char* who) { return RestoreSettled(who); }
 
 // A 0.10.0 world, loaded the way the game's save menu loads one (ui_saveSlots apply, then
 // trylaunch): the entry's save, its metadata and the world's persistent object through
@@ -722,6 +738,7 @@ void ResetCachedSave() {
     g_launchIssued = false;
     g_restoreObservable = false;
     g_restoreWaitStart = {};
+    detail::ResetReturnCampaign();
     ue_wrap::save_restore_watch::Disarm();
 }
 
