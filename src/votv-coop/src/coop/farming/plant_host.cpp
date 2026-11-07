@@ -82,6 +82,7 @@ bool     g_seeded = false;
 bool     g_fullSaid = false;
 int      g_registeredSaid = 0;
 uint64_t g_registeredQuiet = 0;
+uint64_t g_dupKeys = 0, g_dupQuiet = 0;   // save-shared keys re-minted; told once each census, not per plant
 uint64_t g_registered = 0, g_rowsSent = 0, g_gone = 0, g_ran = 0, g_refused = 0;
 
 void* g_harvestPuppet = nullptr;
@@ -98,7 +99,13 @@ std::string NameFor(void* plant, bool& minted) {
     if (!id.empty()) {
         auto it = g_rows.find(id);
         if (it == g_rows.end() || !it->second.actor.Alive() || it->second.actor.Is(plant)) return id;
-        UE_LOGW("farm: host plant key=%s is held by two plants -- the newer gets a fresh key", id.c_str());
+        // A real save duplicate (distinct live actors carrying one key, e.g. many deadgrass rows): the census tells the
+        // first one and counts the rest.
+        if (g_dupKeys++ == 0)
+            UE_LOGW("farm: host plant key=%s is held by two plants -- the newer gets a fresh key (further duplicates "
+                    "are counted)", id.c_str());
+        else
+            ++g_dupQuiet;
     }
     if (!GP::SetKey(plant, coop::prop_synth_key::RandomKeyString())) return {};
     minted = true;
@@ -248,6 +255,11 @@ void Census(uint64_t now, bool forceFresh) {
         UE_LOGI("farm: host registered %llu more plants (%zu live)", static_cast<unsigned long long>(g_registeredQuiet),
                 g_rows.size());
         g_registeredQuiet = 0;
+    }
+    if (g_dupQuiet) {
+        UE_LOGI("farm: host re-keyed %llu more plants that shared a key (%llu duplicates this session)",
+                static_cast<unsigned long long>(g_dupQuiet), static_cast<unsigned long long>(g_dupKeys));
+        g_dupQuiet = 0;
     }
     for (auto it = g_rows.begin(); it != g_rows.end();) {
         HostRow& r = it->second;
@@ -544,6 +556,7 @@ void HostReset() {
     g_seeded = g_fullSaid = false;
     g_registeredSaid = 0;
     g_registeredQuiet = 0;
+    g_dupKeys = g_dupQuiet = 0;
     g_registered = g_rowsSent = g_gone = g_ran = g_refused = 0;
     g_harvestPuppet = g_captured = nullptr;
 }

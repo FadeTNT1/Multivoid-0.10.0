@@ -139,10 +139,21 @@ void* FindLocal(const W::Row& row, bool& byPlace) {
             if (g_indexBuilt && now - g_indexAtMs < kIndexMs) return nullptr;
             BuildIndex(now);
         }
+        // A save can carry one key on several plants (the host re-keys all but one): of the plants holding the row's
+        // key, the nearest is the row's own, so the others stay free for the re-keyed rows to adopt by place.
+        void* byKey = nullptr;
+        float bestD2 = 0.0f;
         for (const Local& l : g_index) {
             void* a = l.actor.Get();
-            if (a && l.id == row.key && !g_byActor.count(a)) return a;
+            if (!a || l.id != row.key || g_byActor.count(a)) continue;
+            const float dx = l.loc.X - row.pose.x, dy = l.loc.Y - row.pose.y, dz = l.loc.Z - row.pose.z;
+            const float d2 = dx * dx + dy * dy + dz * dz;
+            if (!byKey || d2 < bestD2) {
+                byKey = a;
+                bestD2 = d2;
+            }
         }
+        if (byKey) return byKey;
         const float lim = kAdoptUU * kAdoptUU;
         for (const Local& l : g_index) {
             void* a = l.actor.Get();
