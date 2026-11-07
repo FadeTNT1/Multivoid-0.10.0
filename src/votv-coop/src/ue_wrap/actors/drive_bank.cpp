@@ -116,6 +116,21 @@ const wchar_t* Bounded(const std::wstring& s) { return s.c_str(); }
 
 bool IsBank(void* actor) { return BankOf(actor) != nullptr; }
 
+bool ReadRows(void* actor, std::vector<Row>& out) {
+    out.clear();
+    const Bank* b = BankOf(actor);
+    if (!b) return false;
+    LiveArrays a;
+    if (!ReadArrays(actor, *b, a) || a.rowNum < 0 || (a.rowNum > 0 && !a.rows)) return false;
+    out.reserve(static_cast<size_t>(a.rowNum));
+    for (int32_t i = 0; i < a.rowNum; ++i) {
+        Row r;
+        if (!SD::ReadStruct(a.rows + static_cast<size_t>(i) * a.stride, r)) return false;
+        out.push_back(std::move(r));
+    }
+    return true;
+}
+
 bool Capture(void* actor, ue_wrap::save_record::SaveRecord& rec) {
     const Bank* b = BankOf(actor);
     if (!b) return false;

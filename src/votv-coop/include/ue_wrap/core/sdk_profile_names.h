@@ -105,6 +105,20 @@ inline constexpr const wchar_t* DriveBoxDrivesProp  = L"drives";
 inline constexpr const wchar_t* DriveBoxDrivesInProp = L"drives_in";
 inline constexpr const wchar_t* DriveBoxUpdFn       = L"upd";
 
+// The daily task's grader, droneSellLocation_C::sell (0.10.0). It loads each boxed drive box of the
+// drone's inventory into its scratch box `ref_driveBox` and each zip floppy into `ref_zipDisc`, then grades
+// the rows against saveSlot.taskNew; a signal counts once, by its id in saveSlot.soldSignals (TArray<FString>).
+// A zip floppy's `data` is a TArray<FString> of "??"-separated rows whose third field names the dish.
+// lib_C::addHint(inText, type, debug, __WorldContext) is the corner hint the sale raises (a tape's fill).
+inline constexpr const wchar_t* DroneSellRefDriveBoxProp = L"ref_driveBox";
+inline constexpr const wchar_t* DroneSellRefZipDiscProp  = L"ref_zipDisc";
+inline constexpr const wchar_t* FloppyDataProp           = L"data";
+inline constexpr const wchar_t* SaveSlotSoldSignalsProp  = L"soldSignals";
+inline constexpr const wchar_t* LibAddHintFn             = L"addHint";
+inline constexpr const wchar_t* LibAddHintTextParam      = L"inText";
+inline constexpr const wchar_t* LibAddHintTypeParam      = L"type";
+inline constexpr const wchar_t* LibAddHintDebugParam     = L"debug";
+
 // 0.10.0's container inventory: prop_container_C.inventoryComponent (an inventoryComponent_C, the
 // grid inventory that replaced propInventory_C + saveSlot.GObjStack), whose `owner` its BeginPlay
 // (makeOwner) sets to the container -- the "this container has started" mark the host's world

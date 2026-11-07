@@ -251,6 +251,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DishSnapshot:
     case ReliableKind::DishCalib:
     case ReliableKind::TaskNewState:
+    case ReliableKind::TaskSaleHint:
     case ReliableKind::HookAnchored:
     case ReliableKind::RemoverResult:
     case ReliableKind::PropActReply:
