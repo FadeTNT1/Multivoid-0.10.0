@@ -36,6 +36,15 @@ using coop::net::InventoryRestoreAckPayload;
 namespace st = coop::net::inventory_restore_status;
 using Clock = std::chrono::steady_clock;
 
+// The whole profile blob for a restore or a rollback copy: the items plus the empty vitals and pose
+// that inventory_wire::Deserialize requires after them. The items half alone does not parse.
+std::vector<uint8_t> ItemsProfileBlob(const std::vector<uint8_t>& items) {
+    coop::player_profile::Profile p;
+    p.hasItems = true;
+    p.items = items;
+    return coop::inventory_wire::Serialize(p);
+}
+
 std::atomic<coop::net::Session*> g_session{nullptr};
 
 constexpr uint64_t kPendingMs = 60000;      // a request nobody answered is dropped after this
@@ -96,7 +105,7 @@ bool ApplyHere(const std::vector<uint8_t>& items, const char* why, uint32_t reqI
     std::string rollbackPath;
     if (IC::Capture(pawn, current) && !current.empty())
         rollbackPath = coop::player_profile_store::WriteRollback(
-            NickOfLocal(), coop::inventory_wire::SerializeItems(true, current));
+            NickOfLocal(), ItemsProfileBlob(current));
     if (rollbackPath.empty())
         UE_LOGW("[RESTORE] %s: the rollback copy of the current inventory (%d carried, %d hands, %d equipment) could "
                 "NOT be written -- restoring anyway", why, before.carried, before.hands, before.equipment);
@@ -198,7 +207,7 @@ bool Request(int slot, const std::string& backup, std::string& reply) {
         reply = "A restore for " + who + " is still waiting for its answer.";
         return false;
     }
-    const std::vector<uint8_t> wire = coop::inventory_wire::SerializeItems(true, profile.items);
+    const std::vector<uint8_t> wire = ItemsProfileBlob(profile.items);
     const uint32_t reqId = ++g_seq;
     if (!coop::blob_chunks::SendBlobToSlot(s, slot, coop::net::ReliableKind::InventoryRestoreBlob, reqId, wire)) {
         reply = "The send to " + who + " was refused (the channel is busy); try again.";
@@ -220,7 +229,7 @@ bool SendItems(int slot, const std::vector<uint8_t>& items, const std::string& l
     Pending& pend = g_pending[static_cast<size_t>(slot)];
     if (pend.active) return false;
     const std::string who = coop::text::ToUtf8(coop::player_handshake::NicknameForSlot(slot));
-    const std::vector<uint8_t> wire = coop::inventory_wire::SerializeItems(true, items);
+    const std::vector<uint8_t> wire = ItemsProfileBlob(items);
     const uint32_t reqId = ++g_seq;
     if (!coop::blob_chunks::SendBlobToSlot(s, slot, coop::net::ReliableKind::InventoryRestoreBlob, reqId, wire)) return false;
     pend = Pending{true, reqId, coop::net::NowMs(), who, label, static_cast<uint32_t>(items.size()), true};

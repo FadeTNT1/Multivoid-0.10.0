@@ -196,7 +196,8 @@ from the hosted world's profile folder: `good` (the default: the newest full pro
 the newest `<guid>.json.good`), `good.1`, `good.2`, or a relative path to a profile file in that folder, such as a
 hand-made sidecar (`item-recovery-20261106-005930/Miko-004810.json`; a path may not leave the folder). The file's magic
 and checksum are verified and it must parse as a profile with an inventory in it. For a client the host sends the
-inventory bytes to that one player (`InventoryRestoreBlob`), whose machine writes a rollback copy of what it holds to
+inventory to that one player (`InventoryRestoreBlob`; a whole profile blob with the items and empty vitals and pose,
+the only shape `inventory_wire` parses), whose machine writes a rollback copy of what it holds to
 `inventory_rollback/rollback-<UTC>.json` in the mod's data folder, replaces its three item arrays through the game's own
 restore on the game thread (vitals and position are untouched), refreshes the equipment and answers
 `InventoryRestoreAck` with the item counts before and after. The host's own player is restored locally the same way. A
