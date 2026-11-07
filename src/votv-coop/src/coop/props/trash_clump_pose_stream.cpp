@@ -7,6 +7,7 @@
 #include "coop/net/session.h"         // TakeRemoteTrashCarryBatch
 #include "coop/props/trash_channel.h"       // IsInboundStreamCtxFresh / CtxForEid (the stale-pose / pile-jump guard)
 #include "coop/props/remote_prop.h"         // ResolveLiveActorByEid (the per-eid carry target)
+#include "coop/props/trash_mirror.h"        // TickLandWatch
 #include "ue_wrap/core/hot_path_guard.h"   // UE_ASSERT_GAME_THREAD
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"       // IsLive
@@ -74,6 +75,7 @@ void TickApplyAndDrive(coop::net::Session& s) {
     // 2. Advance EVERY drive one tick (whether or not a new pose arrived): smooth follow between sendHz
     //    poses + freeze at the last target on a stream gap. Prune a drive whose mirror actor died (a retire
     //    that did not route through ClearDriveForEid -- defensive; AdvanceLerp itself no-ops on a dead actor).
+    coop::trash_mirror::TickLandWatch();   // a pile a land placed stays at the host's pose
     for (auto it = g_carryDrives.begin(); it != g_carryDrives.end(); ) {
         AD::ActiveDrive& d = it->second;
         if (!d.LiveActor()) { it = g_carryDrives.erase(it); continue; }  // slot-validated
@@ -86,6 +88,12 @@ void ClearDriveForEid(coop::element::ElementId eid) {
     UE_ASSERT_GAME_THREAD("trash_clump_pose_stream::ClearDriveForEid");
     if (g_carryDrives.erase(static_cast<uint32_t>(eid)))
         UE_LOGI("[TRASH-CARRY] CLIENT clear carry drive eid=%u (land / retire)", static_cast<unsigned>(eid));
+}
+
+bool HasDriveForEid(coop::element::ElementId eid) {
+    UE_ASSERT_GAME_THREAD("trash_clump_pose_stream::HasDriveForEid");
+    const auto it = g_carryDrives.find(static_cast<uint32_t>(eid));
+    return it != g_carryDrives.end() && it->second.LiveActor();
 }
 
 void OnDisconnect() {

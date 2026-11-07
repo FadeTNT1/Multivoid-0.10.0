@@ -47,6 +47,13 @@ void* Materialize(coop::element::ElementId eid, const std::wstring& className, u
 void RepositionBoundNative(void* native, uint8_t chipType, const ue_wrap::FVector& loc,
                            const ue_wrap::FRotator& rot, const ue_wrap::FVector& scale);
 
+// Client: watch a pile the host has just landed for its first two seconds and set it back to the
+// host's location if anything moves it (its own re-init, a body pushing it). A pile is kinematic and
+// tick-off here, so a drift means a second author; the first one per pile is logged as a warning
+// with the distance, for the next diagnosis. TickLandWatch runs it, once a client tick. Game thread.
+void WatchLandPose(coop::element::ElementId eid, void* pile, const ue_wrap::FVector& loc);
+void TickLandWatch();
+
 // Release the GC pin Materialize took on `actor`, if we took one. No-op for a save-loaded native
 // or a game-native we never pinned -- so a caller about to destroy an actor of unknown provenance
 // can call it unconditionally. Game thread.

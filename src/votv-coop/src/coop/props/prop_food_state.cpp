@@ -12,6 +12,7 @@
 #include "coop/player/hand_item.h"
 #include "coop/props/prop_key_index.h"
 #include "coop/props/prop_save_data.h"
+#include "coop/session/net_pump.h"
 
 #include "ue_wrap/actors/food.h"
 #include "ue_wrap/actors/prop.h"
@@ -110,13 +111,26 @@ constexpr int16_t  kMaxPortions = 64;  // a tray's count on the wire: far over t
 
 uint64_t NowMs() { return coop::net::NowMs(); }
 
-// Is a food one every peer shares? A tracked world prop, or a keyed one outside a hand. A hand's food is its holder's
-// own (coop/player/hand_item), and a fresh local birth not yet tracked or keyed is this peer's until it is.
+// Is a food one every peer shares? A tracked world prop is. A hand's food is its holder's own (coop/player/hand_item),
+// and a fresh local birth not yet keyed is this peer's until it is. A keyed food with no row is decided as prop_act's
+// client gate decides it -- the row, never the key: before this client's world is announced it may be a shared food
+// the host's snapshot has not bound yet, and after it, it is a birth of this client's own that the host does not hold
+// (the host refuses a bite of a key it lacks, and sends no state for it), so its ticks, its heating and its bites run
+// here.
 bool IsShared(void* food) {
     if (EL::Registry::Get().EidForActor(food) != EL::kInvalidId) return true;
     if (coop::hand_item::IsHandAxisActor(food)) return false;
     const std::wstring key = ue_wrap::prop::GetInteractableKeyString(food);
-    return !key.empty() && key != L"None";
+    if (key.empty() || key == L"None") return false;
+    return !coop::net_pump::IsInAnnouncedWorld(food);
+}
+
+// The client's own keyed food (the case above that is decided by the announce): bitten here, its bite is not sent.
+bool IsClientOwnKeyed(void* food) {
+    if (EL::Registry::Get().EidForActor(food) != EL::kInvalidId) return false;
+    if (coop::hand_item::IsHandAxisActor(food)) return false;
+    const std::wstring key = ue_wrap::prop::GetInteractableKeyString(food);
+    return !key.empty() && key != L"None" && coop::net_pump::IsInAnnouncedWorld(food);
 }
 
 // The client's answer per food, kept two seconds: the tick asks every frame.
@@ -397,6 +411,20 @@ sg::Verdict OnPre(const sg::Call& c) {
 
 uint64_t g_biteWindowMs = 0;
 int      g_biteWindowN = 0;
+uint64_t g_ownBites = 0;        // bites of the client's own keyed foods, kept here and not sent
+uint64_t g_ownBiteSayMs = 0;    // the next time the line below may be said
+
+// A bite of a keyed food the host does not hold is this client's to keep: said every kSayMs at most.
+void SayOwnBite(void* food) {
+    ++g_ownBites;
+    const uint64_t now = NowMs();
+    if (now < g_ownBiteSayMs) return;
+    g_ownBiteSayMs = now + kSayMs;
+    UE_LOGI("[FOOD] client: bite of key='%ls' cls='%ls' kept here, not sent -- a keyed food with no row in the "
+            "announced world is this client's own (the host holds no such key); %llu such bites so far",
+            ue_wrap::prop::GetInteractableKeyString(food).c_str(), R::ClassNameOf(food).c_str(),
+            static_cast<unsigned long long>(g_ownBites));
+}
 
 void SendBite(coop::net::Session& s, void* food) {
     FD::State st;
@@ -427,7 +455,9 @@ void OnPost(const sg::Call& c) {
         else if (w->role == Role::Bitten) MarkDirty(c.object);
         return;
     }
-    if (w->role == Role::Bitten && IsClient(s) && IsSharedMemo(c.object)) SendBite(*s, c.object);
+    if (w->role != Role::Bitten || !IsClient(s)) return;
+    if (IsShared(c.object)) SendBite(*s, c.object);   // asked fresh: a bite is rare, and a memo from before the bind would keep it
+    else if (IsClientOwnKeyed(c.object)) SayOwnBite(c.object);
 }
 
 void RegisterWatches() {
@@ -605,6 +635,8 @@ void OnDisconnect() {
     g_editSaid = 0;
     g_biteWindowMs = 0;
     g_biteWindowN = 0;
+    g_ownBites = 0;
+    g_ownBiteSayMs = 0;
 }
 
 }  // namespace coop::props::prop_food_state
