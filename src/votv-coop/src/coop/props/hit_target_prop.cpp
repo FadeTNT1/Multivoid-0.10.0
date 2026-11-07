@@ -16,11 +16,13 @@
 #include "coop/props/prop_throw.h"
 
 #include "ue_wrap/actors/prop.h"
+#include "ue_wrap/actors/prop_flags.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/obj_keyed_cache.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/types.h"
+#include "ue_wrap/devices/asologo_piece.h"
 #include "ue_wrap/engine/engine.h"
 
 #include <cstdint>
@@ -40,6 +42,7 @@ constexpr float kPropTargetRadiusCm = 100.f;
 int  g_sentSaid = 0;
 int  g_electedSaid = 0;
 int  g_convergedSaid = 0;
+int  g_pieceSentSaid = 0;
 bool g_unboundSaid = false;
 uint32_t g_converged = 0;
 // The host-damaged classes whose first swing at an unbound copy has been said: that copy breaks for nobody, so each
@@ -81,6 +84,14 @@ uint32_t ClientClaim(const sg::Call& c, coop::hit_intent::Swing& swing) {
         }
         swing.seq = 0;
         swing.hostApplies = true;
+        if (ue_wrap::asologo_piece::IsPiece(c.object) && g_pieceSentSaid < kMaxSaid) {
+            ++g_pieceSentSaid;
+            UE_LOGI("[PIECE-HIT] client: swing at %ls eid=%u (row '%ls') dmg=%.1f is the host's -- the call is cancelled "
+                    "here, this copy neither breaks nor frees (Static here=%d)",
+                    ue_wrap::reflection::ClassNameOf(c.object).c_str(), static_cast<unsigned>(held),
+                    ue_wrap::prop::GetPropNameString(c.object).c_str(), static_cast<double>(swing.damage),
+                    ue_wrap::prop::IsStatic(c.object) ? 1 : 0);
+        }
         return static_cast<uint32_t>(held);
     }
     if (coop::props::prop_damage_gate::AuthoredHere(c.object)) return EL::kInvalidId;
@@ -165,6 +176,7 @@ void OnDisconnect() {
     g_sentSaid = 0;
     g_electedSaid = 0;
     g_convergedSaid = 0;
+    g_pieceSentSaid = 0;
     g_converged = 0;
     g_unboundSaid = false;
     g_unboundHostDamagedSaid.Clear();
