@@ -290,6 +290,14 @@ msgid "(hidden -- friends join by invite/IP)"
 msgstr ""
 
 #: src/ui/hud.cpp
+msgid "(joining.)"
+msgstr ""
+
+#: src/ui/hud.cpp
+msgid "(joining..)"
+msgstr ""
+
+#: src/ui/hud.cpp
 msgid "(joining...)"
 msgstr ""
 

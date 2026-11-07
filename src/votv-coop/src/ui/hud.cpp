@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -186,7 +187,12 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
         // No health bar on a sleeper; the loot hint sits where it would be, while the viewer can loot it. A joining
         // body is never lootable; it says the player is on the way in.
         if (p.lootHint || p.joining) {
-            const char* hint = p.joining ? l10n::T("(joining...)") : l10n::T("[E] Loot");
+            const auto step = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count() / 450 % 3;
+            const char* hint = p.joining
+                ? (step == 0 ? l10n::T("(joining.)") : step == 1 ? l10n::T("(joining..)")
+                                                               : l10n::T("(joining...)"))
+                : l10n::T("[E] Loot");
             const float hpx = px * 0.8f;
             const ImVec2 hsz = font->CalcTextSizeA(hpx, FLT_MAX, 0.f, hint);
             TextOutlined(dl, font, hpx, ImVec2(ax - hsz.x * 0.5f, bp.y), IM_COL32(230, 230, 200, static_cast<int>(a * 245.f)),

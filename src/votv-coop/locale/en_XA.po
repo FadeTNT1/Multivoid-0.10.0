@@ -235,6 +235,12 @@ msgstr "[[%s (without passwords)]]"
 msgid "(hidden -- friends join by invite/IP)"
 msgstr "[[(hidden -- friends join by invite/IP)]]"
 
+msgid "(joining.)"
+msgstr "[[(joining.)]]"
+
+msgid "(joining..)"
+msgstr "[[(joining..)]]"
+
 msgid "(joining...)"
 msgstr "[[(joining...)]]"
 
