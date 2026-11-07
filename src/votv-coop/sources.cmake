@@ -446,6 +446,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/floppybox_sync.cpp
     src/coop/interactables/signal_catch_sync.cpp
     src/coop/player/sleep_rest.cpp
+    src/coop/player/sanity_watch.cpp
     src/coop/player/sleep_sync.cpp
     src/coop/player/sleeper_wire.cpp
     src/coop/player/sleepers.cpp
