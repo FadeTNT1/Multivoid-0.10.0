@@ -13,7 +13,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace coop::daily_task_sync {
 namespace {
@@ -53,6 +55,26 @@ uint64_t HashPayload(const coop::net::TaskNewStatePayload& p) {
     uint64_t h = 1469598103934665603ull;
     for (size_t i = 0; i < sizeof(p); ++i) { h ^= b[i]; h *= 1099511628211ull; }
     return h;
+}
+
+// The task's values for a log line: what it asks per signal level, what is done, the satellites (a dish index, -1
+// once collected), the best tapes sent and the rewards. The counts alone said nothing ("sigReq=4" is the levels).
+std::string Describe(const coop::net::TaskNewStatePayload& p) {
+    auto ints = [](const int16_t* v, uint8_t n) {
+        std::string s = "[";
+        for (uint8_t i = 0; i < n; ++i) {
+            if (i) s += ',';
+            s += std::to_string(v[i]);
+        }
+        return s + "]";
+    };
+    char tail[160];
+    std::snprintf(tail, sizeof(tail), " tapes big=%.1f small=%.1f reward sig=%d sat=%d", p.reelBig, p.reelSmall,
+                  p.rewardSig, p.rewardSat);
+    return std::string("active=") + (p.active ? "1" : "0") +
+           " sigRequired=" + ints(p.sigRequired, p.sigRequiredCount) +
+           " sigCompleted=" + ints(p.sigCompleted, p.sigCompletedCount) +
+           " dishes=" + ints(p.requiredDishes, p.requiredDishesCount) + tail;
 }
 
 // Serialize the live taskNew into the wire payload. SEND-side clamp + WARN
@@ -127,10 +149,7 @@ void TryApplyPending() {
     }
     g_havePending = false;
     g_saidPending = false;
-    UE_LOGI("[task] taskNew mirrored (active=%u sigReq=%u sigDone=%u dishes=%u "
-            "reelBig=%.1f reelSmall=%.1f)",
-            g_pending.active, g_pending.sigRequiredCount, g_pending.sigCompletedCount,
-            g_pending.requiredDishesCount, g_pending.reelBig, g_pending.reelSmall);
+    UE_LOGI("[task] taskNew mirrored from the host (%s)", Describe(g_pending).c_str());
 }
 
 }  // namespace
@@ -166,12 +185,12 @@ void Tick() {
     const bool first = !g_haveHash;
     g_lastHash = h;
     g_haveHash = true;
-    if (first) return;  // baseline-on-first-sight: the joiner got this state in the save transfer
+    if (first) {  // baseline-on-first-sight: the joiner got this state in the save transfer
+        UE_LOGI("[task] taskNew baseline (%s)", Describe(p).c_str());
+        return;
+    }
     s->SendReliable(coop::net::ReliableKind::TaskNewState, &p, sizeof(p));
-    UE_LOGI("[task] taskNew changed -- broadcast (active=%u sigReq=%u sigDone=%u dishes=%u "
-            "reelBig=%.1f reelSmall=%.1f)",
-            p.active, p.sigRequiredCount, p.sigCompletedCount, p.requiredDishesCount,
-            p.reelBig, p.reelSmall);
+    UE_LOGI("[task] taskNew changed -- broadcast (%s)", Describe(p).c_str());
 }
 
 void SendCurrentToSlot(int slot) {
@@ -189,8 +208,7 @@ void SendCurrentToSlot(int slot) {
         return;
     }
     g_owed[slot] = false;
-    UE_LOGI("[task] current taskNew sent to slot %d (active=%u sigReq=%u sigDone=%u dishes=%u)",
-            slot, p.active, p.sigRequiredCount, p.sigCompletedCount, p.requiredDishesCount);
+    UE_LOGI("[task] current taskNew sent to slot %d (%s)", slot, Describe(p).c_str());
 }
 
 void OnTaskNewState(const coop::net::TaskNewStatePayload& p) {

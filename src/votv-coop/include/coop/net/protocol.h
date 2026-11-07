@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 313;
+inline constexpr uint16_t kProtocolVersion = 317;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1474,6 +1474,12 @@ enum class ReliableKind : uint8_t {
     // native actor at a row's place or spawns one. The underground loot mounds are not in it. Never relayed; a client's
     // copy is refused at the host's receive edge. BlobChunkPayload.
     DigState = 245,
+
+    // HOST->ALL: a corner hint the drone sale's daily-task grader raised on the host (lib_C::addHint inside
+    // droneSellLocation_C::sell: a sent tape's fill), so the player who sent the package sees it wherever they
+    // stand. Display only; the task itself rides TaskNewState. Never relayed; a client's copy is refused at the
+    // host's receive edge. TaskSaleHintPayload.
+    TaskSaleHint = 251,
 };
 
 #pragma pack(push, 1)
@@ -4572,6 +4578,19 @@ struct TaskNewStatePayload {
 static_assert(sizeof(TaskNewStatePayload) == 180, "TaskNewStatePayload must be 180 bytes");
 static_assert(sizeof(TaskNewStatePayload) <= 256 - 20 - 8,
               "TaskNewStatePayload must fit in one reliable datagram");
+
+// TaskSaleHintPayload (ReliableKind::TaskSaleHint=251) -- one corner hint of the host's drone sale. The text is
+// UTF-16 code units, clamped at send (a sale's hints are one short line each); the type is the hint's
+// enum_notifytype byte, passed through.
+inline constexpr uint8_t kTaskSaleHintCap = 110;
+struct TaskSaleHintPayload {
+    uint8_t  type;                     // 1 -- enum_notifytype
+    uint8_t  len;                      // 1 -- code units used in text
+    uint16_t text[kTaskSaleHintCap];   // 220
+};
+static_assert(sizeof(TaskSaleHintPayload) == 222, "TaskSaleHintPayload must be 222 bytes");
+static_assert(sizeof(TaskSaleHintPayload) <= 256 - 20 - 8,
+              "TaskSaleHintPayload must fit in one reliable datagram");
 
 // The night sky (SkyState): the star dome's world rotation (its random initial yaw plus spin), the
 // moon phase and the eye; the client writes the first two and runs the sky's setEye for the eye.

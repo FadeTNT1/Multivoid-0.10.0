@@ -140,6 +140,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/desk/drive_chain.cpp
     src/ue_wrap/desk/drive_eraser.cpp
     src/ue_wrap/desk/daily_task.cpp
+    src/ue_wrap/desk/task_grade.cpp
     src/ue_wrap/actors/sleep.cpp
     src/ue_wrap/world/email.cpp
     src/ue_wrap/devices/passwordlock.cpp
