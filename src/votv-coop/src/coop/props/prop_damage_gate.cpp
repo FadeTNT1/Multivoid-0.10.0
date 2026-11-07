@@ -77,6 +77,8 @@ struct CompOffsets {
     int32_t health = -1;
     int32_t damageData = -1;
     int32_t resistance = -1;
+    int32_t unbreakable = -1;    // the bool the impact body leaves on first, with its bit
+    uint8_t unbreakableMask = 0;
     bool    resolved = false;
 };
 
@@ -89,6 +91,7 @@ const CompOffsets& OffsetsOf(void* comp) {
     o.damageData = R::FindPropertyOffset(cls, L"damageData");
     void* st = R::PropertyInnerStruct(cls, L"damageData");
     o.resistance = st ? R::FindPropertyOffsetByPrefix(st, L"damageResistance_") : -1;
+    if (!R::FindBoolProperty(cls, L"unbreakable", o.unbreakable, o.unbreakableMask)) o.unbreakable = -1;
     o.resolved = true;
     if (o.health < 0 || o.damageData < 0 || o.resistance < 0)
         UE_LOGE("prop_damage_gate: the component's health (%d) or damageData.damageResistance (%d+%d) did not resolve -- "
@@ -96,19 +99,24 @@ const CompOffsets& OffsetsOf(void* comp) {
     return o;
 }
 
-// What this call would do to the component's health, by the component's own arithmetic: an impact is gated on
-// damage / resistance > 1 and takes that quotient from the health; a fire takes the damage itself. A resistance of 0
-// is lethal, as the division makes it. Unknown when the figures cannot be read.
+// What this call would do to the component's health, by the component's own arithmetic: an impact leaves at once on
+// an unbreakable component or one whose health is already spent (a food prop such as the blue brain cheese: no cue,
+// no particle, no destroy on the host), is gated on damage / resistance > 1 and takes that quotient from the health;
+// a fire takes the damage itself. A resistance of 0 is lethal, as the division makes it. Unknown when the figures
+// cannot be read.
 ImpactOutcome OutcomeOf(Row row, const sg::Call& c) {
     const CompOffsets& o = OffsetsOf(c.object);
     if (o.health < 0 || o.damageData < 0 || o.resistance < 0) return ImpactOutcome::Unknown;
+    const uint8_t* base = static_cast<const uint8_t*>(c.object);
+    if (row == kImpact && o.unbreakable >= 0 && (base[o.unbreakable] & o.unbreakableMask) != 0)
+        return ImpactOutcome::NoDamage;
     float damage = 0.f;
     const uint8_t* d = ParamBytes(c, g_damageOff[row].Of(c.function));
     if (!d) return ImpactOutcome::Unknown;
     std::memcpy(&damage, d, sizeof(damage));
-    const uint8_t* base = static_cast<const uint8_t*>(c.object);
     float health = 0.f, resistance = 0.f;
     std::memcpy(&health, base + o.health, sizeof(health));
+    if (row == kImpact && !(health > 0.f)) return ImpactOutcome::NoDamage;
     std::memcpy(&resistance, base + o.damageData + o.resistance, sizeof(resistance));
     const float taken = row == kFire ? damage : damage / resistance;
     if (row == kImpact && !(taken > 1.f)) return ImpactOutcome::NoDamage;
