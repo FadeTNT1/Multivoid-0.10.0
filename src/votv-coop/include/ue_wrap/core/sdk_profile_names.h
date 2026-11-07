@@ -488,6 +488,9 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     // through coop/world/fire_sync, which enrols the host's fires at their begin-play and mints a client's own never.
     // Its parameters ride the birth blob (FireClass below).
     L"fire_C",
+    // The cloud a puffball (prop_puffballMature_C) bursts into (its `broken` mints it under EX_CallMath, and a bite of
+    // the puffball calls `broken` through its own damage): the host's, on every peer (PuffballExplosionClass below).
+    L"PuffballExplosion_C",
     // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
     // base classes are unverified -- a prop-derived wreck would ride the prop lane as well.
 };
@@ -541,6 +544,12 @@ inline constexpr const wchar_t* BoarInvasionClass = L"boarInvasion_C";
 // and destroys itself. The hatch is a BeginDeferred under EX_CallMath in the tick, so it crosses only through the
 // cheese's source row in npc_world_enum; a client's tick of a shared cheese is refused in coop/props/prop_food_state.
 inline constexpr const wchar_t* BlueBrainCheeseClass = L"prop_food_blueBrainCheese_C";
+// The puffball (a prop_food_C: a bite damages the eater, ragdolls them and adds 1000 damage to the puffball, which
+// breaks it; it also bursts by itself on a timer, or at once when `nuclear`). 0.10.0 capture: `broken` and `broken_fire`
+// mint PuffballExplosion_C 5 cm above it under EX_CallMath; the explosion's BeginPlay throws up to three
+// mushroomSpore_C from itself (random count and velocity) and has no tick. The cloud is a world actor of the host's.
+inline constexpr const wchar_t* PuffballMatureClass    = L"prop_puffballMature_C";
+inline constexpr const wchar_t* PuffballExplosionClass = L"PuffballExplosion_C";
 // ---- The story-event scenes (coop/world/event_scene_sync, ue_wrap/actors/event_scenes) ----
 // Warning Obelisk: the obelisk box's trigger_spawnProp_C (its runTrigger mints the class its prop row names) mints
 // obelisk_C, an actor_save_C. Its BeginPlay rises the mesh, then plays the fall timeline `a`; the finish

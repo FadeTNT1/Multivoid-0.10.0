@@ -836,6 +836,24 @@ food and is the take-or-use request's (`coop/props/prop_act_request`). `ReadFood
 a coffee cup's spill and the blue brain cheese's hatch shown only on the host's copy, are read, not
 measured.
 
+### A puffball's cloud
+
+A puffball (`prop_puffballMature_C`, what `mushroom7` grows into) is a food whose bite hurts the eater, ragdolls them and
+adds 1000 damage to the puffball itself; that damage runs the puffball's `broken`, which mints `PuffballExplosion_C` 5 cm
+above it under `EX_CallMath` (a timer does the same, and `broken_fire` for a fire). The cloud's BeginPlay throws up to
+three `mushroomSpore_C` from itself and it has no tick. `[V]` the capture's `prop_puffballmature_c.bitten`, `broken`,
+`attemptexplode` and `puffballexplosion_c` bodies. No lane carried the cloud, so only the machine where the puffball broke
+saw it (a host's bite: the host alone; a client's: that client alone).
+
+The cloud rides the world-actor lane (`PuffballExplosion_C` in `kWorldActorAllowlist`, the source row
+`prop_puffballMature_C` in `coop/creatures/npc_world_enum`): the host enrols every cloud it mints and each client
+spawns a mirror at the same place, whose own BeginPlay throws its own spores (a client's spore `hit` is refused, so a
+spore plants nothing there; the host's plant). A client's eat of a *world* puffball is the take-or-use request
+([A client's take of a shared prop](#a-clients-take-of-a-shared-prop)): the client's replay of `bitten` mints a cloud that `host_born_spawn` dissolves while the
+replay runs, and the host, on the commit that destroys its copy, mints the cloud where the puffball stood
+(`coop/props/prop_act_host`, `[PUFFBALL]` lines); it reaches every client, the eater's included. A puffball in a client's
+hand is that player's own, so its cloud stays that client's alone (see Known limits).
+
 ### Shrimp trays
 
 A shrimp tray (`prop_food_shrimp_C`) is a food whose `shrimps` portions its `upd()` draws as
@@ -1023,6 +1041,7 @@ through the world-actor lane's connect snapshot, and a burning fuel puddle as it
 | A buried mound a client's world has natively (its save) is adopted at the host's row; one the host dug up between the capture and the ready edge stays on the joiner as an unseen record, since the joiner cannot tell it from a level-placed mound | `[RD]` `coop/props/dig_sync` sends no removal for a row it never named |
 | A custom poster's image does not cross: a peer without the file in its own posters folder sees the preset picture | `[RD]` `ue_wrap/actors/poster` Redraw's fallback |
 | Held-item use, audited against the 0.10.0 capture: a food, pill or medkit used from the hand is that player's own (inventory), so only its leftovers cross, as authored births (`prop_snack_C::eat` spawns its `trash`, `prop_food_banana_C::eaten` its peel). Not carried: the hand extinguisher's spray (`receiveTick`'s `extinguishRay` runs on the user's peer only), a lit dynamite stick's fuse (`igniteFuse` sets `timer` and plays the fuse sound on the lighter's peer), the lighter's and office tape's use counts, and a world medkit's or cancer meds' use by a client beyond the destroy | `[RD]` the capture's `playerHandUse_LMB` / `RMB` bodies; no lane under `src/coop` names `prop_dynamiteStick_C`, `prop_lighter_C`, `prop_officeTape_C` or `prop_medkit_C`; `[?]` until a two-peer run |
+| A puffball a client eats from its own hand bursts into a cloud on that client alone (the cloud is not dissolved there, since no lane would carry the host's), and no cloud crosses from it: `ReliableKind` has no unassigned value left (every gap is a retired one), so a client-to-host cosmetic needs a payload on an existing kind (a `MeleeFx` kind for a spawned actor) | `[V]` `coop/creatures/host_born_spawn` row `clientReplayOnly`; `[?]` until a two-peer run |
 | A pose can arrive milliseconds before the spawn that names its prop; that is a race, not a defect, and a ledger tells the two apart instead of warning per packet | `[V]` `coop/props/unresolved_pose_ledger` |
 | A floor fire on a client is the host's picture and nothing else: a client's hand spray that puts out its copy leaves the host's burning (and the client sees none until the host's ends), its copy hurts and lights nothing there, and it is born with the class's flame emitter, not one a producer set. A fuel puddle spilled during the session is keyed by where each peer's copy landed, so its flame shows on a client only when the two copies share a key | `[?]` `coop/world/fire_sync`; the producers' fields read from the 0.10.0 capture, untested on two peers |
 
@@ -1045,6 +1064,7 @@ through the world-actor lane's connect snapshot, and a burning fuel puddle as it
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case, the lamps, the table clock, the second TV's settings, the barbecue) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
+| a puffball's cloud | `coop/creatures/npc_world_enum` (the source row), `coop/world/world_actor_sync` (the carrier), `coop/creatures/host_born_spawn` (a client replay's own cloud dissolved), `coop/props/prop_act_host` (the host's cloud for a client's eat) |
 | posters, rolled and placed | `coop/items/poster_sync`, `coop/items/poster_mirror` (a client's placed posters), `coop/items/poster_put_ledger`, `ue_wrap/actors/poster`, `coop/props/prop_record_gates` (the rolled form's applier) |
 | holes, buried items and planted seeds | `coop/props/dig_sync`, `coop/props/dig_wire`, `ue_wrap/actors/dirt`, `ue_wrap/actors/inventory_item_codec` (the record), `coop/props/prop_spawn_authoring` (the thrown dirt) |
 | a shrimp tray's portions | `coop/props/shrimp_tray_sync`, `ue_wrap/actors/shrimp_tray`, `coop/props/prop_food_state` (the count's carrier) |

@@ -199,6 +199,9 @@ constexpr const wchar_t* kKavotiaPatrolOutputs[] = {P::name::NpcClass_Kavotia, P
 // shared food prop whose tick a client refuses (coop/props/prop_food_state), so the host's hatch is the only one and its
 // slither rides the npc lane; without this row it lived on the host alone and bit only the host's player.
 constexpr const wchar_t* kBlueBrainCheeseOutputs[] = {P::name::NpcClass_GoreSlitherCheese, nullptr};
+// A puffball's burst (`broken`, `broken_fire`): its cloud, a world-actor-lane output. The cloud is the host's alone; a
+// client's own burst of one is dissolved while the host's act replay runs (coop/creatures/host_born_spawn).
+constexpr const wchar_t* kPuffballOutputs[] = {P::name::PuffballExplosionClass, nullptr};
 constexpr ExSpawnSource kExSpawnSources[] = {
     {L"trigger_wispSwarm_C",     nullptr},          // the wisps event swarm
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
@@ -238,6 +241,8 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {P::name::KavotiaPatrolControllerClass, kKavotiaPatrolOutputs},
     // The blue brain cheese's hatchling (a shared food prop's tick, refused on a client).
     {P::name::BlueBrainCheeseClass, kBlueBrainCheeseOutputs},
+    // The puffball's cloud (a bite, a hit, its timer, a fire): the world-actor lane's, so every peer sees the host's.
+    {P::name::PuffballMatureClass, kPuffballOutputs},
 };
 
 // Whether `cls`'s own name is one of `names` (null-terminated). One render, then plain compares.
@@ -363,6 +368,7 @@ void InstallExSpawnCatch() {
                 "ticker_fossilhoundSpawner_C + event_fossilboarwar_C -> fossilhound_C, "
                 "ticker_insomniacSpawner_C -> insomniac_C + insomniac_child_C, "
                 "ticker_yellowWispSpawner_C -> killerwisp_C, "
+                "prop_puffballMature_C -> PuffballExplosion_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
                 "ufo_UK_enemy_C, superFog_C -> HoelUfo_C, prop_food_blueBrainCheese_C -> npc_goreslither_cheese_C; and the host-born classes whatever mints them; "
                 "EX_CallMath spawns now enroll)");

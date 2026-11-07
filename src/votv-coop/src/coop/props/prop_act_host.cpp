@@ -23,8 +23,11 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/engine/engine.h"
 
 #include <algorithm>
+#include <cwchar>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -62,6 +65,7 @@ struct Slot {
     uint32_t waits[kWaitCauses] = {};
     uint32_t commits[kCommitSteps] = {};
     uint32_t maxDepth = 0;
+    uint8_t  grantedFamily = 0;   // the PropActFamily of the grant the slot's reservation holds
 };
 
 coop::net::Session* g_session = nullptr;
@@ -259,7 +263,10 @@ coop::net::Served ServeHead(uint8_t slot, const Queued& q) {
         ++g_slots[slot].waits[static_cast<int>(cause)];
         return coop::net::Served::Wait;
     }
-    if (v == internal::ActVerdict::Grant) coop::prop_hold::Reserve(slot, q.req.id, q.req.eid, actor);
+    if (v == internal::ActVerdict::Grant) {
+        coop::prop_hold::Reserve(slot, q.req.id, q.req.eid, actor);
+        g_slots[slot].grantedFamily = q.req.family;
+    }
     const bool sent = Answer(slot, *internal::ReplyFor(v, q.req.id));
     if (v == internal::ActVerdict::Grant) {
         if (!sent) {
@@ -276,6 +283,27 @@ coop::net::Served ServeHead(uint8_t slot, const Queued& q) {
             v == internal::ActVerdict::Grant && !sent ? "grant-unsent" : internal::VerdictName(v), dist,
             allowed);
     return coop::net::Served::Done;
+}
+
+// A client's eat of a world puffball: the game's own eat is the puffball's `bitten`, which damages it to its `broken`
+// and its cloud. The client's replay of the verb dissolved its own cloud (coop/creatures/host_born_spawn), and the host
+// destroys its copy without running `broken`, so the host mints the cloud here, where the puffball stood, with the
+// class's own offset (5 cm up). It rides the world-actor lane to every peer, the eater's screen included.
+void BurstPuffballFor(uint8_t slot, void* actor, uint32_t eid) {
+    namespace P = ue_wrap::profile;
+    if (!actor || _wcsicmp(R::ClassNameOf(actor).c_str(), P::name::PuffballMatureClass) != 0) return;
+    void* cls = ue_wrap::object_index::ClassByName(P::name::PuffballExplosionClass);
+    ue_wrap::FVector at{};
+    if (!cls || !ue_wrap::engine::TryGetActorLocation(actor, at)) {
+        UE_LOGW("[PUFFBALL] host: slot %u ate eid %u but its cloud could not be minted (%s)",
+                static_cast<unsigned>(slot), static_cast<unsigned>(eid),
+                cls ? "its location did not read" : "PuffballExplosion_C did not resolve");
+        return;
+    }
+    at.Z += 5.f;
+    void* cloud = ue_wrap::engine::SpawnActor(cls, at);
+    UE_LOGI("[PUFFBALL] host: slot %u ate puffball eid %u at (%.0f,%.0f,%.0f) -> cloud %s", static_cast<unsigned>(slot),
+            static_cast<unsigned>(eid), at.X, at.Y, at.Z, cloud ? "minted (world-actor lane)" : "NOT minted");
 }
 
 void LogCommit(uint8_t slot, const coop::net::PropActCommitPayload& p, const char* outcome) {
@@ -469,6 +497,8 @@ void OnCommit(const coop::net::PropActCommitPayload& p, uint8_t senderSlot) {
     case internal::CommitStep::Destroy:
         break;
     }
+    if (g_slots[senderSlot].grantedFamily == static_cast<uint8_t>(PropActFamily::Use))
+        BurstPuffballFor(senderSlot, actor, p.eid);
     // The eid alone names the prop (no key), so the key fallback can never pick a sibling.
     ue_wrap::CachedObjRef before;
     before.Set(actor);
