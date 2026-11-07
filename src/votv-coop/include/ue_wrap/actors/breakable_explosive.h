@@ -1,5 +1,6 @@
 // ue_wrap/actors/breakable_explosive.h -- the props whose own break blasts: the vending machine, the gas can, the
-// bombs, the explosive crystal and the explosive drive (profile::name::BreakableExplosiveClasses). Their damage runs
+// bombs, the explosive crystal, the explosive drive and a 3D-printed object, which blasts only when printed with
+// explosive data and is listed by class whatever its data (profile::name::BreakableExplosiveClasses). Their damage runs
 // through the prop's physicsImpact component like any prop's, and its break calls the owner's `broken`, which spawns
 // an explosion_C and, for the vending machine, spills half its stock as fresh props and lights the spill.
 // Engine-wrapper layer: which class is one, nothing about who may break it.
