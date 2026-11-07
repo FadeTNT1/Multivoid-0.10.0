@@ -6,7 +6,8 @@
 #include "coop/element/registry.h"      // the clump's eid, read back after the carry opened
 #include "coop/net/protocol.h"          // TrashClumpPoseSnapshot
 #include "coop/net/session.h"           // TrashCarryPoseTurn / PublishTrashCarryPose
-#include "coop/props/trash_channel.h"   // OpenBornCarry / OpenPushedCarry / IsCarrying / CtxForEid
+#include "coop/props/trash_channel.h"   // OpenBornCarry / OpenPushedCarry / IsCarrying / CtxForEid / LiveActorOf
+#include "ue_wrap/actors/prop.h"          // IsGarbageClump (a lane's new clump)
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/types.h"
@@ -30,11 +31,12 @@ struct Swept {
 };
 std::vector<Swept> g_pending;   // born of a sweep since the last tick, not opened yet
 std::vector<Swept> g_pushed;    // pushed by a stroke since the last tick
+std::vector<Swept> g_kicked;    // made of a knocked pile since the last tick (trash_channel's orphan express)
 std::vector<Swept> g_rolling;   // opened, streaming until the latch closes
 size_t             g_turn = 0;  // where the next tick's publishing starts, so no roll waits forever
 
 // What the lane did this session, reported at its end.
-int g_noted = 0, g_opened = 0, g_reopened = 0, g_ended = 0;
+int g_noted = 0, g_opened = 0, g_reopened = 0, g_ended = 0, g_kickOpened = 0, g_kickFollowed = 0;
 
 // An id already rolling moves onto the new clump: a rolling clump that re-piled and was swept again
 // within one tick is one roll whose actor changed, and the old actor is gone.
@@ -60,8 +62,13 @@ void NotePushed(void* clump) {
     g_pushed.push_back(Swept{clump, R::InternalIndexOf(clump), 0});
 }
 
+void NoteKicked(void* clump) {
+    if (!clump) return;
+    g_kicked.push_back(Swept{clump, R::InternalIndexOf(clump), 0});
+}
+
 void Tick(coop::net::Session& s, void* localPlayer) {
-    if (g_pending.empty() && g_pushed.empty() && g_rolling.empty()) return;
+    if (g_pending.empty() && g_pushed.empty() && g_kicked.empty() && g_rolling.empty()) return;
     for (const Swept& p : g_pending) {
         if (!R::IsLiveByIndex(p.clump, p.idx)) continue;   // gone before it was placed; its own destroy spoke
         if (coop::trash_channel::OpenBornCarry(s, p.clump, "SWEEP OPEN") != coop::trash_channel::BornCarry::Opened)
@@ -87,16 +94,44 @@ void Tick(coop::net::Session& s, void* localPlayer) {
         ++g_reopened;
     }
     g_pushed.clear();
+    // A knocked pile's clump has had its convert already (the orphan express), so it opens with none,
+    // the way a pushed resting clump does; one re-made inside a lane already open only moves the
+    // lane's stream onto the new actor.
+    for (const Swept& p : g_kicked) {
+        if (!R::IsLiveByIndex(p.clump, p.idx) || !ue_wrap::prop::IsGarbageClump(p.clump)) continue;
+        const coop::element::ElementId eid = coop::element::Registry::Get().EidForActor(p.clump);
+        if (eid == coop::element::kInvalidId) continue;
+        const bool following = coop::trash_channel::IsCarrying(eid);
+        if (!following && !coop::trash_channel::OpenPushedCarry(p.clump)) continue;
+        Roll(p.clump, p.idx);
+        const int n = following ? ++g_kickFollowed : ++g_kickOpened;
+        if (n <= 5 || (n % 50) == 0)
+            UE_LOGI("[TRASH-SWEEP] HOST knocked clump %p eid=%u %s (#%d)", p.clump, static_cast<unsigned>(eid),
+                    following ? "re-made inside its open lane -- the stream follows the new actor"
+                              : "opened -- its roll streams until it re-piles or rests",
+                    n);
+    }
+    g_kicked.clear();
 
     // The local hand now, not as the last pump pass saw it: a clump the host grabbed this tick
     // streams on the hand's channel from here, and on this one no longer.
     E::MainPlayerGrabState hand{};
     if (!localPlayer || !E::ReadMainPlayerGrabState(localPlayer, hand)) hand = E::MainPlayerGrabState{};
     for (auto it = g_rolling.begin(); it != g_rolling.end(); ) {
-        // The latch closing is the land (or the rest, or the death, which trash_channel reports);
-        // a clump that died with a settle pending has re-piled and the commit will say so.
-        if (!coop::trash_channel::IsCarrying(static_cast<coop::element::ElementId>(it->eid)) ||
-            !R::IsLiveByIndex(it->clump, it->idx) ||
+        const coop::element::ElementId eid = static_cast<coop::element::ElementId>(it->eid);
+        // The entity can change actor inside its lane: a clump that re-piled and was knocked into a
+        // clump again. The lane is the entity's, so the stream follows whatever clump it is now; while
+        // it is a pile with a settle pending the stream only pauses (the publish below skips a dead
+        // actor), and the commit or the dead-lane close ends the lane.
+        if (!R::IsLiveByIndex(it->clump, it->idx)) {
+            void* now = coop::trash_channel::LiveActorOf(eid);
+            if (now && ue_wrap::prop::IsGarbageClump(now)) {
+                it->clump = now;
+                it->idx = R::InternalIndexOf(now);
+            }
+        }
+        // The latch closing is the land (or the rest, or the death, which trash_channel reports).
+        if (!coop::trash_channel::IsCarrying(eid) ||
             it->clump == hand.grabbingActor || it->clump == hand.holdingActor) {
             ++g_ended;
             it = g_rolling.erase(it);
@@ -108,6 +143,7 @@ void Tick(coop::net::Session& s, void* localPlayer) {
     size_t joined = 0;
     for (size_t k = 0; k < n; ++k) {
         const Swept& r = g_rolling[(g_turn + k) % n];
+        if (!R::IsLiveByIndex(r.clump, r.idx)) continue;   // a pile for now, its settle pending
         // A pose read before its turn would be overwritten before any send: two reflected calls
         // for nothing.
         const coop::net::PoseTurn turn = s.TrashCarryPoseTurn(r.eid, /*ahead=*/false);
@@ -129,14 +165,16 @@ void Tick(coop::net::Session& s, void* localPlayer) {
 }
 
 void OnDisconnect() {
-    if (g_noted > 0 || g_reopened > 0)
+    if (g_noted > 0 || g_reopened > 0 || g_kickOpened > 0 || g_kickFollowed > 0)
         UE_LOGI("[TRASH-SWEEP] session tally -- %d swept clump(s) noted, %d opened, %d resting clump(s) "
-                "pushed back into a roll, %d rolls ended", g_noted, g_opened, g_reopened, g_ended);
+                "pushed back into a roll, %d knocked clump(s) opened, %d re-made in a lane, %d rolls ended",
+                g_noted, g_opened, g_reopened, g_kickOpened, g_kickFollowed, g_ended);
     g_pending.clear();
     g_pushed.clear();
+    g_kicked.clear();
     g_rolling.clear();
     g_turn = 0;
-    g_noted = g_opened = g_reopened = g_ended = 0;
+    g_noted = g_opened = g_reopened = g_ended = g_kickOpened = g_kickFollowed = 0;
 }
 
 }  // namespace coop::trash_sweep

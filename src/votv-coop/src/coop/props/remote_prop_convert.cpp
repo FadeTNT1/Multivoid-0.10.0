@@ -102,8 +102,26 @@ void* OnConvert(const coop::net::PropConvertPayload& payload, void* /*localPlaye
     // would reject and leave split-tracked.
     if (cur && ue_wrap::prop::IsGarbageClump(cur) == wantClump) {
         if (wantClump) {
-            UE_LOGI("[PILE] CLIENT convert %s eid=%u ctx=%u -- already a clump, idempotent no-op (echo/dup)",
-                    edge, E, static_cast<unsigned>(payload.ctx));
+            // A carry pose drives a clump a stream owns, and a snap here would fight it. A clump no
+            // drive owns -- one at rest since its lane closed, which the host's world has since
+            // knocked into a pile and back (the host's birth-orphan express) -- has only this convert
+            // to be placed by: left where it lay, it stays where the host's clump no longer is.
+            if (!coop::trash_clump_pose_stream::HasDriveForEid(E)) {
+                ue_wrap::FVector was{};
+                const bool wasRead = E::TryGetActorLocation(cur, was);
+                ClearAnyDriveFor(cur);
+                E::SetActorRootMovable(cur);
+                E::SetActorLocation(cur, loc);
+                E::SetActorRotation(cur, rot);
+                const float mx = was.X - loc.X, my = was.Y - loc.Y, mz = was.Z - loc.Z;
+                UE_LOGI("[PILE] CLIENT convert %s eid=%u ctx=%u -- already a clump with no carry drive: placed at the "
+                        "host's pose (%.1f,%.1f,%.1f), moved %.1f cm",
+                        edge, E, static_cast<unsigned>(payload.ctx), loc.X, loc.Y, loc.Z,
+                        wasRead ? std::sqrt(mx * mx + my * my + mz * mz) : -1.f);
+            } else {
+                UE_LOGI("[PILE] CLIENT convert %s eid=%u ctx=%u -- already a clump, idempotent no-op (echo/dup)",
+                        edge, E, static_cast<unsigned>(payload.ctx));
+            }
             coop::trash_channel::NoteClientConvertObserved(E, true);
             return cur;
         }
@@ -115,6 +133,7 @@ void* OnConvert(const coop::net::PropConvertPayload& payload, void* /*localPlaye
         coop::pile_look::OnHostRootScale(E, payload.scaleX, payload.scaleY, payload.scaleZ, /*isClump=*/false,
                                          senderSlot);
         coop::pile_look::LogLandLook("CLIENT", E, cur);
+        coop::trash_mirror::WatchLandPose(E, cur, loc);
         ue_wrap::FVector got{};
         const bool gotRead = E::TryGetActorLocation(cur, got);
         const float dx = got.X - loc.X, dy = got.Y - loc.Y, dz = got.Z - loc.Z;
@@ -159,7 +178,29 @@ void* OnConvert(const coop::net::PropConvertPayload& payload, void* /*localPlaye
         coop::trash_mirror::Unpin(cur);                         // no-op for a native we never pinned
         DestroyEchoSuppressed(cur);
     }
-    if (!wantClump) coop::pile_look::LogLandLook("CLIENT", E, next);
+    if (!wantClump) {
+        coop::pile_look::LogLandLook("CLIENT", E, next);
+        // The pile must rest where the host's does, and nothing under it on this peer holds it up
+        // the way it is held on the host (a clump here has no collision; a pile the host left
+        // floating when the clump under it rolled away is floating here too). Read the spawned
+        // pile back and set it to the host's pose if its spawn or its re-skin moved it.
+        ue_wrap::FVector got{};
+        if (E::TryGetActorLocation(next, got)) {
+            const float dx = got.X - loc.X, dy = got.Y - loc.Y, dz = got.Z - loc.Z;
+            const float drift = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (drift > 1.0f) {
+                E::SetActorRootMovable(next);
+                E::SetActorLocation(next, loc);
+                ue_wrap::FVector again{};
+                const bool againRead = E::TryGetActorLocation(next, again);
+                UE_LOGW("[PILE] CLIENT ToPile LAND eid=%u ctx=%u -- the spawned pile sat at (%.1f,%.1f,%.1f), %.1f cm "
+                        "off the host's (%.1f,%.1f,%.1f); set back -> (%.1f,%.1f,%.1f)%s",
+                        E, static_cast<unsigned>(payload.ctx), got.X, got.Y, got.Z, drift, loc.X, loc.Y, loc.Z,
+                        again.X, again.Y, again.Z, againRead ? "" : " (unread)");
+            }
+            coop::trash_mirror::WatchLandPose(E, next, loc);
+        }
+    }
     UE_LOGI("[PILE] CLIENT convert %s eid=%u ctx=%u -> %s cls='%ls' actor=%p at (%.1f,%.1f,%.1f) chipType=%u "
             "(predecessor %p retired)%s",
             edge, E, static_cast<unsigned>(payload.ctx), wantClump ? "CLUMP" : "PILE", cls.c_str(),
