@@ -131,20 +131,26 @@ bool Play(uint32_t eid, bool retried) {
         ++g_lost;
         return true;
     }
+    // The whole sequence, not break() alone: break() is only the particles and the sound. The sequence also breaks the
+    // piece's world constraints (the basement's secret wall hangs on four), and a copy that never ran it keeps them and
+    // holds its place however the prop lanes move or release it. break() alone is the fallback when it does not dispatch.
     ++g_applying;
-    const bool ok = AP::CallBreak(actor);
+    bool ok = AP::CallBreakingSequence(actor);
+    const bool whole = ok;
+    if (!ok) ok = AP::CallBreak(actor);
     --g_applying;
     Remember(eid, NowMs());
     if (!ok) {
-        UE_LOGW("[PIECE-BREAK] client: break() on %ls eid=%u did not dispatch -- no effect here",
+        UE_LOGW("[PIECE-BREAK] client: breakingSequence() and break() on %ls eid=%u did not dispatch -- no effect here",
                 R::ClassNameOf(actor).c_str(), static_cast<unsigned>(eid));
         ++g_lost;
         return true;
     }
     ++g_played;
     if (retried) ++g_late;
-    UE_LOGI("[PIECE-BREAK] client: %ls eid=%u break() played%s (#%u)", R::ClassNameOf(actor).c_str(),
-            static_cast<unsigned>(eid), retried ? " after a wait for its copy" : "", g_played);
+    UE_LOGI("[PIECE-BREAK] client: %ls eid=%u %s played%s (#%u)", R::ClassNameOf(actor).c_str(),
+            static_cast<unsigned>(eid), whole ? "breakingSequence() (constraints released)" : "break() only",
+            retried ? " after a wait for its copy" : "", g_played);
     return true;
 }
 
@@ -200,6 +206,23 @@ void OnFx(const coop::net::PieceBreakFxPayload& p) {
         return;
     }
     g_waiting.push_back(Waiting{p.targetEid, now + kPendingMs});
+}
+
+void OnStaticReleased(void* actor) {
+    coop::net::Session* s = LoadSession();
+    if (!s || s->role() != coop::net::Role::Client || g_applying > 0 || !AP::IsPiece(actor)) return;
+    const EL::ElementId eid = EL::Registry::Get().EidForActor(actor);
+    if (eid == EL::kInvalidId) return;
+    const uint64_t now = NowMs();
+    if (SeenRecently(eid, now)) return;   // the cue (or an earlier release) already ran the sequence here
+    ++g_applying;
+    const bool ok = AP::CallBreakingSequence(actor);
+    --g_applying;
+    Remember(eid, now);
+    if (ok) ++g_played;
+    UE_LOGI("[PIECE-BREAK] client: %ls eid=%u released from Static by the host's record -- breakingSequence() %s here "
+            "(its constraints go; a late join or a lost cue lands here)", R::ClassNameOf(actor).c_str(),
+            static_cast<unsigned>(eid), ok ? "ran" : "DID NOT RUN");
 }
 
 void OnDisconnect() {

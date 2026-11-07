@@ -7,9 +7,11 @@
 // and then frees the body and breaks its world constraints. The host's copy is the only one that runs the sequence, so
 // the other peers saw the piece fall, through the prop lanes, with neither effect. The host watches break() after it
 // ran and sends the piece's element id to every client, the one whose player pried it too, since that client's own end
-// was cut at the gate. A receiver runs break() alone on its copy, never the sequence, whose physics and constraints
-// the prop lanes already carry. A copy that has not resolved yet is retried for a short while. A break() that ran
-// natively on a client (its own damage) is noted, so the host's cue does not play it a second time. Wire and late
+// was cut at the gate. A receiver runs the whole breakingSequence on its copy: the prop lanes carry the body's pose and
+// its Static flag, but not the four physics constraints that hold a piece (the basement's secret wall) in the world, so
+// a copy that skipped the sequence stayed solid. A copy that has not resolved yet is retried for a short while. A break()
+// that ran natively on a client (its own damage) is noted, so the host's cue does not play it a second time. A piece the
+// host's record releases from Static runs the same sequence (OnStaticReleased), which covers a late join. Wire and late
 // join: docs/tool-actions.md. Game thread.
 
 #pragma once
@@ -34,6 +36,12 @@ bool WellFormed(const coop::net::PieceBreakFxPayload& payload, int len);
 
 // CLIENT: the host's cue.
 void OnFx(const coop::net::PieceBreakFxPayload& payload);
+
+// CLIENT: a piece's copy was just released from Static by the host's word (a prop record, a drive end). That release is
+// the host's piece having broken, so the copy runs its breakingSequence unless the cue already did (the constraints that
+// hold it in the wall go; a joiner meeting an already broken wall, or a lost cue, lands here). No-op on a host, on a
+// non-piece, and inside this lane's own call.
+void OnStaticReleased(void* actor);
 
 // Net disconnect: the pending cues and the rate state go, with one summary line.
 void OnDisconnect();

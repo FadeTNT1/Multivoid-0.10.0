@@ -1848,6 +1848,9 @@ inline constexpr const wchar_t* CrowbarClass = L"prop_crowbar_C";
 // four world constraints one by one.
 inline constexpr const wchar_t* AsologoPieceClass = L"prop_asologoPiece_C";
 inline constexpr const wchar_t* AsologoPieceBreakFn = L"break";
+// The whole sequence: setPropProps(static off), break(), then the four physicsconstraint components one by one (1.5-3 s
+// apart, a latent delay), each with a random spin. A copy that never ran it keeps its constraints and holds its place.
+inline constexpr const wchar_t* AsologoPieceBreakingSequenceFn = L"breakingSequence";
 inline constexpr int CrowbarMaxLives = 3;
 // The hacksaw (prop_hacksaw_C). Its playerHandUse_LMB takes the looked-at heavy simulating prop of a scrappable
 // material as `sawingProp`: processMat() names the scrap in `drop`, `vol` is the mesh's convex volume
