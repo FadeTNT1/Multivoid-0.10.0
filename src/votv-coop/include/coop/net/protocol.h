@@ -1905,7 +1905,8 @@ static_assert(sizeof(VoiceStatePayload) == 4, "VoiceStatePayload must be 4 bytes
 // freed it, which a pry's kick is part of, and the receiver lets its copy go from there.
 // A glowstick (coop/props/glowstick_hang_sync) rides the same message without the component: flags bit 2 (4) is a
 // hang on world geometry, with linVel carrying the hook point; flags 0 is its release, with the velocities the
-// unstick carries. A peer that does not know the bit drops the message, so the layout and the version are unchanged.
+// unstick carries. The layout is unchanged; the new meaning of bit 2 took protocol 308, so a peer from before it,
+// which would drop the hang as a message for a prop with no component, does not connect.
 struct PropStickStatePayload {
     WireKey  key;
     uint32_t elementId;
