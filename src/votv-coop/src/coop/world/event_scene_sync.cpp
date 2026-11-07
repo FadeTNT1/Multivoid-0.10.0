@@ -60,6 +60,8 @@ uint8_t LastPhaseOf(uint8_t scene) {
     case ids::kBoarShield: return ph::kShieldFlyAway;
     case ids::kAgrav:      return ph::kAgravCloakOff;
     case ids::kMidas:      return ph::kMidasEnd;
+    case ids::kDropper:    return ph::kDropperDeployed;
+    case ids::kMorningUfo: return ph::kMorningUfoFly;
     default:               return 0;
     }
 }
@@ -146,6 +148,18 @@ void ApplyToMirror(const coop::net::EventScenePhasePayload& p, void* actor) {
         const bool ok = snapshot ? ES::ObeliskMarkFallen(actor) : (ES::ObeliskLand(actor) & ES::EndOwnEvent(actor));
         UE_LOGI("event_scene[obelisk]: eid=%u landed%s applied%s", p.eid, snapshot ? " (snapshot)" : "",
                 ok ? "" : " -- a verb did not dispatch");
+        return;
+    }
+    if (p.scene == ids::kDropper || p.scene == ids::kMorningUfo) {
+        // The host's walk-in start: a peer's own copy starts only on its own overlap, so a client nowhere near the
+        // saucer saw none. A copy its own player already started takes nothing (the dropper's body is a DoOnce).
+        uint8_t& last = g_appliedByEid[p.eid];
+        if (last >= p.phase) return;
+        last = p.phase;
+        const bool dropper = p.scene == ids::kDropper;
+        const bool ok = dropper ? ES::UfoDropperDeploy(actor) : ES::MorningUfoFly(actor);
+        UE_LOGI("event_scene[%s]: eid=%u started%s applied%s", dropper ? "dropper" : "morningUfo", p.eid,
+                snapshot ? " (snapshot)" : "", ok ? "" : " -- a verb did not dispatch");
     }
 }
 
@@ -213,8 +227,10 @@ void NoteHostPhase(uint8_t scene, uint8_t phase, void* actor) {
         row->idx = idx;
         if (IsLevelScene(scene)) row->key = ES::ShortName(actor);
     }
-    // The cleaner's phases only advance; a re-entered body (the overlap is a DoOnce) adds nothing.
-    if (scene == ids::kSoltoClean && phase <= row->phase) return;
+    // The cleaner's phases only advance, and the walk-in saucers start once; a re-entered body (each overlap is a
+    // DoOnce, or a flag already set) adds nothing.
+    if ((scene == ids::kSoltoClean || scene == ids::kDropper || scene == ids::kMorningUfo) && phase <= row->phase)
+        return;
     row->phase = phase;
     row->dirty = true;
     UE_LOGI("event_scene: host scene %u reached phase %u on %p", scene, phase, actor);

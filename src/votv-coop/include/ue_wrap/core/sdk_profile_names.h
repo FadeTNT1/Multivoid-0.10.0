@@ -486,6 +486,12 @@ inline constexpr const wchar_t* UfoDropperCarClass  = L"ufoDropper_car_C";
 // power grid's to refuse (coop/world/power_grid), so a mirror is the saucer alone.
 inline constexpr const wchar_t* UfoDropperTankClass = L"ufoDropper_tank_C";
 inline constexpr const wchar_t* UfoDropperPigClass  = L"ufoDropper_pig_C";
+// The two walk-in starts the host relays as scene phases (coop/world/event_scene_sync). ufoDropper_C's box
+// overlap (any actor) and its paramless `forceDeploy` share one DoOnce body: unhide, setEvent, the particle
+// system, `activated`, Timeline_0.PlayFromStart. morningUfo_C's box overlap casts OtherActor to mainPlayer_C,
+// then sets its bool `fly` and unhides itself. The 0.10.0 capture's bodies.
+inline constexpr const wchar_t* UfoDropperDeployFn  = L"forceDeploy";
+inline constexpr const wchar_t* MorningUfoFlyProp   = L"fly";
 // boarwar's controller (runEvent('boarwar') mints it above the treehouse): its ubergraph throws grayboar_C
 // props (the prop lane carries them), mints two npc_ariral_shooter_C 60 s and 120 s in, and four firetank_C
 // once the boars are spent, all under EX_CallMath, so its creatures cross only through its source row in

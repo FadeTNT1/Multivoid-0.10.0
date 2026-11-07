@@ -2785,7 +2785,9 @@ constexpr uint8_t kObelisk    = 2;   // obelisk_C, a world-actor mirror
 constexpr uint8_t kBoarShield = 3;   // ufoShieldShader_C, level-placed (boarwar's UFO shader)
 constexpr uint8_t kAgrav      = 4;   // trigger_agrav_C, level-placed (the anti-gravity prank)
 constexpr uint8_t kMidas      = 5;   // midasufotest_C, level-placed (the gamemode's ufo_midas flight)
-constexpr uint8_t kLast       = kMidas;
+constexpr uint8_t kDropper    = 6;   // a ufoDropper_C child (the eventer's droppers), a world-actor mirror
+constexpr uint8_t kMorningUfo = 7;   // morningUfo_C (morningGay), a world-actor mirror
+constexpr uint8_t kLast       = kMorningUfo;
 }  // namespace event_scene_ids
 namespace event_scene_phases {
 // kSoltoClean, monotonic:
@@ -2804,6 +2806,10 @@ constexpr uint8_t kAgravCloakOff = 2;  // cloak(false): both end
 // kMidas:
 constexpr uint8_t kMidasRun      = 1;  // setActive(true): the flight along its spline begins
 constexpr uint8_t kMidasEnd      = 2;  // setActive(false): the flight is over (a client's own tick ends it too)
+// kDropper:
+constexpr uint8_t kDropperDeployed = 1;  // the box overlap or forceDeploy: shown, its descent timeline playing
+// kMorningUfo:
+constexpr uint8_t kMorningUfoFly   = 1;  // a player's box overlap: `fly` set, shown
 constexpr uint8_t kLast          = 3;
 }  // namespace event_scene_phases
 namespace event_scene_flags {
