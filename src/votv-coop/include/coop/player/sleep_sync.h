@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace coop::net { class Session; }
 
@@ -52,6 +53,8 @@ void OnDisconnectForSlot(int slot);
 // The rest state of `slot` as this peer knows it: on the host, from the clients' reports and its own
 // polls; on a client, from the host's relays (slot 0 the host). Awake for a slot out of range.
 coop::net::SleepPeerState PeerState(int slot);
+// The bed class name `slot` rests in (empty: bedless or awake, or a slot out of range).
+std::string BedOf(int slot);
 
 // Is the host asleep: on the host its own isSleep, on a client the last flag the host sent. For
 // instruments. Game thread.

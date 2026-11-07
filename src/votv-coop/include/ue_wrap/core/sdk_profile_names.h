@@ -186,6 +186,9 @@ inline constexpr const wchar_t* GamemodeOpenPropInvParam      = L"prop";
 // makes itself its storage's owner. Loaded by path when no instance has loaded the class yet.
 inline constexpr const wchar_t* SleeperLootContainerClass     = L"prop_container_crate_C";
 inline constexpr const wchar_t* SleeperLootContainerPath      = L"/Game/objects/prop_container_crate.prop_container_crate_C";
+// A rest bed whose class name holds this is a sleeping bag (laid on the floor), any other a bed (laid on its surface): the
+// word a log line names an online sleeper's surface by (coop/player/sleepers).
+inline constexpr const char*    SleepingBagToken               = "sleepingbag";
 // prop_C.ignoreSav: the prop's own "leave me out of the save" bool, which its ignoreSave answer ORs in.
 inline constexpr const wchar_t* PropIgnoreSavProp             = L"ignoreSav";
 

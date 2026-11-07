@@ -80,6 +80,12 @@ constexpr auto kBuildRetry = std::chrono::milliseconds(1000);
 constexpr int kMaxBuildTries = 60;
 constexpr auto kWritebackEvery = std::chrono::milliseconds(1000);
 constexpr auto kPoseWatchEvery = std::chrono::milliseconds(2000);
+constexpr auto kWakeDebounce = std::chrono::milliseconds(1000);     // an awake read shorter than this is a flicker
+constexpr auto kSettleStill = std::chrono::milliseconds(300);       // the streamed spot held still this long: settle
+constexpr auto kSettleMax = std::chrono::milliseconds(1500);        // ... or this long after the rest began
+constexpr float kSpotStillCm = 20.f;                                // "held still": moved less than this
+constexpr float kOnlineMaxSettleCm = 30.f;                          // a mesh-bounds correction past this is not trusted
+constexpr float kOnlinePlateLiftCm = 40.f;                          // the plate floats this far above the body's centre
 constexpr const wchar_t* kSidecar = L"sleepers.txt";
 constexpr const char* kSidecarMagic = "VCSL1";
 
@@ -125,14 +131,27 @@ struct Wake {
 std::map<std::string, Wake> g_wakes;   // by GUID
 constexpr auto kWakeBound = std::chrono::seconds(180);
 
-// An online player at rest (sleep_sync: resting or dreaming), shown lying: their puppet laid flat on the floor (or
-// the bed) under where they rest, held there each tick over the pose stream until they wake.
+// An online player at rest (sleep_sync: resting or dreaming), shown lying: their puppet laid flat on the bed surface (or
+// the floor) under where they rest. The lying pose is the ONLY writer while they rest: the puppet's normal drive
+// (position, capsule, body yaw, head look, locomotion inputs) is suspended, the pose is settled once per episode, and
+// a 2 s watch puts it back only if something moved it.
 struct OnlineRest {
     bool lying = false;
     FVector lie{};
     FRotator rot{};
     float standYaw = 0.f;
     FVector anchor{};     // the streamed position the pose was traced under
+    float surfaceZ = 0.f; // the traced bed or floor surface the body lies on
+    // Before the pose settles: when the rest began and how long the streamed spot has held still.
+    bool resting = false;
+    Clock::time_point restBegan{};
+    Clock::time_point stableSince{};
+    FVector lastSpot{};
+    // After: the next 2 s watch, and when the peer began to read awake (the wake debounce).
+    Clock::time_point nextVerify{};
+    bool awakeTiming = false;
+    Clock::time_point awakeSince{};
+    uint32_t debounced = 0;   // state flips shorter than kWakeDebounce, ignored this episode
 };
 std::array<OnlineRest, coop::players::kMaxPeers> g_online{};
 bool g_onlineLootSaid = false;
@@ -231,14 +250,17 @@ bool BodyBottom(void* body, float& z) {
 bool IsLying(const FRotator& r) { return std::fabs(r.Roll) > 60.f || std::fabs(r.Pitch) > 60.f; }
 
 // The pose a body lies in under `stand` facing `yaw`, measured on `body` (rotated and moved there to measure it).
-void MeasureLie(void* body, const FVector& stand, float yaw, FVector& lie, FRotator& rot, float* floorOut) {
+// `maxSettleCm` bounds the mesh-bounds correction that is trusted. True when the surface under `stand` was traced.
+bool MeasureLie(void* body, const FVector& stand, float yaw, FVector& lie, FRotator& rot, float* floorOut,
+                float maxSettleCm = kMaxSettleCm) {
     void* const local = coop::players::Registry::Get().Local();
     const float halfH = local ? E::GetActorCharacterHalfHeight(local) : 0.f;
     float floorZ = stand.Z - (halfH > 1.f ? halfH : 90.f);
     ue_wrap::trace::Hit hit;
     const FVector from{stand.X, stand.Y, stand.Z + 50.f};
     const FVector to{stand.X, stand.Y, stand.Z - 600.f};
-    if (ue_wrap::trace::LineHitStatDyn(local ? local : body, from, to, &hit) && hit.blocked) floorZ = hit.point.Z;
+    const bool traced = ue_wrap::trace::LineHitStatDyn(local ? local : body, from, to, &hit) && hit.blocked;
+    if (traced) floorZ = hit.point.Z;
     rot = FRotator{0.f, yaw, kLyingRoll};
     lie = FVector{stand.X, stand.Y, floorZ + 25.f};
     E::SetActorRotation(body, rot);
@@ -246,10 +268,11 @@ void MeasureLie(void* body, const FVector& stand, float yaw, FVector& lie, FRota
     float bottom = 0.f;
     if (BodyBottom(body, bottom)) {
         const float settle = (floorZ + kFloorClearanceCm) - bottom;
-        if (std::fabs(settle) <= kMaxSettleCm) lie.Z += settle;
+        if (std::fabs(settle) <= maxSettleCm) lie.Z += settle;
         E::SetActorLocation(body, lie);
     }
     if (floorOut) *floorOut = floorZ;
+    return traced;
 }
 
 // Lay the body: on its side, its forward axis level at the player's facing, its lowest point on the floor. The host
@@ -726,42 +749,140 @@ void TickBuilds(Clock::time_point now) {
     }
 }
 
+// The head pinned on the lying body: looking along where it lies, so the anim graph neither follows the stream's camera
+// pitch nor turns it to whoever looks at it. Written at the settle and by the watch, never per tick.
+void PinHead(void* body, const FVector& lie) {
+    ue_wrap::puppet::DriveHeadLookAtWorld(body, Add(lie, Mul(E::GetActorForwardVector(body), 200.f)));
+}
+
+// The puppet's normal drive goes back on: standing at the streamed pose, the body yaw re-seeded.
+void StandUp(int slot, OnlineRest& o, coop::RemotePlayer& p, void* body, const char* why) {
+    p.SetDrivesSuspended(false);
+    if (body) {
+        E::SetActorLocation(body, p.GetSyncedPosition());
+        E::SetActorRotation(body, FRotator{0.f, o.standYaw, 0.f});
+    }
+    UE_LOGI("sleeper: drives restored for slot %d (%s)", slot, why);
+    UE_LOGI("sleeper: %s woke -- standing again (%u state flip(s) debounced this rest)", Utf8(p.GetNickname()).c_str(),
+            o.debounced);
+    o = OnlineRest{};
+}
+
+// Settle the lying pose, once for the episode: trace down from the sleeping spot to the surface (the bed's, or the
+// floor's under a sleeping bag), lay the body there, pin the head, still the locomotion, and take the puppet's drive.
+void SettleOnline(int slot, OnlineRest& o, coop::RemotePlayer& p, void* body, const FVector& anchor) {
+    o.anchor = anchor;
+    o.standYaw = p.GetSyncedAimRotation().Yaw;
+    float surfaceZ = 0.f;
+    const bool traced = MeasureLie(body, anchor, o.standYaw, o.lie, o.rot, &surfaceZ, kOnlineMaxSettleCm);
+    o.surfaceZ = surfaceZ;
+    ue_wrap::puppet::DriveCharacterMovement(body, FVector{0.f, 0.f, 0.f}, false);
+    PinHead(body, o.lie);
+    p.SetDrivesSuspended(true);
+    o.lying = true;
+    o.resting = false;
+    o.awakeTiming = false;
+    o.nextVerify = Clock::now() + kPoseWatchEvery;
+    const std::string bed = coop::sleep_sync::BedOf(slot);
+    const bool inBag = bed.find(N::SleepingBagToken) != std::string::npos;
+    const char* on = (!bed.empty() && !inBag) ? "bed" : "floor";
+    FRotator got{};
+    FVector at{};
+    E::TryGetActorRotation(body, got);
+    E::TryGetActorLocation(body, at);
+    UE_LOGI("sleeper: %s pose settled at (%.0f, %.0f, %.0f) on %s z=%.1f%s", Utf8(p.GetNickname()).c_str(), at.X, at.Y,
+            at.Z, on, surfaceZ, traced ? "" : " (surface NOT traced; the capsule's foot is used)");
+    UE_LOGI("sleeper: %s (online, slot %d) lying at (%.0f, %.0f, %.0f) pitch/roll=%.0f/%.0f floor z=%.1f",
+            Utf8(p.GetNickname()).c_str(), slot, at.X, at.Y, at.Z, got.Pitch, got.Roll, surfaceZ);
+    UE_LOGI("sleeper: drives suspended for slot %d", slot);
+}
+
 }  // namespace
 
 void DriveOnline(int slot, coop::RemotePlayer& p) {
     if (slot < 0 || slot >= static_cast<int>(coop::players::kMaxPeers)) return;
     OnlineRest& o = g_online[slot];
     void* const body = p.actor();
+    const auto now = Clock::now();
     const bool resting = coop::sleep_sync::PeerState(slot) != coop::net::SleepPeerState::Awake;
-    // A fainted or knocked-out body is the ragdoll's to show; it does not lie as a sleeper.
-    if (!resting || p.IsRagdollDisplayed() || !body) {
-        if (o.lying) {
-            o.lying = false;
-            // Up at once: standing at the streamed pose, the drive takes it from here.
-            E::SetActorLocation(body, p.GetSyncedPosition());
-            E::SetActorRotation(body, FRotator{0.f, o.standYaw, 0.f});
-            UE_LOGI("sleeper: %s woke -- standing again", Utf8(p.GetNickname()).c_str());
-        }
+    // A fainted or knocked-out body is the ragdoll's to show; it does not lie as a sleeper. No debounce: it stands up now.
+    if (p.IsRagdollDisplayed() || !body) {
+        if (o.lying) StandUp(slot, o, p, body, "ragdoll or body gone");
+        else o = OnlineRest{};
         return;
     }
-    const FVector anchor = p.GetSyncedPosition();
-    if (!o.lying || Len(Sub(anchor, o.anchor)) > 150.f) {
-        o.anchor = anchor;
-        o.standYaw = p.GetSyncedAimRotation().Yaw;
-        float floorZ = 0.f;
-        MeasureLie(body, anchor, o.standYaw, o.lie, o.rot, &floorZ);
-        ue_wrap::puppet::DriveCharacterMovement(body, FVector{0.f, 0.f, 0.f}, false);
-        o.lying = true;
-        FRotator got{};
-        FVector at{};
-        E::TryGetActorRotation(body, got);
-        E::TryGetActorLocation(body, at);
-        UE_LOGI("sleeper: %s (online, slot %d) lying at (%.0f, %.0f, %.0f) pitch/roll=%.0f/%.0f floor z=%.1f", Utf8(p.GetNickname()).c_str(),
-                slot, at.X, at.Y, at.Z, got.Pitch, got.Roll, floorZ);
+    if (!o.lying) {
+        // Not lying yet: the normal drive still moves the puppet (it may be walking into the bed). Settle once the
+        // streamed spot has held still, or a moment after the rest began.
+        if (!resting) {
+            if (o.resting) {
+                ++o.debounced;
+                UE_LOGI("sleeper: slot %d rest ended before its pose settled -- flip debounced (%u)", slot, o.debounced);
+            }
+            const uint32_t keep = o.debounced;
+            o = OnlineRest{};
+            o.debounced = keep;
+            return;
+        }
+        const FVector spot = p.GetSyncedPosition();
+        if (!o.resting) {
+            o.resting = true;
+            o.restBegan = now;
+            o.stableSince = now;
+            o.lastSpot = spot;
+            return;
+        }
+        if (Len(Sub(spot, o.lastSpot)) > kSpotStillCm) {
+            o.lastSpot = spot;
+            o.stableSince = now;
+        }
+        if (now - o.stableSince < kSettleStill && now - o.restBegan < kSettleMax) return;
+        SettleOnline(slot, o, p, body, spot);
+        return;
     }
-    // Held over the pose stream every tick: the drive pushes the streamed standing pose when it changes.
+    // Lying. A read of awake shorter than the debounce is a flicker (a Resting/Dreaming hand-over, a late relay):
+    // the body keeps lying.
+    if (!resting) {
+        if (!o.awakeTiming) {
+            o.awakeTiming = true;
+            o.awakeSince = now;
+        }
+        if (now - o.awakeSince >= kWakeDebounce) StandUp(slot, o, p, body, "woke");
+        return;
+    }
+    if (o.awakeTiming) {
+        o.awakeTiming = false;
+        ++o.debounced;
+        UE_LOGI("sleeper: slot %d state flip debounced (awake for %lld ms) -- still lying (%u this rest)", slot,
+                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now - o.awakeSince).count()),
+                o.debounced);
+    }
+    // The sleeper's streamed spot jumped (a teleport): a new episode, settled again under the new spot.
+    const FVector spot = p.GetSyncedPosition();
+    if (Len(Sub(spot, o.anchor)) > 300.f) {
+        UE_LOGI("sleeper: slot %d's resting spot moved %.0f cm -- settling again", slot, Len(Sub(spot, o.anchor)));
+        SettleOnline(slot, o, p, body, spot);
+        return;
+    }
+    // The only writer: nothing is written per tick. Every 2 s the pose is checked and put back only if it drifted.
+    if (now < o.nextVerify) return;
+    o.nextVerify = now + kPoseWatchEvery;
+    if (!p.DrivesSuspended()) p.SetDrivesSuspended(true);   // a respawned body
+    FRotator r{};
+    FVector at{};
+    if (!E::TryGetActorRotation(body, r) || !E::TryGetActorLocation(body, at)) return;
+    if (IsLying(r) && Len(Sub(at, o.lie)) < 5.f) return;
+    UE_LOGW("sleeper: slot %d was moved off its pose (pitch/roll %.0f/%.0f, %.0f cm away) -- laid again", slot, r.Pitch,
+            r.Roll, Len(Sub(at, o.lie)));
     E::SetActorRotation(body, o.rot);
     E::SetActorLocation(body, o.lie);
+    PinHead(body, o.lie);
+}
+
+bool OnlinePlateAnchor(int slot, FVector& out) {
+    if (slot < 0 || slot >= static_cast<int>(coop::players::kMaxPeers) || !g_online[slot].lying) return false;
+    out = FVector{g_online[slot].lie.X, g_online[slot].lie.Y, g_online[slot].lie.Z + kOnlinePlateLiftCm};
+    return true;
 }
 
 bool IsLyingOnline(int slot) {

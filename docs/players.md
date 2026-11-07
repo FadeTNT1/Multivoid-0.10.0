@@ -318,9 +318,16 @@ head; with a wall in between there is no plate at all. Online players' plates ar
 
 **Online sleepers.** A player who is still connected but at rest -- in a bed, a sleeping bag, or dreaming, the
 state `sleep_sync` already carries -- is shown the same way on every other peer: their puppet is laid flat under
-where they rest (onto the floor, or onto the bed the trace meets) by the same measured pose, held over their pose
-stream each tick, and stood back up the tick they wake or ragdoll. Their plate follows the sleeper's rule: "z Z Z",
-no plate through a wall, the name only near. One who disconnects while lying becomes an offline sleeper in the very
+where they rest (onto the bed surface the trace meets, or the floor under a sleeping bag) by the same measured pose.
+The pose is settled once per rest, after the streamed spot has held still for 0.3 s (1.5 s at most), and is the only
+writer while they lie: the puppet's normal drive (position, body yaw, head and flashlight pitch from the sleeper's
+camera, locomotion inputs, footsteps) is suspended, the head is pinned once, and a check every 2 s puts the body back
+only if something moved it. Without that, the head look kept turning with the sleeper's camera and the plate, which
+followed the head bone, bobbed with it. The plate floats at a fixed point 40 cm over the body's centre. They stand
+back up when an awake read holds for 1 s (shorter flips are ignored and counted) or at once on a ragdoll. The log
+says `sleeper: <name> pose settled at (x, y, z) on <floor|bed> z=..`, `sleeper: drives suspended for slot N`,
+`sleeper: drives restored for slot N` and, on waking, the count of debounced flips. Their plate follows the
+sleeper's rule: "z Z Z", no plate through a wall, the name only near. One who disconnects while lying becomes an offline sleeper in the very
 pose every peer saw; on a client the puppet goes with the roster row and the offline body comes with the host's Add,
 a round trip later. Looting an online sleeper is not in this build: their inventory is live on their own machine, and
 the round trip it needs (the looter asks the host, the host asks the owner's machine, which takes or adds the item

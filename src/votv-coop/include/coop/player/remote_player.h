@@ -128,6 +128,11 @@ public:
 
     // True while a ragdoll display body is spawned: the peer is ragdolled (fainted, fell, died).
     bool IsRagdollDisplayed() const { return ragdoll_.Active(); }
+    // While set, the streamed pose is still tracked (interpolation, aim) but NOT written to the engine: no position,
+    // body yaw, flashlight pitch, locomotion inputs, footsteps or head look. A lying online sleeper (coop/player/sleepers)
+    // is the one writer then. A ragdoll display still drives. Clearing it re-applies the standing pose.
+    void SetDrivesSuspended(bool suspended);
+    bool DrivesSuspended() const { return drivesSuspended_; }
     // The spawned playerRagdoll_C body and its GUObjectArray index, for a liveness-guarded deref in
     // tests.
     void* RagdollBody() const { return ragdoll_.Body(); }
@@ -274,6 +279,7 @@ private:
     coop::LerpWindow window_;
     bool             hasPose_ = false;  // first packet snaps; spawn placeholder is fake
     bool             dirty_ = true;     // true while there's an unapplied change to push to the engine
+    bool             drivesSuspended_ = false;   // see SetDrivesSuspended
 };
 
 }  // namespace coop
