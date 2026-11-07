@@ -7,6 +7,7 @@
 #include "coop/net/session.h"
 #include "coop/props/prop_drive_host.h"       // ContextOf: the drive context a correction carries
 #include "coop/props/prop_element_tracker.h"  // the capture-instant collectors
+#include "coop/props/prop_snapshot.h"         // ExpressSpawnToSlot: the post-window spawn row
 #include "coop/props/prop_wire_parity.h"      // PhysFlagsOf, the state a correction carries
 #include "ue_wrap/actors/prop.h"     // IsChipPile: a grabbed clump belongs to the convert stream
 #include "ue_wrap/core/log.h"
@@ -256,6 +257,27 @@ void FlushDivergedPositions_(int peerSlot, bool firstRun) {
                 sentPile, checkedPile, sentKeyed, checkedKeyed);
 }
 
+// The window's close, for each prop the host moved or re-flagged inside it: its spawn row again, to this
+// joiner alone. The joiner took the first one while its world was still being adjudicated -- a mirror held
+// hidden, a native claimed and converged, the reconcile sweep still to run -- and a host move inside that
+// window has been seen to leave the prop missing on the joiner until the host next picked it up, whose
+// re-announce is this same row sent after the window. By now the joiner has quiesced, so the row lands on
+// its settled world: a prop it has converges (aligned, a no-op), one it lacks is spawned visible. A prop in a
+// hand or still moving is left to its own stream; one that dies or is held now needs nothing.
+void ReexpressCorrected_(int peerSlot, const std::vector<coop::element::ElementId>& corrected) {
+    int sent = 0;
+    for (const coop::element::ElementId eid : corrected) {
+        coop::element::Element* el = coop::element::Registry::Get().Get(eid);
+        void* actor = el ? el->LiveActor() : nullptr;  // slot-validated
+        if (!actor || ue_wrap::prop::IsChipPile(actor)) continue;
+        if (coop::prop_drive_host::InAHand(actor) || !AtRest_(actor)) continue;
+        if (coop::prop_snapshot::ExpressSpawnToSlot(actor, peerSlot)) ++sent;
+    }
+    if (sent > 0)
+        UE_LOGI("[PILE-B3] HOST slot %d window closed -- re-sent the spawn row of %d prop(s) moved inside it "
+                "(%zu corrected), now that the joiner has quiesced", peerSlot, sent, corrected.size());
+}
+
 // After the late window: only the props a hand held once their correction had gone out are still
 // watched, each sent its follow-up and dropped from the set at rest.
 void SettleHandHeld_(int peerSlot) {
@@ -405,6 +427,7 @@ void TickLateArm() {
                 const auto kit = g_blobKeyedXforms[slot].find(eid);
                 if (kit != g_blobKeyedXforms[slot].end()) FlushKeyedProp_(slot, "expiry", eid, kit->second);
             }
+            ReexpressCorrected_(slot, corrected);
             const size_t held = g_handSinceSent[slot].size();
             if (held == 0) {
                 g_flushArmUntil[slot] = {};
