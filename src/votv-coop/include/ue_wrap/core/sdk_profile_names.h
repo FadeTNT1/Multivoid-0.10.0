@@ -861,6 +861,10 @@ inline constexpr const wchar_t* TrashPileVerbLocationParam = L"location";
 inline constexpr const wchar_t* BreakableExplosiveClasses[] = {
     L"prop_vending_C",   L"prop_gascan_C",          L"prop_bombBarrel_C",       L"prop_bombBottle_C",
     L"prop_bombBox_C",   L"prop_crystal_explode_C", L"prop_drive_explosive_C",
+    // A 3D-printed object: its `broken` spawns an explosion_C (tag printedObject, force 2500, radius 250, damage 25)
+    // when its mesh data's explotano is above zero and the funny setting is on (0.10.0 capture,
+    // printedobject_c.broken). Listed by class, so a plain print's damage is the host's too.
+    L"printedObject_C",
 };
 
 // The office cubicle partitions of the base's main room (ue_wrap/actors/cubicle): the class prop_cubicle_C (a prop_C
