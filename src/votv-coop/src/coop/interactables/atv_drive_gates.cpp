@@ -11,6 +11,13 @@
 // raises fuel or health clears its latch, so a latch set while its value is above zero is stale on any copy and is
 // cleared here; setting one stays the game's own runOut.
 //
+// The empty seat. The ATV's own sound_drive sets `isDrive` from the throttle and the handbrake alone and re-activates
+// audio_car_drive_start (the short engine rev) whenever that changes; f_brake, unbrake and loadbrake call it as well as
+// the input events, and receiveTick burns fuel while `isDrive` holds. None of them checks isDriven, so a copy nobody
+// sits in that kept a throttle (a seat left without the release reaching the ATV, a peer gone mid-drive) revs on every
+// brake change and burns fuel. A copy whose isDriven is clear keeps no driver input: the four inputs and `isDrive` are
+// cleared here by field write, which calls nothing of the game's.
+//
 // The report. A local driver holding the throttle while a term is set gets one log line naming every term and its
 // value, and one chat line naming the first, again when the set changes or after ten seconds. Gameplay layer
 // (principle 7); the fields are ue_wrap::atv's. Game thread.
@@ -42,9 +49,10 @@ enum Gate : uint8_t {
 struct Watch {
     uint8_t  saidMask = 0;   // the set last reported (0 = none, or the throttle was released since)
     uint64_t saidMs = 0;
+    bool     inputSaid = false;   // a stale-input clear on this key was logged
 };
 std::unordered_map<std::wstring, Watch> g_watch;   // per ATV key
-unsigned long long g_emptyCleared = 0, g_brokenCleared = 0;
+unsigned long long g_emptyCleared = 0, g_brokenCleared = 0, g_inputCleared = 0;
 
 // The first blocking term as the line a driver reads.
 const char* DriverLine(uint8_t mask, float battery) {
@@ -76,6 +84,26 @@ void TickDriveGates(AtvEntry& e, const std::wstring& key, uint8_t localSlot, uin
         UE_LOGI("atv: cleared a stale 'brokenn' latch on '%ls' (health %.1f) -- this copy kept it after the health "
                 "came back by sync, which blocks the throttle here alone (x%llu)",
                 key.c_str(), g.health, g_brokenCleared);
+    }
+
+    // Nobody in this copy's seat: no throttle, steer or engine state survives. The first clear per key and every
+    // 50th overall are said, the rest counted.
+    if (!A::IsDriven(e.actor)) {
+        const uint8_t was = A::ClearDriveInput(e.actor);
+        if (was) {
+            ++g_inputCleared;
+            Watch& cw = g_watch[key];
+            if (!cw.inputSaid || g_inputCleared % 50 == 0) {
+                cw.inputSaid = true;
+                UE_LOGI("atv: cleared stale drive input on empty '%ls' (forward %d, back %d, left %d, right %d, "
+                        "isDrive %d; seat %u, syncer %u) -- the game's sound_drive would rev the engine with no rider "
+                        "(x%llu)",
+                        key.c_str(), (was & 0x01) ? 1 : 0, (was & 0x02) ? 1 : 0, (was & 0x04) ? 1 : 0,
+                        (was & 0x08) ? 1 : 0, (was & 0x10) ? 1 : 0, static_cast<unsigned>(e.occupantSlot),
+                        static_cast<unsigned>(e.syncerSlot), g_inputCleared);
+            }
+        }
+        g.inputForward = g.inputBack = false;
     }
 
     Watch& w = g_watch[key];
