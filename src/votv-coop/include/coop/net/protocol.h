@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 329;
+inline constexpr uint16_t kProtocolVersion = 330;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -260,6 +260,9 @@ enum class ReliableKind : uint8_t {
     // Any peer, relayed by the host: a grime decal's process scalar decreased, keyed by the decal's
     // quantized world position (a static decal's position is its identity). Minimum wins, like the
     // window. A decal wiped out of existence rides the same kind, as a zero. KeyedScalarPayload.
+    // Protocol 330: the host also sends a fuel puddle's flame on its key (adopt kGrimeOpFireOn with the fuel in value,
+    // kGrimeOpFireOff), live and at a joiner's world-ready (coop/world/fire_sync); a receiver honours those from the
+    // host alone.
     GrimeState = 31,
 
     // Any peer, relayed by the host: the garage door's open state, keyed by the garage's
@@ -3202,10 +3205,15 @@ struct KeyedScalarPayload {
     WireKey  key;        // 32 -- instance identity string (FName for windows; quantized position for grime)
     float    value;      // 4  -- the dirt scalar (>= 0; 0 = fully clean)
     uint8_t  adopt;      // 1  -- 1 = connect-snapshot, adopt the host's value as is;
-                         // 0 = live wipe, apply the minimum
+                         // 0 = live wipe, apply the minimum;
+                         // GrimeState only: kGrimeOpFireOn / kGrimeOpFireOff (below)
     uint8_t  _pad[3];    // 3  -- 8-byte alignment / reserved
 };
 static_assert(sizeof(KeyedScalarPayload) == 40, "KeyedScalarPayload must be 40 bytes");
+// GrimeState's flame ops in KeyedScalarPayload::adopt (protocol 330), host-authored only: a fuel puddle (grime_gasoline_C)
+// on that key lit with `value` as its fuel, or put out. They leave the dirt floor alone.
+inline constexpr uint8_t kGrimeOpFireOn  = 2;
+inline constexpr uint8_t kGrimeOpFireOff = 3;
 static_assert(sizeof(KeyedScalarPayload) <= 256 - 20 - 8,
               "KeyedScalarPayload must fit in one reliable datagram");
 
@@ -3880,6 +3888,8 @@ struct WorldActorSpawnPayload {
     // 32 bytes of floats (the heading, the two endpoints, the ball's place), ufo_boofo_spawn1_C its alpha and the
     // angles of its random spline, ufo_joel_C and ufo_pillfo_C their timelines' places. An older peer ignores them and
     // flies its own random course.
+    // Protocol 330: fire_C, a burning patch, carries the fields its begin-play reads (coop/world/fire_sync.h): fuel,
+    // fuelSpeed, fireSize, effectRate, ignite chance and boxExtent: a version byte and eight floats, 33 bytes.
 };
 static_assert(sizeof(WorldActorSpawnPayload) == 172,
               "WorldActorSpawnPayload must be 172 bytes");

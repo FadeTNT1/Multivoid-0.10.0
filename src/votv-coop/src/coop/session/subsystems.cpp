@@ -112,6 +112,7 @@
 #include "coop/items/order_sync.h"
 #include "coop/world/event_cue_sync.h"
 #include "coop/world/explosion_sync.h"
+#include "coop/world/fire_sync.h"
 #include "coop/world/explosion_parking.h"
 #include "coop/world/event_fire_sync.h"
 #include "coop/world/firefly_sync.h"
@@ -247,6 +248,7 @@ void Install(coop::net::Session& session) {
     coop::prop_lifecycle::Install(&session);
     coop::npc_sync::Install(&session);
     coop::world_actor_sync::Install(&session);  // non-Character event-actor mirror (2nd BeginDeferred interceptor, disjoint allowlist)
+    coop::fire_sync::Install(&session);  // the host's fires on every client (on the world-actor lane) and a puddle's flame; a client's own fire refused
     coop::event_scene_sync::Install(&session);  // the story scenes: the host's phase edges, a client's refused scene gameplay
     coop::piramid_sync::Install(&session);  // piramid event choreography lane (hooks arm lazily on the first piramid element)
     coop::geom_octa_sync::Install(&session);  // the Geom Octa's lane: the [OCTA] watches (live once the class loads)
@@ -520,6 +522,7 @@ DisconnectStats DisconnectAll() {
     coop::item_activate::OnDisconnect();
     coop::weather_sync::OnDisconnect();
     coop::explosion_sync::OnDisconnect();  // the class table and the counters, and the request lane's queues, shot tables and client state
+    coop::fire_sync::OnDisconnect();  // the tracked and waiting puddles, the counters
     coop::explosion_parking::OnDisconnect();  // the counters, after a summary
     coop::interactable_sync::OnDisconnect();
     coop::keypad_sync::OnDisconnect();
@@ -655,6 +658,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::ItemConnect};   coop::item_activate::TickConnect(); }
     { PP::Scope _s{PP::Bucket::WeatherConnect}; coop::weather_sync::TickConnect(); }
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:explosion"}; coop::explosion_sync::Tick(); }  // the explosion classes: reset at a world change, resolved until all three are; the request lane's source classes (client) and its host queues
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:fire"}; coop::fire_sync::Tick(); }  // the fire watches until live; the host's puddle reads, a client's waiting puddles
     // The ends of play the engine announced since the last tick, handed to the lanes that subscribed
     // before the hub's pass can complete: a pass prunes what has died from its consumers' indexes, and a
     // lane names an ended actor by its index (grime's position key).

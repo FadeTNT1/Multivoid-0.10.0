@@ -252,7 +252,8 @@ cleaning verb runs, so a decal no index pass has reached yet still sends its fal
 repaint that fails is retried on its own, and a slice of the index is checked against the shared floor
 each second. A crack (`grime_crack_C`) is not cleanable: a sponge or the pressure washer leaves it on
 every peer, and only the wall fixer repairs it
-(`coop/interactables/window_sync`, `coop/interactables/grime_sync`).
+(`coop/interactables/window_sync`, `coop/interactables/grime_sync`). A fuel puddle's flame rides the same kind on
+the decal's key, host to client only ([props.md](props.md), fire on the floor).
 
 The kitchen sink's, the shower cubicle's and the toilet's dirt (`clean`, 0 filthy to 1 spotless) is the same register
 turned over: the sponge's `cleanSponge` body raises it, calls the surface's own `upd` to paint the material and, at 1,
@@ -472,7 +473,7 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | `PowerControlState` | a client to the host; the host to all | the breakers a press flipped; the breakers, the lockout, a lever's click and each slot's last press taken |
 | `PowerGridState` | the host to all; a client to the host | every generator's row and each slot's last op taken; a repair, a service, an upgrade install or a hit |
 | `FuseTowerState` | the host to all; a client to the host | every tower's row (kind, broken, fuses, puzzle, panel, levers), each slot's last op taken and last claim refused; a press of a puzzle button, a lever or the retract, a fuse pulled or inserted |
-| `TurbineState`, `WindowCleanState`, `GrimeState` | each peer or the host | the driver floats; a decrease |
+| `TurbineState`, `WindowCleanState`, `GrimeState` | each peer or the host | the driver floats; a decrease; on `GrimeState`, a fuel puddle's flame on or off (host only) |
 | `SurfaceCleanState` | each peer, relayed | a sink's or shower's key and its `clean`, with an adopt flag on the host's snapshot |
 | `BucketFillState` | the host to all | a world bucket's prop key, its `height` and `empty` |
 | `DroneState` | the host to all | the drone's transform and flags, among them its leave timer |

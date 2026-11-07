@@ -347,7 +347,8 @@ bool HandleStateEvent(net::Session& session,
             UE_LOGW("event_feed: GrimeState value=%.3f invalid -- dropping", gp.value);
             break;
         }
-        if (gp.adopt != 0 && gp.adopt != 1) {  // consistency with WindowCleanState's guard
+        // 0 and 1 are the dirt; 2 and 3 a fuel puddle's flame, the host's alone (grime_sync judges the sender).
+        if (gp.adopt > net::kGrimeOpFireOff) {
             UE_LOGW("event_feed: GrimeState adopt=%u out of range -- dropping",
                     static_cast<unsigned>(gp.adopt));
             break;

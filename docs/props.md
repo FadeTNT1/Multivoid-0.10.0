@@ -535,7 +535,31 @@ runs as the extinguisher's own `addDamage` with the swinger's puppet as the dama
 host as a `PropContactIntent`, which it runs as the component's own `impactDamage`; the host's native guard then starts
 the burst. On a client the extinguisher's `shoot` is cancelled unless the replay below is running, so no other route
 into it, a fire's damage or a `loadData`, starts a burst there, and its loop's `extinguishRay` is cancelled while it
-thrusts: the host's loop extinguishes, and fire reaches the clients by its own lanes.
+thrusts: the host's loop extinguishes, and fire reaches the clients by its own lanes (below).
+
+### Fire on the floor
+
+A burning patch (`fire_C`, an `actor_save_C`) is minted under `EX_CallMath` by a cigarette dropped on a sleeper's
+bed, a broken bottle bomb, a burning thing's spread onto a flammable floor and a save's load. Its begin-play adds a
+`comp_flammable_C` and lights it with the fields the producer wrote: `fuel`, `fuelSpeed`, `fireSize`, `effectRate`,
+`ignite chance`, `boxExtent`. It is no player's deploy, so the save actor lane leaves it out ([deployables.md](deployables.md)),
+and no lane carried it: the host's floor fire was invisible on a client. It rides the world-actor lane
+(`coop/world/fire_sync` on `coop/world/world_actor_sync`). The host enrols each fire after its begin-play, the fields
+in the birth blob; a scan-hub sweep enrols one that began play before the lane saw it (a save's load before hosting).
+Its end, put out or burnt out, is the lane's dead-retire and destroy. A client's mirror is visuals only: before its
+begin-play its `fuelSpeed` and `ignite chance` are written 0, so its flame never burns out on its own, and its
+component's `spreadFire` is cancelled, so it damages and lights nothing there; the host's destroy puts it out.
+
+A client never authors fire. A `fire_C` begin-play on a client that is not the lane's own mirror is cancelled and the
+actor destroyed, and the sweep removes one that began play before the watch was live. A joiner's own save copy of a
+fire goes the same way, and the world-actor snapshot brings the host's.
+
+A fuel puddle (`grime_gasoline_C`) is a grime decal, and its flame is a component its `ignite(fuel)` adds to the
+decal, not a birth. The host's ignite goes out on `GrimeState` under the decal's grime key as `kGrimeOpFireOn` with
+the fuel; the host reads its tracked puddles twice a second and sends `kGrimeOpFireOff` when the flame ends (put out,
+burnt out, the decal destroyed). A client runs the puddle's own ignite under the lane, parks the component the same
+way, and runs its `extinguish` on the off; its own ignite of a puddle is cancelled. A joiner gets every burning
+puddle at its world-ready; a key its grime index has not reached yet waits up to two minutes.
 
 ### A breakable explosive's break
 
@@ -971,7 +995,8 @@ prop resolves. A placed poster arrives with the save under its key; at the ready
 every placed poster's state and an end marker, and the joiner destroys a placed poster the marker
 finds unnamed, one removed between the save and the ready edge. A player-dug hole, a burial mound and a planted seed arrive with the save; at the ready edge the host sends every named
 row and an end marker, and the joiner adopts its own native actor at each row's place or spawns one. A container's damage needs no seed: its health is the host's alone, a broken container reaches a joiner
-as its absence and its spill as the host's props, and a cue is a one-shot with no replay.
+as its absence and its spill as the host's props, and a cue is a one-shot with no replay. A live fire reaches a joiner
+through the world-actor lane's connect snapshot, and a burning fuel puddle as its flame op at the ready edge.
 
 ## Known limits
 
@@ -999,6 +1024,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | A custom poster's image does not cross: a peer without the file in its own posters folder sees the preset picture | `[RD]` `ue_wrap/actors/poster` Redraw's fallback |
 | Held-item use, audited against the 0.10.0 capture: a food, pill or medkit used from the hand is that player's own (inventory), so only its leftovers cross, as authored births (`prop_snack_C::eat` spawns its `trash`, `prop_food_banana_C::eaten` its peel). Not carried: the hand extinguisher's spray (`receiveTick`'s `extinguishRay` runs on the user's peer only), a lit dynamite stick's fuse (`igniteFuse` sets `timer` and plays the fuse sound on the lighter's peer), the lighter's and office tape's use counts, and a world medkit's or cancer meds' use by a client beyond the destroy | `[RD]` the capture's `playerHandUse_LMB` / `RMB` bodies; no lane under `src/coop` names `prop_dynamiteStick_C`, `prop_lighter_C`, `prop_officeTape_C` or `prop_medkit_C`; `[?]` until a two-peer run |
 | A pose can arrive milliseconds before the spawn that names its prop; that is a race, not a defect, and a ledger tells the two apart instead of warning per packet | `[V]` `coop/props/unresolved_pose_ledger` |
+| A floor fire on a client is the host's picture and nothing else: a client's hand spray that puts out its copy leaves the host's burning (and the client sees none until the host's ends), its copy hurts and lights nothing there, and it is born with the class's flame emitter, not one a producer set. A fuel puddle spilled during the session is keyed by where each peer's copy landed, so its flame shows on a client only when the two copies share a key | `[?]` `coop/world/fire_sync`; the producers' fields read from the 0.10.0 capture, untested on two peers |
 
 ## Code map
 
@@ -1015,6 +1041,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | containers and the drone's storage | `coop/props/storage_contents`, `coop/props/storage_act`, `coop/props/storage_wire`, `ue_wrap/actors/storage_inventory`, `ue_wrap/actors/inventory_item_codec`, `coop/interactables/interactable_sync` |
 | a held prop's knock and break effects | `coop/player/melee_fx_contact`, `coop/player/melee_fx` |
 | a container's damage, break and cues | `coop/props/crate_break`, `coop/props/prop_impact_fx`, `coop/props/prop_damage_gate`, `coop/props/hit_target_prop`, `ue_wrap/actors/physics_impact` |
+| fire on the floor and a fuel puddle's flame | `coop/world/fire_sync`, `ue_wrap/actors/fire`, `coop/world/world_actor_sync` (the carrier), `coop/interactables/grime_sync` (the puddle's key) |
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case, the lamps, the table clock, the second TV's settings, the barbecue) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |

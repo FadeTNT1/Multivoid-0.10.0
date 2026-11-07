@@ -38,7 +38,8 @@ void Install(coop::net::Session* session);
 // Receiver entry: a GrimeState packet arrived (event_feed has copied and range-checked it). A live
 // fall (adopt 0) lowers the key's floor and is written to a decal reading above it; a value of the
 // host's connect snapshot (adopt 1) sets the floor and is written as is to a decal indexed when it
-// arrives. A pass lowers a decal it takes to its floor and never raises one. Called from event_feed's
+// arrives. A pass lowers a decal it takes to its floor and never raises one. A fuel puddle's flame op (adopt
+// kGrimeOpFireOn / kGrimeOpFireOff) is the host's alone and goes to coop/world/fire_sync. Called from event_feed's
 // reliable drain loop.
 void OnReliable(const coop::net::KeyedScalarPayload& payload, uint8_t senderPeerSlot);
 
@@ -53,6 +54,14 @@ void QueueConnectBroadcastForSlot(int peerSlot);
 // take; while connected, retry the visual-pending repaints and reconcile a slice of the index
 // against the floor. Call every net-pump tick on the game thread.
 void Tick();
+
+// The cross-peer key of the grime decal `actor` (class, type, grid cell and exact position), or empty when its location
+// cannot be read. coop/world/fire_sync names a fuel puddle's flame by it. Game thread.
+std::wstring KeyForDecal(void* actor);
+
+// The live decal `key` names on this peer -- the exact key, else the one decal of its cell -- or null, also while the
+// index belongs to another world or has not reached it yet. Game thread.
+void* ResolveDecal(const std::wstring& key);
 
 // DEV-DRILL ONLY: the key this module would index `actor` under (class, type, grid cell and exact
 // position). The scan-parity drill uses it so its independent walk counts distinct keys the way the

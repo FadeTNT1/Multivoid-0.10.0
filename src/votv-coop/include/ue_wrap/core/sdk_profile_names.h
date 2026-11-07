@@ -483,6 +483,11 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     // The alien dropper (an actor_save_C) npc_zombie_alienSummoner_C mints on its landing; its graph is refused on a
     // client (coop/world/spawn_authority), so a mirror is the saucer the host's killer wisp, aliens and ship leave.
     L"ufoAlienDropper_C",
+    // A burning patch (fire_C, an actor_save_C): a cigarette dropped on a sleeper's bed, a broken bottle bomb, the
+    // spread of a burning thing onto a flammable floor and a save's load mint it under EX_CallMath, so this entry acts
+    // through coop/world/fire_sync, which enrols the host's fires at their begin-play and mints a client's own never.
+    // Its parameters ride the birth blob (FireClass below).
+    L"fire_C",
     // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
     // base classes are unverified -- a prop-derived wreck would ride the prop lane as well.
 };
@@ -2053,7 +2058,8 @@ inline constexpr const wchar_t* BlueprintGeneratedClassName = L"BlueprintGenerat
 //
 // Deliberately absent: poster_C (coop/items/poster_sync owns it), hook_C and its rope (coop/items/hook_sync), the cig
 // family (cig_C attaches itself to the LOCAL player's camera and binds the local input, so a mirror would put a cigarette
-// in every viewer's mouth), fire_C (spread by the host's own breaks and burns), wire_C and printedObject_C (each keeps
+// in every viewer's mouth), fire_C (spread by the host's own breaks and burns, not a player's deploy: it rides the
+// world-actor lane through coop/world/fire_sync, FireClass below), wire_C and printedObject_C (each keeps
 // its own key and save flag, off actor_save_C), ceilingStars_C (no save interface), transmittedSignal_C (the signal
 // sender's own tick calls transmit, so every peer holding the sender mints one), and the world's own actor_save
 // spawners (beehiveBranch_C, hexPillar_C, erieRise_C, ufoAlienDropper_C), which every peer runs for itself.
@@ -2090,6 +2096,38 @@ inline constexpr const wchar_t* ActorSaveGetKeyParam = L"key";
 inline constexpr const wchar_t* ActorSaveGetDataFn = L"getData";
 inline constexpr const wchar_t* ActorSaveLoadDataFn = L"loadData";
 inline constexpr const wchar_t* ActorSaveProcessKeysFn = L"processKeys";
+// ---- Fire (coop/world/fire_sync, ue_wrap/actors/fire) ----
+// fire_C (0.10.0 bytecode capture): its ReceiveBeginPlay sets `box` to `boxExtent`, adds a comp_flammable_C and copies
+// `fuelSpeed`, `fireSize`, `effectRate`, `emitter` (as fireParticleEmitter) and `ignite chance` onto it, points the
+// component at `box` and runs its ignite_s(`fuel`); the component's `extinguished` delegate runs fire_C.extinguished,
+// which destroys the actor. Every producer writes its fields between BeginDeferredActorSpawnFromClass and the finish
+// (the cigarette's bed fire: `fuel` and `boxExtent`).
+inline constexpr const wchar_t* FireClass              = L"fire_C";
+inline constexpr const wchar_t* FireBeginPlayFn        = L"ReceiveBeginPlay";
+inline constexpr const wchar_t* FireFuelProp           = L"fuel";
+inline constexpr const wchar_t* FireFuelSpeedProp      = L"fuelSpeed";
+inline constexpr const wchar_t* FireSizeProp           = L"fireSize";
+inline constexpr const wchar_t* FireEffectRateProp     = L"effectRate";
+inline constexpr const wchar_t* FireIgniteChanceProp   = L"ignite chance";
+inline constexpr const wchar_t* FireBoxExtentProp      = L"boxExtent";
+// comp_flammable_C: the burning itself. ignite_s(fuel) spawns the flame emitter and the burning sound, sets
+// `isBurning`, arms the `spreadFire` timer and the tick; the tick burns `fuel` at `fuelSpeed` and runs `extinguish` at
+// zero; spreadFire runs the owner's fireDamage, box-traces round the flame for attemptIgnite on what it touches and,
+// by `ignitechance`, lights a flammable floor. `owner` is its GetOwner, cached at its begin-play.
+inline constexpr const wchar_t* FlammableCompClass     = L"comp_flammable_C";
+inline constexpr const wchar_t* FlammableSpreadFn      = L"spreadFire";
+inline constexpr const wchar_t* FlammableExtinguishFn  = L"extinguish";
+inline constexpr const wchar_t* FlammableOwnerProp     = L"owner";
+inline constexpr const wchar_t* FlammableBurningProp   = L"isBurning";
+inline constexpr const wchar_t* FlammableFuelSpeedProp = L"fuelSpeed";
+inline constexpr const wchar_t* FlammableIgniteChanceProp = L"ignitechance";
+// grime_gasoline_C (a grime_C decal, the fuel puddle): ignite(fuel) adds a comp_flammable_C over its `box` the first
+// time (fuelSpeed 0.25, eff_burning, ignitechance 1, ignitescale 1.25), keeps it in `flameBase` and runs its ignite_s;
+// its fireDamage burns its own `fuel` and destroys the decal below zero. Its attemptIgnite is empty.
+inline constexpr const wchar_t* GasolineGrimeClass     = L"grime_gasoline_C";
+inline constexpr const wchar_t* GasolineIgniteFn       = L"ignite";
+inline constexpr const wchar_t* GasolineIgniteFuelParam = L"fuel";
+inline constexpr const wchar_t* GasolineFlameBaseProp  = L"flameBase";
 // Irrigation. The held faucet (prop_faucet_C) on its left button, when the trace below the hit finds water under
 // grass, sand, gravel or dirt, spawns `faucet_C` (an actor_save_C) at the hit, yaw = the player's + 90, and destroys
 // itself. faucet_C: action 5 toggles `active` then upd() (the appliance lane's bit); action 7 spawns a prop_faucet_C,

@@ -20,6 +20,7 @@
 #include "coop/net/session.h"
 #include "coop/net/wire_key_util.h"  // WireKeyFromString / StringFromWireKey / FnvKey (shared)
 #include "coop/player/players_registry.h"  // coop::players::kMaxPeers
+#include "coop/world/fire_sync.h"          // a fuel puddle's flame, on the decal's key
 
 #include "ue_wrap/engine/engine.h"          // TryGetActorLocation (the grime's world position -> posKey)
 #include "ue_wrap/devices/grime.h"
@@ -699,6 +700,19 @@ void Install(coop::net::Session* session) {
 void OnReliable(const coop::net::KeyedScalarPayload& payload, uint8_t senderPeerSlot) {
     std::wstring key = StringFromWireKey(payload.key);
     if (key.empty()) { UE_LOGW("grime: OnReliable empty key -- dropping"); return; }
+    // A fuel puddle's flame on the decal's key: the host's alone, and no part of the dirt floor.
+    if (payload.adopt == coop::net::kGrimeOpFireOn || payload.adopt == coop::net::kGrimeOpFireOff) {
+        if (senderPeerSlot != 0) {
+            static int sSaid = 0;
+            if (sSaid < 4) {
+                ++sSaid;
+                UE_LOGW("grime: a flame op from slot %u refused -- a puddle's flame is the host's", senderPeerSlot);
+            }
+            return;
+        }
+        coop::fire_sync::OnGasolineFlame(key, payload.adopt == coop::net::kGrimeOpFireOn, payload.value);
+        return;
+    }
     // The trust boundary (the same as the window's): adopt (as is, able to re-dirty) is honoured
     // only from the host; a client edge is forced to a min-wins live fall.
     const bool adopt = (payload.adopt != 0) && (senderPeerSlot == 0);
@@ -800,6 +814,15 @@ void Tick() {
     ReconcileTick();
     SummaryTick();
 }
+
+std::wstring KeyForDecal(void* actor) {
+    if (!actor) return std::wstring();
+    const int32_t idx = R::InternalIndexOf(actor);
+    if (const CachedKey* ck = CachedOf(actor, idx, R::SlotSerial(idx))) return ck->key;
+    return PosKey(actor);
+}
+
+void* ResolveDecal(const std::wstring& key) { return key.empty() ? nullptr : ResolveFast(key); }
 
 std::wstring DebugPosKeyForActor(void* actor) {
     // The dev drill's parity probe: the real quantiser, cache-independent.

@@ -10,6 +10,7 @@
 #include "coop/creatures/piramid_sync.h"  // the heading, look and wisp-target consumers
 #include "coop/world/event_scene_sync.h"     // a story scene's phase that arrived before its mirror
 #include "coop/world/ufo_event_sync.h"       // the gamemode UFOs' birth setups
+#include "coop/world/fire_sync.h"            // a burning patch's fields, parked
 
 #include "coop/element/identity_create.h"  // the single WorldActor mirror create funnel
 #include "coop/items/coingun_sync.h"
@@ -212,6 +213,10 @@ void OnWorldActorSpawn(const coop::net::WorldActorSpawnPayload& payload) {
             coop::coingun_sync::SeedCoinMirror(spawned, pts);
         }
     }
+    // A burning patch's fields are what its begin-play lights it with, so they go in before the finish, parked: the
+    // mirror's flame burns no fuel and spreads nothing here; the host's destroy puts it out (fire_sync).
+    if (coop::fire_sync::IsFireClassName(classW))
+        coop::fire_sync::SeedMirror(spawned, payload.elementId, payload.birth, payload.birthLen);
     {
         ParamFrame finish(sp.finishSpawnFn);
         if (!finish.valid()) {

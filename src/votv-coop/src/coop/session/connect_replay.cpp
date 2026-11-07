@@ -74,6 +74,7 @@
 #include "coop/world/event_active_sync.h"  // the native activeEvents registry probe
 #include "coop/world/creature_event_relay.h"  // the host's creature events, carried to every client's count
 #include "coop/world/weather_sync.h"
+#include "coop/world/fire_sync.h"  // the burning fuel puddles
 #include "ue_wrap/core/log.h"
 
 namespace coop::subsystems {
@@ -150,6 +151,7 @@ void ConnectReplayForSlot(int slot) {
     coop::voice_chat::ReplayPeerStatesToSlot(slot);  // voice mute/disabled states -> joiner
     coop::window_sync::QueueConnectBroadcastForSlot(slot);  // base-window clean (adopt=1)
     coop::grime_sync::QueueConnectBroadcastForSlot(slot);  // surface grime process (adopt=1)
+    coop::fire_sync::QueueConnectBroadcastForSlot(slot);  // the burning fuel puddles, on their grime keys (the fires ride the world-actor snapshot below)
     coop::trash_pile_sync::QueueConnectBroadcastForSlot(slot);  // pile counters (adopt=1) + depleted-key replay
     coop::npc_world_enum::RegisterExistingWorldNpcs(slot);  // pre-existing/level-load NPCs (the save's kerfur) -> the peers already in; the joiner (slot) is skipped, its connect broadcast below sends it and it adopts its twin
     coop::npc_sync::QueueConnectBroadcastForSlot(slot);  // existing NPCs -> joiner
