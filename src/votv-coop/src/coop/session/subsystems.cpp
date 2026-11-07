@@ -191,6 +191,7 @@
 #include "coop/creatures/npc_mirror_brain.h"  // a parked family's mirror runs none of its Blueprint graph
 #include "coop/items/hook_anchor.h"
 #include "coop/items/hook_sync.h"  // the hook lane: owner-phase stream, mirrors, the tick park
+#include "coop/items/save_actor_sync.h"  // the deployed save actors: a leaver's half-sent blobs
 #include "coop/world/event_active_sync.h"  // the native activeEvents registry probe
 #include "coop/world/creature_event_relay.h"  // the host's creature events, carried to every client's count
 #include "coop/world/weather_sync.h"
@@ -445,6 +446,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::sleep_sync::OnDisconnectForSlot(slot);  // the leaver's rest state back to awake, told to every client
     coop::owner_entity_sync::OnPeerLeftSlot(slot);  // destroy the leaver's owner-entity mirrors (its eyer dies with it)
     coop::hook_sync::OnPeerLeftSlot(slot);  // the leaver's OWNER-PHASE hook mirrors; anchored ones are the host's and stay
+    coop::save_actor_sync::OnPeerLeft(static_cast<uint8_t>(slot));  // its half-sent deployed-actor blobs; its actors are the host's
     coop::player_inventory_sync::OnDisconnectForSlot(slot);  // re-arm the on-join push; the leaver's profile stays held
     coop::inventory_restore::OnSlotLeft(slot);  // a restore it never answered, or its rejoin is told "still waiting" for a minute
 }

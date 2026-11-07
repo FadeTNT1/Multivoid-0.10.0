@@ -33,6 +33,11 @@ void Install(bool isClient);
 // is every ambient spawn the world makes for itself. Game thread.
 bool BirthIsPlayerAuthored();
 
+// Was `actor` itself born under a player's authorship (any class): the inheritance a latent birth needs, such as the
+// nail a fired nail projectile mints from its own tick, where no player frame is on the stack any more. False for null
+// and for an actor this peer saw born from the world's own churn. Game thread.
+bool IsAuthoredActor(void* actor);
+
 // Session teardown: report both columns of the caller tally -- the menu's calls, which crossed as
 // intents, and every other caller's, which stayed local -- and zero it. The watch and the resolved
 // UFunctions stay: they name the game's own classes, not this session's world. Game thread.
