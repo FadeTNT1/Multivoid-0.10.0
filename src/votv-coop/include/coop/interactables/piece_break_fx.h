@@ -43,6 +43,13 @@ void OnFx(const coop::net::PieceBreakFxPayload& payload);
 // non-piece, and inside this lane's own call.
 void OnStaticReleased(void* actor);
 
+// CLIENT: the host's record says a piece is NOT Static, and this copy already is not (so OnStaticReleased never fires).
+// A copy that loaded or arrived non-Static still has its world constraints (the basement's secret wall stays in the
+// doorway), so they are broken now, once per copy, through ue_wrap::asologo_piece::BreakIntactConstraints: idempotent,
+// and without the sequence's randomised latent chain, particles or sound. No-op on a host, on a non-piece, on a copy
+// already settled (the sequence ran here, or an earlier call), and inside this lane's own call.
+void ReconcileBroken(void* actor);
+
 // Net disconnect: the pending cues and the rate state go, with one summary line.
 void OnDisconnect();
 

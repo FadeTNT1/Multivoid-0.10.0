@@ -199,7 +199,12 @@ bool ConvergeStaticRelease(void* actor, uint8_t physFlags, bool hostAuthored, bo
     }
     if (!(physFlags & pf::kLiveState)) return false;
     if (!actor || !ue_wrap::prop::IsDescendantOfProp(actor)) return false;
-    if (!ue_wrap::prop::IsStatic(actor)) return false;                              // already released
+    if (!ue_wrap::prop::IsStatic(actor)) {                                          // already released
+        // The host says broken and this copy is already free of Static, so the release below never runs; an asologo
+        // piece's world constraints may still hold it (the basement's secret wall). No-op for any other prop.
+        coop::piece_break_fx::ReconcileBroken(actor);
+        return false;
+    }
     // A wall-attachable's stuck state belongs to its component: the stick lane's unstick (and ConvergeStuck on a
     // snapshot) frees it through the component's own verb, which a bare setter would bypass.
     if (coop::prop_stick_sync::IsWallAttachable(actor)) return false;

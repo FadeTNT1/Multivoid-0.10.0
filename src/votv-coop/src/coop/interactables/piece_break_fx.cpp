@@ -49,6 +49,16 @@ struct Recent {
 // HOST: the pieces whose break went out. CLIENT: the pieces whose break() ran here, natively or from a cue.
 std::vector<Recent> g_recent;
 
+// CLIENT: the pieces whose world constraints are settled on this copy (the sequence ran here, or the host's state made
+// them let go). Unlike g_recent this never times out: one reconcile per copy, however many snapshots or records follow.
+// The actor pointer is part of the key, so a respawned copy under the same element id is reconciled again.
+struct Settled {
+    uint32_t eid = 0;
+    void* actor = nullptr;
+};
+constexpr size_t kSettledMax = 64;
+std::vector<Settled> g_settled_pieces;
+
 struct Waiting {
     uint32_t eid = 0;
     uint64_t dueMs = 0;   // give up at this time
@@ -64,6 +74,18 @@ bool SeenRecently(uint32_t eid, uint64_t now) {
     for (const Recent& r : g_recent)
         if (r.eid == eid && now - r.ms < kSameBreakMs) return true;
     return false;
+}
+
+bool IsSettled(uint32_t eid, void* actor) {
+    for (const Settled& s : g_settled_pieces)
+        if (s.eid == eid && s.actor == actor) return true;
+    return false;
+}
+
+void MarkSettled(uint32_t eid, void* actor) {
+    if (IsSettled(eid, actor)) return;
+    if (g_settled_pieces.size() >= kSettledMax) g_settled_pieces.erase(g_settled_pieces.begin());
+    g_settled_pieces.push_back(Settled{eid, actor});
 }
 
 void Remember(uint32_t eid, uint64_t now) {
@@ -140,6 +162,7 @@ bool Play(uint32_t eid, bool retried) {
     if (!ok) ok = AP::CallBreak(actor);
     --g_applying;
     Remember(eid, NowMs());
+    if (ok) MarkSettled(eid, actor);
     if (!ok) {
         UE_LOGW("[PIECE-BREAK] client: breakingSequence() and break() on %ls eid=%u did not dispatch -- no effect here",
                 R::ClassNameOf(actor).c_str(), static_cast<unsigned>(eid));
@@ -219,10 +242,32 @@ void OnStaticReleased(void* actor) {
     const bool ok = AP::CallBreakingSequence(actor);
     --g_applying;
     Remember(eid, now);
-    if (ok) ++g_played;
+    if (ok) {
+        ++g_played;
+        MarkSettled(eid, actor);
+    }
     UE_LOGI("[PIECE-BREAK] client: %ls eid=%u released from Static by the host's record -- breakingSequence() %s here "
             "(its constraints go; a late join or a lost cue lands here)", R::ClassNameOf(actor).c_str(),
             static_cast<unsigned>(eid), ok ? "ran" : "DID NOT RUN");
+}
+
+void ReconcileBroken(void* actor) {
+    coop::net::Session* s = LoadSession();
+    if (!s || s->role() != coop::net::Role::Client || g_applying > 0 || !AP::IsPiece(actor)) return;
+    const EL::ElementId eid = EL::Registry::Get().EidForActor(actor);
+    if (eid == EL::kInvalidId || IsSettled(eid, actor)) return;
+    // Not the sequence: its random spin and latent chain would restart on every snapshot, and a join would replay the
+    // particles and the sound of a wall that broke long ago. The constraints alone let go, once. The cue (a break in
+    // progress) still plays the whole sequence, since this does not note the break in g_recent.
+    const AP::ConstraintReport r = AP::BreakIntactConstraints(actor);
+    MarkSettled(eid, actor);
+    if (r.found == 0) {
+        UE_LOGW("[PIECE-BREAK] client: %ls eid=%u is non-Static by the host's word but owns no constraint component -- "
+                "nothing to release here", R::ClassNameOf(actor).c_str(), static_cast<unsigned>(eid));
+        return;
+    }
+    UE_LOGI("[PIECE-BREAK] client: %ls eid=%u already non-Static here, host says broken -- %d of %d constraints were still "
+            "holding and are broken now", R::ClassNameOf(actor).c_str(), static_cast<unsigned>(eid), r.intact, r.found);
 }
 
 void OnDisconnect() {
@@ -231,6 +276,7 @@ void OnDisconnect() {
                 g_sent, g_played, g_late, g_repeats, g_ranHere, g_lost);
     g_sent = g_played = g_repeats = g_ranHere = g_lost = g_noEid = g_late = 0;
     g_recent.clear();
+    g_settled_pieces.clear();
     g_waiting.clear();
     g_applying = 0;
 }

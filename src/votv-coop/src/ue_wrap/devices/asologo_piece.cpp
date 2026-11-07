@@ -2,6 +2,7 @@
 
 #include "ue_wrap/devices/asologo_piece.h"
 
+#include "ue_wrap/core/call.h"
 #include "ue_wrap/core/component_calls.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
@@ -25,6 +26,23 @@ bool CallBreak(void* piece) {
 
 bool CallBreakingSequence(void* piece) {
     return IsPiece(piece) && component_calls::CallParamlessNamed(piece, N::AsologoPieceBreakingSequenceFn);
+}
+
+ConstraintReport BreakIntactConstraints(void* piece) {
+    ConstraintReport out;
+    if (!IsPiece(piece)) return out;
+    for (const R::ObjectRef& c : R::ChildObjectsOf(piece)) {
+        if (c.className != N::PhysicsConstraintComponentClass || !R::IsLive(c.object)) continue;
+        ++out.found;
+        void* cls = R::ClassOf(c.object);
+        void* isBroken = cls ? R::FindDispatchFunctionCached(cls, N::ConstraintIsBrokenFn) : nullptr;
+        if (isBroken) {
+            ParamFrame f(isBroken);
+            if (f.valid() && Call(c.object, f) && f.Get<bool>(L"ReturnValue")) continue;   // already released
+        }
+        if (component_calls::CallParamlessNamed(c.object, N::BreakConstraintFn)) ++out.intact;
+    }
+    return out;
 }
 
 }  // namespace ue_wrap::asologo_piece

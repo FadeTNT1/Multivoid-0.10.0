@@ -1862,6 +1862,10 @@ inline constexpr const wchar_t* AsologoPieceBreakFn = L"break";
 // The whole sequence: setPropProps(static off), break(), then the four physicsconstraint components one by one (1.5-3 s
 // apart, a latent delay), each with a random spin. A copy that never ran it keeps its constraints and holds its place.
 inline constexpr const wchar_t* AsologoPieceBreakingSequenceFn = L"breakingSequence";
+// UPhysicsConstraintComponent::IsBroken() -> bool, read off each of a piece's constraint components to tell the ones the
+// sequence has already released from the ones still holding it. Where it does not resolve, a constraint counts as intact
+// (breaking a broken one again is harmless).
+inline constexpr const wchar_t* ConstraintIsBrokenFn = L"IsBroken";
 inline constexpr int CrowbarMaxLives = 3;
 // The hacksaw (prop_hacksaw_C). Its playerHandUse_LMB takes the looked-at heavy simulating prop of a scrappable
 // material as `sawingProp`: processMat() names the scrap in `drop`, `vol` is the mesh's convex volume

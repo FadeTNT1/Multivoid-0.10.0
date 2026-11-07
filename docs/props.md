@@ -338,6 +338,15 @@ ran. A piece the host breaks itself takes the same path from the break on; a joi
 and the Static release from the join's keyed replay. `[?]` The save of an opened wall is the game's own record of the
 freed panel; whether it reloads free of Static has not been checked in a two-peer run.
 
+A copy that is already free of Static when the host's record arrives (a save that loaded the opened wall loose, or a
+copy another lane freed first) has no release to run, but its four constraints can still hold it in the doorway.
+`ConvergeStaticRelease` hands such a copy to `piece_break_fx::ReconcileBroken`, which breaks the constraints that are
+still intact through `asologo_piece::BreakIntactConstraints` (`IsBroken` per constraint where it resolves, else every one;
+breaking a broken constraint is harmless). It runs once per copy (a per-entity settled mark that never times out), skips
+the sequence's latent chain, spin, particles and sound, and logs `already non-Static here, host says broken`. `[?]`
+`UPhysicsConstraintComponent::IsBroken` resolving on this build is unchecked; without it the walk breaks every
+constraint once, with the same result.
+
 ### The vent-cover census
 
 Both peers log a `[VENT-CENSUS]` summary of every `prop_vent_C` once when the world is ready (a host: its

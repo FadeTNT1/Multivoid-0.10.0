@@ -21,4 +21,16 @@ bool CallBreak(void* piece);
 // piece or the function did not dispatch. Game thread.
 bool CallBreakingSequence(void* piece);
 
+// What BreakIntactConstraints found on one piece.
+struct ConstraintReport {
+    int found = 0;    // PhysicsConstraint components the piece owns
+    int intact = 0;   // of those, the ones still holding (IsBroken false, or unreadable) that were just broken
+};
+
+// Breaks every world constraint of the piece that is still intact, at once and without the sequence's latent chain,
+// its spin, its particles or its sound. Idempotent: a constraint already broken is left alone. This is how a copy that
+// the host's state says is broken, and whose constraints still hold it, lets go without a restart of the randomised
+// sequence. Walks the object array once (reflection::ChildObjectsOf), so for an edge, not a tick. Game thread.
+ConstraintReport BreakIntactConstraints(void* piece);
+
 }  // namespace ue_wrap::asologo_piece
