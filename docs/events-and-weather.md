@@ -386,10 +386,34 @@ lands. What a client sees of the scene is its own copy, given the host's phases:
 | rozitalHole | `holeBottom_C` and `igetis_C` on the world-actor lane, `kavotia_C` on the character lane (the controller and patrol rows); the grate and beacons on the prop lane | the kavotia's and igetis' brains are refused, and so is a client's own controller's overlap and patrol begin-play |
 | boarwar | the four `firetank_C` on the world-actor lane; the UFO shader's shown, hidden and fly-away phases | a tank mirror builds its wheels and speaks, its AI, weapon, senses and death refused; the level shader runs its own verbs |
 | ventCrawler | the crawler on the character lane (the eventer's row); its footsteps and the vent's break, sound and burst, on the sound relay (`coop/world/event_sound_relay`, `EventSoundCue`); a client's player in its box is tested by the host, which runs the box's own handler once | its begin-play and box overlap are refused; it plays the host's one-shots at their places |
+| ventKnocker | `kocker_C` on the world-actor lane (the eventer's row); its seven knocks on the sound relay; a client's player in its box is tested by the host as the crawler's is | its box overlap is refused; it plays the host's knocks at their place |
 | agrav | the cloak phase; the floating props on the prop lane, each stream's end carrying the body's gravity (`propspawn_flags::kNoGravity`) | the trigger's own shimmer and hover sound; the host floats the props near each client's puppet too, which the game's gather (centred on player 0) leaves out |
 
-The sound relay is generic: it is armed on the host only while an actor of a listed source class lives, and
-takes only the calls that class's own graph makes. A joiner gets the crawler's pose, never a sound already played.
+The sound relay is generic: it is armed on the host only while an enrolled actor of a listed source class lives
+(it polls the npc and world-actor registries four times a second), and takes only the calls that class's own graph
+makes. A joiner gets the crawler's pose, never a sound already played.
+
+The listed source classes are the vent crawler and the vent knocker. `kocker_C` (ventKnocker's world actor) is a copy
+of the crawler's graph: its box overlap starts seven `knock` calls, each a `PlaySoundAtLocation` of
+`metaldoorknock_cue` at its own place, 0.25 to 3 s apart, and then it destroys itself. A client's mirror has that
+overlap refused (`coop/world/spawn_authority`, the way the crawler's is), so only the host's knocks sound and the relay
+carries them; a client's player in the knocker's box is tested by the host as the crawler's is
+(`coop/world/event_scene_crawler`), so the knocking still starts when only a client walks in `[RD]` the 0.10.0 capture's
+`kocker_C.knock` and its ubergraph; the host's box test for the knocker is `[?]`, as it reads the box through the
+crawler's reader on the assumption that the knocker's component is named `Box` too (its handler is the crawler's
+copy by name).
+
+The other event sounds an audit named are not positional one-shots the relay can carry, or already play on a client:
+
+| Event | What the 0.10.0 capture shows | Outcome |
+|---|---|---|
+| arirEgg | `trigger_arirEgg_C::runTrigger` repeats `metaldoorknock_cue` through `SpawnSoundAttached` onto its own `snd` component | not carried: the relay hooks `PlaySoundAtLocation` and `SpawnEmitterAtLocation` only; an attached sound would need a third seam (no wire change) |
+| alienJump | `alienJump_C::spawn` plays `outsidealien-08` through `SpawnSoundAttached` onto the spawned prop's mesh | not carried, as above |
+| fleshRain | `event_fleshRain_C` begin-play plays `piramid_step_far-01` and `chamberappear` through `PlaySound2D` | not carried: a 2D sound has no place, and the cue carries none; it needs a 2D op on the wire |
+| fridgeGlow | the knocks are `Play` calls on its `audio_knock1..3` components, the creak a volume/pitch change on `audio_knockobscure` | not carried: component sounds, not one-shots; the actor's overlap runs on each peer itself |
+| soltoClean | no sound call in `soltomiaCleaning_C`; the ATV's damage loop is `atv_c.audio_car_damage.Activate(true)` | not carried: a component activation on the host's ATV (the existing gap below) |
+| rozitalHole | `kavotia_C` and `igetis_C` set the volume or pitch of their `charging` and `elec` audio components; neither calls a one-shot | not carried: component sounds, and both mirrors have their begin-play refused |
+| boar war hounds | `fossilhound_C::step` (`PlaySoundAtLocation`, the physical material's step sound) is called by the footstep notify, and the hound mirror's brain allows that entry; `adddamage`'s `impact_rock_cue` is the hit lane's | not added: the mirror plays its own steps, so a relay would double them |
 
 A joiner gets every live scene's newest phase after its world-actor spawns, as a snapshot: the end state, not
 the transition. The obelisk, the hole's room and the fire tanks are saved by the game, so a joiner's own load
@@ -423,7 +447,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | Rain falls inside the base for a player standing indoors, the host included: the game's own effect, the same in single player. The rain emitter follows the player's camera and spawns its drops around it, below the roof's rain-collision mesh, which stops only drops falling onto it from above | `[V]` `coop/world/weather_rain` never moves the emitter or the camera; `[RD]` the decompiled day-night cycle's emitter move |
 | Trigger-volume fires (a bed event, a scare a player walks into) run per peer, as the single-player design intends | `[V]` by design, not a gap |
 | Host-only event scenes: dreambase (`dreamer_dreambase_C` is unread) and salt | `[RD]` `coop/world/event_fire_policy`, the bodies read from the 0.10.0 bytecode capture |
-| The story scenes (obelisk, soltoClean, rozitalHole, boarwar's end, agrav) have not been seen crossing in a play session yet. A client's hit on a fire tank or kavotia mirror does nothing (no intent carries it); a tank mirror shows no flame (its fire decision is the host's and not relayed); the kavotia's chatter and the igetis' beams are not heard or seen on a client (their begin-play is refused); `holeDevice_C`'s lane is unverified; the cleaner's ATV sound plays on the host's ATV only; a joiner during the obelisk's ten-second fall, or after the war with tanks alive, runs its own save-loaded copy | `[RD]` `coop/world/event_scene_sync`, `coop/world/event_scene_refuse` |
+| The story scenes (obelisk, soltoClean, rozitalHole, boarwar's end, agrav) have not been seen crossing in a play session yet. A client's hit on a fire tank or kavotia mirror does nothing (no intent carries it); a tank mirror shows no flame (its fire decision is the host's and not relayed); the kavotia's chatter and the igetis' beams are not heard or seen on a client (their begin-play is refused); `holeDevice_C`'s lane is unverified; the cleaner's ATV sound plays on the host's ATV only (a component activation, not a one-shot); a joiner during the obelisk's ten-second fall, or after the war with tanks alive, runs its own save-loaded copy | `[RD]` `coop/world/event_scene_sync`, `coop/world/event_scene_refuse` |
 | rockThrow's rock throwers aim at `getPlayerPawn(0)`, the host's player, and the alien jump at the host's camera: a client in their box is not targeted, though what they throw crosses as props | `[RD]` `rockThrower_C`, `alienJump_C` |
 | The arirShip, bedEvent, treehouseSleep and oil replays have not been seen in a play session yet; the sleep rows need a sleep and a wake on each peer | `[RD]` `coop/world/event_fire_policy` |
 | A client sees no church herbs and cannot pick them (the herbs are spawned inside the church's graph and no lane carries them yet); the striking client gets no camera turn or slow motion of its own | `[RD]` `coop/world/church_sync`; needs a plant lane and a per-striker cue |

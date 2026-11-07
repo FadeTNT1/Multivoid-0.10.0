@@ -478,9 +478,19 @@ inline constexpr const wchar_t* VentCrawlerBoxOverlapFn =
 inline constexpr const wchar_t* BoxGetScaledExtentFn    = L"GetScaledBoxExtent";
 // The host event actors whose positional one-shots (PlaySoundAtLocation, SpawnEmitterAtLocation) the sound relay
 // carries to every client (coop/world/event_sound_relay). Every entry's client copy must have the bodies that play
-// them refused, so a client never plays its own beside the host's.
+// them refused, so a client never plays its own beside the host's. The crawler's bodies are refused in
+// spawn_authority; the knocker's knock sequence starts at its box overlap, refused there too (kocker_C.knock is a
+// PlaySoundAtLocation at its own place, metaldoorknock_cue; its seven knocks are the host's alone).
 inline constexpr const wchar_t* kPositionalCueSourceClasses[] = {
     NpcClass_VentCrawler,
+    KockerClass,
+};
+// The event actors a client's player starts by standing in their `Box` (a begin-overlap with no actor filter, under a
+// DoOnce). A client's puppet never overlaps it on the host, so the host tests the puppets against the box itself
+// (coop/world/event_scene_crawler). Both classes' overlap handler is the ventCrawler's copy, so one name serves.
+inline constexpr const wchar_t* kBoxStartedSceneClasses[] = {
+    NpcClass_VentCrawler,
+    KockerClass,
 };
 inline constexpr const wchar_t* SpawnEmitterAtLocationFn = L"SpawnEmitterAtLocation";
 inline constexpr const wchar_t* ParticleTemplateProp     = L"Template";
