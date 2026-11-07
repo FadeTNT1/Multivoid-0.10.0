@@ -169,10 +169,11 @@ constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
                                               nullptr};
 // The gamemode mints many classes besides these, and most of its other spawners are not refused on a client yet,
 // so its source is narrowed to the outputs of the rolls whose client copies the spawn authority refuses: the night
-// roll (mainGamemode_C::CustomEvent_5, an Octa or a night egg) and the UFO rolls (mainGamemode_C::ufo_ball, ufo_boo,
-// ufo_joel and ufo_pill; ufo_midas mints nothing).
-constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", P::name::UfoBallClass, P::name::UfoBoofoClass,
-                                                  P::name::UfoJoelClass, P::name::UfoPillfoClass, nullptr};
+// roll (mainGamemode_C::CustomEvent_5, an Octa or a night egg), the figure roll (CustomEvent_3, a figura_C) and the UFO
+// rolls (mainGamemode_C::ufo_ball, ufo_boo, ufo_joel and ufo_pill; ufo_midas mints nothing).
+constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", P::name::NpcClass_Figura, P::name::UfoBallClass,
+                                                  P::name::UfoBoofoClass, P::name::UfoJoelClass, P::name::UfoPillfoClass,
+                                                  nullptr};
 // The gamemode's other natural birth: tickerFunguy (a timer body that rolls a Funguy at a random absolute map
 // point at night). A row of its own beside the Octa's, so the two output lists stay separate.
 constexpr const wchar_t* kGamemodeFunguyOutputs[] = {P::name::NpcClass_Funguy, nullptr};

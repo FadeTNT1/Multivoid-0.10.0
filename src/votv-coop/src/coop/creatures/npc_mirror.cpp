@@ -88,6 +88,9 @@ struct MirrorTickRow {
 constexpr MirrorTickRow kMirrorTicks[] = {
     {ue_wrap::profile::name::NpcClass_Wisp,     true, &ArmWispLanding},
     {ue_wrap::profile::name::NpcClass_GeomOcta, true, nullptr},
+    // The figure keeps its tick for the turn of its mesh toward this machine's own camera and its footstep sound: the
+    // tick moves nothing (it writes the mesh's rotation and the AnimBP's variables). Its flight is the pose stream's.
+    {ue_wrap::profile::name::NpcClass_Figura,   true, nullptr},
 };
 
 constexpr size_t kMirrorTickCount = sizeof(kMirrorTicks) / sizeof(kMirrorTicks[0]);

@@ -295,6 +295,11 @@ inline constexpr const wchar_t* NpcClass_GeomOcta     = L"geomOcta_C";
 // controller, itself an ObjectConst of event_bottomHoleController_C, an ObjectConst of the eventer's runEvent, so it
 // loads with the level as the other story creatures do.
 inline constexpr const wchar_t* NpcClass_Kavotia      = L"kavotia_C";
+// figura_C (a Character on the kerfur-omega body AnimBP): the figure the gamemode's CustomEvent_3 drops 200 m from the
+// roller's pawn, 50 m up, at a 1 % roll. Its only spawn site is that body, under EX_CallMath. It stands there turning
+// its mesh toward the local camera from its tick, and its 0.1 s timer destroys it once the local camera is within 175
+// units of it, so a mirror keeps its actor tick and has that timer refused (coop/world/spawn_authority).
+inline constexpr const wchar_t* NpcClass_Figura       = L"figura_C";
 
 // The allowlist array: resolved through R::FindClass and cached per entry. The classes load on the
 // first gameplay-level transition, not at the menu: the install waits for the first one to load,
@@ -329,6 +334,7 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_WispBlu,
     NpcClass_GeomOcta,          // the Geom Octahedron; host-authored ACharacter, pose rides EntityPose
     NpcClass_Kavotia,           // rozitalHole's patrollers; host-authored ACharacter, brain refused on a mirror
+    NpcClass_Figura,            // the gamemode's CustomEvent_3 figure; host-authored ACharacter, self-destroy timer refused on a mirror
 };
 inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcAllowlist[0]);
 

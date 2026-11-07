@@ -74,6 +74,8 @@ UE_FACT_FN(kRowReceiveTickTentacleBallsFollower, "spawn_authority", L"tentacleBa
 UE_FACT_FN(kRowReceiveBeginPlaySuperEgger, "spawn_authority", L"superEgger_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowSpwnSuperEgger, "spawn_authority", L"superEgger_C", L"spwn", Declared);
 UE_FACT_FN(kRowCustomEvent5Gamemode, "spawn_authority", L"mainGamemode_C", L"CustomEvent_5", Declared);
+UE_FACT_FN(kRowCustomEvent3Gamemode, "spawn_authority", L"mainGamemode_C", L"CustomEvent_3", Declared);
+UE_FACT_FN(kRowCustomEvent0Figura, "spawn_authority", L"figura_C", L"CustomEvent_0", Declared);
 UE_FACT_FN(kRowTickerFunguyGamemode, "spawn_authority", L"mainGamemode_C", L"tickerFunguy", Declared);
 UE_FACT_FN(kRowUfoBallGamemode, "spawn_authority", L"mainGamemode_C", L"ufo_ball", Declared);
 UE_FACT_FN(kRowUfoBooGamemode, "spawn_authority", L"mainGamemode_C", L"ufo_boo", Declared);
@@ -220,6 +222,17 @@ constexpr Row kRows[] = {
     // 120-300 s timer), so a client's timer simply ends here. The host rolls and the source-gated catch mirrors the
     // Octa and the egg; the level-placed egg roller is already a row above.
     {&kRowCustomEvent5Gamemode,           "gamemode.CustomEvent_5"},
+    // mainGamemode_C::CustomEvent_3: a timer body that rolls 1 % and mints one figura_C 200 m from player 0's pawn and
+    // 50 m up (its only spawn site in the 0.10.0 capture). The figure is a world occurrence, not a scare built on the
+    // roller's screen: it stands where it fell and turns its mesh toward each machine's camera. The host rolls it and
+    // the source-gated catch mirrors it on the npc lane (npc_world_enum); a client's own roll would stand a second,
+    // unsynced figure 200 m from the client.
+    {&kRowCustomEvent3Gamemode,           "gamemode.CustomEvent_3"},
+    // figura_C::CustomEvent_0: the figure's own 0.1 s timer body, which destroys it once the LOCAL camera is within 175
+    // units (it sets `del`, stops the movement, and a 0.1 s delay later destroys the actor). On a mirror that is a
+    // second, per-machine destroy the host never sent: a client walking up to the mirror would remove it while the
+    // host's figure stays. The host's destroy (its own camera, or its tick) reaches the mirror as the npc despawn.
+    {&kRowCustomEvent0Figura,             "figura.CustomEvent_0"},
     // mainGamemode_C::tickerFunguy: the night Funguy's looping timer. It rolls (a 3 % chance in the night hours and
     // the moon phase) a Funguy at a random absolute map point, ground-tested for gravel, dirt or grass, and re-arms
     // itself (ubergraph @50), so a client's timer ends here. The host rolls and the source-gated catch mirrors the
