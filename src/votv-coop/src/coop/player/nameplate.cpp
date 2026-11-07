@@ -17,6 +17,7 @@
 #include "ue_wrap/core/game_thread.h"   // the HUD tick post-observer -- the frame capture's clock
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"  // ClassByName -- the HUD widget class
+#include "ue_wrap/core/reflection.h"    // IsLiveByIndex -- the cached controller's liveness
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/trace.h"   // LineBlockedStatDyn -- the occlusion (gray plate) check
 #include "ue_wrap/core/types.h"
@@ -74,6 +75,7 @@ int64_t NowUs() {
 // resolved, which the capture re-projects every frame until the next Update replaces them.
 Snapshot g_meta;
 void*    g_metaPc = nullptr;
+int32_t  g_metaPcIdx = -1;           // g_metaPc's GUObjectArray index, for the purge-safe check
 void*    g_hudTickFn = nullptr;      // the UFunction the observer is registered on (null: none)
 void*    g_hudSelf = nullptr;        // the widget instance the captures follow (one per frame)
 int64_t  g_hudSelfUs = 0;            // when that instance last ticked
@@ -211,7 +213,9 @@ void OnHudTickPost(void* self, void* /*function*/, void* /*params*/) {
     // covers only the copy in.
     static Snapshot s;   // game thread only; static so the frame does not put a snapshot on the stack
     s = g_meta;
-    if (s.count > 0 && g_metaPc) {
+    // The controller is Update's, cached across ticks: a world change can destroy it before the next
+    // Update replaces it, so it is checked through its slot, never its own memory.
+    if (s.count > 0 && g_metaPc && ue_wrap::reflection::IsLiveByIndex(g_metaPc, g_metaPcIdx)) {
         auto& reg = coop::players::Registry::Get();
         for (int i = 0; i < s.count; ++i) {
             Plate& pl = s.plates[i];
@@ -403,6 +407,7 @@ void Update() {
     }
     g_meta = snap;
     g_metaPc = pc;
+    g_metaPcIdx = pc ? ue_wrap::reflection::InternalIndexOf(pc) : -1;
     MaintainFrameCapture();
 }
 
