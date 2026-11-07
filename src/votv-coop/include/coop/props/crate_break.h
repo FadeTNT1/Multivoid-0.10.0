@@ -29,12 +29,14 @@ struct Call;
 namespace coop::props::crate_break {
 
 // Is `prop` a world container, a fire extinguisher or a breakable explosive (ue_wrap/actors/breakable_explosive: the
-// vending machine, a gas can, a bomb, the explosive crystal or drive) or a cubicle partition (ue_wrap/actors/cubicle),
-// whose damage only the host runs? Any role. The
+// vending machine, a gas can, a bomb, the explosive crystal or drive), a cubicle partition (ue_wrap/actors/cubicle) or
+// an asologo piece (ue_wrap/devices/asologo_piece: the basement's secret wall, a radiator, a security TV), whose damage
+// only the host runs? Any role. The
 // extinguisher is one so that its burst starts on the host and travels as its record
 // (coop/props/fire_extinguisher_sync); a breakable explosive so that its break, its blast (coop/world/explosion_sync)
 // and the vending machine's spill and fire happen once, on the host; a cubicle so that a client's swing breaks it and
-// its cues are heard once by every peer. Game thread.
+// its cues are heard once by every peer; an asologo piece so that its breakingSequence, which frees it from Static,
+// runs once on the host and the clients take the freed panel from the prop lanes. Game thread.
 bool IsHostDamaged(void* prop);
 
 // CLIENT: comp_physicsImpact_C::impactDamage call `c` on the mirror of `container`, which prop_damage_gate cancels.

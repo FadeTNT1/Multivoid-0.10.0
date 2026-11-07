@@ -269,6 +269,27 @@ keeps its component's unstick (`prop_stick_sync`) and a trash clump its own lane
 X class Y` and `physics restored: yes|no`. `[?]` Whether the game keeps a second native "pryable" state that the
 prompt reads has not been confirmed in a two-peer run.
 
+### A client's swing at an asologo piece
+
+`prop_asologoPiece_C` and its family carry a health of their own, and the inherited `breakingSequence` frees the body from
+Static and breaks its four world constraints. `prop_basementSecretWall_C`, the basement extension's removable wall, is
+one: it declares no function of its own and four `PhysicsConstraint` components (its pak asset, `[RD]`), so a crowbar
+swing's `addDamage` is what takes the wall down. A swing at it used to take the ordinary prop path: the swinger's copy
+took the damage and broke alone, the host elected the swinger the prop's syncer, and the freed panel streamed to a host
+copy that was still Static ("a static body cannot be held ... not driven"). The host kept its wall and the client walked
+through the gap `[RD]`: the mod's own lanes show the order (the election, the refused Static hold), and the game's break is the inherited sequence.
+
+An asologo piece is now host-damaged, as a container or a cubicle is (`coop/props/crate_break`): a client's swing at one
+is cancelled on its copy and sent as a `HitIntent`; the host judges it and runs the piece's own `addDamage` on its copy.
+The host's `breakingSequence` then runs once, its `break()` cue reaches every peer (`PieceBreakFx`), and the freed
+panel travels the pried-prop lane above (a Static-cleared end, a join correction, the first pose of a host hold), so
+every client's copy is released from Static by the host's word. A client's impact on a piece (a thrown prop) is cancelled
+by `coop/props/prop_damage_gate` and sent as a contact. The log says `[PIECE-HIT] client:` for the cancelled swing,
+`[PIECE-HIT] host:` for the applied one (with the Static flag before and after) and `[PIECE-BREAK] host:` when the break
+ran. A piece the host breaks itself takes the same path from the break on; a joining client takes the freed panel's pose
+and the Static release from the join's keyed replay. `[?]` The save of an opened wall is the game's own record of the
+freed panel; whether it reloads free of Static has not been checked in a two-peer run.
+
 ### The vent-cover census
 
 Both peers log a `[VENT-CENSUS]` summary of every `prop_vent_C` once when the world is ready (a host: its
