@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 308;
+inline constexpr uint16_t kProtocolVersion = 312;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1456,6 +1456,24 @@ enum class ReliableKind : uint8_t {
     // The prop is named by its Element id. Never relayed; a client's copy is refused at the host's receive edge. Late
     // join: none -- a one-shot cue. PieceBreakFxPayload.
     PieceBreakFx = 243,
+
+    // CLIENT->HOST: a client's plant verb (coop::farming): the harvest or the discard of a growing plant, a raise of
+    // its water, fertilizer, growth or fruit timer that the client's own watering can, bucket, fertilizer, poo, growinator,
+    // poog or plant dev tool made, a medicine, or a seed planted in a farm pot. A chunked blob of one op
+    // (coop/farming/plant_wire.h): the request id, the plant's key (the pot's for a planting), the op's fields. The host
+    // judges each against the sender's puppet (alive, in reach), runs the game's own verb with that puppet, raises a
+    // tended field only up to the game's caps, and answers PlantState Ack. Never relayed; not pre-world; late join: none,
+    // a request is a moment. BlobChunkPayload.
+    PlantIntent = 248,
+
+    // HOST->ALL: the growing plants (coop::farming), named by their actor_save key or level identity. A chunked blob of
+    // one op (coop/farming/plant_wire.h): Row (class, row name, transform, the pot it grows in, growth, water, dryness,
+    // fertilizer, fruit timer, health, berries, disease), Gone (harvested or not), SnapshotEnd, or Ack (a PlantIntent's
+    // answer, with the key of a harvested item to pocket). A receiver binds a row to its own plant by key or by place,
+    // or spawns one, applies it through the plant's own upd, updLoc and processGrown and parks its tick. Late join: every
+    // row to the joiner at its world-ready, then SnapshotEnd, which removes the plants the host did not name. Never
+    // relayed; a client's copy is refused at the host's receive edge; not pre-world. BlobChunkPayload.
+    PlantState = 249,
 };
 
 #pragma pack(push, 1)

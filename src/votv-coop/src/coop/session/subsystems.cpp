@@ -184,6 +184,7 @@
 #include "coop/props/join_membership_sweep.h"  // the join claim and sweep
 #include "coop/world/alarm_sync.h"  // base radar alarm shared-world toggle
 #include "coop/world/church_sync.h"  // the Stolas church: host-run, its four save fields mirrored
+#include "coop/farming/plant_sync.h"  // the growing plants: a leaver's requests go
 #include "coop/interactables/serverbox_sync.h"  // host-authoritative signal-server sim state
 #include "coop/interactables/server_upgrade_sync.h"  // the servers' physical upgrades
 #include "coop/creatures/roach_sync.h"  // host-authoritative roach-infestation mirror
@@ -408,6 +409,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::props::container_birth::OnPeerGone(static_cast<uint8_t>(slot));  // a container transfer it had in flight
     coop::props::storage_act::OnPeerGone(static_cast<uint8_t>(slot));  // a row it was taking goes back
     coop::prop_act_host::OnPeerGone(static_cast<uint8_t>(slot));  // a take or use it had reserved
+    coop::farming::OnPeerLeft(static_cast<uint8_t>(slot));  // its plant requests and half assemblies
     coop::signal_sync::OnDisconnectSlot(slot);
     coop::email_sync::OnDisconnectSlot(slot);
     // Shut the chat lane's per-slot seed gate: the next occupant's applied range starts empty, so

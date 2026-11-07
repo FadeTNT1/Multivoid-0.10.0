@@ -144,6 +144,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ToolActionIntent:
     case ReliableKind::MicrowaveIntent:
     case ReliableKind::PosterIntent:
+    case ReliableKind::PlantIntent:
     case ReliableKind::ProjectileFired:
     case ReliableKind::ExplosionRequest:
     case ReliableKind::AtvExplodeRequest:
@@ -182,6 +183,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::MicrowaveState:
     case ReliableKind::BucketFillState:
     case ReliableKind::PosterState:
+    case ReliableKind::PlantState:
     case ReliableKind::ToolActionState:
     case ReliableKind::EventScenePhase:
     case ReliableKind::EventSoundCue:

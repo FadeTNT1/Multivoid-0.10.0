@@ -151,6 +151,11 @@ set(VOTVCOOP_SOURCES
     src/coop/world/creature_event_relay_client.cpp
     src/coop/world/alarm_sync.cpp
     src/coop/world/church_sync.cpp
+    src/coop/farming/plant_sync.cpp
+    src/coop/farming/plant_host.cpp
+    src/coop/farming/plant_client.cpp
+    src/coop/farming/plant_client_verbs.cpp
+    src/coop/farming/plant_refusals.cpp
     src/coop/interactables/serverbox_sync.cpp
     src/coop/interactables/server_upgrade_sync.cpp
     src/coop/interactables/sat_console_table.cpp

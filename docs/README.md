@@ -64,6 +64,7 @@ messages, the late-join answer, the known limits with their evidence, and the co
 | [events-and-weather.md](events-and-weather.md) | The clock, the weather, who rolls, the story events and how a client sees one fire, the event actors, the pyramid, the alarm, emails and the task |
 | [signals.md](signals.md) | The signal workstation: occupancy, the desk, the download simulation, the catch and the dishes, the deck, drives and racks, the laptop, the database, and the upgrades |
 | [devices.md](devices.md) | Doors, keypads, lights, the power panel, the turbine, windows and grime, the drone, the signal servers |
+| [farming.md](farming.md) | The growing plants: the host's census and rows, a client's harvest, tending and pot planting as intents, the parked mirror |
 | [tool-actions.md](tool-actions.md) | The crowbar's pry and the hacksaw's cut: shown on every peer while they last, their end run once on the host |
 | [achievements.md](achievements.md) | Shared achievements: the host's union of the profile's achievements and the world's advancements, claims, the award, the late joiner |
 | [base-computer.md](base-computer.md) | The base laptop and the economy: the balance, upgrades, the laptop's tab and inbox, shop orders, the coin gun, the floppy slot |
