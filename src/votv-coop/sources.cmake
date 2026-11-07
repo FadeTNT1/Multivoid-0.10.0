@@ -373,6 +373,7 @@ set(VOTVCOOP_SOURCES
     src/coop/net/master_slots.cpp
     src/coop/save/join_window_baseline.cpp
     src/coop/save/save_transfer.cpp
+    src/coop/save/save_transfer_return.cpp
     src/coop/save/slot_file_read.cpp
     src/coop/save/save_indicator_suppress.cpp
     src/coop/session/session_join.cpp

@@ -10,6 +10,7 @@
 #include "coop/net/intent_bucket.h"
 #include "coop/net/protocol.h"  // kMaxPeers, Role
 #include "coop/net/session.h"
+#include "coop/player/pocket_travel_host.h"  // a slot away in a pocket, and its way home
 #include "coop/player/roster_ledger.h"  // PerSlotState
 #include "coop/props/prop_snapshot.h"  // HasSnapshotFor
 #include "coop/session/player_handshake.h"  // OnClientWorldReady
@@ -96,6 +97,15 @@ void OnAnnounce(coop::net::Session& session, int slot) {
         if (g_held[slot]) {
             h = HeldAnnounce{true, false, false, session.peerGenerationForSlot(slot), NowMs()};
             g_held[slot] = false;
+            return;
+        }
+        // A pocket trip (coop/player/pocket_travel_host): a slot parked in a pocket has no main world, so
+        // its announce is refused and its gate hold given back; a returning slot's announce is the
+        // first announce of its way home, and runs the full join edge below as a joiner's does. Its row
+        // goes back to the main world first, since the connect replay is gated by it, and every first
+        // announce is sent the rows of the players who are away.
+        if (!coop::player::pocket_travel_host::OnFirstWorldReady(static_cast<uint8_t>(slot))) {
+            ConsumeAnnounce(session, slot);
             return;
         }
         // The first announce of this occupancy completes the join. The join window closes for this joiner

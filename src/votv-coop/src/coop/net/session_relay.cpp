@@ -17,6 +17,8 @@
 
 #include "coop/net/session.h"
 
+#include "coop/player/pocket_travel.h"       // the pocket rule: who stands in which level
+#include "coop/player/pocket_travel_host.h"  // ... and who is parked in a pocket
 #include "ue_wrap/core/log.h"
 #include "session_lanes.h"  // Lane, LaneForKind (co-located private header)
 
@@ -48,12 +50,30 @@ void Session::RelayUnreliableToOtherClients(int originSlot, const void* data, in
     h->senderSlot = static_cast<uint8_t>(originSlot);
     h->originContext = originContext_.Stamp(originSlot);
     coop::net::WriteStateTimeMs24(*h, 0);  // the origin's state time is not the relayer's -- scrub (no client-side reader)
+    // The pocket rule (coop/player/pocket_travel, docs/pocket-dimensions.md): a player's body and
+    // voice reach another player only when both stand in the same level. Two clients in the same
+    // pocket are both not world-ready (they have no main world), so for them the pre-world gate is
+    // carved open, for the body and voice kinds only: a held prop's pose or a desk cursor names a
+    // thing in a world, and each pocket copy is its client's own. Read through the location table's
+    // atomics: this is the net thread.
+    namespace PT = coop::player::pocket_travel;
+    namespace PTH = coop::player::pocket_travel_host;
+    const auto type = static_cast<MsgType>(h->type);
+    const bool bodyOrVoice = type == MsgType::PoseSnapshot || type == MsgType::RagdollPose ||
+                             type == MsgType::HandPose || type == MsgType::VoiceFrame;
+    const auto origin = static_cast<uint8_t>(originSlot);
+    const bool originParked = PTH::IsSlotParked(origin);
     for (int i = 1; i < kMaxPeers; ++i) {
         if (i == originSlot) continue;
         const uint32_t hConn = peerConns_[i].load();
         if (hConn == 0) continue;
-        // Pre-world gate: no pose relays to a joiner still at the menu.
-        if (!IsSlotWorldReady(i)) continue;
+        const auto to = static_cast<uint8_t>(i);
+        if (!PT::SameLocation(origin, to)) continue;
+        // Pre-world gate: no pose relays to a joiner still at the menu -- except between two
+        // players parked in the same pocket (above).
+        if (!IsSlotWorldReady(i) &&
+            !(bodyOrVoice && originParked && PTH::IsSlotParked(to) && PT::IsPocket(PT::LocationOf(to))))
+            continue;
         const EResult rc = sockets->SendMessageToConnection(
             hConn, buf, len, k_nSteamNetworkingSend_UnreliableNoDelay, nullptr);
         if (rc == k_EResultOK) {
@@ -94,6 +114,10 @@ void Session::RelayReliableToOtherClients(int originSlot, ReliableKind kind,
         // receipt->GT-flip gap was skipped here AND missed by the ready-edge seed.
         if (!IsSlotWorldReady(i) && !IsRelayEligible(i, hConn) &&
             !IsPreWorldSendableKind(kind)) continue;
+        // The pocket rule: a slot away in a pocket dimension gets no relayed world kind, whatever
+        // its eligibility says (its stamp is cleared at its departure; this holds the gap).
+        if (coop::player::pocket_travel_host::IsSlotIsolated(static_cast<uint8_t>(i)) &&
+            !IsAwaySendableKind(kind)) continue;
         // The relay rides the same delivery guarantee as every other reliable send. Before the
         // backlog existed, a refusal here was the worst silent-loss surface in the mod -- the
         // message was dropped without even a warning, so the field's refusal count under-reported

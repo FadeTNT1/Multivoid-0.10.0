@@ -74,7 +74,8 @@ const char* PhaseTag(Phase p);
 const char* ReasonTag(Reason r);
 
 // The per-slot location table. On the host it is the authority; on a client it mirrors the host's
-// PlayerLocation rows. Game thread.
+// PlayerLocation rows. Written on the game thread; read on any thread (each row is one atomic word,
+// so the host's net thread can judge a relay by it).
 Pocket LocationOf(uint8_t slot);
 uint32_t TripSeqOf(uint8_t slot);
 void SetLocation(uint8_t slot, Pocket p, uint32_t tripSeq);

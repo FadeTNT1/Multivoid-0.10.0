@@ -22,11 +22,18 @@ namespace N = ue_wrap::profile::name;
 
 std::atomic<coop::net::Session*> g_session{nullptr};
 
-struct Row {
-    Pocket   pocket  = Pocket::Main;
-    uint32_t tripSeq = 0;
-};
-std::array<Row, coop::players::kMaxPeers> g_rows{};
+// One row per slot, packed into one word so a reader never sees a pocket from one write and a trip
+// number from another: the pocket in the low byte, the trip number in the high half. The host's net
+// thread reads it at every relay and stream decision (coop/net/session_relay, session_streams,
+// session_voice) while the game thread writes it, so each row is an atomic. Zero is the main world,
+// trip 0.
+std::array<std::atomic<uint64_t>, coop::players::kMaxPeers> g_rows{};
+
+constexpr uint64_t Pack(Pocket p, uint32_t tripSeq) {
+    return (static_cast<uint64_t>(tripSeq) << 32) | static_cast<uint64_t>(static_cast<uint8_t>(p));
+}
+Pocket PocketOf(uint64_t row) { return static_cast<Pocket>(static_cast<uint8_t>(row & 0xFFu)); }
+uint32_t TripOf(uint64_t row) { return static_cast<uint32_t>(row >> 32); }
 
 bool IsHostRole(const coop::net::Session* s) {
     return s && s->role() == coop::net::Role::Host;
@@ -92,20 +99,22 @@ const char* ReasonTag(Reason r) {
 }
 
 Pocket LocationOf(uint8_t slot) {
-    return slot < g_rows.size() ? g_rows[slot].pocket : Pocket::Main;
+    return slot < g_rows.size() ? PocketOf(g_rows[slot].load(std::memory_order_acquire)) : Pocket::Main;
 }
 
 uint32_t TripSeqOf(uint8_t slot) {
-    return slot < g_rows.size() ? g_rows[slot].tripSeq : 0;
+    return slot < g_rows.size() ? TripOf(g_rows[slot].load(std::memory_order_acquire)) : 0;
 }
 
 void SetLocation(uint8_t slot, Pocket p, uint32_t tripSeq) {
     if (slot >= g_rows.size()) return;
     if (!IsValidWire(static_cast<uint8_t>(p))) p = Pocket::Main;
-    g_rows[slot] = Row{p, tripSeq};
+    g_rows[slot].store(Pack(p, tripSeq), std::memory_order_release);
 }
 
-void ResetLocations() { g_rows.fill(Row{}); }
+void ResetLocations() {
+    for (auto& row : g_rows) row.store(0, std::memory_order_release);
+}
 
 bool SameLocation(uint8_t a, uint8_t b) { return LocationOf(a) == LocationOf(b); }
 

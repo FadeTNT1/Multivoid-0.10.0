@@ -243,6 +243,8 @@ public:
     // The net-thread view of the same event: relay-eligible since the ClientWorldReady receipt on
     // exactly this hConn.
     bool IsRelayEligible(int peerSlot, uint32_t hConn) const;
+    // Host: the slot left for a pocket dimension (coop/player/pocket_travel_host); its return's announce stamps it again.
+    void ClearRelayEligible(int peerSlot);
 
     // Is a remote connection registered in this slot (any state)?
     bool HasPeerConn(int peerSlot) const {
@@ -748,6 +750,8 @@ private:
     RefusalTally staleEpochRefusals_{"net"};
     // The receive budget's stream drops, folded the same way. Net thread; cleared with the two above.
     RefusalTally streamRateRefusals_{"net"};
+    RefusalTally awayKindRefusals_{"pocket"};  // a world kind from a slot away in a pocket (IsAwayReceivableKind)
+    bool SlotTakesKind_(int peerSlot, ReliableKind kind) const;  // the per-slot send gate (session.cpp)
     // The host's bound on what each client sends, every packet (receive_budget.h). Net thread only.
     ReceiveBudget receiveBudget_;
     // The receive budget's answer to one packet (receive_budget.h): true to go on. A stream past its rate is dropped;
