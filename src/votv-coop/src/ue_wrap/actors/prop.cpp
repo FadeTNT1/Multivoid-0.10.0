@@ -111,6 +111,9 @@ void* ResolveOrLoadPropClass(const std::wstring& className) {
     }
     static std::unordered_set<std::wstring> s_missed;   // game thread only
     if (s_missed.count(className)) return nullptr;
+    // Once the miss latch is full, no new name is tried at all: a peer naming endless unknown classes
+    // must not buy a synchronous load per message.
+    if (s_missed.size() >= 256) return nullptr;
     // A class this loaded is answered from here until the index lists it, and again only while its slot
     // still holds it.
     static std::unordered_map<std::wstring, std::pair<void*, int32_t>> s_loaded;   // game thread only

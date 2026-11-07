@@ -386,6 +386,9 @@ void DestroyOurs(void* actor) {
     if (!actor) return;
     MarkIncoming(actor);
     E::DestroyActor(actor);
+    // The end of play runs inside the destroy, and has taken the mark by now. One still here never ended play (a
+    // refused destroy, an actor that never began play): forget it, so a later actor at its address is not muted.
+    g_incoming.erase(actor);
 }
 
 std::wstring MintKey(uint8_t slot) {
@@ -656,8 +659,10 @@ void ClientBirth(Caught& c, void* a) {
 
 void DrainCaught() {
     for (size_t i = 0; i < g_caught.size();) {
-        Caught& c = g_caught[i];
-        if (g_tick < c.tick + 2) { ++i; continue; }   // a whole frame after the finish: the Blueprint's tail has run
+        // A whole frame after the finish: the Blueprint's tail has run.
+        if (g_tick < g_caught[i].tick + 2) { ++i; continue; }
+        // A copy: the birth runs Blueprint (getKey, getData, a destroy) whose own spawns append to g_caught.
+        Caught c = g_caught[i];
         void* a = c.ref.Get();
         if (!a) {
             g_caught.erase(g_caught.begin() + static_cast<std::ptrdiff_t>(i));
@@ -666,7 +671,12 @@ void DrainCaught() {
         const uint8_t before = c.tries;
         if (g_host) HostBirth(c, a);
         else ClientBirth(c, a);
-        if (c.tries != before) { ++i; continue; }   // a capture to retry next tick
+        // A capture to retry next tick; the last try's refusal (logged by the birth) ends it.
+        if (c.tries != before && c.tries < kMaxCaptureTries) {
+            g_caught[i].tries = c.tries;
+            ++i;
+            continue;
+        }
         g_caught.erase(g_caught.begin() + static_cast<std::ptrdiff_t>(i));
     }
 }
@@ -1126,6 +1136,12 @@ void OnPeerLeft(uint8_t slot) {
     // Slots recycle lowest-free, so a rejoining peer's chunks must never merge into the previous occupant's half.
     g_asmIntent.ClearSlot(slot);
     g_budget[slot] = Budget{};
+    // A message queued for the leaver never sends (the slot refuses it), and the queue is all-or-nothing at its head:
+    // left there, it would hold every later message back for good.
+    for (auto it = g_out.begin(); it != g_out.end();) {
+        if (it->slot == static_cast<int>(slot)) it = g_out.erase(it);
+        else ++it;
+    }
 }
 
 void OnDisconnect() {
