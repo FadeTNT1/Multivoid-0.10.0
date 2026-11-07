@@ -28,6 +28,7 @@ struct Snapshot {
     float   spareDirt = 0.f;
     float   fuel = 0.f;
     float   health = 0.f;
+    float   battery = -1.f;  // the inserted battery's charge, 0..100; -1 = none in (its presence is the sign)
     uint8_t mask = 0;        // bit i = tires[i]
     bool    hasSpare = false;
     int8_t  spareFixes = 0;
@@ -36,9 +37,9 @@ struct Snapshot {
 };
 
 // The game's per-facet reducers, resolvable as verbs. All four are BlueprintCallable.
-enum class Verb : uint8_t { UpdTires, UpdDirt, UpdSpareTire, UpdHealth };
+enum class Verb : uint8_t { UpdTires, UpdDirt, UpdSpareTire, UpdHealth, UpdBattery };
 
-// Resolve ATV_C's 13 property offsets and the 4 verb UFunctions. Idempotent, one attempt per
+// Resolve ATV_C's 14 property offsets and the 5 verb UFunctions. Idempotent, one attempt per
 // process, since the class is resident for the game's lifetime. Returns true only if EVERYTHING
 // resolved: the caller treats a partial resolve as "this build cannot run the lane", and the
 // producer then ships tiresValid=0 rather than a zeroed block. The layout:
@@ -46,7 +47,7 @@ enum class Verb : uint8_t { UpdTires, UpdDirt, UpdSpareTire, UpdHealth };
 //   tiresFixes TArray<int32> -- a countdown, and -1 is legally reachable: ejectWheel writes fixes-1
 //     uncapped and putTire copies it back
 //   tiresTypes TArray<uint8> -- no runtime writer in ATV_C's bytecode; reducer input only
-//   dirt, fuel, health, spareTire_durability, spareTire_dirt   FloatProperty
+//   dirt, fuel, health, battery, spareTire_durability, spareTire_dirt   FloatProperty
 //   spareTire_fixes  IntProperty         hasSpareTire  BoolProperty
 //   skipTireUpdate BoolProperty -- no writer and no CDO override, so permanently false; read
 //     anyway, because a true would mean a future external writer exists and the caller must defer
@@ -64,6 +65,13 @@ bool Read(void* atv, Snapshot& out);
 // Never touches tires[] or hasSpareTire -- presence is a separate, authority-gated write.
 // Bounded min(Num,4) per array; false when unresolved/null.
 bool WriteAccumulators(void* atv, const Snapshot& s);
+
+// Read `battery` alone (the receiver's presence test). False, `out` untouched, when unresolved or null.
+bool ReadBattery(void* atv, float& out);
+
+// Write `battery` (a float: the charge, or -1 for none in). Never written by WriteAccumulators, because whether a
+// battery is in at all is presence, an authority-gated write the caller decides; this function only performs it.
+bool WriteBattery(void* atv, float battery);
 
 // Write PRESENCE: tires[i] from mask bits (min(Num,4)) and hasSpareTire. The caller gates this
 // on packet authorship (host-only); this function only performs it.

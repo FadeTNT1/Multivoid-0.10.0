@@ -151,6 +151,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::AchievementClaim:
     case ReliableKind::AtvSeat:
     case ReliableKind::AtvTakeover:
+    case ReliableKind::AtvRepairIntent:
     case ReliableKind::PropActRequest:
     case ReliableKind::PropActCommit:
     case ReliableKind::ContainerActRequest:

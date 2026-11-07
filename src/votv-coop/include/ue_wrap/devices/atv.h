@@ -59,6 +59,29 @@ float GetFuel(void* atv);    // fuel, 0..100
 float GetHealth(void* atv);  // health, 0..100
 bool  GetBrake(void* atv);   // the handbrake
 
+// The terms the ATV's own tick ORs before it applies wheel torque (receiveTick: battery <= 0, `empty`, `Brake`,
+// `brokenn`, `underwater`), the two throttle inputs, and fuel and health for context. Names: sdk_profile_names.h.
+// Resolved once by name with no fallback; a field that did not resolve reads as its zero value and leaves its
+// `have` bit clear (bit 0 battery, 1 empty, 2 brokenn, 3 underwater, 4 input_forward, 5 input_back). False, `out`
+// zeroed, on null or an unresolved ATV_C. Game thread.
+struct DriveGates {
+    float   battery = 0.f;
+    float   fuel = 0.f;
+    float   health = 0.f;
+    bool    empty = false;
+    bool    brake = false;
+    bool    broken = false;
+    bool    underwater = false;
+    bool    inputForward = false;
+    bool    inputBack = false;
+    uint8_t have = 0;
+};
+bool ReadDriveGates(void* atv, DriveGates& out);
+
+// Writes the `empty` / `brokenn` latch. False, and nothing written, on null or a flag that did not resolve.
+bool WriteEmptyLatch(void* atv, bool v);
+bool WriteBrokenLatch(void* atv, bool v);
+
 // The story event's flag: while it is set the ATV's own tick explodes it (health to 0, then `explode`) once its driver
 // has moved. Resolved by name with no fallback; both return false, and touch nothing, on null, an unresolved ATV_C or a
 // class without the property. Game thread.

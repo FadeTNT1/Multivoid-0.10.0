@@ -1,11 +1,11 @@
 // coop/interactables/atv_condition_sync.h -- the ATV CONDITION lane: the syncer's
-// tires/spare/dirt/fuel/health ride the AtvState payload's condition block, and a mirror is
+// tires/spare/dirt/fuel/health/battery ride the AtvState payload's condition block, and a mirror is
 // OVERWRITTEN from the syncer, re-deriving visuals through the game's own per-facet reducers
 // on change edges. The impulse neuter makes that safe -- a mirror's own accrual is held at
 // zero, so an overwrite cannot race an irreversible act.
 //
-// AUTHORITY: accumulators apply from the syncer the host assigned, PRESENCE (tiresMask, hasSpare)
-// only from the host's own copy, never a client syncer's re-sent block, because a client-authored
+// AUTHORITY: accumulators apply from the syncer the host assigned, PRESENCE (tiresMask, hasSpare, and
+// whether a battery is in: its sign) only from the host's own copy, never a client syncer's re-sent block, because a client-authored
 // eject ships a mask bit whose paired prop_atvWheel_C birth cannot travel, so applying it would turn
 // a retained-wheel divergence into host-PERSISTED item loss. docs/vehicles.md carries it as a limit.
 //
@@ -49,6 +49,8 @@ struct Counters {
     unsigned long long updDirtCalled = 0;
     unsigned long long updSpareCalled = 0;
     unsigned long long updHealthCalled = 0;
+    unsigned long long updBatteryCalled = 0;
+    unsigned long long batteryPresenceSkipped = 0;  // a block whose battery presence differed, not consumed
     unsigned long long presenceSkippedDiffering = 0;  // non-host presence that DIFFERED
     unsigned long long deferred = 0;           // applies that deferred verbs (skipTireUpdate)
     unsigned long long invalidBlocks = 0;      // tiresValid==0 received
