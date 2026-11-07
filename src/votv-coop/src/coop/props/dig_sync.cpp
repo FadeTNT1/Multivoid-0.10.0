@@ -82,7 +82,7 @@ constexpr float    kSameHoleUU = 25.0f;        // a second dig this near a hole 
 constexpr float    kBuryNearUU = 60.0f;        // the hole a burial names, to the one the host has
 constexpr size_t   kMaxRows = 512;
 constexpr size_t   kMaxPendingIntents = 8;
-constexpr size_t   kMaxQueuedOut = 256;
+constexpr size_t   kMaxQueuedOut = 2 * kMaxRows;   // a joiner's whole snapshot (every row and its end) fits
 constexpr uint64_t kCensusMs = 1000;
 constexpr uint64_t kBodyWaitMs = 4000;
 constexpr uint64_t kAckWaitMs = 10000;
@@ -140,6 +140,13 @@ void DrainOut(coop::net::Session& s) {
     const auto kind = host ? coop::net::ReliableKind::DigState : coop::net::ReliableKind::DigIntent;
     for (int n = 0; n < 16 && !g_out.empty(); ++n) {
         const Out& o = g_out.front();
+        // HOST: a peer takes the dig lane only once its world is up, and its world-ready snapshot then carries every
+        // row as it stands. A broadcast no ready peer can take, or a row for a slot no longer ready (it left), is
+        // already covered or moot; held at the head it refused every tick and blocked the joiner's snapshot.
+        if (host && (o.slot < 0 ? !s.AnyWorldReadyPeer() : !s.IsSlotWorldReady(o.slot))) {
+            g_out.pop_front();
+            continue;
+        }
         const bool ok = (host && o.slot >= 0)
                             ? coop::blob_chunks::SendBlobToSlot(&s, o.slot, kind, g_sendSeq, o.bytes)
                             : coop::blob_chunks::SendBlob(&s, kind, g_sendSeq, o.bytes);

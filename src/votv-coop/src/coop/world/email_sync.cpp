@@ -22,6 +22,8 @@
 #include <cstring>
 #include <deque>
 #include <map>
+#include <mutex>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -133,7 +135,18 @@ void AppendWchars(std::vector<uint8_t>& b, const std::wstring& s, size_t cap,
                   const char* what) {
     size_t n = s.size();
     if (n > cap) {
-        UE_LOGW("email_sync: %s %zu chars > cap %zu -- truncating", what, n, cap);
+        // The cap is part of the row's cross-peer hash, so it stays put; every peer truncates the same row the
+        // same way. The blob is built at every poll, seed and join snapshot: each over-long field is told once.
+        static std::mutex sMu;
+        static std::set<std::pair<const char*, size_t>> sSaid;
+        bool say = false;
+        {
+            std::lock_guard<std::mutex> lk(sMu);
+            say = sSaid.size() < 64 && sSaid.emplace(what, n).second;
+        }
+        if (say)
+            UE_LOGW("email_sync: %s %zu chars > cap %zu -- truncating (every peer truncates it alike; told once)",
+                    what, n, cap);
         n = cap;
     }
     for (size_t i = 0; i < n; ++i) {

@@ -122,9 +122,12 @@ Driven* Open(void* actor, bool claimed, const char* why, uint8_t syncer = 0) {
         if (sRefusedSaid.size() > 512) sRefusedSaid.clear();   // bounded; a repeat after the clear is one line
         if (sRefusedSaid.insert(actor).second) {
             // A class the wire never expresses has no copy on any peer to move, so its motion is
-            // parity and its refusal no news.
-            if (!coop::prop_lifecycle::IsWireSuppressedPropClass(R::ClassNameOf(actor)))
-                UE_LOGW("[PROP-DRIVE] HOST refused: actor %p has no host element id (%s)", actor, why);
+            // parity and its refusal no news. A child actor is never enrolled (its parent's construction
+            // script makes it on every peer), so it too is expected. Anything else is named by class.
+            const std::wstring cls = R::ClassNameOf(actor);
+            if (!coop::prop_lifecycle::IsWireSuppressedPropClass(cls) && !E::IsChildActor(actor))
+                UE_LOGW("[PROP-DRIVE] HOST refused: actor %p cls='%ls' has no host element id (%s) -- its motion "
+                        "stays host-local", actor, cls.c_str(), why);
         }
         return nullptr;
     }

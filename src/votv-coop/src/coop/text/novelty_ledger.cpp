@@ -48,6 +48,9 @@ bool SeenAndMark(uint32_t cp) {
     return false;
 }
 
+// Set while the boot selftest feeds its deliberate over-budget burst: that refusal is the test, not a peer's text.
+bool g_selftestQuiet = false;
+
 bool WouldBeSeen(uint32_t cp) {
     if (cp >= kMaxTracked || g_seen.empty()) return cp >= kMaxTracked;
     return (g_seen[cp >> 6] & (1ull << (cp & 63))) != 0;
@@ -93,12 +96,13 @@ bool AdmitRemoteText(uint8_t peerSlot, const std::wstring& text) {
     if (novel == 0) return true;                             // the common case: free
 
     if (w.spent + novel > budget) {
-        UE_LOGW("novelty ledger: REFUSED a text field from slot %u -- it would introduce %d "
-                "never-before-seen codepoints and %d of this peer's %d are already spent in "
-                "this window. Rasterising a large first-sight alphabet inside one frame is a "
-                "stutter every receiving peer pays for. Raise "
-                "net.novelty_budget if a legitimate multilingual lobby trips this.",
-                static_cast<unsigned>(peerSlot), novel, w.spent, budget);
+        if (!g_selftestQuiet)
+            UE_LOGW("novelty ledger: REFUSED a text field from slot %u -- it would introduce %d "
+                    "never-before-seen codepoints and %d of this peer's %d are already spent in "
+                    "this window. Rasterising a large first-sight alphabet inside one frame is a "
+                    "stutter every receiving peer pays for. Raise "
+                    "net.novelty_budget if a legitimate multilingual lobby trips this.",
+                    static_cast<unsigned>(peerSlot), novel, w.spent, budget);
         return false;
     }
 
@@ -150,8 +154,10 @@ bool RunNoveltyLedgerSelftest() {
     // If the repertoire cannot even supply budget+1 codepoints the check is
     // untestable, and saying so is the honest outcome -- not a silent pass.
     ok(distinct > budget, "the repertoire can supply a burst larger than the budget");
-    ok(distinct > budget && !AdmitRemoteText(1, burst),
-       "a burst past the budget is refused whole");
+    g_selftestQuiet = true;
+    const bool burstRefused = distinct > budget && !AdmitRemoteText(1, burst);
+    g_selftestQuiet = false;
+    ok(burstRefused, "a burst past the budget is refused whole");
 
     // MONOTONE: the same text a second time costs nothing, so a peer that says the
     // same word twice is never throttled for it.

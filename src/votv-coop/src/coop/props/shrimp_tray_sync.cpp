@@ -250,6 +250,8 @@ void RegisterWatches() {
 
 void Settle() {
     if (g_settled) return;
+    // Tick can run before Install has asked for the watches; an empty pending table then says nothing.
+    if (g_regAction == Reg::Pending || g_regHandUse == Reg::Pending || g_regUpd == Reg::Pending) return;
     const bool live = g_regAction == Reg::Registered && g_regHandUse == Reg::Registered &&
                       g_regUpd == Reg::Registered && sg::NameWatchLive(kRowAction, kTagAction) &&
                       sg::NameWatchLive(kRowHandUse, kTagHandUse) && sg::NameWatchLive(kRowUpd, kTagUpd);
