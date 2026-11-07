@@ -49,6 +49,15 @@ without publishing its final record. Mirrored applications and a joining client'
 excluded so records do not echo. `[V]` `.github/ci/prop_record_refresh_drill.py` executes the
 production callback with isolated engine boundaries; two-peer gameplay remains a separate check.
 
+The same lane also watches the in-place switches of lamps and a few appliances, each row read against
+the 0.10.0 bytecode: `upd()` of the floor lamp, desk lamp, wall light, spotlight head and table clock
+(their records carry `active`, or the clock's alarm, ringing and time, and `loadData` ends in `upd()`
+to repaint), `updproperties()` of the second TV (brightness, squeeze and volume; the channel number
+travels but `loadData` never calls `usechannel()`, so a channel change does not re-attach the picture
+on the far peer) and `updlid()` and `addcoal()` of the barbecue (lid and coal count). The mini oven, the
+cooking pad and the wood chipper are not watched: their on / off state is not in the record, so
+republishing it would change nothing.
+
 On the host, a prop born during play -- a device's eject, a drop, a place -- gets its record from
 the finish-spawning drain a tick after the birth, because the Blueprint that spawned it fills its
 state in after the finish call returns: a disc's eject loads it from the slot's JSON there. The
@@ -838,7 +847,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a held prop's knock and break effects | `coop/player/melee_fx_contact`, `coop/player/melee_fx` |
 | a container's damage, break and cues | `coop/props/crate_break`, `coop/props/prop_impact_fx`, `coop/props/prop_damage_gate`, `coop/props/hit_target_prop`, `ue_wrap/actors/physics_impact` |
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
-| a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
+| a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case, the lamps, the table clock, the second TV's settings, the barbecue) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
 | posters, rolled and placed | `coop/items/poster_sync`, `coop/items/poster_mirror` (a client's placed posters), `coop/items/poster_put_ledger`, `ue_wrap/actors/poster`, `coop/props/prop_record_gates` (the rolled form's applier) |
 | a shrimp tray's portions | `coop/props/shrimp_tray_sync`, `ue_wrap/actors/shrimp_tray`, `coop/props/prop_food_state` (the count's carrier) |

@@ -1,5 +1,5 @@
 // coop/props/prop_record_refresh.h -- a prop whose save record changes while it sits in place
-// republishes that record. Two classes today: the drive box (Aprop_box_C, the "data case") and the
+// republishes that record. Two classes first: the drive box (Aprop_box_C, the "data case") and the
 // tape reel case (Aprop_reelbox_C). Overview: docs/props.md.
 //
 // prop_save_data carries a prop's record on every BIRTH path -- a spawn, a drop intent, the join
@@ -9,6 +9,10 @@
 // Taking a lid off spawns it in the presser's hands; putting a drive or reel in destroys the held
 // one and stores it in the record. So a guest's open left every other peer with a closed case,
 // and a reel a guest put in vanished for the host: its destroy crossed, the record did not.
+//
+// The same lane carries the lamps (floor, desk, wall light, spotlight head), the table clock, the
+// second TV's settings (updproperties) and the barbecue's lid and coals; the row list and the
+// classes left out (mini oven, cooking pad, wood chipper) are in the .cpp.
 //
 // The verb watched is each class's own upd(): every mutation ends there and no tick or look-at
 // path calls it. The watch is a script_gate one, not a ProcessEvent observer -- the prop calls its
