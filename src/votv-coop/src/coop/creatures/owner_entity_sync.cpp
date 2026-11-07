@@ -1,6 +1,6 @@
 // coop/creatures/owner_entity_sync.cpp -- see the header for the tier design.
-// Shapes reused: host_spawn_watcher (BeginDeferred POST + param-transform
-// read), roach_sync (lazy resolve + keepalive), npc_mirror (mirror park via
+// Shapes reused: npc_world_enum (the BeginDeferred Func-thunk catch, queue then drain once the spawn has
+// finished), roach_sync (lazy resolve + keepalive), npc_mirror (mirror park via
 // puppet::DisableCharacterTicks), prop_echo_suppress::ScopedMirrorSpawn (the
 // receiver's own spawn call must not re-trigger the owner observer).
 
@@ -21,12 +21,14 @@
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/types.h"
+#include "ue_wrap/core/ufunction_hook.h"
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -65,11 +67,8 @@ int ClassIdOf(void* cls) {
     return -1;
 }
 
-// ---- BeginDeferred seam (own resolve; host_spawn_watcher pattern) ----
+// ---- BeginDeferred seam (own resolve; the Func-thunk catch) ----
 ue_wrap::facts::Resolved g_beginDeferredFn;
-int32_t g_classParamOff   = -1;
-int32_t g_returnParamOff  = -1;
-int32_t g_xformParamOff   = -1;
 bool    g_observerArmed   = false;   // also the permanent give-up latch
 void*   g_k2DestroyFn     = nullptr; // AActor::K2_DestroyActor (mirror teardown)
 
@@ -110,62 +109,82 @@ uint32_t Key(int slot, uint16_t seq) {
 // Inverse of Key's slot half -- used by the W5 receive-side per-sender mirror cap.
 int SlotOfKey(uint32_t key) { return static_cast<int>(key >> 16); }
 
-float YawOfQuat(float qx, float qy, float qz, float qw) {
-    constexpr float kRadToDeg = 57.29577951308232f;
-    return std::atan2(2.f * (qw * qz + qx * qy), 1.f - 2.f * (qy * qy + qz * qz)) * kRadToDeg;
-}
-
 void DestroyMirrorActor(void* actor, int32_t idx) {
     if (!actor || !R::IsLiveByIndex(actor, idx)) return;
     if (!g_k2DestroyFn) return;
     R::CallFunction(actor, g_k2DestroyFn, nullptr);
 }
 
-// The OWNER observer: a member-class actor spawned LOCALLY (native ticker
-// roll or the F1 dev test). Mirror spawns are excluded by the mirror scope.
-// GT-only (actor spawning is GT); engine calls are safe here.
-void OnSpawnPost(void* /*self*/, void* /*function*/, void* params) {
-    if (!GT::IsGameThread()) return;
-    if (!params || g_classParamOff < 0 || g_returnParamOff < 0 || g_xformParamOff < 0) return;
+// A member-class actor seen at the deferred spawn, queued for the next tick: the catch fires before the finish,
+// and the actor's root is placed only when FinishSpawning runs its construction, so its pose is read after.
+struct PendingBirth { void* actor; int32_t idx; uint8_t classId; };
+std::mutex g_pendingMx;
+std::vector<PendingBirth> g_pendingBirths;
+constexpr size_t kMaxPendingBirths = 16;   // eyers are rare singletons; a stalled drain cannot grow this
+
+// The OWNER catch: a member-class actor spawned LOCALLY (native ticker roll or the F1 dev test). Mirror spawns
+// are excluded by the mirror scope. It is a Func-thunk post hook on BeginDeferredActorSpawnFromClass, not a
+// ProcessEvent observer: ticker_eyers and blackFog_C::spawnghost mint the eyer under EX_CallMath, a route the
+// ProcessEvent detour never sees (ue_wrap/core/ufunction_hook.h), and the Func runs for every route. It fires for
+// every deferred spawn of the game, deep inside the engine spawn, so it stays cheap: the session and scope gates,
+// then the spawned actor's class name as two integers per row. It only queues; the game-thread drain reads the pose.
+void OnSpawnPost(void* /*context*/, void* /*sourceObject*/, void* spawned) {
+    if (!spawned) return;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
     if (coop::prop_echo_suppress::InMirrorSpawnScope()) return;  // our own mirror spawn
 
-    void* actorClass = *reinterpret_cast<void**>(
-        reinterpret_cast<uint8_t*>(params) + g_classParamOff);
-    const int classId = ClassIdOf(actorClass);   // two integer compares a row
+    const int classId = ClassIdOf(R::ClassOf(spawned));   // two integer compares a row
     if (classId < 0) return;
-    void* actor = *reinterpret_cast<void**>(
-        reinterpret_cast<uint8_t*>(params) + g_returnParamOff);
-    if (!actor || !R::IsLive(actor)) return;
-    if (g_owned.size() >= kMaxOwned) {
-        UE_LOGW("owner_entity: owned cap %zu hit -- NOT broadcasting this '%ls' spawn",
-                kMaxOwned, kOwnerEntityClasses[classId]);
-        return;
-    }
-    // The actor is NOT positioned at Begin POST -- read the SpawnTransform
-    // param -- ue_wrap::FTransform IS the engine's layout, so the cast is exact.
-    const auto* xt = reinterpret_cast<const ue_wrap::FTransform*>(
-        reinterpret_cast<const uint8_t*>(params) + g_xformParamOff);
-    Owned o{};
-    o.seq = g_nextSeq++;
-    if (g_nextSeq == 0) g_nextSeq = 1;
-    o.classId = static_cast<uint8_t>(classId);
-    o.actor = actor;
-    o.idx = R::InternalIndexOf(actor);
-    o.x = xt->TX; o.y = xt->TY; o.z = xt->TZ;
-    o.yaw = YawOfQuat(xt->RotX, xt->RotY, xt->RotZ, xt->RotW);
-    o.lastAnnounceMs = NowMs();
-    g_owned.push_back(o);
+    const int32_t idx = R::InternalIndexOf(spawned);
+    std::lock_guard<std::mutex> lk(g_pendingMx);
+    if (g_pendingBirths.size() >= kMaxPendingBirths) return;
+    g_pendingBirths.push_back({spawned, idx, static_cast<uint8_t>(classId)});
+}
 
-    coop::net::OwnerEntitySpawnPayload p{};
-    p.seq = o.seq; p.classId = o.classId;
-    p.x = o.x; p.y = o.y; p.z = o.z; p.yaw = o.yaw;
-    if (s->SendReliable(coop::net::ReliableKind::OwnerEntitySpawn, &p, sizeof(p))) {
-        UE_LOGI("owner_entity: OWN '%ls' spawned locally seq=%u at (%.0f,%.0f,%.0f) -- announced",
-                kOwnerEntityClasses[classId], o.seq, o.x, o.y, o.z);
-    } else {
-        UE_LOGW("owner_entity: announce send FAILED for seq=%u (keepalive re-announces)", o.seq);
+// The drain: each queued birth that is still live gets its pose read (the spawn has finished by now), is
+// recorded as owned, and is announced. Game thread.
+void DrainPendingBirths(coop::net::Session* s) {
+    std::vector<PendingBirth> pending;
+    {
+        std::lock_guard<std::mutex> lk(g_pendingMx);
+        if (g_pendingBirths.empty()) return;
+        pending.swap(g_pendingBirths);
+    }
+    for (const PendingBirth& b : pending) {
+        if (!b.actor || !R::IsLiveByIndex(b.actor, b.idx)) continue;   // gone before the drain, or recycled
+        if (g_owned.size() >= kMaxOwned) {
+            UE_LOGW("owner_entity: owned cap %zu hit -- NOT broadcasting this '%ls' spawn",
+                    kMaxOwned, kOwnerEntityClasses[b.classId]);
+            continue;
+        }
+        ue_wrap::FVector loc{};
+        ue_wrap::FRotator rot{};
+        if (!E::TryGetActorLocation(b.actor, loc) || !E::TryGetActorRotation(b.actor, rot)) {
+            UE_LOGW("owner_entity: '%ls' %p pose could not be read -- NOT broadcast",
+                    kOwnerEntityClasses[b.classId], b.actor);
+            continue;
+        }
+        Owned o{};
+        o.seq = g_nextSeq++;
+        if (g_nextSeq == 0) g_nextSeq = 1;
+        o.classId = b.classId;
+        o.actor = b.actor;
+        o.idx = b.idx;
+        o.x = loc.X; o.y = loc.Y; o.z = loc.Z;
+        o.yaw = rot.Yaw;
+        o.lastAnnounceMs = NowMs();
+        g_owned.push_back(o);
+
+        coop::net::OwnerEntitySpawnPayload p{};
+        p.seq = o.seq; p.classId = o.classId;
+        p.x = o.x; p.y = o.y; p.z = o.z; p.yaw = o.yaw;
+        if (s->SendReliable(coop::net::ReliableKind::OwnerEntitySpawn, &p, sizeof(p))) {
+            UE_LOGI("owner_entity: OWN '%ls' spawned locally seq=%u at (%.0f,%.0f,%.0f) -- announced",
+                    kOwnerEntityClasses[b.classId], o.seq, o.x, o.y, o.z);
+        } else {
+            UE_LOGW("owner_entity: announce send FAILED for seq=%u (keepalive re-announces)", o.seq);
+        }
     }
 }
 
@@ -193,14 +212,6 @@ void Install(coop::net::Session* session) {
             g_observerArmed = true;  // give up
             return;
         }
-        g_classParamOff  = R::FindParamOffset(g_beginDeferredFn.Fn(), L"ActorClass");
-        g_returnParamOff = R::FindParamOffset(g_beginDeferredFn.Fn(), L"ReturnValue");
-        g_xformParamOff  = R::FindParamOffset(g_beginDeferredFn.Fn(), L"SpawnTransform");
-        if (g_classParamOff < 0 || g_returnParamOff < 0 || g_xformParamOff < 0) {
-            UE_LOGW("owner_entity: BeginDeferred param offsets missing -- lane disabled");
-            g_observerArmed = true;
-            return;
-        }
     }
     if (!g_k2DestroyFn) {
         void* actorCls = ue_wrap::object_index::ClassByName(P::name::ActorClassName);
@@ -221,20 +232,23 @@ void Install(coop::net::Session* session) {
         }
     }
 
-    if (!GT::RegisterPostObserver(g_beginDeferredFn, &OnSpawnPost)) {
-        UE_LOGE("owner_entity: RegisterPostObserver FAILED (table full?) -- lane disabled");
+    if (!ue_wrap::ufunction_hook::InstallPostHook(g_beginDeferredFn, &OnSpawnPost)) {
+        UE_LOGE("owner_entity: Func-thunk hook install FAILED (hook table full or Func slot unreadable) -- "
+                "lane disabled");
         g_observerArmed = true;
         return;
     }
     g_observerArmed = true;
-    UE_LOGI("owner_entity: armed (%zu member class(es); eyer_C classId=0) -- per-peer owned, "
-            "cross-peer mirrored", kOwnerEntityClassCount);
+    UE_LOGI("owner_entity: armed on the BeginDeferred Func thunk, every route (%zu member class(es); eyer_C "
+            "classId=0) -- per-peer owned, cross-peer mirrored", kOwnerEntityClassCount);
 }
 
 void Tick() {
     if (!GT::IsGameThread()) return;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
+    // Births first, at the pump's own rate: the announce should not wait out the 4 Hz driver below.
+    DrainPendingBirths(s);
     static long long sLastMs = 0;
     const long long now = NowMs();
     if (now - sLastMs < kTickPeriodMs) return;
@@ -453,6 +467,12 @@ void OnDisconnect() {
     }
     g_mirrors.clear();
     g_owned.clear();
+    {
+        // A birth queued in the disconnecting tick must not survive into the next session (a stale address
+        // could recycle into an unrelated live actor).
+        std::lock_guard<std::mutex> lk(g_pendingMx);
+        g_pendingBirths.clear();
+    }
     g_session.store(nullptr, std::memory_order_release);
 }
 

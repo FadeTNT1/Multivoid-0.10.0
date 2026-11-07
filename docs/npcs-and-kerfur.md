@@ -47,7 +47,11 @@ behaviour loop reads the local player. Suppressing them on clients would delete 
 and rolling them on the host would anchor them to the wrong player. So each peer keeps its native
 roll, owns the entity it rolled, and broadcasts it so every other peer renders a display mirror
 (`coop/creatures/owner_entity_sync`). The first member is the night stalker, the eyes that watch
-from the dark.
+from the dark. The eyer is minted by `ticker_eyers_C` and `blackFog_C::spawnghost` under EX_CallMath,
+which the ProcessEvent detour never sees, so the owner catch is a Func-thunk hook on the native
+`BeginDeferredActorSpawnFromClass`, the seam every route runs; the entity's pose is read on the next tick,
+once its spawn has finished. A client's black fog `spawnghost` is refused at the script gate, which sees
+every route, so its eyers are the host's.
 
 ### Which spawners a client refuses
 
@@ -62,11 +66,12 @@ leaving one leaves nothing to restore.
 
 | Spawner | On a client | Why |
 |---|---|---|
-| insomniac, fossilhound | tick refused | the host mirrors the product |
+| insomniac, fossilhound | tick refused | the host mirrors the product: both tickers are rows of the source-gated catch (the insomniac's child form is a subclass of `insomniac_C`, so the allowlist takes it), and so is the war event's `event_fossilboarwar_C`, whose BeginPlay throws up to 32 hounds (the host's midnight rollover mints it; a client never runs a rollover). A mirror's brain is parked only for the hound; the insomniac, Funguy and killer wisp mirrors still run their own BeginPlay, a known gap (below) |
+| yellow wisp spawner | tick refused | anchors on a random navmesh point; the product (a killer wisp) is host-mirrored through the source-gated catch |
+| the night Funguy | `mainGamemode_C::tickerFunguy` refused | a looping timer on the gamemode that rolls a Funguy at a random absolute map point; the host's mirrors through a second gamemode row of the catch, scoped to `npc_funguy_C` |
 | cockroach master and summoner | tick, summon and timers refused | its tick also drains and destroys shared food props; `coop/creatures/roach_sync` drives the client's population |
 | shrimp eater | `eat` refused | its timer rolls reputation and RNG against the local player's distance and swaps a shrimp for a `shrimp_e` prop; the host's swap crosses as the ordinary prop birth and destroy |
 | mushroom master and spawner | spawn refused | they spawn at their own world transform |
-| yellow wisp spawner | tick refused | anchors on a random navmesh point; the product is host-mirrored |
 | sky wisp spawner | tick refused | absolute map coordinates, not player-anchored |
 | night egg spawner | tick refused | a weighted night roll mints one egg at random absolute map coordinates; the host's egg mirrors through the source-gated catch |
 | jellyfish path | spawn refused | its seven fish are made inside its graph; the host's run is mirrored through the source-gated catch |
@@ -195,6 +200,7 @@ wisp in flight is transient and owes nothing.
 |---|---|
 | The Omega's take-object, pat, equipment, kill and sit-on-the-ATV verbs are not synced | `[V]` `coop/creatures/kerfur_command`, the verb table |
 | The Omega's floppy state is not synced, so a relayed get-reports diverges on its result; its accessories and carried object likewise | `[V]` no lane under `coop/creatures` carries them |
+| The insomniac, Funguy and killer wisp mirrors are not brain-parked: only the zombie family, the hound and the Octa are (`coop/creatures/npc_mirror_brain_table`), so a mirror of the others runs its own BeginPlay on the client (the insomniac's own walk toward the client's player and its distance self-destroy, the Funguy's own AI), over a pose-driven body with its movement tick off. The host's natural births of all three now reach clients | `[V]` the table's class list; the births' crossing and the mirrors' looks are `[?]` until a session shows them |
 | Only one stalker class is owned per peer so far | `[V]` `coop/creatures/owner_entity_sync`, the member table |
 | The conversion is detected by a poll, five times a second, not at the verb | `[V]` `coop/creatures/kerfur_convert`; the lane reads the result rather than the call, because a peer's own conversion has already happened by the time any watch of ours runs |
 | Nine ambient spawner families are neither mirrored nor refused, so each peer grows its own deer, hexahives, walking trees and the rest | `[V]` they appear in no lane under `coop/creatures` and in no row of `coop/world/spawn_authority` |

@@ -72,8 +72,11 @@ fades its copy out when the host's is gone; a joiner gets it in the seed `[RD]`.
 stalkers it mints every 40 seconds at full darkness, are the host's: a client's copy is refused
 its own, and the host's reach clients on the owner-entity mirror as parked display copies `[RD]`.
 A lightning
-strike is a transient actor; the host observes its spawn and sends the location
-(`coop/world/weather_lightning`). The red sky is a story event actor that the clock's hour pulse
+strike is a transient actor; the host catches its spawn and sends the location
+(`coop/world/weather_lightning`). The natural strike is minted by the height analyzer's graph under
+EX_CallMath, which the ProcessEvent detour never sees, so the catch is a hook on the native
+`BeginDeferredActorSpawnFromClass` itself (the same Func-thunk seam as the creature catch), which every
+route to it runs; the strike's location is read on the next pump tick, once its spawn has finished `[V]`. The red sky is a story event actor that the clock's hour pulse
 toggles at noon on every peer -- a living one ends, else a one-percent roll starts one --
 dispatched inside the Blueprint, where the script-body gate still sees the toggle: the host sends
 its red sky as each toggle leaves it, and a client refuses its own and runs the host's through

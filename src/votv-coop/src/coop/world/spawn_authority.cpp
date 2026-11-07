@@ -73,6 +73,7 @@ UE_FACT_FN(kRowReceiveTickTentacleBallsFollower, "spawn_authority", L"tentacleBa
 UE_FACT_FN(kRowReceiveBeginPlaySuperEgger, "spawn_authority", L"superEgger_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowSpwnSuperEgger, "spawn_authority", L"superEgger_C", L"spwn", Declared);
 UE_FACT_FN(kRowCustomEvent5Gamemode, "spawn_authority", L"mainGamemode_C", L"CustomEvent_5", Declared);
+UE_FACT_FN(kRowTickerFunguyGamemode, "spawn_authority", L"mainGamemode_C", L"tickerFunguy", Declared);
 // The 0.10.0 UFO encounters (untitled_1): the bodies the controllers' and the ships' ubergraphs own.
 UE_FACT_FN(kRowStartEventKnobController, "spawn_authority", L"ufo_knob_controller_C", L"startEvent", Declared);
 UE_FACT_FN(kRowStopEventKnobController, "spawn_authority", L"ufo_knob_controller_C", L"stopEvent", Declared);
@@ -208,6 +209,11 @@ constexpr Row kRows[] = {
     // 120-300 s timer), so a client's timer simply ends here. The host rolls and the source-gated catch mirrors the
     // Octa and the egg; the level-placed egg roller is already a row above.
     {&kRowCustomEvent5Gamemode,           "gamemode.CustomEvent_5"},
+    // mainGamemode_C::tickerFunguy: the night Funguy's looping timer. It rolls (a 3 % chance in the night hours and
+    // the moon phase) a Funguy at a random absolute map point, ground-tested for gravel, dirt or grass, and re-arms
+    // itself (ubergraph @50), so a client's timer ends here. The host rolls and the source-gated catch mirrors the
+    // Funguy (npc_world_enum); without the refusal a client's own Funguy would be a second, unsynced one.
+    {&kRowTickerFunguyGamemode,           "gamemode.tickerFunguy"},
 
     // The 0.10.0 UFO encounters. The knob controller starts its flock 0.2 s after its BeginPlay and
     // re-rolls it from its tick; the UK controller starts 5 s after BeginPlay when beginSpawn is set,
