@@ -1837,6 +1837,9 @@ static_assert(sizeof(VoiceStatePayload) == 4, "VoiceStatePayload must be 4 bytes
 // carries the commit-time transform the receiver pre-poses to before replaying the component's own
 // forceStick; an unstick carries the prop's transform and velocity once the unsticking peer's body
 // freed it, which a pry's kick is part of, and the receiver lets its copy go from there.
+// A glowstick (coop/props/glowstick_hang_sync) rides the same message without the component: flags bit 2 (4) is a
+// hang on world geometry, with linVel carrying the hook point; flags 0 is its release, with the velocities the
+// unstick carries. A peer that does not know the bit drops the message, so the layout and the version are unchanged.
 struct PropStickStatePayload {
     WireKey  key;
     uint32_t elementId;

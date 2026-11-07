@@ -18,6 +18,7 @@
 #include "coop/interactables/surface_clean_sync.h"
 #include "coop/interactables/toggle_verbs.h"
 #include "coop/interactables/tool_action.h"
+#include "coop/props/glowstick_hang_sync.h"
 #include "coop/items/point_sack_intent.h"
 #include "coop/items/poster_sync.h"
 #include "coop/net/session.h"
@@ -86,6 +87,7 @@ void ConnectReplayForSlot(int slot) {
     coop::basement_pipe_sync::OnPeerWorldReady(slot);  // HOST: every pipe's burst flag to the joiner
     coop::basement_flood_sync::OnPeerWorldReady(slot);  // HOST: the basement's water level to the joiner
     coop::tool_action::ConnectReplayForSlot(slot);  // HOST: every stuck crowbar and running cut to the joiner
+    coop::glowstick_hang_sync::ConnectReplayForSlot(slot);  // HOST: every glowstick hung on the ceiling or a wall to the joiner
 }
 
 void OnDisconnect() {

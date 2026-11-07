@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace coop::net {
 class Session;
@@ -71,6 +72,11 @@ bool IsWallAttachable(void* actor);
 // the component's `holding`, which nobody here has set on the copy. Not mirrored back. False when the
 // unstick half is not installed or the component does not resolve. Game thread.
 bool ReplayUnstick(void* actor);
+
+// The prop's key (else its element id) and its actor pose into a stick message, for a lane that rides the message
+// without the component (coop/props/glowstick_hang_sync). False when the prop has neither identity or its pose is
+// unreadable; `keyW` is the key read. Game thread.
+bool FillStickIdentityAndPose(coop::net::PropStickStatePayload& p, void* prop, std::wstring& keyW);
 
 // Clear per-session state (the pending stick and unstick records). Net disconnect.
 void OnDisconnect();

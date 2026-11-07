@@ -1334,6 +1334,22 @@ inline constexpr const wchar_t* PropVentHangingKey                   = L"ventHan
 // frozen true, active false, sleep false) on it).
 inline constexpr const wchar_t* VentCrawlerVentProp                  = L"vent";
 
+// prop_glowstick_C (0.10.0), the glowstick and its coloured subclasses. It does not carry comp_wallAttachable: it
+// hangs through its own members. While held its tick traces forward (`ray`); on a hit `stickto(hit, false)` sets
+// `sticked`, `loc` (the impact point), `stickstatic` (the hit component does not simulate), `stickcomp`, moves the
+// `hook` scene component to `loc`, and runs `hookdelay`, whose body (after a zero delay) constrains `hook` to the
+// stick's mesh through the `physicsconstraint` component and sets the constraint frames (`setframe`). It sets
+// neither the base prop's frozen nor its Static. `releaseglowstick` breaks the constraint and clears `sticked`; every
+// grab verb of the stick runs it first. Members are read from the pak's bytecode.
+inline constexpr const wchar_t* GlowstickClass                       = L"prop_glowstick_C";
+inline constexpr const wchar_t* GlowstickStickedProp                 = L"sticked";
+inline constexpr const wchar_t* GlowstickStickStaticProp             = L"stickstatic";
+inline constexpr const wchar_t* GlowstickLocProp                     = L"loc";
+inline constexpr const wchar_t* GlowstickHookProp                    = L"hook";
+inline constexpr const wchar_t* GlowstickStickToFn                   = L"stickto";
+inline constexpr const wchar_t* GlowstickHookDelayFn                 = L"hookdelay";
+inline constexpr const wchar_t* GlowstickReleaseFn                   = L"releaseglowstick";
+
 // AoutsideChurch_C (0.10.0): the level-placed Stolas church. Its state is four save fields
 // (getData's mbool [broken, angry, striked] and mint [harvests]); updBroken and updEyes are the
 // presentation refreshes loadData runs after writing them (coop/world/church_sync).

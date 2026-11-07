@@ -20,6 +20,7 @@
 #include "coop/props/prop_park.h"  // Park / Unpark: a held prop, and a Character welded on it
 #include "coop/props/prop_element_tracker.h"
 #include "coop/props/prop_key_index.h"  // a key on the wire to a live actor
+#include "coop/props/glowstick_hang_sync.h"  // a hung glowstick released by a peer's grab
 #include "coop/props/prop_stick_sync.h"  // the stuck wall-attachable gates
 #include "coop/props/prop_wire_parity.h"  // ConvergeStaticRelease, FrozenSleepBitsOf: a host hold frees a Static copy
 #include "coop/net/protocol.h"            // propspawn_flags
@@ -259,6 +260,8 @@ void ResolveAndStartDrive(int slot, const coop::net::PropPoseSnapshot& pose) {
                                                                   : nullptr;
             const bool ok = attachable ? coop::prop_stick_sync::ReplayUnstick(prop)
                                        : ue_wrap::prop::CallBaseGrabPrelude(prop);
+            // The glowstick's own grab verbs release its hang first, which the base prelude above does not run.
+            if (!attachable) coop::glowstick_hang_sync::ReplayRelease(prop);
             if (!ok) {
                 UE_LOGW("remote_prop: slot %d key '%ls' hold %u -- the grab's own prelude did not run here; the "
                         "copy keeps its flags and its lifespan", slot, keyW.c_str(),

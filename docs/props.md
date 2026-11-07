@@ -328,6 +328,31 @@ since a crowbar's pry frees a pryable sign with nobody holding it: the script ga
 component's unstick on every route, the unsticking peer broadcasts the prop's pose and velocity, and
 a receiver runs the same unstick with the tool and lets its copy go.
 
+### A glowstick hung on the ceiling
+
+A glowstick (`prop_glowstick_C` and its coloured subclasses) does not stick through the wall-attach component. While it
+is held its own tick traces forward; on a hit `stickto` sets `sticked`, `stickstatic` (the hit component does not
+simulate) and `loc` (the impact point), moves its `hook` component there and runs `hookdelay`, which binds a physics
+constraint between the hook and the stick's mesh. It sets neither the base prop's frozen nor its Static, and the stick
+keeps simulating on the constraint. `prop_stick_sync` watches the component, so it never saw this: the sticking peer saw
+the stick hang and every other peer's copy took the sticker's release as a drop and fell to the floor (the host log
+read `HOST release eid=3317 -> (-459.2,2348.1,6049.1)`, the ceiling, then the copy at rest at z=5752).
+
+`coop/props/glowstick_hang_sync` rides the stick message (`PropStickState`) without the component. A script-gate watch on
+`stickto` (post) and `releaseglowstick` (pre) records the edge, and the next pump pass, before the hold's release edge,
+broadcasts: flags bit 2 for a hang, with the hook point in the message's `linVel`; flags 0 for the release, with the
+pose and velocities as the component's unstick sends them. A receiver closes the sender's hold, stops any drive on the
+copy, poses and simulates it, and replays the tail of `stickto` on its own copy: the members, the hook at the impact
+point, the stick's own `hookdelay`. A release runs the stick's own `releaseglowstick` and lets the copy go from the
+sender's pose. A peer's grab of a stick hung here releases it too (the stick's grab verbs run `releaseglowstick` first,
+the base prelude the hold replays does not). A joiner is sent every hung stick at its ready edge, after the snapshot's
+end. The version is unchanged: a peer that does not know the bit drops the message as one for a prop with no component.
+`[V]` the `prop_glowstick_C` bytecode in the fingerprint capture (`stickto`, `hookdelay`, `releaseglowstick`,
+`receivetick`, `getData`). `[?]` all of it in play: the constraint holding a copy the host's motion scan and a thrower's
+rows have also moved, and whether the game restores a hung stick from a save (`loadData` writes the members only; the
+constraint is rebuilt by `processkeys`, when a player looks at the stick, in the bytecode). A stick on a prop that
+simulates (`stickstatic` false) needs the hit component and is not mirrored; the sender logs it once.
+
 ### A client's take of a shared prop
 
 On 0.10.0 one verb takes a prop into an inventory: `mainPlayer_C::addObjectToInventory(object, out success)`, which

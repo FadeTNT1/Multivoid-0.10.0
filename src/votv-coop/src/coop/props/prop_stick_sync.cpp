@@ -8,6 +8,7 @@
 #include "coop/net/session.h"
 #include "coop/player/local_streams.h"  // CurrentHoldGen, the hold a stick ends
 #include "coop/props/bracket_position_wait.h"  // KeepIfWaiting: a stick for a spawn that waits for the bracket's end
+#include "coop/props/glowstick_hang_sync.h"  // a glowstick's hang rides this message; its lane takes it first
 #include "coop/props/prop_drive_host.h"  // OverrideClientSyncer: a replay that writes the copy ends a client's row on it
 #include "coop/props/prop_element_tracker.h"
 #include "coop/props/prop_key_index.h"  // a key on the wire to a live actor
@@ -494,6 +495,8 @@ void OnStickState(const coop::net::PropStickStatePayload& payload, uint8_t sende
                 unstick ? "UNSTICK" : "STICK", keyW.c_str(), payload.elementId, senderPeerSlot);
         return;
     }
+    // A glowstick hangs through its own members, not the component: its lane takes the message whole.
+    if (coop::glowstick_hang_sync::OnStickState(payload, prop, keyW, senderPeerSlot)) return;
     void* comp = WallAttachCompOf(prop);  // the component, checked against the index's class
     if (!comp) {
         UE_LOGW("prop_stick_sync: %s target %p carries no wall-attach component -- dropped",
@@ -573,6 +576,10 @@ void ConvergeStuck(void* actor, uint8_t physFlags) {
     if (ReplayStick(actor, comp, flags, keyW))
         UE_LOGI("prop_stick_sync: join converge key='%ls' -- free here, stuck on the host: the component's "
                 "forceStick ran at the host's pose", keyW.c_str());
+}
+
+bool FillStickIdentityAndPose(coop::net::PropStickStatePayload& p, void* prop, std::wstring& keyW) {
+    return FillIdentityAndPose(p, prop, keyW) == Fill::Ok;
 }
 
 bool IsWallAttachable(void* actor) {
