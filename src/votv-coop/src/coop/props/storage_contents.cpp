@@ -78,11 +78,26 @@ uint64_t HashRows(const std::vector<SI::Row>& rows) {
     return h;
 }
 
+// A sleeper's loot crate is also a registered prop on the host (its eid is the one a client's mirror carries), so a
+// client can open it by either name: its own crate as "sleeper N", or the host's mirror as "prop eid". Both must hear
+// every revision, or a client bound to the other name keeps a stale view and asks for items already moved. The second
+// address of a sleeper's crate; false for any other storage.
+bool PropAddressOfSleeperCrate(void* comp, const W::Address& primary, W::Address& out) {
+    if (primary.kind != W::AddressKind::Sleeper) return false;
+    void* const owner = SI::OwnerOf(comp);
+    const auto eid = owner ? coop::element::Registry::Get().EidForActor(owner) : coop::element::kInvalidId;
+    if (eid == coop::element::kInvalidId || coop::element::LivePropActor(eid) != owner) return false;
+    out = W::Address{W::AddressKind::Prop, static_cast<uint32_t>(eid)};
+    return true;
+}
+
 // The host's watches: every change of a storage's rows ends in one of these two bodies.
 void MarkComponent(void* comp) {
     if (!IsHost() || !SI::IsWorldStorage(comp)) return;
-    W::Address a;
-    if (AddressOf(comp, a)) g_dirty.insert(a);
+    W::Address a, alt;
+    if (!AddressOf(comp, a)) return;
+    g_dirty.insert(a);
+    if (PropAddressOfSleeperCrate(comp, a, alt)) g_dirty.insert(alt);
 }
 
 void OnCalculatePost(const SG::Call& c) { MarkComponent(c.object); }
@@ -306,6 +321,21 @@ void Resync(const W::Address& a) {
     if (!IsHost()) return;
     g_sent[a].known = false;   // the next publish reads it as changed: a new revision, to every world-ready peer
     g_dirty.insert(a);
+    // A sleeper's crate answers to its prop name as well (see PropAddressOfSleeperCrate): resend under that one too.
+    void* const comp = Resolve(a);
+    W::Address alt;
+    if (comp && PropAddressOfSleeperCrate(comp, a, alt)) {
+        g_sent[alt].known = false;
+        g_dirty.insert(alt);
+    }
+    // A request made under the prop name of a sleeper's crate: the sleeper name needs the same resend.
+    if (comp && a.kind == W::AddressKind::Prop) {
+        W::Address primary;
+        if (AddressOf(comp, primary) && primary.kind == W::AddressKind::Sleeper) {
+            g_sent[primary].known = false;
+            g_dirty.insert(primary);
+        }
+    }
 }
 
 bool AddressOf(void* component, W::Address& out) {
