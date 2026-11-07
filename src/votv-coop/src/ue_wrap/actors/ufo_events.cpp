@@ -122,6 +122,8 @@ bool FrameAt(void* travel, float t, Frame& out) {
     return true;
 }
 
+struct Vec2 { float x = 0.f, y = 0.f; };   // an FVector2D
+
 struct Course {
     void*   travel = nullptr;
     void*   fly = nullptr;
@@ -133,14 +135,14 @@ struct Course {
 bool ResolveCourse(void* actor, Course& c) {
     c.travel = ObjectMember(actor, P::name::UfoBoofoTravelSplineProp);
     c.fly = ObjectMember(actor, P::name::UfoBoofoFlySplineProp);
-    float squish[2] = {};
+    Vec2 squish;
     int32_t n = 0;
     const bool ok = c.travel && c.fly && ValueMember(actor, P::name::UfoBoofoSplinePointsProp, n) &&
                     ValueMember(actor, P::name::UfoBoofoRadiusProp, c.radius) &&
                     ValueMember(actor, P::name::UfoBoofoSquishProp, squish);
     c.splinePoints = n;
-    c.sx = squish[0];
-    c.sy = squish[1];
+    c.sx = squish.x;
+    c.sy = squish.y;
     if (!ok || n < 1 || !std::isfinite(c.radius) || !std::isfinite(c.sx) || !std::isfinite(c.sy)) {
         static bool s_said = false;
         if (!s_said) {
