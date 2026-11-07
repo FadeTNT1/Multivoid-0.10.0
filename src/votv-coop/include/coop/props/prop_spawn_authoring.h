@@ -1,6 +1,6 @@
 // coop/props/prop_spawn_authoring.h -- did a PLAYER author this prop birth, or did the game?
 //
-// A client's world mints keyed props constantly with nobody asking: spawners, a dirthole, a
+// A client's world mints keyed props constantly with nobody asking: spawners, a loot mound, a
 // lightning strike, an impact, lib_C::replaceProp. Each resolves the same catalog and finishes the
 // same GameplayStatics spawn the sandbox spawn menu does, and none may cross -- every peer's game
 // makes its own, so an intent per birth would double the world. So the drop-intent lane cannot

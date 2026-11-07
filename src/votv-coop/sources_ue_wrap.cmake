@@ -203,6 +203,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/prop_use.cpp
     src/ue_wrap/actors/prop_fire.cpp
     src/ue_wrap/actors/poster.cpp
+    src/ue_wrap/actors/dirt.cpp
     src/ue_wrap/actors/event_scenes.cpp
     src/ue_wrap/actors/garbage_bag.cpp
     src/ue_wrap/actors/vitals.cpp

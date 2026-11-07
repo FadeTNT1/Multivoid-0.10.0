@@ -33,6 +33,7 @@
 #include "coop/interactables/window_stroke_sync.h"
 #include "coop/interactables/surface_clean_sync.h"
 #include "coop/interactables/window_sync.h"
+#include "coop/props/dig_sync.h"
 #include "coop/player/sleepers.h"
 
 #include "ue_wrap/core/log.h"
@@ -543,6 +544,32 @@ bool HandleStateEvent(net::Session& session,
         net::BlobChunkPayload sp{};
         std::memcpy(&sp, msg.payload, sizeof(sp));
         coop::sleepers::OnStateChunk(sp, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::DigIntent: {
+        // CLIENT->HOST: a dig, burial or fill (coop::dig_sync). Client-authored only (client_authorship.h); the module
+        // takes it only on the host, from a client slot. Never relayed.
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
+            UE_LOGW("event_feed: DigIntent payload too short (%zu < %zu)", static_cast<size_t>(msg.payloadLen),
+                    sizeof(net::BlobChunkPayload));
+            break;
+        }
+        net::BlobChunkPayload dp{};
+        std::memcpy(&dp, msg.payload, sizeof(dp));
+        coop::dig_sync::OnIntentChunk(dp, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::DigState: {
+        // HOST->ALL: a hole, mound or plant stands or is gone, or the answer to a DigIntent (coop::dig_sync).
+        // Host-authored only (client_authorship.h); the module takes it only from slot 0 on a client.
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
+            UE_LOGW("event_feed: DigState payload too short (%zu < %zu)", static_cast<size_t>(msg.payloadLen),
+                    sizeof(net::BlobChunkPayload));
+            break;
+        }
+        net::BlobChunkPayload ds{};
+        std::memcpy(&ds, msg.payload, sizeof(ds));
+        coop::dig_sync::OnStateChunk(ds, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::InventoryRestoreAck: {

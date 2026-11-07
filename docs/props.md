@@ -528,6 +528,49 @@ warning. `[V]` `putDriveIn`, `getData`, `loadData` and `upd` of `prop_box_C` in 
 occupied and empty slots, stale rows and every refusal through the production record wire; `[?]` the
 sale of a client-filled box on the host in play.
 
+### Holes and buried items
+
+A player's shovel digs a hole, a held item used on a hole buries it, and a held seed used on a hole plants it. Three
+actors carry it, none named by the prop lane: the hole (`dirthole_C`, a `prop_C` whose key getter answers None, so no
+birth message can name it), the mound a buried item sits in (`dirthole_item_C`, an `actor_save_C`; `betterData`, a
+`struct_betterSave`, is the item's whole save record) and the plant a seed becomes (`growingPlant_C`). `[RD]` the
+decoded bodies of `prop_shovel_C::event_dighole`, `dirthole_C::playerUsedOn`, `::processBuriedItem` and
+`::ReceiveBeginPlay`, and `dirthole_item_C::buryItem` and `::pullout`. Before this lane a hole dug on a client stood on
+that client alone, and an item it buried was destroyed on the host by the ordinary destroy seam and never came back:
+the mound lived on the burying peer only, so the host's next save lost the item.
+
+**Doctrine, narrowed.** The underground loot mounds (`ticker_susHoleSpawner`, a `dirthole_item_C` with an `object` or a
+`name` and no buried class) stay per-peer, as `coop/interactables/garbage_sync` records. A hole or a mound a *player*
+makes is the host's and shared. A mound is a player's burial when its `betterData` names a class.
+
+The host names each hole, burial mound and plant with a number it mints (`coop/props/dig_sync`), publishes `DigState`
+on a census once a second and on every change, and sends `DigState` op 4 when one is gone: a filled or spent hole, a
+dug-up mound, a harvested plant. A hole's new `ReceiveBeginPlay` digs the mound under it up (`pullout`: the item is
+spawned from the record and the mound destroyed), so a dig-up is the host's dig; the item comes back by the prop lane
+as any host-born prop does `[?]`.
+
+A client's verbs are intents the host runs on its own copies (`DigIntent`, `coop/props/dig_wire`):
+
+- **Dig.** The client's shovel still runs `event_dighole` (crater, sound, animation). The hole it spawns is read at its
+  `ReceiveBeginPlay`, which is refused, and destroyed on the next tick; the intent carries the class, transform and
+  `matType`. The host checks that the sender lives and the place is in reach, spawns the hole and names it, and the
+  hole reaches every peer, the digger included, a round trip later.
+- **Bury or plant.** The hole's `playerUsedOn` is refused on a client (after `filterItems`, so "Cannot bury this item"
+  stays the game's own). The intent carries the hole's place, the held item's class and its record, read through the
+  item's own `betterGetData` and the record codec (`ue_wrap/actors/inventory_item_codec`). The host finds the hole it
+  has at that place, rebuilds the item from the record as a mirror spawn no peer is told of, runs the hole's own
+  `processBuriedItem` (a seed plants, a plush rises, anything else is buried) and spends the hole as the game's tail
+  does. The mound or plant it made is named and published. The answer is `DigState` op 6; a grant makes the client
+  spend the item it held.
+- **Fill.** A dirt ball used on a hole is the same shape (the hole and the ball are spent). A ball thrown in is the
+  host's physics: the hole's box overlap is refused on a client, and the ball the shovel throws crosses as a player's
+  own spawn (`coop/props/prop_spawn_authoring` admits the shovel's ubergraph).
+
+A receiver adopts the native actor of the row's class within a few centimetres of its place, else spawns one with the
+game's own spawn and a deferred window (the hole's `matType`, the mound's `betterData`, the plant's `plant` and its
+own `upd(false)`), marked a mirror so no seam answers it. A mirror hole's `ReceiveBeginPlay` and fill overlap are
+refused, so a client never digs up or fills what the host owns.
+
 ### Notebook
 
 A notebook's pages are `text` on the prop, which its own `getData` and `loadData` save, so the
@@ -776,6 +819,7 @@ two-peer run reads the `[POSTER]` lines.
 | a world food's temperature, freshness, bites and cooking | the host | its tick runs on the host alone; `FoodState` on a step or an edge; a client's partial bite is an intent |
 | notebook editor occupancy | the host arbitrates | a claim keyed by the owning prop |
 | a placed poster: existence, transform and look | the host | `PosterState` on a change; a client's put, take-down and picture are intents |
+| a player-dug hole, a buried item's mound and a planted seed | the host | `DigState` on the census and every change; a client's dig, burial, planting and fill are `DigIntent`s. Loot mounds are per-peer |
 | notebook page text | the editing peer; the host takes it from the claim's holder, or from anyone while it is free | the notebook's own save record on the record lane, at the editor's commit and at the close |
 | a client's shared-world spawners | the host | refused on a client at the script-body gate; shared-world content arrives only from the host |
 
@@ -802,6 +846,8 @@ two-peer run reads the `[POSTER]` lines.
 | `FoodBiteIntent` | a client to the host | a bite of a shared food that did not finish it, with the bites left |
 | `ShrimpDispenseIntent` | a client to the host | a press on a shared shrimp tray, by key: its action 4 or its hand use |
 | `PosterIntent` | a client to the host | a put of a held rolled poster (a request id, its look, and the placement its aim made, scale included) or the give-back of one, a take-down or a custom picture of a placed one (its key, the picked file name) |
+| `DigIntent` | a client to the host | a dig (class, transform, material), a burial or planting (the hole's place, the held item's class and its encoded save record) or a fill, by request id; chunked |
+| `DigState` | the host to all; to one client | a hole, a burial mound (with the item's record) or a plant stands, one is gone, a joiner's snapshot ended, or a `DigIntent` was granted or refused (to the asking client); chunked |
 | `PosterState` | the host to all; to one client | a placed poster stands (key, class, transform, type, index, file name, custom), is gone (key), or a joiner's snapshot ended; to the asking client alone, a put accepted (with the placed poster's key) or refused, by request id |
 
 ## Late join
@@ -822,7 +868,8 @@ the host re-sends every driven prop's pose, the resting ones included, which the
 otherwise never send. An end edge that reaches a joiner before the prop it names is kept until the
 prop resolves. A placed poster arrives with the save under its key; at the ready edge the host sends
 every placed poster's state and an end marker, and the joiner destroys a placed poster the marker
-finds unnamed, one removed between the save and the ready edge. A container's damage needs no seed: its health is the host's alone, a broken container reaches a joiner
+finds unnamed, one removed between the save and the ready edge. A player-dug hole, a burial mound and a planted seed arrive with the save; at the ready edge the host sends every named
+row and an end marker, and the joiner adopts its own native actor at each row's place or spawns one. A container's damage needs no seed: its health is the host's alone, a broken container reaches a joiner
 as its absence and its spill as the host's props, and a cue is a one-shot with no replay.
 
 ## Known limits
@@ -844,6 +891,9 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | A prop parked under the host's drive cannot be grabbed on a client while the drag lasts: the park turns the body kinematic and the game's grab needs a simulating one. It is grabbable again after the end edge | `[V]` `coop/props/prop_drive_stream` parks by switching the mesh's simulation off (`ue_wrap/engine/engine_physics`); `coop/props/prop_wire_parity` records why a kinematic mirror is ungrabbable |
 | A container's break is read, not measured: that `prop_C.addDamage` on a container reaches its component's `impactDamage` with the puppet as damager, that the actor a client's impact names is the thrown prop, which of the container's bodies spills, and that the material's break cues are named `sound_damaged` and `sound_destroyed` are taken from the pak's name maps. A container a client throws breaks only when it strikes something the contact intent names; fire never breaks a container a client holds | `[RD]` the pak's name maps of `comp_physicsImpact`, `prop_container` and `physSnd_wood_crate`; `[?]` until a two-peer run reads the `[CRATE]` lines |
 | A placed poster a client takes down lands at that client's feet as a rolled poster on the floor instead of in its hand: the host spawns it at the sender's puppet, and a puppet's pickup is no hand on the client | `[RD]` `coop/items/poster_sync` spawns the rolled form without `pickupObjectDirect` |
+| A client sees its own dig a round trip late: the hole its shovel spawns is destroyed and the host's replaces it. A hole dug into a prop or a moving surface is not attached on a client (the attach is in the refused `ReceiveBeginPlay`) | `[RD]` `coop/props/dig_sync` refuses the mirror hole's begin-play; `[?]` until a two-peer run reads the `[DIG]` lines |
+| A planted seed's birth and removal cross, but its growth is each peer's own clock after the birth, and a plant is not re-read after the row | `[?]` `coop/props/dig_sync` sends the plant's class, row name and place only |
+| A buried mound a client's world has natively (its save) is adopted at the host's row; one the host dug up between the capture and the ready edge stays on the joiner as an unseen record, since the joiner cannot tell it from a level-placed mound | `[RD]` `coop/props/dig_sync` sends no removal for a row it never named |
 | A custom poster's image does not cross: a peer without the file in its own posters folder sees the preset picture | `[RD]` `ue_wrap/actors/poster` Redraw's fallback |
 | A pose can arrive milliseconds before the spawn that names its prop; that is a race, not a defect, and a ledger tells the two apart instead of warning per packet | `[V]` `coop/props/unresolved_pose_ledger` |
 
@@ -866,6 +916,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
 | posters, rolled and placed | `coop/items/poster_sync`, `coop/items/poster_mirror` (a client's placed posters), `coop/items/poster_put_ledger`, `ue_wrap/actors/poster`, `coop/props/prop_record_gates` (the rolled form's applier) |
+| holes, buried items and planted seeds | `coop/props/dig_sync`, `coop/props/dig_wire`, `ue_wrap/actors/dirt`, `ue_wrap/actors/inventory_item_codec` (the record), `coop/props/prop_spawn_authoring` (the thrown dirt) |
 | a shrimp tray's portions | `coop/props/shrimp_tray_sync`, `ue_wrap/actors/shrimp_tray`, `coop/props/prop_food_state` (the count's carrier) |
 | the drive box's signal rows | `ue_wrap/actors/drive_bank` (the live arrays), `ue_wrap/actors/drive_bank_rows.h` (pack, judge, plan), `ue_wrap/actors/save_record` (the hooks), `coop/items/save_record_wire` (the sidecar) |
 | notebook sync | `coop/interactables/notebook_sync`, `coop/props/prop_save_data`, `ue_wrap/actors/notebook` |
