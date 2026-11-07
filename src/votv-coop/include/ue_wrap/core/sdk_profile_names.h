@@ -84,6 +84,34 @@ inline constexpr const wchar_t* GamemodeSaveSlotPropLegacy = L"saveSlot";
 // mainGamemode_C::car: the world's ATV, the one the atvExplode special sets `trap` on.
 inline constexpr const wchar_t* GamemodeCarProp            = L"car";
 
+// ATV_C's battery and drive-gate fields. The ATV's own receiveTick ORs five terms before it applies wheel torque:
+// `battery` <= 0 (the inserted battery's charge, 0..100; -1 with none in), `empty` (set by runOut when fuel reaches 0,
+// cleared by fuelUp and by loadData), `Brake`, `brokenn` (set by runOut when health reaches 0, cleared by toolboxFix and
+// by loadData) and `underwater`; the driver's throttle is `input_forward` / `input_back`. updBattery re-derives the
+// battery's visuals (the back lights and `upd lights`).
+inline constexpr const wchar_t* AtvBatteryProp      = L"battery";
+inline constexpr const wchar_t* AtvEmptyLatchProp   = L"empty";
+inline constexpr const wchar_t* AtvBrokenLatchProp  = L"brokenn";
+inline constexpr const wchar_t* AtvUnderwaterProp   = L"underwater";
+inline constexpr const wchar_t* AtvInputForwardProp = L"input_forward";
+inline constexpr const wchar_t* AtvInputBackProp    = L"input_back";
+inline constexpr const wchar_t* AtvUpdBatteryFn     = L"updBattery";
+// ATV_C's repair look and its unscrew. lookAt writes the part the player looks at: `lookAtTire` (a fitted wheel,
+// -1 none), `lookAtTireSocket` (an empty wheel socket, -1 none), `lookAtSpareTireBox`, `lookAtContainer` (the
+// storage), and playerUsedOn keeps the wheel in hand as `playersWheel`. unscrewPanel(spawnAt) is the finished unscrew:
+// a fitted wheel comes off as a prop_atvWheel_C, an empty socket takes `playersWheel` (putTire), and with neither the
+// battery comes out as a prop_atvcarbattery_C carrying its charge; getUnscrewSpawn() names the component it spawns at,
+// from lookAtTire alone; resetUnscrew() ends the unscrew's widget, timer and look.
+inline constexpr const wchar_t* AtvLookAtTireProp       = L"lookAtTire";
+inline constexpr const wchar_t* AtvLookAtTireSocketProp = L"lookAtTireSocket";
+inline constexpr const wchar_t* AtvLookAtSpareBoxProp   = L"lookAtSpareTireBox";
+inline constexpr const wchar_t* AtvLookAtContainerProp  = L"lookAtContainer";
+inline constexpr const wchar_t* AtvPlayersWheelProp     = L"playersWheel";
+inline constexpr const wchar_t* AtvUnscrewPanelFn       = L"unscrewPanel";
+inline constexpr const wchar_t* AtvUnscrewSpawnAtParam  = L"spawnAt";
+inline constexpr const wchar_t* AtvGetUnscrewSpawnFn    = L"getUnscrewSpawn";
+inline constexpr const wchar_t* AtvResetUnscrewFn       = L"resetUnscrew";
+
 // The per-item save record struct (a BP UserDefinedStruct): struct_save1 on 0.10.0, struct_save
 // before. Its layout is MEASURED through reflection (ue_wrap/actors/save_record); the names are only
 // the fallback route to the struct when prop_C::getData has not loaded yet.

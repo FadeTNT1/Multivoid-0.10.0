@@ -65,16 +65,36 @@ bringing it again, and a spawn that fails in a ready world is final, never retri
 ### Condition
 
 The syncer's condition rides the same payload: per-wheel durability, dirt, fixes and type, the
-spare's trio, body dirt, fuel and health (`coop/interactables/atv_condition_sync`). A mirror is
+spare's trio, body dirt, fuel, health and the battery's charge (`coop/interactables/atv_condition_sync`). A mirror is
 overwritten and re-derives its visuals through the game's own reducers on change edges, against a
 baseline seeded from the actor rather than from the last packet: a zero baseline would break all
 eight constraints on a settled rig, and a per-packet one would starve the dirt reducer forever.
 Accumulators apply from the syncer, clamped to the game's domains when it is a client; presence,
-which tyres are on and whether the spare is, is consumed only from the host's own copy, because a
-client syncer's eject ships a mask whose paired wheel prop cannot travel, and applying it would
-turn a divergence into an item loss the host persists. The mirror's own accrual is held at zero by the impulse neuter, so an
-overwrite never races an irreversible act. The battery is an inserted prop's charge and rides
-the prop lane.
+which tyres are on, whether the spare is and whether a battery is in, is consumed only from the
+host's own copy, because a client syncer's eject ships a mask whose paired wheel prop cannot travel,
+and applying it would turn a divergence into an item loss the host persists. The mirror's own accrual
+is held at zero by the impulse neuter, so an overwrite never races an irreversible act.
+
+The battery's charge drains only on the copy whose driver sits in it, so before it travelled every
+peer's battery drifted apart, and a copy whose battery read zero could not drive while the others
+could. Two latches stay off the wire: `empty` (fuel ran out) and `brokenn` (health ran out). The game
+clears each on every path that raises its value, so a copy that took its fuel or health back by sync
+kept a latch no game path would clear; every copy now clears a latch set while its value is above
+zero (`coop/interactables/atv_drive_gates`). A local driver whose throttle meets a set term (the
+battery at zero or out, `empty`, the handbrake, `brokenn`, under water) gets a log line naming each
+term and a chat line naming the first.
+
+### Repair
+
+An item in a player's hand is that player's own, so a client's battery, spare or wheel fitted from
+the hand, a gas can's refuel and a toolbox fix run the game's own body on the client's copy, and the
+values it left go to the host (`AtvRepairIntent`). The host checks them against its own copy (the
+sender in reach, no battery in, no spare, the socket empty, the fuel lower, the health below full)
+and writes them. An unscrew births a prop, a wheel or the battery with its charge, so a client's
+`unscrewPanel` is cancelled and the host runs the game's own unscrew for that wheel or the battery.
+After any repair on the host's copy, a client's or the host's own, the host sends every client a
+block of its copy marked `kAtvRepair`, which a client applies, presence included, even to an ATV it
+syncs (`coop/interactables/atv_repair`). `[?]` Built to this design; no two-peer run has judged it yet.
 
 ## Who owns what
 
@@ -87,17 +107,19 @@ the prop lane.
 | collision damage, the accumulators, wheel torque | the tick owner, the syncer's machine | a mirror's impulses are zeroed |
 | every route to an ATV's damage and death (the two blast verbs, the explosion) | the tick owner | a copy that does not own the tick cancels them at the script gate; the owner takes every blast that reaches it |
 | the story event's trap | the host | the host copy's `trap` rides the stamp (bit 4); the driven copy fires it |
-| the condition values | the syncer | overwritten on the mirror, re-derived on edges |
-| tyre and spare presence | the host | consumed from the host's own copy only |
+| the condition values, the battery's charge among them | the syncer | overwritten on the mirror, re-derived on edges |
+| tyre, spare and battery presence | the host | consumed from the host's own copy only |
+| a repair (fit, unscrew, refuel, toolbox fix) | the host | a client's request, checked and written or run on the host's copy, then a `kAtvRepair` block to every client |
 | a runtime ATV's identity | the host | its game key, announced |
 
 ## Wire messages
 
 | Kind | Direction | Carries |
 |---|---|---|
-| `AtvState` | the syncer (a client's to the host alone), re-sent by the host; the host when idle | key, pose, rotation, velocities, the seat and the syncer the host stamps, the host copy's trap, the condition block, an adopt flag |
+| `AtvState` | the syncer (a client's to the host alone), re-sent by the host; the host when idle; the host after a repair (`kAtvRepair`) | key, pose, rotation, velocities, the seat and the syncer the host stamps, the host copy's trap, the condition block with the battery, an adopt flag |
 | `AtvSeat`, `AtvTakeover` | a client to the host | a sit in or leave of the driver's seat; a grab of the ATV |
 | `AtvAnswer` | the host to the asking client | the verdict on one request, with the seat and the syncer the host holds |
+| `AtvRepairIntent` | a client to the host | a repair by op: a battery, spare or wheel fitted, with the values the client's copy took; an unscrew of a wheel or the battery; a refuel's fuel; a toolbox fix |
 | `AtvExplodeRequest` | a client to the host | the ATV the client syncs that exploded, by key, and whether the story event's trap fell in that frame; the host blasts at the ATV's own `tp` |
 | `AtvSpawn`, `AtvDestroy` | the host to all | an ATV's key, class and pose; its teardown |
 | `AtvSetComplete` | the host to a joiner | the count of distinct keys its connect snapshot named |
@@ -126,9 +148,10 @@ run, join, park and divergence arms, each red arm failing as designed (`coop/dev
 | While driving, the mirror trails the syncer: the correction is a bounded velocity bias, and the cut to the syncer's pose happens only past a speed-scaled error or when the error stops shrinking | `[V]` `coop/interactables/atv_corrector` |
 | A client drives for one round trip before the host's answer can refuse its sit or grab; a refused sit dismounts, a refused grab drops, and the blocks it streamed meanwhile are dropped and counted, never applied | `[?]` `coop/interactables/atv_authority`, built to the design and not yet run |
 | At a hand-back to the host the old syncer's last blocks may still be in flight; the host drops and counts them, and the stamp moves every client to the host's copy | `[?]` `coop/interactables/atv_authority`, `coop/interactables/atv_sync` |
-| A client's tyre eject is refused by the arbiter, so the host keeps the wheel and the peers disagree until the eject intent lane exists | `[V]` `coop/interactables/atv_condition_sync`, by design |
+| A wheel a client syncer's collision ejects is refused by the arbiter, so the host keeps the wheel and the peers disagree; a client's unscrew is the host's (`AtvRepairIntent`) | `[V]` `coop/interactables/atv_condition_sync`, by design |
+| A repair the host refuses has already run on the client's copy, which the host's `kAtvRepair` block sets back; the item it used from the hand is gone | `[?]` `coop/interactables/atv_repair` |
 | The pose stream rides the reliable lane; a sequenced unreliable stream is the intended shape | `[V]` `coop/interactables/atv_sync` sends it reliable |
-| Not synced: the thirteen modules and every upgrade effect, lights, brake and turbo, honk, the radio, the map, repair, the kerfur passenger, and a remote driver's body is not seated on the ATV | `[V]` nothing under `coop/interactables/atv_*` carries them |
+| Not synced: the thirteen modules and every upgrade effect, lights, brake and turbo, honk, the radio, the map, the sponge's cleaning, the kerfur passenger, and a remote driver's body is not seated on the ATV | `[V]` nothing under `coop/interactables/atv_*` carries them |
 
 ## Code map
 
@@ -138,6 +161,8 @@ run, join, park and divergence arms, each red arm failing as designed (`coop/dev
 | the seat and syncer table, and the host's judgements | `coop/interactables/atv_authority` |
 | the corrector, the hit guard and the damage gate | `coop/interactables/atv_corrector`, `coop/interactables/atv_hit_guard`, `coop/interactables/atv_damage_gate` |
 | condition | `coop/interactables/atv_condition_sync`, `ue_wrap/devices/atv_condition` |
+| the torque gates, the stale latches | `coop/interactables/atv_drive_gates` |
+| repair | `coop/interactables/atv_repair`, `ue_wrap/devices/atv_repair` |
 | the engine wrapper | `ue_wrap/devices/atv` |
 | the seat | `coop/interactables/device_occupancy` |
 | tests and probes | `coop/dev/atv_probe` (the drive arm), `coop/dev/atv_tire_probe`, `coop/dev/atv_eject_drill`; the smoke run with the ATV scenario enabled |

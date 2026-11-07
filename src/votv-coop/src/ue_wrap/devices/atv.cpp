@@ -13,6 +13,8 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflection_props.h"  // FindBoolProperty (the packed drive-gate flags)
+#include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/types.h"     // FTransform (SpawnMirror)
 
 #include <atomic>
@@ -35,6 +37,29 @@ int32_t g_brakeOff    = -1;       // Brake    (0x05D9, bool)
 int32_t g_trapOff     = -1;       // trap     (a bool bit: the byte, with its mask below)
 uint8_t g_trapMask    = 0;
 int32_t g_tpOff       = -1;       // tp       (a UBillboardComponent*: where `explode` places its blast)
+// The drive gates (ReadDriveGates): battery a float, the rest bools resolved as byte and mask, since a BP packs
+// neighbouring bools into one byte. -1 = unresolved.
+int32_t g_batteryOff  = -1;
+struct BoolField { int32_t off = -1; uint8_t mask = 0; };
+BoolField g_empty, g_broken, g_underwater, g_inFwd, g_inBack;
+
+void ResolveBool(void* cls, const wchar_t* name, BoolField& f) {
+    if (!R::FindBoolProperty(cls, name, f.off, f.mask) || f.off < 0 || f.mask == 0) {
+        f = BoolField{};
+        UE_LOGW("atv: bool %ls not found -- the drive-gate read leaves it out", name);
+    }
+}
+
+bool ReadBool(const void* atv, const BoolField& f) {
+    return f.off >= 0 && (*(reinterpret_cast<const uint8_t*>(atv) + f.off) & f.mask) != 0;
+}
+
+bool WriteBool(void* atv, const BoolField& f, bool v) {
+    if (!atv || f.off < 0) return false;
+    uint8_t& byte = *(reinterpret_cast<uint8_t*>(atv) + f.off);
+    byte = v ? static_cast<uint8_t>(byte | f.mask) : static_cast<uint8_t>(byte & ~f.mask);
+    return true;
+}
 
 int32_t ResolveOff(void* cls, const wchar_t* name, int32_t fallback) {
     int32_t o = R::FindPropertyOffset(cls, name);
@@ -74,6 +99,15 @@ bool EnsureResolved() {
     // No fallback: a miss leaves a client's ATV explosion unrequested, since the host has no place to put it.
     g_tpOff = R::FindPropertyOffset(cls, L"tp");
     if (g_tpOff < 0) UE_LOGW("atv: tp offset not found -- a client's ATV explosion cannot be requested");
+
+    namespace N = ue_wrap::profile::name;
+    g_batteryOff = R::FindPropertyOffset(cls, N::AtvBatteryProp);
+    if (g_batteryOff < 0) UE_LOGW("atv: battery offset not found -- the drive-gate read leaves it out");
+    ResolveBool(cls, N::AtvEmptyLatchProp, g_empty);
+    ResolveBool(cls, N::AtvBrokenLatchProp, g_broken);
+    ResolveBool(cls, N::AtvUnderwaterProp, g_underwater);
+    ResolveBool(cls, N::AtvInputForwardProp, g_inFwd);
+    ResolveBool(cls, N::AtvInputBackProp, g_inBack);
 
     g_resolved.store(true, std::memory_order_release);
     UE_LOGI("atv: resolved ATV_C=%p Key@0x%04X Player@0x%04X isDriven@0x%04X fuel@0x%04X "
@@ -159,6 +193,25 @@ bool WriteTrap(void* atv, bool v) {
     byte = v ? static_cast<uint8_t>(byte | g_trapMask) : static_cast<uint8_t>(byte & ~g_trapMask);
     return true;
 }
+
+bool ReadDriveGates(void* atv, DriveGates& out) {
+    out = DriveGates{};
+    if (!atv || !g_resolved.load(std::memory_order_acquire)) return false;
+    const char* base = reinterpret_cast<const char*>(atv);
+    if (g_batteryOff >= 0) { out.battery = *reinterpret_cast<const float*>(base + g_batteryOff); out.have |= 0x01; }
+    out.fuel   = GetFuel(atv);
+    out.health = GetHealth(atv);
+    out.brake  = GetBrake(atv);
+    if (g_empty.off >= 0)      { out.empty = ReadBool(atv, g_empty);           out.have |= 0x02; }
+    if (g_broken.off >= 0)     { out.broken = ReadBool(atv, g_broken);         out.have |= 0x04; }
+    if (g_underwater.off >= 0) { out.underwater = ReadBool(atv, g_underwater); out.have |= 0x08; }
+    if (g_inFwd.off >= 0)      { out.inputForward = ReadBool(atv, g_inFwd);    out.have |= 0x10; }
+    if (g_inBack.off >= 0)     { out.inputBack = ReadBool(atv, g_inBack);      out.have |= 0x20; }
+    return true;
+}
+
+bool WriteEmptyLatch(void* atv, bool v) { return WriteBool(atv, g_empty, v); }
+bool WriteBrokenLatch(void* atv, bool v) { return WriteBool(atv, g_broken, v); }
 
 bool ReadTpLocation(void* atv, FVector& out) {
     out = FVector{};

@@ -1491,6 +1491,15 @@ enum class ReliableKind : uint8_t {
     // HOST->JOINER: the same, bracketed by a snapshot's begin and end, after which a joiner destroys the ones the host
     // did not name. Never relayed; a client's copy is refused at the host's receive edge. BlobChunkPayload.
     IrrigationState = 253,
+    // CLIENT->HOST: a repair this client made on an ATV, by the ATV's Key (coop::atv_repair). Fitting a battery, a spare
+    // or a wheel from the hand, a gas can's refuel and a toolbox fix run on the client's own copy, since the item is its
+    // own, and send the values they left; the host writes them on its copy if they still fit (no battery in, no spare,
+    // the socket empty, the fuel lower, the health below full). An unscrew (a wheel or the battery coming off as a prop)
+    // is cancelled on the client and the host runs the game's own unscrew, so the prop is the host's. Either way the
+    // host then sends every client a block of its own copy marked kAtvRepair, which a client applies even to an ATV it
+    // syncs. Never relayed; not pre-world. Late join: nothing to replay; the connect snapshot carries the condition.
+    // AtvRepairIntentPayload.
+    AtvRepairIntent = 239,
 };
 
 #pragma pack(push, 1)
@@ -3484,8 +3493,12 @@ struct AtvStatePayload {
     int8_t   tiresFixes[4];       // 4  -- per-wheel repair countdown (int32 in-game, int8 on wire)
     uint8_t  tiresTypes[4];       // 4  -- setWheelsType input (zero runtime writers measured; kept
                                   //      because it IS reducer input and 4 B closes the class)
+    float    battery;             // 4  -- the inserted battery's charge, 0..100; -1 = no battery (PRESENCE: whether one is
+                                  //      in is consumed from the host's own copy only, the charge from the syncer). The
+                                  //      drain runs only on the copy whose driver sits in it, so without this every
+                                  //      peer's battery drifted apart and a dead copy could not drive
 };
-static_assert(sizeof(AtvStatePayload) == 148, "AtvStatePayload must be 148 bytes");
+static_assert(sizeof(AtvStatePayload) == 152, "AtvStatePayload must be 152 bytes");
 
 // stateBits bit 3: the block is the syncer's, re-sent by the host (a client syncer's pose and condition), not the
 // host's own copy. A receiver applies the pose and condition of such a block to an ATV it does not sync; the host's
@@ -3495,6 +3508,11 @@ constexpr uint8_t kAtvFromSyncer = 0x08;
 // stateBits bit 4: the host's own copy has its `trap` set (the story event's explosion). The host writes it in every
 // block it sends and ignores a client's bit; a client copy takes it from the stamp (atv_sync.cpp).
 constexpr uint8_t kAtvTrap = 0x10;
+
+// stateBits bit 5: a block of the host's own copy sent because a repair changed it (coop::atv_repair). A client applies
+// its condition block, presence included, even to an ATV it syncs or has a request in flight for, and takes no pose
+// from it. Only the host sets it; a client's bit is masked off when the host re-sends its block.
+constexpr uint8_t kAtvRepair = 0x20;
 
 // An ATV (AtvSpawn): the host ATV's own game Key and its class, so the receiver spawns the exact skin
 // under that Key. The Key is at most 31 chars (an ATV's is 22, or "ATV"); a receiver drops a longer one.
@@ -4854,6 +4872,30 @@ struct ExplosionRequestPayload {
 };
 static_assert(sizeof(ExplosionRequestPayload) == 22, "ExplosionRequestPayload must be 22 bytes");
 static_assert(sizeof(ExplosionRequestPayload) <= 256 - 20 - 8, "ExplosionRequestPayload must fit in one reliable datagram");
+
+// A client's repair on an ATV (AtvRepairIntent): the ATV by its Key, the op and the values the client's own copy holds
+// after it. `index` is the wheel socket (put a wheel) or the fitted wheel (unscrew it, -1 the battery).
+struct AtvRepairIntentPayload {
+    WireKey key;          // 32
+    uint8_t op;           // 1 -- AtvRepairOp
+    int8_t  index;        // 1 -- 0..3, or -1
+    int8_t  fixes;        // 1 -- a fitted wheel's or the spare's repair countdown
+    uint8_t reserved;     // 1 -- zero
+    float   value;        // 4 -- the battery's charge, the fuel, or the wheel's durability
+    float   dirt;         // 4 -- the wheel's dirt
+};
+static_assert(sizeof(AtvRepairIntentPayload) == 44, "AtvRepairIntentPayload must be 44 bytes");
+static_assert(sizeof(AtvRepairIntentPayload) <= 256 - 20 - 8, "AtvRepairIntentPayload must fit in one reliable datagram");
+
+// AtvRepairIntentPayload::op. Wire-visible: the values are stable.
+enum class AtvRepairOp : uint8_t {
+    BatteryIn = 1,   // value = the charge the client's copy took from the battery in its hand
+    SpareIn = 2,     // value, dirt, fixes = the spare's
+    PutTire = 3,     // index = the socket; value, dirt, fixes = the wheel's
+    Unscrew = 4,     // index = the fitted wheel to take off, or -1 for the battery
+    Fuel = 5,        // value = the fuel after the client's gas can
+    Fix = 6,         // the client's toolbox fix: health to full
+};
 
 // A client's ATV exploded (AtvExplodeRequest): the ATV by its Key. `trapFired` is 1 when the story event's trap fell
 // in the explode's frame on the client's copy, which tells the host to clear its own copy's trap.
