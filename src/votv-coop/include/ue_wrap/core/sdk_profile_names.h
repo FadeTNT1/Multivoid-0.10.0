@@ -1762,6 +1762,42 @@ inline constexpr const wchar_t* WasherSplashFx = L"eff_waterThrowSplash";
 inline constexpr const wchar_t* WasherCue = L"wade_Cue";
 inline constexpr const wchar_t* ParticleSystemClass = L"ParticleSystem";
 inline constexpr const wchar_t* SoundCueClass = L"SoundCue";
+// Irrigation. The held faucet (prop_faucet_C) on its left button, when the trace below the hit finds water under
+// grass, sand, gravel or dirt, spawns `faucet_C` (an actor_save_C) at the hit, yaw = the player's + 90, and destroys
+// itself. faucet_C: action 5 toggles `active` then upd() (the appliance lane's bit); action 7 spawns a prop_faucet_C,
+// clears `active`, and its `hose` (groundhose_C) is destroyed into a prop_hose_C when it has fewer than 3 points, else
+// loses point 0 and its `faucet`, then gen(); then the faucet destroys itself. Saved: bools {active}, names {hose_key}.
+// The held hose (prop_hose_C) on a faucet with no hose spawns `groundhose_C` at the faucet's `connect` with
+// `conntofauc` set, whose BeginPlay ticks it: it lays a spline point under the LOCAL player (getMainPlayer) every `max`
+// of path and, while its faucet is on, sprays from `pickup` (growingplant_C.water += 100/s below 600; buckets fill).
+// The next left button on a prop_sprinkler_C with no hose runs the sprinkler's connectHose(hose) (adds its point,
+// finish(), setPropProps(false, true, false, false), links both ways); elsewhere finish(): tick off, gen(), collision
+// on, faucet.upd(). The held hose then destroys itself. groundhose_C's action 4: a `doCollect` look (the hose's start)
+// or no faucet puts a prop_hose_C in the inventory and destroys the hose; else a held prop_hose_grab_C resume()s it.
+// Saved: vectors {points}, names {faucet_key, sprinkler_key}; processKeys links and finish()es. A sprinkler's
+// doWater (a 0.1 s timer) waters the growingplant_C in `wateringRadius` while its hose's faucet is on; grabbing it
+// or its action runs its hose's detachSprinkler(). [RD] the decoded bodies of the five classes.
+inline constexpr const wchar_t* IrrigationFaucetClass = L"faucet_C";
+inline constexpr const wchar_t* IrrigationHoseClass = L"groundhose_C";
+inline constexpr const wchar_t* IrrigationSprinklerClass = L"prop_sprinkler_C";
+inline constexpr const wchar_t* IrrigationFaucetItemClass = L"prop_faucet_C";
+inline constexpr const wchar_t* IrrigationHoseItemClass = L"prop_hose_C";
+inline constexpr const wchar_t* IrrigationFaucetActiveProp = L"active";
+inline constexpr const wchar_t* IrrigationFaucetHoseProp = L"hose";
+inline constexpr const wchar_t* IrrigationHoseFaucetProp = L"faucet";
+inline constexpr const wchar_t* IrrigationHoseSprinklerProp = L"sprinkler";
+inline constexpr const wchar_t* IrrigationHosePointsProp = L"points";
+inline constexpr const wchar_t* IrrigationHoseDoCollectProp = L"doCollect";
+inline constexpr const wchar_t* IrrigationSprinklerHoseProp = L"hose";
+inline constexpr const wchar_t* IrrigationGetDataFn = L"getData";
+inline constexpr const wchar_t* IrrigationLoadDataFn = L"loadData";
+inline constexpr const wchar_t* IrrigationGetKeyFn = L"getKey";
+inline constexpr const wchar_t* IrrigationHoseFinishFn = L"finish";
+inline constexpr const wchar_t* IrrigationHoseUpdEffectFn = L"updEffect";
+inline constexpr const wchar_t* IrrigationHoseDetachFn = L"detachSprinkler";
+inline constexpr const wchar_t* IrrigationUpdFn = L"upd";
+inline constexpr int IrrigationFaucetActionTake = 7;
+inline constexpr int IrrigationHoseActionPickup = 4;
 }  // namespace name
 
 }  // namespace ue_wrap::profile

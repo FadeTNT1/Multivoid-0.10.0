@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 308;
+inline constexpr uint16_t kProtocolVersion = 314;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1456,6 +1456,18 @@ enum class ReliableKind : uint8_t {
     // The prop is named by its Element id. Never relayed; a client's copy is refused at the host's receive edge. Late
     // join: none -- a one-shot cue. PieceBreakFxPayload.
     PieceBreakFx = 243,
+
+    // CLIENT->HOST: the irrigation set (coop::irrigation_sync). One chunked blob per verb under an op byte: a faucet
+    // or a ground hose this player placed, as the actor's own getData record (its links rewritten to the live ones);
+    // a faucet taken up (its action 7, cancelled here); a hose picked up or resumed (action 4, run here too); a hose's
+    // sprinkler detached. The host judges life, reach and the named keys and runs each on its own copy. Never relayed:
+    // the host's IrrigationState is what the other peers get. BlobChunkPayload.
+    IrrigationCommit = 252,
+
+    // HOST->ALL: a placed faucet or ground hose exists (its record, links as the live ones) or is gone (its key);
+    // HOST->JOINER: the same, bracketed by a snapshot's begin and end, after which a joiner destroys the ones the host
+    // did not name. Never relayed; a client's copy is refused at the host's receive edge. BlobChunkPayload.
+    IrrigationState = 253,
 };
 
 #pragma pack(push, 1)
