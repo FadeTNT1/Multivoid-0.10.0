@@ -13,6 +13,11 @@
 // vacuum, the broom) run inside the Blueprint, which is why this channel polls the resulting
 // STATE rather than observing an input. Keys come from the save actor's own Key, so both peers
 // start a transferred save identical and only live decrements ride the wire.
+//
+// Which piles EXIST is the host's: a client dissolves, echo-suppressed, every pile the host's
+// connect snapshot, live packets and wire spawns never named (once at the snapshot's end under a
+// valve, then for any pile indexed later), and the host answers a client collect on a key its world
+// has no pile for with the keyed destroy, to that client. docs/piles.md has the rules.
 
 #pragma once
 
