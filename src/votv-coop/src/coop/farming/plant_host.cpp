@@ -54,6 +54,10 @@ constexpr float    kReachUU = 400.0f;
 // this radius around itself, plant_client_verbs kTendRadiusUU), so its reach is that radius.
 constexpr float    kTendReachUU = 1500.0f;
 constexpr float    kMoveUU = 5.0f;
+// The water a rain roll (0-5) or a tick's decay moves a plant that hovers at zero; a zero-crossing smaller than this is
+// that noise, not a state the client needs (the wild canes sit at about -5..10 for good and crossed zero every few
+// seconds, so each re-sent its row at the drift cadence for nothing).
+constexpr float    kWaterNoiseUU = 10.0f;
 constexpr size_t   kMaxRows = 4096;
 constexpr size_t   kMaxPending = 8;
 constexpr int      kSayRegistered = 16;
@@ -227,7 +231,8 @@ const char* Reason(const HostRow& r, const GP::State& st, const W::Pose& pose, c
     }
     if (r.edge) return "edge:tend";
     if (now - r.sentMs < kDriftMs) return nullptr;
-    if (std::fabs(st.grow - o.grow) >= 0.01f || (st.water > 0.f) != (o.water > 0.f) || std::fabs(st.water - o.water) >= 30.f ||
+    const bool waterCrossed = (st.water > 0.f) != (o.water > 0.f) && std::fabs(st.water - o.water) >= kWaterNoiseUU;
+    if (std::fabs(st.grow - o.grow) >= 0.01f || waterCrossed || std::fabs(st.water - o.water) >= 30.f ||
         (st.fertilizer > 0.f) != (o.fertilizer > 0.f) || std::fabs(st.fruitgrow - o.fruitgrow) >= 0.02f ||
         std::fabs(st.health - o.health) >= 1.f)
         return "drift";

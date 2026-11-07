@@ -28,7 +28,9 @@ Facts read from the 0.10.0 bytecode capture; `class.function@N` is the bytecode 
   a bush with berries spawns one `drop` and hands it to `player."retarget add object to inventory"` (`@89`); a crop is
   destroyed (`@94`) and its `ReceiveDestroyed` drops `drop` x `randomIntegerInRange(amount_range)` through
   `dropFruits_grass` (`receiveDestroyed@69-71`, `dropFruits_grass@9`), or the seed when `grow <= 0.1`
-  (`receiveDestroyed@1-2`). With `discard` set (a young plant)
+  (`receiveDestroyed@1-2`). The count is rolled afresh at every loop step (`dropFruits_grass@9-11`: `i <= randomIntegerInRange(x, y)`), so a row
+  whose range starts at 0 yields nothing part of the time: the wild cane `sugarcane_w` is `drop=sugarcane`, `amount_range=0..1`, planttype 0
+  (read from `list_farmPlants` in the 0.10.0 pak), one cane or none at about even odds; the farmed `sugarcane` is 1..4. With `discard` set (a young plant)
   and `input_alt` held the action destroys it (`@3-6`).
 - Wild cane: `sugarcaneGrower_C.spawn` places `plant=sugarcane_w` at random spline points (`@1`, `@3-6`, `@27`).
 - A pot (`prop_farmPot_C.playerUsedOn`) plants the item `player.holdingActor_main` names when its row exists, is not a
@@ -45,7 +47,7 @@ named, and a client keeps its own.
 
 A 1 Hz census reads each named plant and sends its row at once on an edge -- new, a row change (death renames it),
 grown, dead, berries, disease, the dirt, the pot it grows in, a move, a tend -- and on drift at most every 5 s (growth
-0.01, water 30 or crossing zero, fertilizer crossing zero, fruit 0.02, health 1). A plant's `ReceiveDestroyed` sends
+0.01, water 30 or crossing zero by 10 or more (a plant that hovers at zero, the wild cane, is not re-sent for the noise), fertilizer crossing zero, fruit 0.02, health 1). A plant's `ReceiveDestroyed` sends
 its Gone, flagged harvested when the destroy runs inside an action-4 harvest.
 
 ### The client
@@ -114,7 +116,7 @@ not name (its save's drift; the destroy's body is refused, so nothing drops). Re
 
 Host: `farm: host registered plant key=...`, `farm: host row -> all key=... reason=new|edge:...|drift`, `farm: host
 gone key=... harvested=1`, `farm: host received slot N's intent op=...`, `farm: host intent slot=N op=Harvest
-key=... req=... -> ok|refused(...)`, `farm: host harvest captured item key=... for slot N`, `farm: host snapshot ->
+key=... req=... -> ok|refused(...)`, `farm: host harvest captured item key=... for slot N`, `farm: host harvest of <row> (grow g): yield range a..b, N prop(s) born` (every host-run crop harvest, a client's or the host's own: says whether the game's roll gave 0), `farm: host snapshot ->
 slot N rows=K`. Client: `farm: client row key=... adopted|spawned|applied`, `farm: client parked row key=...`,
 `farm: client intent op=... key=... reqId=...`, `farm: client ack reqId=... op=... ok=...`, `farm: client pocketed
 harvested item key=...`, `farm: client snapshot end: named=... destroyed-unnamed=...`, `farm: client refused
