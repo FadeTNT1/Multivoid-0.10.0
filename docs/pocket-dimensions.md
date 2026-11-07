@@ -244,14 +244,18 @@ one atomic byte, since the net thread asks it at every send, relay and receive; 
   taken and the departure spot finite. The net thread isolates the slot as the Enter is inboxed, so
   what the client sends behind it is already refused; the game thread then marks it not world-ready,
   clears its relay eligibility, cancels a snapshot or a transfer still running to it, lets go of
-  what it held in the main world (device claims, a carried prop or trash, lids, driven props, a
-  crowbar, its stalker, its hooks) and broadcasts `PlayerLocation`. The first departure is the way
-  home. **Arrived** is logged. **Failed** leaves the slot away.
+  what it held, reserved or had pending in the main world as a leave would (device claims and the
+  desk's ping, a carried prop or trash, lids, driven props, a crowbar, its stalker, its hooks, a take,
+  use, storage row or container transfer in flight, the robots and Kerfuses serving it, its washer,
+  messages waiting for a bind, panel, generator and tower ops) while what says who it is stays (the
+  roster, chat, profile, voice, rest state, sleeper), and broadcasts `PlayerLocation`. The first
+  departure is the way home. **Arrived** is logged. **Failed** leaves the slot away.
 - **ReturnRequest** (away to returning): `save_transfer::HostArmReturnForSlot` drops what the join left
   (`CancelForSlot`) and clears the one-shot request latch, for a returning slot only, so the request
   behind it is served as at a join; `player_inventory_sync::HostRearmApplyForSlot` pushes the held
-  profile again. A repeat is ignored. A return unannounced after 120 s is warned once; the client owns
-  its failure. A request the host refuses (no trip away, or another trip number) is answered with the
+  profile again. A repeat is ignored. Each return is a live capture of the world, so a slot gets two
+  at once and one per 30 s after (full again at its next occupant); past that it is ended
+  (`RepeatedRequest`). A return unannounced after 120 s is warned once; the client owns its failure. A request the host refuses (no trip away, or another trip number) is answered with the
   slot's own row, cause `Refused`, to that client alone.
 - **The ready edge** (`world_ready_answer`, before `MarkSlotWorldReady`): an away slot's announce is
   refused (it has no main world) and answered with the same `Refused` row. A returning slot's is

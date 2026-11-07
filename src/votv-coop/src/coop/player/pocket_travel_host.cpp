@@ -19,22 +19,38 @@
 #include "coop/player/pocket_travel_host.h"
 
 #include "coop/comms/chat_feed.h"
+#include "coop/creatures/kerfus_lanes.h"
 #include "coop/creatures/owner_entity_sync.h"
+#include "coop/creatures/served_player.h"
 #include "coop/creatures/wisp_grab_hold.h"
+#include "coop/element/bind_wait.h"
+#include "coop/interactables/desk_input_sync.h"
+#include "coop/interactables/desk_ping_sync.h"
 #include "coop/interactables/device_occupancy.h"
 #include "coop/interactables/swinger_hold.h"
 #include "coop/interactables/tool_action.h"
 #include "coop/items/hook_sync.h"
 #include "coop/items/player_inventory_sync.h"
+#include "coop/net/end_reason.h"
+#include "coop/net/intent_bucket.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/death_revive.h"
+#include "coop/player/item_activate.h"
 #include "coop/player/players_registry.h"
+#include "coop/player/roster_ledger.h"
+#include "coop/player/washer_fx.h"
+#include "coop/props/container_birth.h"
+#include "coop/props/prop_act_host.h"
 #include "coop/props/prop_snapshot.h"
 #include "coop/props/prop_syncer_host.h"
 #include "coop/props/remote_prop.h"
+#include "coop/props/storage_act.h"
 #include "coop/props/trash_channel.h"
 #include "coop/save/save_transfer.h"
+#include "coop/world/fuse_tower_ops.h"
+#include "coop/world/power_grid.h"
+#include "coop/world/power_panel.h"
 #include "l10n/l10n.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
@@ -86,6 +102,11 @@ std::array<Trip, kSlots> g_trip{};
 // How long a return may stay unannounced before the host says so (the client owns the failure: it
 // ends its own session when its transfer or load fails, design step 7).
 constexpr uint64_t kReturnWarnMs = 120000;
+
+// A slot's returns: two at once, then one per 30 s. Each costs the host a live capture of its world;
+// an honest trip takes longer than that. Full again at the slot's next occupant (PerSlotState).
+constexpr coop::net::IntentBudget kReturnBudget{2.0f, 1.0f / 30.0f};
+coop::roster_ledger::PerSlotState<coop::net::IntentBucket> g_returnRate;
 
 // The host's own save entry, read once a second while hosting: two of the six triggers clear it
 // before their travel (skullzone_C, insomniac_C), and a host left with an empty one cannot save.
@@ -150,10 +171,16 @@ void SendRefusal(uint8_t slot, const Trip& t) {
     s->SendReliableToSlot(slot, coop::net::ReliableKind::PlayerLocation, &row, sizeof(row));
 }
 
-// The slot's hold on things in the main world, let go as a leave would let them go: its device
-// claims, the prop and the trash it carried, the lids it held, the props it drove, its crowbar, its
-// stalker and its hooks. Its return is a join's world load and connect replay, which rebuilds what
-// it holds then. Its chat seed, its profile and its roster row stay: it is still here.
+// The slot's hold on things in the main world, let go as a leave would let them go. The rule, read
+// against subsystems::DisconnectSlot: what the slot holds, reserves or has pending IN THE WORLD goes
+// (its body is not there to finish it, and its return is a join's world load and connect replay,
+// which rebuilds what it holds then); what says WHO it is stays, since it is still here -- its roster
+// row, chat seed and rate, profile and inventory push latch, voice channel, rest state, its sleeper
+// (none is laid), its stat orders, its command bucket, its half-assembled blobs and its terminal.
+// Taken: its device claims and desk ping, the prop and the trash it carried, the lids it held, the
+// props it drove, its crowbar, its stalker and its hooks; a take, use, storage row or container
+// transfer it had reserved; the robots and Kerfuses that served it; its washer; its waiting flashlight
+// apply; the messages it sent that wait for a prop to bind; its panel presses, generator and tower ops.
 void ReleaseWorldHolds(coop::net::Session& s, uint8_t slot) {
     const int islot = slot;
     coop::device_occupancy::OnDisconnectForSlot(islot);
@@ -165,6 +192,19 @@ void ReleaseWorldHolds(coop::net::Session& s, uint8_t slot) {
     coop::tool_action::OnPeerLeft(slot);
     coop::owner_entity_sync::OnPeerLeftSlot(islot);
     coop::hook_sync::OnPeerLeftSlot(islot);
+    coop::props::container_birth::OnPeerGone(slot);
+    coop::props::storage_act::OnPeerGone(slot);
+    coop::prop_act_host::OnPeerGone(slot);
+    coop::served_player::OnPeerLeft(slot);
+    coop::kerfus_lanes::OnPeerLeft(slot);
+    coop::washer_fx::OnSlotDisconnected(slot);
+    coop::item_activate::OnDisconnectForSlot(islot);
+    coop::element::bind_wait::OnSlotLeft(islot);
+    coop::desk_input_sync::OnPeerLeft(islot);
+    coop::desk_ping_sync::OnPeerLeft(slot);
+    coop::power_panel::OnPeerLeft(slot);
+    coop::power_grid::OnPeerLeft(slot);
+    coop::fuse_tower_ops::OnPeerLeft(slot);
 }
 
 void OnEnter(coop::net::Session& s, uint8_t slot, const coop::net::PocketTravelPayload& p) {
@@ -245,6 +285,16 @@ void OnReturnRequest(uint8_t slot, const coop::net::PocketTravelPayload& p) {
     if (t.returnSinceMs != 0) {
         UE_LOGW("[POCKET] host: slot %u asked again to come home from %s (trip %u, reason %s) -- its "
                 "return is already armed; ignored", slot, PT::LevelTag(t.pocket), t.trip, PT::ReasonTag(why));
+        return;
+    }
+    // Every return is a full live capture of the world (the save transfer's request latch is cleared
+    // for it), so Enter, ReturnRequest and the request behind it looped would hitch the host at will.
+    if (!g_returnRate[slot].Take(kReturnBudget, NowMs())) {
+        UE_LOGW("[POCKET] host: slot %u asked to come home from %s past its return budget (trip %u, reason "
+                "%s) -- ending it: no player travels this often", slot, PT::LevelTag(t.pocket), t.trip,
+                PT::ReasonTag(why));
+        if (coop::net::Session* s = HostSession())
+            s->Kick(slot, coop::net::EndReason::RepeatedRequest, "repeated pocket return");
         return;
     }
     t.cause = why;
