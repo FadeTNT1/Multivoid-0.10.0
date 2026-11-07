@@ -20,6 +20,7 @@
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
@@ -353,7 +354,7 @@ void Tick() {
             UE_LOGE("player_damage: the ragdollMode watch did not register -- a puppet can ragdoll here");
     }
     if (g_impactInterceptorsDone) return;
-    void* cls = ue_wrap::object_index::ClassByName(L"mainPlayer_C");
+    void* cls = ue_wrap::object_index::ClassByName(ue_wrap::profile::name::MainPlayerClass);
     if (!cls) return;
     // A Blueprint class loads with its functions, so the first attempt with the class present is the
     // last: a name that does not resolve is a recooked Blueprint, and a full table is a capacity fault

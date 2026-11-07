@@ -114,7 +114,7 @@ bool IsHost(coop::net::Session* s) { return s && s->running() && s->role() == co
 
 void* PlayerArg(const sg::Call& c) {
     const int32_t off = g_playerParam.Of(c.function);
-    return off >= 0 ? *reinterpret_cast<void* const*>(c.locals + off) : nullptr;
+    return (off >= 0 && c.locals) ? *reinterpret_cast<void* const*>(c.locals + off) : nullptr;
 }
 bool LocalPlayerArg(const sg::Call& c) {
     void* player = PlayerArg(c);
@@ -122,7 +122,7 @@ bool LocalPlayerArg(const sg::Call& c) {
 }
 int ActionArg(const sg::Call& c) {
     const int32_t off = g_actionParam.Of(c.function);
-    return off >= 0 ? static_cast<int>(c.locals[off]) : -1;
+    return (off >= 0 && c.locals) ? static_cast<int>(c.locals[off]) : -1;
 }
 
 bool SendCommit(coop::net::Session* s, const D::Commit& c) {

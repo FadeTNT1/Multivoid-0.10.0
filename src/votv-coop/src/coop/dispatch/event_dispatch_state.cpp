@@ -533,7 +533,10 @@ bool HandleStateEvent(net::Session& session,
         }
         net::BlobChunkPayload rb{};
         std::memcpy(&rb, msg.payload, sizeof(rb));
-        coop::inventory_restore::OnBlob(rb, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        const uint8_t fromSlot = (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
+                                     ? static_cast<uint8_t>(msg.senderPeerSlot)
+                                     : static_cast<uint8_t>(0xFF);
+        coop::inventory_restore::OnBlob(rb, fromSlot);
         break;
     }
     case net::ReliableKind::SleeperState: {
@@ -546,7 +549,10 @@ bool HandleStateEvent(net::Session& session,
         }
         net::BlobChunkPayload sp{};
         std::memcpy(&sp, msg.payload, sizeof(sp));
-        coop::sleepers::OnStateChunk(sp, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        const uint8_t fromSlot = (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
+                                     ? static_cast<uint8_t>(msg.senderPeerSlot)
+                                     : static_cast<uint8_t>(0xFF);
+        coop::sleepers::OnStateChunk(sp, fromSlot);
         break;
     }
     case net::ReliableKind::PocketTravel: {
@@ -606,7 +612,10 @@ bool HandleStateEvent(net::Session& session,
         }
         net::BlobChunkPayload dp{};
         std::memcpy(&dp, msg.payload, sizeof(dp));
-        coop::dig_sync::OnIntentChunk(dp, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        const uint8_t fromSlot = (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
+                                     ? static_cast<uint8_t>(msg.senderPeerSlot)
+                                     : static_cast<uint8_t>(0xFF);
+        coop::dig_sync::OnIntentChunk(dp, fromSlot);
         break;
     }
     case net::ReliableKind::DigState: {
@@ -619,13 +628,16 @@ bool HandleStateEvent(net::Session& session,
         }
         net::BlobChunkPayload ds{};
         std::memcpy(&ds, msg.payload, sizeof(ds));
-        coop::dig_sync::OnStateChunk(ds, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        const uint8_t fromSlot = (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
+                                     ? static_cast<uint8_t>(msg.senderPeerSlot)
+                                     : static_cast<uint8_t>(0xFF);
+        coop::dig_sync::OnStateChunk(ds, fromSlot);
         break;
     }
     case net::ReliableKind::InventoryRestoreAck: {
         // CLIENT->HOST: the answer to a restore; judged against the request pending for that slot.
         net::InventoryRestoreAckPayload ra{};
-        if (msg.payloadLen != sizeof(ra) || msg.senderPeerSlot < 1) {
+        if (msg.payloadLen != sizeof(ra) || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
             UE_LOGW("event_feed: InventoryRestoreAck dropped (%zu bytes, sender slot %d)",
                     static_cast<size_t>(msg.payloadLen), msg.senderPeerSlot);
             break;

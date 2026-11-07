@@ -70,9 +70,19 @@ bool IsSourceByName(void* obj) {
 bool IsSource(void* obj) {
     if (!obj) return false;
     void* cls = R::ClassOf(obj);
+    if (!cls) return false;
     for (size_t i = 0; i < std::size(g_sourceClasses); ++i) {
-        if (!g_sourceClasses[i]) g_sourceClasses[i] = R::FindClass(P::name::kPositionalCueSourceClasses[i]);
-        if (g_sourceClasses[i] && cls == g_sourceClasses[i]) return true;
+        if (g_sourceClasses[i]) {
+            if (cls == g_sourceClasses[i]) return true;
+            continue;
+        }
+        // Not resolved yet: compare this object's class by name instead of resolving by FindClass, whose miss walks
+        // the whole object array -- and this runs inside every PlaySoundAtLocation and SpawnEmitterAtLocation while
+        // armed, with a source class (the knocker, say) that may not be loaded. The first match caches the class.
+        if (R::NameEquals(R::NameOf(cls), P::name::kPositionalCueSourceClasses[i])) {
+            g_sourceClasses[i] = cls;
+            return true;
+        }
     }
     return false;
 }
