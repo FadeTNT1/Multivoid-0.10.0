@@ -204,7 +204,7 @@ void Tick(coop::net::Session& session) {
     }
     if (!session.running() || session.role() != coop::net::Role::Host) return;
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot) {
-        g_slots[slot].queue.Serve(kVacuumBudget, coop::active_drive::NowMs,
+        g_slots[slot].queue.Serve(slot, kVacuumBudget, coop::active_drive::NowMs,
                                   [&](const coop::net::VacuumPileIntentPayload& p) {
             Execute(session, p, slot);
             return coop::net::Served::Done;

@@ -152,6 +152,7 @@
 #include "coop/props/pack_trash_intent.h"
 #include "coop/interactables/tool_action.h"  // a leaver's stuck crowbars drop, its cut ends
 #include "coop/interactables/verb_lanes.h"  // the interactable lanes on a device's own verbs, at the script gate
+#include "coop/player/hint_route.h"  // a hint the host raises for a client goes to that client
 #include "coop/creatures/kerfus_lanes.h"  // the plain kerfur: its brain on the host, its state and drive, its verbs
 #include "coop/creatures/served_player.h"  // a robot the host runs for a client reads that client as its player
 #include "coop/items/broom_push.h"
@@ -344,6 +345,7 @@ void Install(coop::net::Session& session) {
     coop::kerfur_entity::SetSession(&session);  // the stable-KerfurId authority table: the session for the host id-allocation role gate and the broadcasts
     coop::kerfur_convert::Install(&session);  // host-authoritative kerfur on/off conversion (a client's verb refused -> request; the host's verb converges at its return)
     coop::served_player::Install(&session);  // HOST: the player-0 read seams the next two lanes serve through
+    coop::hint_route::Install(&session);  // lib_C::addHint: HOST routes a client's hints to it; CLIENT shows them
     coop::kerfus_lanes::Install(session);  // the plain kerfur: a client refuses its brain and its verbs, the host sends its state
     coop::kerfur_command::Install(&session);  // host-authoritative kerfur menu relay, serving the requester
     coop::remover_request::Install(&session);  // CLIENT: the remover press becomes a request (init watch); HOST: its judge
@@ -422,6 +424,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::trash_channel::OnGrabHolderLeft(session, static_cast<uint8_t>(slot));  // the leaver's carried clump is let go: it falls, streams, lands
     coop::tool_action::OnPeerLeft(static_cast<uint8_t>(slot));  // the leaver's stuck crowbars drop, its cut ends
     coop::broom_stroke::OnPeerLeft(static_cast<uint8_t>(slot));  // the leaver's stroke rate goes with it
+    coop::hint_route::OnPeerLeft(static_cast<uint8_t>(slot));  // the leaver's credited jobs and repeat window
     coop::kerfus_lanes::OnPeerLeft(static_cast<uint8_t>(slot));  // and the Kerfuses it turned on follow the host again (its verbs' queue goes with its slot)
     coop::dish_calib_sync::OnPeerLeft(static_cast<uint8_t>(slot));  // and its precision-intent budget
     coop::drive_payload_sync::OnPeerLeft(static_cast<uint8_t>(slot));  // and its drive rows in assembly, its brought drives
@@ -596,6 +599,7 @@ DisconnectStats DisconnectAll() {
     coop::pack_trash_intent::OnDisconnect();  // with no session the game's own bagging stands
     coop::vacuum_pile_intent::OnDisconnect();  // with no session the game's vacuum pops as written
     coop::verb_lanes::OnDisconnect();  // and each verb lane's counters and summary line (a sender's queue goes with its slot)
+    coop::hint_route::OnDisconnect();  // every credit and repeat window
     coop::kerfus_lanes::OnDisconnect();  // and the Kerfus lanes' records and waiting states
     coop::served_player::OnDisconnect();  // and every served robot's record: its seams disarm
     coop::broom_push::OnDisconnect();  // forget pushes not yet handed on
@@ -779,6 +783,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; coop::vacuum_pile_intent::Tick(session); }  // settle the vacuumed watch; HOST: run one queued client vacuum pop a tick a client
     { PP::Scope _s{PP::Bucket::Interactable}; coop::verb_lanes::Tick(session); }  // settle each verb lane's watches; HOST: run their queued intents
     { PP::Scope _s{PP::Bucket::Interactable}; coop::sleepingbag_sync::Tick(session); }  // settle the gates and serve bounded fold/unfold intents
+    coop::hint_route::Tick();  // the lib_C::addHint watch, until live
     { PP::Scope _s{PP::Bucket::Interactable}; coop::kerfus_lanes::Tick(session); }  // the Kerfus lanes' watches; CLIENT: waiting states; HOST: queued verbs
     { PP::Scope _s{PP::Bucket::Interactable}; coop::served_player::Tick(); }  // HOST: the served robots' seams
     { PP::Scope _s{PP::Bucket::Balance};       coop::balance_sync::Tick(); }  // host polls saveSlot.Points + broadcasts on change; client retries the pending mirror apply

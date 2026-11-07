@@ -5,9 +5,14 @@
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/fname_utils.h"
+#include "ue_wrap/core/ftext_utils.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/reflection_props.h"
+#include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/core/sdk_profile.h"
+
+#include <cstring>
 
 namespace ue_wrap::votv_lib {
 namespace {
@@ -82,6 +87,43 @@ bool ProgressAdvancement(const std::wstring& name, bool disablePopup, void* worl
     ue_wrap::ParamFrame f(fn);
     return f.valid() && f.Set<R::FName>(L"advancement", fname) && f.Set<bool>(L"disablePopup", disablePopup) &&
            f.Set<void*>(L"__WorldContext", worldContext) && ue_wrap::Call(g_libCdo.Raw(), f);
+}
+
+bool ReadAddHintCall(const ue_wrap::script_gate::Call& call, HintCall& out) {
+    namespace N = ue_wrap::profile::name;
+    static R::ParamOffset sText{N::LibAddHintTextParam};
+    static R::ParamOffset sType{N::LibAddHintTypeParam};
+    static R::ParamOffset sDebug{N::LibAddHintDebugParam};
+    static R::ParamOffset sContext{N::LibWorldContextParam};
+    if (!call.function || !call.locals) return false;
+    const int32_t oText = sText.Of(call.function);
+    const int32_t oType = sType.Of(call.function);
+    const int32_t oDebug = sDebug.Of(call.function);
+    const int32_t oContext = sContext.Of(call.function);
+    if (oText < 0 || oType < 0 || oDebug < 0 || oContext < 0) return false;
+    out.text = ue_wrap::ftext_utils::FTextToString(call.locals + oText);
+    out.type = call.locals[oType];
+    out.debug = call.locals[oDebug] != 0;
+    std::memcpy(&out.worldContext, call.locals + oContext, sizeof(void*));
+    return !out.text.empty();
+}
+
+bool AddHint(const std::wstring& text, uint8_t type, void* worldContext) {
+    namespace N = ue_wrap::profile::name;
+    void* fn = !text.empty() && worldContext ? Fn(N::LibAddHintFn) : nullptr;
+    if (!fn) return false;
+    uint8_t ftext[ue_wrap::ftext_utils::kFTextSize] = {};
+    if (!ue_wrap::ftext_utils::MintFText(text.c_str(), ftext)) return false;
+    ue_wrap::ParamFrame f(fn);
+    return f.valid() && f.SetRaw(N::LibAddHintTextParam, ftext, ue_wrap::ftext_utils::kFTextSize) &&
+           f.Set<uint8_t>(N::LibAddHintTypeParam, type) && f.Set<bool>(N::LibAddHintDebugParam, false) &&
+           f.Set<void*>(N::LibWorldContextParam, worldContext) && ue_wrap::Call(g_libCdo.Raw(), f);
+}
+
+bool BeganAtPlayer(const ue_wrap::script_gate::Call& call) {
+    void* const first = ue_wrap::script_gate::OutermostFunction(call);
+    void* const cls = first ? R::OuterOf(first) : nullptr;
+    return cls && R::ToString(R::NameOf(cls)) == ue_wrap::profile::name::MainPlayerClass;
 }
 
 }  // namespace ue_wrap::votv_lib

@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "coop/net/acting_slot.h"
 #include "coop/net/intent_bucket.h"
 
 #include <cstddef>
@@ -40,12 +41,19 @@ public:
 
     // At most one head, at `now()`, a steady clock's milliseconds read only once the queue holds something: nothing
     // when empty; else one token is taken, and with it `fn(head)` answers Done (the head leaves) or Wait (the token
-    // returns, the head stays for the next call).
+    // returns, the head stays for the next call). `slot` is the sender whose queue this is: the head runs inside an
+    // acting-slot scope naming it (coop/net/acting_slot.h), so what the game shows while the host runs the head --
+    // a hint -- reaches that sender rather than the host (coop/player/hint_route).
     template <class NowFn, class Fn>
-    void Serve(const IntentBudget& b, NowFn&& now, Fn&& fn) {
+    void Serve(int slot, const IntentBudget& b, NowFn&& now, Fn&& fn) {
         if (q_.empty()) return;
         if (!bucket_.Take(b, now())) return;
-        if (fn(q_.front()) == Served::Done) {
+        Served served;
+        {
+            const coop::acting_slot::Scope acting(slot);
+            served = fn(q_.front());
+        }
+        if (served == Served::Done) {
             q_.pop_front();
         } else {
             bucket_.Refund(b);

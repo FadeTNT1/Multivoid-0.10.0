@@ -24,6 +24,7 @@
 #include "coop/session/join_progress.h"
 #include "coop/element/mirror_defer.h"  // deferred hide, armed at Begin and revealed at the lift
 #include "coop/net/session.h"
+#include "coop/net/acting_slot.h"  // the drained client message names whom the host acts for
 #include "coop/element/bind_wait.h"  // Pump: the replay of the messages held for a bind that has since taken
 #include "coop/session/subsystems.h"
 #include "coop/creatures/npc_adoption.h"
@@ -177,6 +178,12 @@ void Update(net::Session& session, void* localPlayer) {
         coop::element::bind_wait::Pump();
         if (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
             ++g_drained[msg.senderPeerSlot][static_cast<uint8_t>(msg.kind)];
+        // On the host a client's message is handled acting for its sender: what the game shows while a handler runs
+        // the game's own body for it (a hint) is that client's (coop/player/hint_route). A queued intent reopens the
+        // scope when its lane serves it (coop/net/intent_queue.h).
+        const bool fromClient = session.role() == net::Role::Host && msg.senderPeerSlot >= 1 &&
+                                msg.senderPeerSlot < net::kMaxPeers;
+        const coop::acting_slot::Scope acting(fromClient ? msg.senderPeerSlot : coop::acting_slot::kNone);
         switch (msg.kind) {
         case net::ReliableKind::Join: {
             coop::player_handshake::HandleJoinMessage(session, msg);

@@ -438,6 +438,15 @@ inline constexpr const wchar_t* LibClass                = L"lib_C";
 inline constexpr const wchar_t* LibSetEventFn           = L"setEvent";
 inline constexpr const wchar_t* LibSetEventActiveParam  = L"isEventActive";
 inline constexpr const wchar_t* LibWorldContextParam    = L"__WorldContext";
+// lib_C::addHint(inText, type, debug, __WorldContext): every in-game hint (the info-icon toast, bottom right) runs
+// through it -- mainGamemode_C's "Add Hint from Gamemode" forwards to it, ui_ui_C::addHint has no caller. `type` is
+// enum_notifytype (the icon), `debug` hides the hint outside the editor. droneSellLocation_C::sell raises the sale's
+// hints with the sell location as the world context; its `drone` field names the drone that sold.
+inline constexpr const wchar_t* LibAddHintFn            = L"addHint";
+inline constexpr const wchar_t* LibAddHintTextParam     = L"inText";
+inline constexpr const wchar_t* LibAddHintTypeParam     = L"type";
+inline constexpr const wchar_t* LibAddHintDebugParam    = L"debug";
+inline constexpr const wchar_t* DroneSellLocationClass  = L"droneSellLocation_C";
 // Garage Soltomia: the eventer mints soltomiaCleaning_C hidden. A player's overlap of its box shows it (the
 // squeak, the particles, `active`, the talking timer) and moves the ATV and jams three doors; the garage door's
 // dooropened runs `opened`, which plays the montage on `solt`; the montage's `throw` notify mints the sponge.

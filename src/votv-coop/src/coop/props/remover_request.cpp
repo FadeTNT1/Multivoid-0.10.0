@@ -341,7 +341,7 @@ void Serve(coop::net::Session& s, uint8_t slot, const Queued& q) {
 
 void ServeQueues(coop::net::Session& s) {
     for (uint8_t slot = 1; slot < coop::players::kMaxPeers; ++slot) {
-        g_slots[slot].queue.Serve(kBudget, coop::net::NowMs, [&](const Queued& q) {
+        g_slots[slot].queue.Serve(slot, kBudget, coop::net::NowMs, [&](const Queued& q) {
             Serve(s, slot, q);
             return coop::net::Served::Done;
         });

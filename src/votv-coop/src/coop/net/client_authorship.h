@@ -235,6 +235,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::DishHashcodes:
     case ReliableKind::ServerSetting:
     case ReliableKind::CommandReply:
+    case ReliableKind::HintRoute:
     case ReliableKind::PermissionGrants:
     case ReliableKind::CoinGunResult:
     case ReliableKind::OrderRefused:
