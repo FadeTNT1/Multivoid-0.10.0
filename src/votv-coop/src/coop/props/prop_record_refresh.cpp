@@ -138,6 +138,10 @@ std::string DescribeReelCase(void* rc) {
 //   discbox (the USB stick box): record `discs` (getData's ints[0]); taking a stick (action 7) and
 //     putting one in (playerUsedOn) both end in gen(), and loadData sets `discs` and calls gen(). Without
 //     it a guest's take left the stick in the box on every other peer, to be taken a second time.
+//   cannedfood: record `type`, `opened` and `foods`; open() sets `opened` (and runs init(), which
+//     picks the shut, open or empty mesh from the three), eat() takes one from `foods`. Its
+//     loadData sets the three and does NOT run init(), so the receiver's repaint is the watch on
+//     loadData below (OnCanLoadPost), which runs init() after our own apply only.
 // Not added: minioven, cookingpad and woodchipper keep their on / off state (`active`) out of the
 // record (the first two carry only the cord base, the chipper only `fuel`) and their loadData does
 // not run their refresh, so a republished record would change nothing on the far side.
@@ -152,12 +156,36 @@ UE_FACT_FN(kRowUpdPropsTv2,    "prop_record_refresh", L"prop_tv2_C",           L
 UE_FACT_FN(kRowUpdlidBbq,      "prop_record_refresh", L"prop_bbq_C",           L"updlid",      Dispatch);
 UE_FACT_FN(kRowAddcoalBbq,     "prop_record_refresh", L"prop_bbq_C",           L"addcoal",     Dispatch);
 UE_FACT_FN(kRowGenDiscbox,     "prop_record_refresh", L"prop_discbox_C",       L"gen",         Dispatch);
+UE_FACT_FN(kRowOpenCan,        "prop_record_refresh", L"prop_cannedFood_C",    L"open",        Dispatch);
+UE_FACT_FN(kRowEatCan,         "prop_record_refresh", L"prop_cannedFood_C",    L"eat",         Dispatch);
+UE_FACT_FN(kRowLoadCan,        "prop_record_refresh", L"prop_cannedFood_C",    L"loadData",    Dispatch);
+
+// A record has just landed on a prop whose loadData sets its state without running the init()
+// that draws it (the canned food: shut, open or empty mesh). init() re-runs the pick from the
+// fields the record carried. Called after our own apply only.
+void RepaintByInit(void* actor) {
+    void* cls = R::ClassOf(actor);
+    void* const initFn = cls ? R::FindDispatchFunctionCached(cls, L"init") : nullptr;
+    if (!initFn) {
+        static bool s_warned = false;
+        if (!s_warned) { s_warned = true;
+            UE_LOGW("prop_record_refresh: no init() on a repainted prop -- its state lands without its look"); }
+        return;
+    }
+    ue_wrap::ParamFrame f(initFn);
+    if (f.valid()) ue_wrap::Call(actor, f);
+    ++g_cRelooked;
+}
 
 struct Watched {
     const ue_wrap::facts::Function* row;
     int tag;
     bool relook;
     std::string (*describe)(void*);
+    // `applyOnly`: the watch is the receiver's repaint and nothing else; a native call of it (the
+    // game's own load) publishes nothing. `repaint`: run after our own apply lands.
+    bool applyOnly = false;
+    void (*repaint)(void*) = nullptr;
 };
 constexpr Watched kWatched[] = {
     { &kRowUpdBox,        0x44424F58, true,  &DescribeBox },       // 'DBOX'
@@ -171,6 +199,9 @@ constexpr Watched kWatched[] = {
     { &kRowUpdlidBbq,     0x42425130, false, nullptr },            // 'BBQ0'
     { &kRowAddcoalBbq,    0x42425131, false, nullptr },            // 'BBQ1'
     { &kRowGenDiscbox,    0x44534358, false, nullptr },            // 'DSCX'
+    { &kRowOpenCan,       0x43414E30, false, nullptr },            // 'CAN0'
+    { &kRowEatCan,        0x43414E31, false, nullptr },            // 'CAN1'
+    { &kRowLoadCan,       0x43414E4C, false, nullptr, true, &RepaintByInit },  // 'CANL'
 };
 // The UFunction each watch was armed on, so a re-armed one can be recognised. A world change can
 // re-create a Blueprint class and its functions (127 were in a same-process rejoin; these two kept
@@ -215,6 +246,7 @@ void OnUpdPost(const sg::Call& call) {
     // lanes gate on the same flag for the same reason. Logged rather than dropped silently: this
     // line is the far side's receipt, and it says which state actually landed.
     if (call.fromOurCode) {
+        if (w->repaint) w->repaint(call.object);
         bool opened = false;
         if (w->relook) {
             if (ReadOpened(call.object, opened)) RefreshLook(call.object, opened);
@@ -224,6 +256,7 @@ void OnUpdPost(const sg::Call& call) {
         }
         return;
     }
+    if (w->applyOnly) return;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
     void* actor = call.object;
