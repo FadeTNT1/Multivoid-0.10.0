@@ -244,6 +244,18 @@ join-once placement is not repeated. The lanes that refuse a client's own calls 
 (doors, light groups, keypads) run a call natively while its object is in a world the client has
 not announced ready: that world's load is the host's save (`coop::net_pump::IsInAnnouncedWorld`).
 
+### Coming home from a pocket dimension
+
+A client's way home from a pocket level (docs/pocket-dimensions.md, "The way home") re-runs steps 2
+and 4 for its admitted slot, in place: a second save transfer into the same zcoop slot
+(`save_transfer::ClientArmForReturn`, the host's MV-H33 latch re-armed first), the profile push,
+and the story-save load from the world the player stands in
+(`ue_wrap::engine::LoadStorySaveForReturn`, which skips the boot survey). The world-load episode is
+re-armed with `world_load_episode::ArmForReturn`, whose request the left world's own replay cannot
+satisfy, and the announce state is forgotten (`net_pump::ForgetAnnounceForReturn`), so the new
+world's announce is a first one and the host runs the full connect replay. Admission, the roster,
+the slot and the identity do not change, and the join's own cover is not raised.
+
 ### Leaving and rejoining
 
 A slot teardown is a roster-row transition: the leaver's mirrors, proxies, seed brackets and

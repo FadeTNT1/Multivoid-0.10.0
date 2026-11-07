@@ -556,6 +556,7 @@ void Session::DoStop_() {
     zeroEpochRefusals_.Clear();
     staleEpochRefusals_.Clear();
     streamRateRefusals_.Clear();
+    awayKindRefusals_.Clear();
 
     auto* sockets = SteamNetworkingSockets();
     if (sockets) {

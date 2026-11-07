@@ -439,6 +439,16 @@ account that made it (`coop/net/peer_identity`; [install.md](install.md) says wh
 what a second account on the same PC gets). The world-side effect of a pickup or a drop is
 on the props lane.
 
+### Pocket trips
+
+A client sent to a pocket dimension (the outhouse, the goop, the well, the shaker, the skull zone)
+keeps its session (`coop/player/pocket_travel`). Its inventory stream stands down
+for the trip: the profile is flushed with the departure spot as its place when the trip starts and
+again at the way home, and the client puts its own carried state back on its player in the pocket
+and in the host's world on return, a whole replacement, so no item is ever in two places. Every
+peer shows a puppet only when its player is in the same level: an away player's puppet is hidden
+where it stood, without collision or nameplate, and the scoreboard and the feed say where it went.
+
 ### Roster and moderation
 
 Slots are recycled, so who is in a slot is a token, never a boolean (`coop/player/roster_ledger`).

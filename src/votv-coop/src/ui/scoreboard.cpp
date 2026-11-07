@@ -5,6 +5,8 @@
 #include "coop/commands/command_sync.h"
 #include "coop/session/session_manager.h"  // ListedState / SetListed -- the ONE mid-session edit
 #include "coop/player/nick_color.h"
+#include "coop/player/pocket_travel.h"         // where a player is: the main world or a pocket
+#include "coop/player/pocket_travel_client.h"  // ... and where this machine's player is
 #include "coop/player/roster.h"
 #include "coop/voice/voice_chat.h"
 #include "l10n/l10n.h"
@@ -55,6 +57,24 @@ void IdTooltip(const coop::roster::Row& r, bool host) {
     l10n::Fmt(tip, sizeof(tip), r.isLocal ? l10n::T("Your player id %s") : l10n::T("Player id %s"),
               r.playerId);
     ImGui::SetTooltip("%s", tip);
+}
+
+// Where a player on a pocket trip is, after the name; null in the main world (the common case says
+// nothing). This machine's own row is its own trip; another row is the host's location table.
+const char* PocketStatus(const coop::roster::Row& r) {
+    namespace PT = coop::player::pocket_travel;
+    if (r.slot < 0 || r.slot >= static_cast<int>(coop::players::kMaxPeers)) return nullptr;
+    const PT::Pocket at = r.isLocal ? coop::player::pocket_travel_client::ViewerLocation()
+                                    : PT::LocationOf(static_cast<uint8_t>(r.slot));
+    switch (at) {
+    case PT::Pocket::PoopDim:  return l10n::T("in the poop dimension");
+    case PT::Pocket::Goop:     return l10n::T("in the goop");
+    case PT::Pocket::Place:    return l10n::T("in the place");
+    case PT::Pocket::AlexPdim: return l10n::T("in Alex's dimension");
+    case PT::Pocket::Woid:     return l10n::T("in the woid");
+    case PT::Pocket::Other:    return r.isLocal ? l10n::T("on the way back") : nullptr;
+    default:                   return nullptr;
+    }
 }
 
 // A menu item that is off, with the reason on hover, while the person has no proved id yet. The
@@ -265,6 +285,11 @@ void Render() {
                         ImGui::SameLine(0.0f, S(6.0f));
                         ImGui::TextColored(ImVec4(1.00f, 0.82f, 0.35f, 0.85f), "%s", l10n::T("HOST"));
                     }
+                }
+                // A player on a pocket trip: where they are, after the name.
+                if (const char* where = PocketStatus(r)) {
+                    ImGui::SameLine(0.0f, S(6.0f));
+                    ImGui::TextDisabled("%s", where);
                 }
 
                 // The voice column, the per-player mic-state icon: the self row toggles your mute,

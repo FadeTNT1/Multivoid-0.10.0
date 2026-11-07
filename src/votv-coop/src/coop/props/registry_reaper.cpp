@@ -10,6 +10,7 @@
 #include "coop/element/element_deleter.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
+#include "coop/player/pocket_travel_client.h"  // KeepSessionInOtherWorld: a pocket is not the menu
 #include "coop/props/prop_element_tracker.h"
 #include "coop/props/prop_snapshot.h"
 #include "coop/props/save_identity_bind.h"
@@ -133,10 +134,14 @@ bool Tick(coop::net::Session& session) {
         // gameplay, a transition to a non-gameplay world (matched positively, so a cave or a
         // streamed sublevel never trips it) means the local peer left: the session stops and the
         // dormancy bypass arms. It rides this 4 s scan, well inside the minute the balloon takes.
+        // A client on a pocket trip stands in a world that is not the gameplay map and is not the
+        // menu either: its session stays up (coop/player/pocket_travel_client, which names the world
+        // by its map against the pocket list, so a real quit to the menu while away still ends it).
         if (inGameplayWorld) {
             g_everInGameplayThisSession = true;
         } else if (kind == ue_wrap::world_identity::WorldKind::Other &&
-                   g_everInGameplayThisSession && !coop::net_pump::IsFleeing() && session.running()) {
+                   g_everInGameplayThisSession && !coop::net_pump::IsFleeing() && session.running() &&
+                   !coop::player::pocket_travel_client::KeepSessionInOtherWorld()) {
             // Positive Other, never Unknown: a travel publishes null for about a second in both
             // directions, and fleeing on that would end the session of a peer mid-load. Other also
             // covers preLoad and the tutorial maps, which a name test for "menu" did not.

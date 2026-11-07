@@ -29,6 +29,7 @@
 #include "coop/session/subsystems.h"
 #include "coop/creatures/npc_adoption.h"
 #include "coop/creatures/kerfur_prop_adoption.h"  // OnSnapshotComplete
+#include "coop/player/pocket_travel_client.h"  // the stand-down: world kinds from the host dropped on a trip
 #include "coop/player/hand_item.h"  // the hand-item handler
 #include "coop/interactables/laptop_sync.h"  // PayOwed: a client's laptop power at its pace
 #include "coop/player/sleep_sync.h"          // PayOwed: a client's rest state at its pace
@@ -173,7 +174,20 @@ void Update(net::Session& session, void* localPlayer) {
     // chains the family routers (each returns true iff it owns the kind, so the family's own switch
     // is the single membership declaration).
     net::Session::ReliableMessage msg;
+    // The pocket rule, client side: while this client's world lanes stand down (a pocket trip, or its
+    // way home before the host's world is up), a host message of a world kind is not applied. The host
+    // cannot know the client already travelled: what it sent before it isolated the slot (a spawn, an
+    // event, a destroy) arrives here after the travel, and would act in the pocket or on the world the
+    // way home is about to replace, whose connect replay brings all of it again.
+    const bool standDown = session.role() == net::Role::Client &&
+                           coop::player::pocket_travel_client::WorldLanesStandDown();
+    uint32_t standDownDrops = 0;
+    uint8_t standDownFirst = 0;
     while (session.TryGetReliable(msg)) {
+        if (standDown && !net::Session::IsAwaySendable(msg.kind)) {
+            if (standDownDrops++ == 0) standDownFirst = static_cast<uint8_t>(msg.kind);
+            continue;
+        }
         // The previous message may have bound a prop: its held messages run before this one.
         coop::element::bind_wait::Pump();
         if (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
@@ -494,6 +508,7 @@ void Update(net::Session& session, void* localPlayer) {
         }
     }
     coop::element::bind_wait::Pump();   // the last message's bind
+    if (standDownDrops > 0) coop::player::pocket_travel_client::NoteStandDownDrops(standDownDrops, standDownFirst);
 }
 
 uint32_t DrainedFrom(int slot, net::ReliableKind kind) {

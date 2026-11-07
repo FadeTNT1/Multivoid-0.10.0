@@ -19,6 +19,8 @@
 #include "coop/config/config_registry.h"
 #include "coop/net/session.h"
 #include "coop/player/death_revive.h"
+#include "coop/player/pocket_travel.h"
+#include "coop/player/pocket_travel_client.h"  // OnRunEndWhileAway: a run-ending in a pocket goes home
 #include "coop/player/players_registry.h"
 #include "coop/session/net_pump.h"
 #include "ue_wrap/core/game_thread.h"
@@ -158,16 +160,17 @@ sg::Verdict OnLoadLevelPre(const sg::Call& call) {
     void* author = *reinterpret_cast<void* const*>(call.locals + sAuthorOff);
 
     if (!R::NameEquals(level, kMenuLevel)) {
-        // A sub-level travel (sl_*, the map transitions). It is not this seam's to refuse -- and
-        // it will still end the session for the peer that takes it, which is a separate open
-        // question, so the trail is left deliberately.
+        // A sub-level travel (sl_*, the map transitions). Not a run-ending: a pocket trip or the way
+        // home from one is the pocket lane's (coop/player/pocket_travel), which keeps the session
+        // up across it; any other level passes through with a trail.
+        const std::wstring levelName = R::ToString(level);
         const unsigned long long n = ++g_subLevelLogged;
         if (n <= 8 || (n % 50) == 0) {
             UE_LOGI("run_end_travel: lib_C::loadLevel(\"%ls\") authored by %ls (#%llu) -- not the "
-                    "menu, so not judged here; a sub-level travel still ends this peer's session",
-                    R::ToString(level).c_str(), R::ClassNameOf(author).c_str(), n);
+                    "menu, so not judged here; handed to the pocket lane",
+                    levelName.c_str(), R::ClassNameOf(author).c_str(), n);
         }
-        return sg::Verdict::Run;
+        return coop::player::pocket_travel::OnLoadLevel(levelName.c_str(), author);
     }
     g_menuSeen.fetch_add(1, std::memory_order_relaxed);
 
@@ -186,6 +189,15 @@ sg::Verdict OnLoadLevelPre(const sg::Call& call) {
     }
 
     const Judgement v = JudgeMenuTravel(author);
+    // A run-ending in a pocket (a death there, above all) is answered by the way home, not by a revive
+    // in the pocket or by the menu: the player comes home alive. The player's own quit is not one.
+    if (v != Judgement::RunPlayerAsked && v != Judgement::RunNoSession &&
+        coop::player::pocket_travel_client::OnRunEndWhileAway(author)) {
+        g_cancelled.fetch_add(1, std::memory_order_relaxed);
+        UE_LOGW("run_end_travel: REFUSED lib_C::loadLevel(\"menu\") authored by %ls -- a run-ending in a "
+                "pocket; the pocket lane brings the player home", R::ClassNameOf(author).c_str());
+        return sg::Verdict::Cancel;
+    }
     if (v != Judgement::Cancel) {
         // Only the two that say something about this seam are worth a line per travel: a solo
         // travel is the common case and says nothing, and the two shortfalls latch below.

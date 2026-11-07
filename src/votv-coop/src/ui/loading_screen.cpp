@@ -3,6 +3,7 @@
 #include "ui/loading_screen.h"
 
 #include "coop/net/protocol.h"  // HostJoinPhase -- the beacon's phase, as the View carries it
+#include "coop/player/pocket_return_client.h"  // the pocket return's own cover
 #include "coop/session/join_progress.h"
 #include "l10n/l10n.h"
 #include "ui/scale.h"
@@ -43,15 +44,92 @@ void IndeterminateBar(float barW) {
     ImGui::Dummy(ImVec2(barW, h));
 }
 
+// The pocket return's panel: the same centred panel over the curtain, its title naming where the
+// player is coming back from, the step and its seconds, the download's bytes. No Cancel: the player
+// is mid-load, and a failed return ends the session by itself.
+void RenderReturn(const coop::player::pocket_return_client::CoverView& r) {
+    namespace RC = coop::player::pocket_return_client;
+    const ImGuiIO& io = ImGui::GetIO();
+    const float barW = S(380.0f);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, S(10.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(22.0f), S(20.0f)));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.05f, 0.07f, 0.72f));
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                                   ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                   ImGuiWindowFlags_AlwaysAutoResize;
+    if (ImGui::Begin("###coop_pocket_return", nullptr, flags)) {
+        ImGui::SetWindowFontScale(1.25f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.94f, 0.98f, 1.0f));
+        CenteredText(r.from == coop::player::pocket_travel::Pocket::PoopDim
+                         ? l10n::T("Returning from the poop dimension")
+                         : l10n::T("Returning to the main world"));
+        ImGui::PopStyleColor();
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::Dummy(ImVec2(0.0f, S(8.0f)));
+
+        const char* text = r.phase == RC::CoverPhase::Downloading ? l10n::T("Downloading the host's world")
+                         : r.phase == RC::CoverPhase::Loading     ? l10n::T("Loading the world")
+                                                                  : l10n::T("Waiting for the host to capture its world");
+        const int dots = static_cast<int>(ImGui::GetTime() * 2.0) % 4;
+        char d[4] = {0};
+        for (int i = 0; i < dots; ++i) d[i] = '.';
+        char status[256];
+        l10n::Fmt(status, sizeof(status), "%s%s", text, d);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.80f, 0.84f, 0.90f, 1.0f));
+        CenteredText(status);
+        ImGui::PopStyleColor();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.60f, 0.68f, 1.0f));
+        if (r.phaseMs >= 3000) {
+            char since[256];
+            l10n::Fmt(since, sizeof(since), l10n::T("%llu s in this step"),
+                      static_cast<unsigned long long>(r.phaseMs / 1000));
+            CenteredText(since);
+        } else {
+            ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
+        }
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0.0f, S(8.0f)));
+
+        if (r.phase == RC::CoverPhase::Downloading && r.totalBytes > 0) {
+            const float frac = static_cast<float>(r.doneBytes) / static_cast<float>(r.totalBytes);
+            char overlay[256];
+            l10n::Fmt(overlay, sizeof(overlay), l10n::T("%1$.1f / %2$.1f MB"),
+                      static_cast<double>(r.doneBytes) / (1024.0 * 1024.0),
+                      static_cast<double>(r.totalBytes) / (1024.0 * 1024.0));
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.36f, 0.59f, 0.82f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.12f, 0.16f, 1.0f));
+            ImGui::ProgressBar(frac > 1.0f ? 1.0f : frac, ImVec2(barW, 0.0f), overlay);
+            ImGui::PopStyleColor(2);
+        } else {
+            IndeterminateBar(barW);
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+}
+
 }  // namespace
 
-bool IsOpen() { return jp::Active(); }
+// The join's cover, or the pocket return's: the two never stand together (a return runs inside an
+// admitted session, after the join's cover came down).
+bool IsOpen() { return jp::Active() || coop::player::pocket_return_client::Cover().active; }
 
-void Close() { jp::Reset(); }
+void Close() {
+    jp::Reset();
+    coop::player::pocket_return_client::HideCover();
+}
 
 void Render() {
     const jp::View v = jp::Snapshot();
-    if (v.phase == jp::Phase::Idle) return;
+    if (v.phase == jp::Phase::Idle) {
+        const coop::player::pocket_return_client::CoverView r = coop::player::pocket_return_client::Cover();
+        if (r.active) RenderReturn(r);
+        return;
+    }
 
     const ImGuiIO& io = ImGui::GetIO();
     const float barW = S(380.0f);

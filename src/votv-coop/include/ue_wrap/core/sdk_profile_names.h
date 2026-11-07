@@ -21,6 +21,33 @@ inline constexpr const wchar_t* WorldClass = L"World";
 inline constexpr const wchar_t* SetActorLocationFn = L"K2_SetActorLocation";
 inline constexpr const wchar_t* GameplayLevel = L"untitled_1";
 
+// The pocket dimensions (coop/player/pocket_travel, docs/pocket-dimensions.md): the levels the
+// game's own triggers send one player to with lib_C::loadLevel, a full OpenLevel travel. Read off
+// the 0.10.0 bytecode: prop_biotoilet_C -> sl_poopdim, puddle_C -> sl_goop, wellTp_C and
+// prop_shake_C -> sl_place, skullzone_C -> sl_alexpdim, insomniac_C -> sl_woid. None is
+// "restricted" (lib_getFunc_C::isAreaLevelRestricted names only the menu), so each travel keeps the
+// save slot object and names the level as currentLevel.
+inline constexpr const wchar_t* PocketLevelPoopDim  = L"sl_poopdim";
+inline constexpr const wchar_t* PocketLevelGoop     = L"sl_goop";
+inline constexpr const wchar_t* PocketLevelPlace    = L"sl_place";
+inline constexpr const wchar_t* PocketLevelAlexPdim = L"sl_alexpdim";
+inline constexpr const wchar_t* PocketLevelWoid     = L"sl_woid";
+// The token every one of those trips passes as loadLevel's option. lib_C::loadLevel stores it in
+// mainGameInstance_C.NewVar_1, and the arriving mainGamemode_C::ReceiveBeginPlay quits the game when
+// the map is not one of its known maps and the token does not match: a travel the mod drives to a
+// pocket level must carry it.
+inline constexpr const wchar_t* PocketTravelToken   = L"PQXYyeofZ8cr5rJD4YXLVw";
+// What a trip's trigger leaves behind on the machine that refuses it (the host while hosting,
+// ue_wrap/engine/travel_residue). skullzone_C and insomniac_C clear the game instance's
+// loadedSlotName before their travel, and saveSlot_C::save returns early while it is empty, so a
+// refused trip would leave the host unable to save; prop_biotoilet_C and puddle_C set
+// currentLevel = None; puddle_C sets the character's movement mode to MOVE_None through
+// UCharacterMovementComponent::SetMovementMode(NewMovementMode, NewCustomMode).
+inline constexpr const wchar_t* GameInstanceLoadedSlotNameProp = L"loadedSlotName";
+inline constexpr const wchar_t* CharacterSetMovementModeFn     = L"SetMovementMode";
+inline constexpr const wchar_t* CharacterSetMovementModeParam  = L"NewMovementMode";
+inline constexpr const wchar_t* CharacterSetCustomModeParam    = L"NewCustomMode";
+
 // The checkpoint spawn point at the base entrance (the actor centre, world cm; re-derive per game
 // version): every client appearance is teleported here (coop/session/teleport_client).
 inline constexpr float kKPPSpawnX = -37695.f;
@@ -291,6 +318,9 @@ inline constexpr const wchar_t* NpcClass_KerfurOmega  = L"kerfurOmega_C";
 inline constexpr const wchar_t* NpcClass_Krampus      = L"npc_krampus_C";
 inline constexpr const wchar_t* NpcClass_Funguy       = L"npc_funguy_C";
 inline constexpr const wchar_t* NpcClass_GoreSlither  = L"npc_goreSlither_C";
+// The blue brain cheese's hatchling (BlueBrainCheeseClass below). A child of npc_goreSlither_C, so the super-chain
+// walk already takes it; listed by name too, so the hatch mirrors whatever its parent becomes.
+inline constexpr const wchar_t* NpcClass_GoreSlitherCheese = L"npc_goreslither_cheese_C";
 inline constexpr const wchar_t* NpcClass_Insomniac    = L"insomniac_C";
 inline constexpr const wchar_t* NpcClass_Fossilhound  = L"fossilhound_C";
 inline constexpr const wchar_t* NpcClass_Antibreather = L"antibreather_C";
@@ -377,6 +407,7 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_GeomOcta,          // the Geom Octahedron; host-authored ACharacter, pose rides EntityPose
     NpcClass_Kavotia,           // rozitalHole's patrollers; host-authored ACharacter, brain refused on a mirror
     NpcClass_Figura,            // the gamemode's CustomEvent_3 figure; host-authored ACharacter, self-destroy timer refused on a mirror
+    NpcClass_GoreSlitherCheese, // the blue brain cheese's hatchling; EX_CallMath, npc_world_enum source row
 };
 inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcAllowlist[0]);
 
@@ -461,6 +492,12 @@ inline constexpr const wchar_t* UfoDropperPigClass  = L"ufoDropper_pig_C";
 // npc_world_enum. The firetanks stay out of that row: a firetank_C mirror's BeginPlay arms five AI timers
 // (update, senseupdate, fire, speak, makehealthnoise) that no row refuses yet.
 inline constexpr const wchar_t* BoarInvasionClass = L"boarInvasion_C";
+// The blue brain cheese (prop_food_blueBrainCheese_C, a prop_food_C whose ReceiveTick replaces the food tick): every
+// 45 to 75 s it rolls 10 %, and with a pawn inside its sphere (else, at 50 %, another gore slither) it hatches into a
+// cheese gore slither (npc_goreslither_cheese_C, a child of npc_goreSlither_C that only blanks setMesh and preDied)
+// and destroys itself. The hatch is a BeginDeferred under EX_CallMath in the tick, so it crosses only through the
+// cheese's source row in npc_world_enum; a client's tick of a shared cheese is refused in coop/props/prop_food_state.
+inline constexpr const wchar_t* BlueBrainCheeseClass = L"prop_food_blueBrainCheese_C";
 // ---- The story-event scenes (coop/world/event_scene_sync, ue_wrap/actors/event_scenes) ----
 // Warning Obelisk: the obelisk box's trigger_spawnProp_C (its runTrigger mints the class its prop row names) mints
 // obelisk_C, an actor_save_C. Its BeginPlay rises the mesh, then plays the fall timeline `a`; the finish
@@ -1076,6 +1113,9 @@ inline constexpr const wchar_t* PhysAudioImpactProp          = L"sound_impact"; 
 inline constexpr const wchar_t* PhysAudioDamagedProp         = L"sound_damaged";    // damage taken, still standing
 inline constexpr const wchar_t* PhysAudioDestroyedProp       = L"sound_destroyed";  // the break
 inline constexpr const wchar_t* PropPhysicsImpactProp        = L"physicsImpact";      // prop_C -> comp_physicsImpact_C
+// The component class itself: its graph's `destroyed` entry (a break) mints the prop's gibs (struct_breakableprop's
+// propGibs, e.g. a cheese wheel's pieces) under EX_CallMath, with the component as the spawning frame's object.
+inline constexpr const wchar_t* PhysImpactComponentClass     = L"comp_physicsImpact_C";
 inline constexpr const wchar_t* PhysImpactMatOverrideProp    = L"physmat_override";   // comp_physicsImpact_C UPhysicalMaterial*, wins when valid
 inline constexpr const wchar_t* PhysImpactMatProp            = L"physmat";            // comp_physicsImpact_C UPhysicalMaterial*
 inline constexpr const wchar_t* PhysImpactDamageFn           = L"impactDamage";       // comp_physicsImpact_C (damage, impact, hit, actor)

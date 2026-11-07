@@ -292,6 +292,16 @@ int Session::FindPeerSlotForConn(uint32_t hConn) {
     return -1;
 }
 
+void Session::ResetHostWorldStreams() {
+    std::lock_guard<std::mutex> lk(remoteMutex_);
+    host_.Reset();
+    for (OriginStreams& o : origin_) {
+        o.prop = decltype(o.prop){};
+        o.deskCursor = decltype(o.deskCursor){};
+        o.propDrive = decltype(o.propDrive){};
+    }
+}
+
 void Session::ResetPeerRemoteState(int peerSlot) {
     // remoteMutex_ held by the caller.
     if (peerSlot < 0 || peerSlot >= kMaxPeers) return;

@@ -35,6 +35,9 @@
 #include "coop/interactables/window_sync.h"
 #include "coop/props/dig_sync.h"
 #include "coop/player/sleepers.h"
+#include "coop/player/pocket_travel.h"         // IsValidWire: a pocket byte this build knows
+#include "coop/player/pocket_travel_client.h"  // CLIENT: the host's PlayerLocation rows
+#include "coop/player/pocket_travel_host.h"    // HOST: a client's PocketTravel edges
 
 #include "ue_wrap/core/log.h"
 
@@ -544,6 +547,53 @@ bool HandleStateEvent(net::Session& session,
         net::BlobChunkPayload sp{};
         std::memcpy(&sp, msg.payload, sizeof(sp));
         coop::sleepers::OnStateChunk(sp, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::PocketTravel: {
+        // CLIENT->HOST: one edge of a client's own trip to a pocket dimension (coop::pocket_travel).
+        // The host judges the connection's slot only; the payload never names another. A client's
+        // copy from the host is meaningless and dropped.
+        if (session.role() != net::Role::Host || msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: PocketTravel dropped (role %d, sender slot %d) -- the host takes it from a "
+                    "client alone", static_cast<int>(session.role()), msg.senderPeerSlot);
+            break;
+        }
+        net::PocketTravelPayload tp{};
+        if (msg.payloadLen != sizeof(tp)) {
+            UE_LOGW("event_feed: PocketTravel from slot %d dropped -- %zu bytes, not %zu", msg.senderPeerSlot,
+                    static_cast<size_t>(msg.payloadLen), sizeof(tp));
+            break;
+        }
+        std::memcpy(&tp, msg.payload, sizeof(tp));
+        if (!coop::player::pocket_travel::IsValidWire(tp.pocket)) {
+            UE_LOGW("event_feed: PocketTravel from slot %d dropped -- pocket byte %u names no level",
+                    msg.senderPeerSlot, static_cast<unsigned>(tp.pocket));
+            break;
+        }
+        coop::player::pocket_travel_host::OnPocketTravel(static_cast<uint8_t>(msg.senderPeerSlot), tp);
+        break;
+    }
+    case net::ReliableKind::PlayerLocation: {
+        // HOST->ALL: where one slot's player is (coop::pocket_travel). Host-authored only
+        // (client_authorship.h); a client takes it from slot 0 alone.
+        if (session.role() != net::Role::Client || msg.senderPeerSlot != 0) {
+            UE_LOGW("event_feed: PlayerLocation dropped (role %d, sender slot %d) -- a client takes it from "
+                    "the host alone", static_cast<int>(session.role()), msg.senderPeerSlot);
+            break;
+        }
+        net::PlayerLocationPayload lp{};
+        if (msg.payloadLen != sizeof(lp)) {
+            UE_LOGW("event_feed: PlayerLocation dropped -- %zu bytes, not %zu",
+                    static_cast<size_t>(msg.payloadLen), sizeof(lp));
+            break;
+        }
+        std::memcpy(&lp, msg.payload, sizeof(lp));
+        if (lp.slot >= net::kMaxPeers || !coop::player::pocket_travel::IsValidWire(lp.pocket)) {
+            UE_LOGW("event_feed: PlayerLocation dropped -- slot %u, pocket byte %u",
+                    static_cast<unsigned>(lp.slot), static_cast<unsigned>(lp.pocket));
+            break;
+        }
+        coop::player::pocket_travel_client::OnPlayerLocation(lp);
         break;
     }
     case net::ReliableKind::DigIntent: {

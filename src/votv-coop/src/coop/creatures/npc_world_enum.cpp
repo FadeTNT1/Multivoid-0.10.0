@@ -28,6 +28,7 @@
 #include "ue_wrap/core/ufunction_hook.h"   // the EX_CallMath spawn-catch thunk
 #include "ue_wrap/facts/function_row.h"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -193,6 +194,10 @@ constexpr const wchar_t* kBoarInvasionOutputs[] = {P::name::NpcClass_AriralShoot
 constexpr const wchar_t* kSpawnPropOutputs[] = {P::name::ObeliskClass, nullptr};
 constexpr const wchar_t* kBottomHoleOutputs[] = {P::name::HoleBottomClass, nullptr};
 constexpr const wchar_t* kKavotiaPatrolOutputs[] = {P::name::NpcClass_Kavotia, P::name::IgetisClass, nullptr};
+// The blue brain cheese's hatch: its ReceiveTick mints one cheese gore slither and destroys the cheese. The cheese is a
+// shared food prop whose tick a client refuses (coop/props/prop_food_state), so the host's hatch is the only one and its
+// slither rides the npc lane; without this row it lived on the host alone and bit only the host's player.
+constexpr const wchar_t* kBlueBrainCheeseOutputs[] = {P::name::NpcClass_GoreSlitherCheese, nullptr};
 constexpr ExSpawnSource kExSpawnSources[] = {
     {L"trigger_wispSwarm_C",     nullptr},          // the wisps event swarm
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
@@ -230,6 +235,8 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     // rozitalHole: the controller's walk-in mints the room; the patrol controller its kavotia and igetis.
     {P::name::BottomHoleControllerClass, kBottomHoleOutputs},
     {P::name::KavotiaPatrolControllerClass, kKavotiaPatrolOutputs},
+    // The blue brain cheese's hatchling (a shared food prop's tick, refused on a client).
+    {P::name::BlueBrainCheeseClass, kBlueBrainCheeseOutputs},
 };
 
 // Whether `cls`'s own name is one of `names` (null-terminated). One render, then plain compares.
@@ -302,7 +309,16 @@ void OnBeginDeferredExSpawn(void* /*context*/, void* srcObj, void* spawned) {
         if (!e.outputs || NamesOneOf(cls, e.outputs)) { outputPermitted = true; break; }
     }
     if (!outputPermitted) return;
-    if (!coop::npc_sync::IsAllowlistedClass(cls) && !IsWaAllowlistedClass(cls)) return;
+    if (!coop::npc_sync::IsAllowlistedClass(cls) && !IsWaAllowlistedClass(cls)) {
+        // A source row let this output through but neither lane's allowlist takes it: the row is inert for it, and the
+        // spawn stays on the host alone. Said once per process; the row's own output list is what to check.
+        static std::atomic<bool> s_unlistedSaid{false};
+        if (!s_unlistedSaid.exchange(true))
+            UE_LOGW("npc-sync[ex-spawn]: source '%ls' minted '%ls', which neither allowlist takes -- it stays on the "
+                    "host only (said once)",
+                    srcName.c_str(), R::ToString(R::NameOf(cls)).c_str());
+        return;
+    }
     const int32_t idx = R::InternalIndexOf(spawned);
     std::lock_guard<std::mutex> lk(g_pendingMx);
     if (g_pendingExSpawns.size() >= kMaxPendingExSpawns) {
@@ -342,7 +358,8 @@ void InstallExSpawnCatch() {
                 "ticker_insomniacSpawner_C -> insomniac_C + insomniac_child_C, "
                 "ticker_yellowWispSpawner_C -> killerwisp_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
-                "ufo_UK_enemy_C, superFog_C -> HoelUfo_C; EX_CallMath spawns now enroll)");
+                "ufo_UK_enemy_C, superFog_C -> HoelUfo_C, prop_food_blueBrainCheese_C -> npc_goreslither_cheese_C; "
+                "EX_CallMath spawns now enroll)");
     } else {
         UE_LOGW("npc-sync[ex-spawn]: InstallPostHook FAILED -- EX_CallMath creature spawns will "
                 "NOT mirror this session (event-swarm wisps host-only)");

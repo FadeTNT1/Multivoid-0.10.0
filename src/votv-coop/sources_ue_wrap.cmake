@@ -40,7 +40,9 @@ set(VOTVCOOP_SOURCES_UE_WRAP_1
     src/ue_wrap/core/script_loop.cpp
     src/ue_wrap/engine/engine.cpp
     src/ue_wrap/engine/engine_save.cpp
+    src/ue_wrap/engine/engine_save_return.cpp
     src/ue_wrap/engine/save_restore_watch.cpp
+    src/ue_wrap/engine/travel_residue.cpp
     src/ue_wrap/engine/data_table.cpp
     src/ue_wrap/actors/inventory_component.cpp
     src/ue_wrap/actors/inventory_item_codec.cpp
@@ -184,6 +186,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/kerfus.cpp
     src/ue_wrap/actors/zombie.cpp
     src/ue_wrap/actors/fossilhound.cpp
+    src/ue_wrap/actors/goreslither.cpp
     src/ue_wrap/actors/geom_octa.cpp
     src/ue_wrap/actors/int_objects.cpp
     src/ue_wrap/actors/physics_impact.cpp

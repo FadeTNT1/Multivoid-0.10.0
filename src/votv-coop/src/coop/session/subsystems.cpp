@@ -55,6 +55,7 @@
 #include "coop/interactables/signal_catch_sync.h"
 #include "coop/interactables/signal_sync.h"
 #include "coop/player/movement_ledger.h"
+#include "coop/player/pocket_travel.h"
 #include "coop/player/run_end_travel.h"
 #include "coop/player/local_body.h"  // skins: local first-person body owner
 #include "coop/player/local_push.h"  // the local pawn's push on simulated props, held down for the session
@@ -456,6 +457,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::hook_sync::OnPeerLeftSlot(slot);  // the leaver's OWNER-PHASE hook mirrors; anchored ones are the host's and stay
     coop::player_inventory_sync::OnDisconnectForSlot(slot);  // re-arm the on-join push; the leaver's profile stays held
     coop::inventory_restore::OnSlotLeft(slot);  // a restore it never answered, or its rejoin is told "still waiting" for a minute
+    coop::player::pocket_travel::OnDisconnectForSlot(static_cast<uint8_t>(slot));  // an away leaver's row back to the main world, told to every client
 }
 
 DisconnectStats DisconnectAll() {
@@ -764,7 +766,8 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::glowstick_hang_sync::Tick(); }  // a hung/released glowstick, broadcast NOW for the same reason as the stick below
     { PP::Scope _s{PP::Bucket::TrashWatch};    coop::prop_stick_sync::Tick(); }  // broadcast recorded stick commits NOW -- must precede local_streams' release edge (net_pump runs TickGameplay first)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:pause_guard"}; coop::pause_guard::Tick(isConnected); }  // coop no-pause invariant -- un-pause the world while connected (ESC menu stays usable; a paused peer froze its pose stream)
-    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:run_end"}; coop::player::run_end_travel::Tick(); }  // the run-ending seam's session-scoped work: publish the seam's readiness (the verdict itself runs in the VM's body loop)
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:run_end"}; coop::player::run_end_travel::Tick(); }
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:pocket_travel"}; coop::player::pocket_travel::Tick(); }  // the pocket trips: an away slot parked (host), the away and return edges (client)  // the run-ending seam's session-scoped work: publish the seam's readiness (the verdict itself runs in the VM's body loop)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:save_cycle_off"}; coop::save_block::Tick(&session); }  // client native save-cycle OFF -- hold gamemode.disableSave=true under the verb gates
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:sanity_watch"}; coop::sanity_watch::Tick(); }  // the sanity line every 10 s, a tier change at once, the lights near the hand while it drains
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:sleep"}; coop::sleep_sync::Tick(); }  // the local rest-state poll + its send + the client's dream hold

@@ -40,6 +40,17 @@ bool LoadStorySave(const wchar_t* slot, int forceGameMode = -1);
 enum class LoadResult { Pending, InGameplay, Failed };
 LoadResult LoadWorld(const std::wstring& folder, const std::wstring& entry);
 
+// LoadStorySave for a player already standing in a world: a co-op client coming home from a pocket
+// level, or from the stale main world the game brought back. LoadStorySave's boot survey answers
+// "in gameplay" for any placed pawn of the current world and so never travels from there; this verb
+// skips it and otherwise does what LoadStorySave does (the slot loaded from disk once, the
+// save-object-ready hook, setSaveSlotObject, the rules, the day, the apply flag, the mode, the
+// launch level in force, `open untitled_1`), issuing the open once from the world it is first polled
+// in (re-issued at most twice if that world still stands 10 s later). InGameplay once a DIFFERENT
+// world of the gameplay kind holds a placed pawn and its save's restore ran there; Failed when the
+// slot is missing. Call ResetCachedSave first: it starts the campaign. Polled; game thread.
+LoadResult LoadStorySaveForReturn(const wchar_t* slot, int forceGameMode);
+
 // Drop the cached USaveGame* and the GameMode latch so a second in-process LoadStorySave re-loads
 // from disk. Game thread.
 void ResetCachedSave();

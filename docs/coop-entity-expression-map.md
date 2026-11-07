@@ -91,8 +91,11 @@ are peer-gated. `[V]`
 - **A client never authors a save-loaded prop.** Three intent doors route around it: the drop
   intent for a parked key placed after a pickup, the whitelisted births (a reel, a module, a
   drive, a container extract) the client cannot avoid, and a birth a PLAYER's own spawn verb
-  asked for; the host performs all three. Any other client-born keyed prop is dropped at the
-  door. `[V]`
+  asked for; the host performs all three. A fourth rides the drop intent: a gib of a break this
+  client ran on a prop it holds, threw or syncs (the spawning frame is the prop's
+  `comp_physicsImpact_C`; only such a break runs on a client, so its pieces exist nowhere else).
+  Any other client-born keyed prop is dropped at the door. `[V]`; the gib door `[?]` until a run
+  reads `[PROP-DROP] CLIENT authored BREAK-GIB intent`.
 - **Who asked, for a client's fresh birth.** The third door cannot be a class list, because the
   spawn menu is the whole catalog and every class on it is also what the world's own spawners,
   morphs and impacts mint for themselves on each peer independently -- a class test would double
@@ -202,12 +205,14 @@ install are taken back, and taken back again at its end (`coop/world/creature_ev
 fossilhound, the antibreather and the egg compute their event from the local camera, render state or player 0 and keep
 their own per peer. `[RD]`
 
-**A parked creature's brain.** A mirror of the zombie family or the fossilhound runs none of its Blueprint's event
-graph. It is marked when it is born (between the two halves of its spawn, or at the bind of a client's own
+**A parked creature's brain.** A mirror of the zombie family, the fossilhound or the gore slither family (with the
+blue brain cheese's hatchling below it) runs none of its Blueprint's event graph. It is marked when it is born (between the two halves of its spawn, or at the bind of a client's own
 save-loaded twin), and the graph watches (`coop/creatures/npc_mirror_brain`) refuse every entry of a marked mirror
 but the few a table names: the footstep notify, and the fossilhound's per-viewer loop. What its BeginPlay set up
 for the eye is done by our code after the install: the zombie's animation instance and walk blend, the fossilhound's
-mesh parent, animation instance and owner. Lost on a mirror: the attack animation and sounds, the fossilhound's hit
+mesh parent, animation instance and owner, the slither's mesh parent and animation phase. The slither's bite is the
+host's alone (its sense timer, jump and damage-sphere overlap are refused on a mirror): its bite on a client's puppet
+is delivered to that client as a PlayerHit. Lost on a mirror: the attack animation and sounds, the slither's jump montage, the fossilhound's hit
 sound and its hidden-then-dig-out. A client's own creature of these classes is never marked and runs whole. The mark
 is the actor's slot and the slot's serial, so a recycled address is never a mirror, and it ends with the mirror.
 `[RD]`; the refusals `[?]` until a run reads them.

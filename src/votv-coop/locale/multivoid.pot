@@ -76,6 +76,11 @@ msgstr[1] ""
 
 #: src/coop/comms/peer_action_feed.cpp
 #, c-format
+msgid "%1$s came back"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
 msgid "%1$s caught signal '%2$s'"
 msgstr ""
 
@@ -204,6 +209,31 @@ msgstr ""
 #: src/coop/session/player_handshake_version.cpp
 #, c-format
 msgid "%1$s was turned away: unofficial build %2$s [%3$s]"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went into the goop"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went to Alex's dimension"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went to the place"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went to the poop dimension"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went to the woid"
 msgstr ""
 
 #: src/ui/loading_screen.cpp
@@ -1044,6 +1074,14 @@ msgstr ""
 msgid "Rescan devices"
 msgstr ""
 
+#: src/ui/loading_screen.cpp
+msgid "Returning from the poop dimension"
+msgstr ""
+
+#: src/ui/loading_screen.cpp
+msgid "Returning to the main world"
+msgstr ""
+
 #: src/ui/config_review_panel.cpp
 #, c-format
 msgid ""
@@ -1752,6 +1790,10 @@ msgstr ""
 msgid "You can't see that from there"
 msgstr ""
 
+#: src/coop/player/pocket_travel_host.cpp
+msgid "You can't travel to another dimension while hosting: the shared world runs on your machine. Stop hosting first to take the trip."
+msgstr ""
+
 #: src/ui/config_review_panel.cpp
 #, c-format
 msgid "Your body skin (%s) could not be saved to multivoid.ini this launch -- it is temporary for this session. Fix whatever keeps the file from being read or saved (a lock from an editor or antivirus, permissions, or a file saved as UTF-16); nothing is lost once a launch can save again."
@@ -1840,6 +1882,26 @@ msgstr ""
 msgid "host or host:port"
 msgstr ""
 
+#: src/ui/scoreboard.cpp
+msgid "in Alex's dimension"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "in the goop"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "in the place"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "in the poop dimension"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "in the woid"
+msgstr ""
+
 #: src/ui/config_review_panel.cpp
 msgid "multivoid.ini could not be read"
 msgstr ""
@@ -1889,6 +1951,10 @@ msgstr ""
 
 #: src/ui/scoreboard.cpp
 msgid "offline"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "on the way back"
 msgstr ""
 
 #: src/ui/admin_panel.cpp

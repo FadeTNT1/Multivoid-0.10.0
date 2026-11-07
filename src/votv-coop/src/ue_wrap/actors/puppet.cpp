@@ -386,6 +386,13 @@ bool ReadCharacterIsFalling(void* actor) {
     return mode == P::off::kMOVE_Falling;
 }
 
+bool ReadCharacterMovementIsNone(void* actor) {
+    if (!actor || !R::IsLive(actor)) return false;
+    void* cmc = ReadPtr(actor, P::off::ACharacter_CharacterMovement);
+    if (!cmc || !R::IsLive(cmc)) return false;
+    return ReadAt<uint8_t>(cmc, P::off::UCharacterMovement_MovementMode) == P::off::kMOVE_None;
+}
+
 void DisableCharacterTicks(void* actor) {
     if (!actor || !R::IsLive(actor)) return;
     DisableMovementTick(actor);
