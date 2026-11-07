@@ -603,6 +603,12 @@ inline constexpr const wchar_t* AttachToComponentFn     = L"K2_AttachToComponent
 // UPrimitiveComponent's gravity verbs (engine_physics).
 inline constexpr const wchar_t* SetEnableGravityFn      = L"SetEnableGravity";
 inline constexpr const wchar_t* IsGravityEnabledFn      = L"IsGravityEnabled";
+// UPrimitiveComponent::WakeRigidBody(FName BoneName): the body leaves PhysX sleep. SetEnableGravity(true) alone does
+// not wake a body that came to rest while its gravity was off.
+inline constexpr const wchar_t* WakeRigidBodyFn         = L"WakeRigidBody";
+// trigger_agrav_C's `comps`: the root primitive components its gaher gathered (never cleared), the list runTrigger
+// turns the gravity of off and, 5-7 s later, back on.
+inline constexpr const wchar_t* AgravCompsProp          = L"comps";
 // The vent crawler (ventCrawler_C): its `Box`'s begin-overlap starts the crawl (a DoOnce with no actor filter:
 // two vent footsteps, then moveTL, the crawl, whose StepSounds and BreakVent events play its footsteps and the
 // vent's break at its place, as GameplayStatics one-shots).

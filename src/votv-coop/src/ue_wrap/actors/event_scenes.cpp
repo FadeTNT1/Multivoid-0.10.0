@@ -4,6 +4,7 @@
 
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/component_calls.h"
+#include "ue_wrap/core/field_io.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/reflection_props.h"
@@ -204,6 +205,23 @@ bool AgravPlayerLight(void* actor, bool on) {
     // SetComponentVisible also clears hidden-in-game: the host's census read this light as hidden mid-event.
     ok &= E::SetComponentVisible(light, true, false);
     return ok;
+}
+
+size_t AgravGatheredComponents(void* actor, std::vector<void*>& out) {
+    if (!actor || !R::IsLive(actor)) return 0;
+    const int32_t off = R::FindPropertyOffset(R::ClassOf(actor), P::name::AgravCompsProp);
+    if (off < 0) return 0;
+    const auto* arr = reinterpret_cast<const field_io::TArrayView*>(static_cast<const uint8_t*>(actor) + off);
+    constexpr int32_t kMaxComps = 4096;   // the game's gather is a sphere of 10000 cm: far fewer in a real base
+    if (!arr->data || arr->num <= 0 || arr->num > arr->max || arr->num > kMaxComps) return 0;
+    size_t added = 0;
+    for (int32_t i = 0; i < arr->num; ++i) {
+        void* comp = reinterpret_cast<void* const*>(arr->data)[i];
+        if (!comp || !R::IsLive(comp)) continue;
+        out.push_back(comp);
+        ++added;
+    }
+    return added;
 }
 
 bool MidasProgress(void* actor, float& out) {

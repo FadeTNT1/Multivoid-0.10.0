@@ -9,6 +9,13 @@
 // A client standing elsewhere saw nothing float around it: these are the props near each client's puppet that the
 // game's gather, centred on the host, left out. At the cloak's on edge the host floats them the same way, all at
 // once, and at its off edge gives them their gravity back. Host only; game thread.
+//
+// The game's own end turns gravity back on and wakes nothing. A body that came to rest while floating (the 10 cm/s
+// push damps out) is asleep in PhysX, and SetEnableGravity(true) does not wake it, so it hangs in the air until
+// something hits or lifts it; and the host's stream only follows a body that moves, so the clients' copies hang
+// too. The off edge therefore gives back every body the event touched -- the game's own `comps` list and the ones
+// this module floated -- gravity on and woken. A client replays the same edge for the copies the host's stream
+// left without gravity (prop_wire_parity's gravity watch).
 
 #include "event_scene_detail.h"
 
@@ -17,6 +24,9 @@
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
 
+#include "coop/props/prop_wire_parity.h"
+
+#include "ue_wrap/actors/event_scenes.h"
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -36,6 +46,7 @@ namespace R  = ue_wrap::reflection;
 namespace P  = ue_wrap::profile;
 namespace E  = ue_wrap::engine;
 namespace PR = ue_wrap::prop;
+namespace ES = ue_wrap::event_scenes;
 
 // The props this module floated, to be given their gravity back.
 struct Floated {
@@ -94,33 +105,67 @@ void FloatNearClients() {
             nClients);
 }
 
+// Gravity on and the body woken for every prop this module floated.
 void Restore() {
-    size_t restored = 0;
+    size_t restored = 0, woken = 0;
     for (const Floated& f : g_floated) {
         if (!R::IsLiveByIndex(f.actor, f.idx)) continue;
-        if (E::SetComponentEnableGravity(PR::GetStaticMesh(f.actor), true)) ++restored;
+        const E::GravityRelease r = E::ReleaseComponentGravity(PR::GetStaticMesh(f.actor));
+        if (r.gravityRestored) ++restored;
+        if (r.woken) ++woken;
     }
     if (!g_floated.empty())
-        UE_LOGI("event_scene[agrav]: gravity back on %zu of %zu prop(s) near the clients", restored, g_floated.size());
+        UE_LOGI("event_scene[agrav]: gravity back on %zu and %zu woken of %zu prop(s) near the clients", restored, woken,
+                g_floated.size());
     g_floated.clear();
+}
+
+// The off edge: the game's own float list gets what it was owed too. Its restore loop has finished by the time
+// cloak(false) runs, so what is still without gravity here is a body it never reached (one destroyed and rebuilt, a
+// prop the host's other lanes touched) and what is asleep is every body that came to rest in the air.
+void ReleaseGameList(void* trigger) {
+    static std::vector<void*> comps;   // kept for its capacity
+    comps.clear();
+    const size_t n = ES::AgravGatheredComponents(trigger, comps);
+    size_t restored = 0, woken = 0;
+    for (void* c : comps) {
+        const E::GravityRelease r = E::ReleaseComponentGravity(c);
+        if (r.gravityRestored) ++restored;
+        if (r.woken) ++woken;
+    }
+    UE_LOGI("event_scene[agrav]: end: %zu of the game's %zu gathered body(ies) given gravity back, %zu woken", restored,
+            n, woken);
 }
 
 }  // namespace
 
-void AgravHostEdge(void* /*trigger*/, bool on) {
+void AgravHostEdge(void* trigger, bool on) {
     if (!IsHost()) return;
     if (on) {
         Restore();   // a second cloak(true) before its off edge: the first set lands first
         FloatNearClients();
     } else {
         Restore();
+        ReleaseGameList(trigger);
     }
+}
+
+void AgravClientEdge(bool on) {
+    if (!IsActiveClient()) return;
+    if (on) {
+        coop::prop_wire_parity::OpenGravityWatch();
+        return;
+    }
+    const coop::prop_wire_parity::GravityWatchResult r = coop::prop_wire_parity::ReleaseWatchedGravity();
+    UE_LOGI("event_scene[agrav]: end: %zu of %zu copy(ies) the host floated given gravity back, %zu woken", r.restored,
+            r.watched, r.woken);
 }
 
 void AgravOnDisconnect() {
     // The session's end leaves the host alone: a prop still floating for a client that left falls as the game's
-    // own would have.
+    // own would have. Woken as the end's would have, and a client's watch is closed.
     Restore();
+    coop::prop_wire_parity::ReleaseWatchedGravity();
 }
 
 }  // namespace coop::event_scene_sync::detail

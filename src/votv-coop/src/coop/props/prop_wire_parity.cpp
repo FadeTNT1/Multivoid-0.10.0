@@ -18,6 +18,8 @@
 #include "ue_wrap/engine/engine_mainplayer.h"  // IsMainPlayerGrabbing
 #include "ue_wrap/engine/engine_physics.h"  // the body's gravity, the anti-gravity prank's floating props
 
+#include <vector>
+
 namespace coop::prop_wire_parity {
 
 namespace R = ue_wrap::reflection;
@@ -80,6 +82,36 @@ uint8_t PhysFlagsOf(void* actor) {
     return flags;
 }
 
+namespace {
+struct Watched {
+    void*   actor;
+    int32_t idx;
+};
+std::vector<Watched> g_gravityWatch;
+bool g_gravityWatchOpen = false;
+constexpr size_t kMaxWatched = 1024;
+}  // namespace
+
+void OpenGravityWatch() {
+    g_gravityWatch.clear();
+    g_gravityWatchOpen = true;
+}
+
+GravityWatchResult ReleaseWatchedGravity() {
+    GravityWatchResult out;
+    out.watched = g_gravityWatch.size();
+    for (const Watched& w : g_gravityWatch) {
+        if (!R::IsLiveByIndex(w.actor, w.idx)) continue;
+        const ue_wrap::engine::GravityRelease r =
+            ue_wrap::engine::ReleaseComponentGravity(ue_wrap::prop::GetStaticMesh(w.actor));
+        if (r.gravityRestored) ++out.restored;
+        if (r.woken) ++out.woken;
+    }
+    g_gravityWatch.clear();
+    g_gravityWatchOpen = false;
+    return out;
+}
+
 void ConvergeGravity(void* actor, uint8_t physFlags) {
     namespace pf = coop::net::propspawn_flags;
     if (!(physFlags & pf::kLiveState) || !actor || !ue_wrap::prop::IsDescendantOfProp(actor)) return;
@@ -88,9 +120,13 @@ void ConvergeGravity(void* actor, uint8_t physFlags) {
     if (!ue_wrap::engine::ReadComponentGravityEnabled(mesh, gravity)) return;
     const bool want = (physFlags & pf::kNoGravity) == 0;
     if (gravity == want) return;
-    if (!ue_wrap::engine::SetComponentEnableGravity(mesh, want))
+    if (!ue_wrap::engine::SetComponentEnableGravity(mesh, want)) {
         UE_LOGW("prop_wire_parity: %p gravity -> %d: the setter did not dispatch; the copy keeps its gravity", actor,
                 want ? 1 : 0);
+        return;
+    }
+    if (!want && g_gravityWatchOpen && g_gravityWatch.size() < kMaxWatched)
+        g_gravityWatch.push_back(Watched{actor, R::InternalIndexOf(actor)});
 }
 
 uint8_t FrozenSleepBitsOf(void* actor) {

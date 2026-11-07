@@ -43,6 +43,7 @@ Thunk g_isSimulating{P::name::IsSimulatingPhysicsFn, L"BoneName", L"ReturnValue"
 Thunk g_getCenterOfMass{P::name::GetCenterOfMassFn, L"BoneName", L"ReturnValue"};
 Thunk g_setGravity{P::name::SetEnableGravityFn, L"bGravityEnabled", nullptr};
 Thunk g_isGravity{P::name::IsGravityEnabledFn, L"ReturnValue", nullptr};
+Thunk g_wakeBody{P::name::WakeRigidBodyFn, L"BoneName", nullptr};
 
 // The class they are found on. A native class outlives every world, but the references are checked:
 // a freed one is found again, and each thunk, holding the class it resolved on by slot and serial,
@@ -162,6 +163,23 @@ bool ReadComponentGravityEnabled(void* component, bool& enabled) {
     if (!R::CallFunction(component, g_isGravity.fn, frame)) return false;
     enabled = *reinterpret_cast<bool*>(frame + g_isGravity.off0);
     return true;
+}
+
+bool WakeComponentBody(void* component) {
+    if (!IsPrimitiveComponent(component) || !Resolve(g_wakeBody)) return false;
+    unsigned char frame[kFrameBytes] = {};   // BoneName None: the whole body
+    return R::CallFunction(component, g_wakeBody.fn, frame);
+}
+
+GravityRelease ReleaseComponentGravity(void* component) {
+    GravityRelease out;
+    if (!IsPrimitiveComponent(component)) return out;
+    bool enabled = true;
+    if (ReadComponentGravityEnabled(component, enabled) && !enabled)
+        out.gravityRestored = SetComponentEnableGravity(component, true);
+    // Woken whether or not its gravity was off: a body whose gravity the game already restored may be asleep too.
+    if (IsComponentSimulatingPhysics(component)) out.woken = WakeComponentBody(component);
+    return out;
 }
 
 int StopActorSimulating(void* actor) {

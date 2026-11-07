@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -58,6 +59,19 @@ void ConvergeFrozenSleep(void* actor, uint8_t physFlags);
 // The copy's body gravity made to match the sender's live state (propspawn_flags::kNoGravity, with kLiveState).
 // ConvergeFrozenSleep runs it first.
 void ConvergeGravity(void* actor, uint8_t physFlags);
+
+// The anti-gravity prank's end on a copy. While the watch is open (the host's cloak-on phase to its cloak-off),
+// every copy ConvergeGravity takes OUT of gravity is remembered. ReleaseWatchedGravity gives them gravity back and
+// wakes the bodies that simulate, closes the watch and forgets them: the host's stream carries a body's gravity only
+// when the body moves, and a floated one that came to rest sends nothing more. Copies outside the window (an altar's
+// hovering runes) are never remembered. Game thread.
+struct GravityWatchResult {
+    size_t watched = 0;
+    size_t restored = 0;
+    size_t woken = 0;
+};
+void OpenGravityWatch();
+GravityWatchResult ReleaseWatchedGravity();
 
 // The one place a flag converge takes a prop OUT of Static, for any Aprop_C whose host copy has cleared it: a
 // wall vent the ventCrawler pulled down (its break timeline ends in setPropProps(static false, frozen true)), a

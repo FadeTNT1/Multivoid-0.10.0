@@ -25,6 +25,8 @@ void InstallWatches();
 // The prank's floating props near the clients (event_scene_agrav.cpp): its cloak edge on the host, and the
 // teardown.
 void AgravHostEdge(void* trigger, bool on);
+// CLIENT: the host's cloak phase arrived (on at the start, off at the end).
+void AgravClientEdge(bool on);
 void AgravOnDisconnect();
 // The vent crawler's walk-in by a client's player, and the sound relay's arming while a crawler lives
 // (event_scene_crawler.cpp). HOST, each tick (it paces itself).

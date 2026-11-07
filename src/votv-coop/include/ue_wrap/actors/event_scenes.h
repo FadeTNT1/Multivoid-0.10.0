@@ -9,8 +9,10 @@
 
 #include "ue_wrap/core/types.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace ue_wrap::event_scenes {
 
@@ -72,6 +74,11 @@ bool AgravCloak(void* actor, bool forward);
 // player is not in the box never runs runTrigger, so it replays this beside the cloak. False when the light, the
 // camera manager or a call did not resolve; a light already gone on `off` is true.
 bool AgravPlayerLight(void* actor, bool on);
+
+// The primitive components the trigger's gaher gathered (its `comps`, which the game never empties): the bodies its
+// runTrigger floated and gave their gravity back. Appended to `out`; the number appended. 0 when the trigger or
+// the member did not resolve.
+size_t AgravGatheredComponents(void* actor, std::vector<void*>& out);
 
 // ---- the Midas UFO (midasufotest_C, level-placed) ----
 
