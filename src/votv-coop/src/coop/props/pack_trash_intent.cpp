@@ -75,12 +75,35 @@ void* g_rollCls = nullptr;
 // callback: the body we refuse belongs to the tool, and destroying it from under the caller's
 // frame is a hazard the next tick does not have.
 struct SpentTool {
-    void*   actor = nullptr;
-    int32_t idx = -1;
-    bool    roll = false;
+    void*    actor = nullptr;
+    int32_t  idx = -1;
+    bool     roll = false;
+    uint16_t req = 0;
 };
 std::vector<SpentTool> g_spent;
-uint64_t g_sent = 0, g_refusedGhost = 0;
+
+// A press is spent by the HOST's word and not by the press: the host may refuse it (no row, out of
+// reach, queue full, a carry open), and a bag the host did not make costs the sender nothing. So a
+// press waits here, keyed by its request number, until the host's PackTrashGrant names it; a press
+// the host never answers is dropped after kPendingTtlMs.
+struct PendingPress {
+    uint16_t req = 0;
+    void*    actor = nullptr;
+    int32_t  idx = -1;
+    bool     roll = false;
+    uint64_t atMs = 0;
+};
+constexpr uint64_t kPendingTtlMs = 15000;
+std::vector<PendingPress> g_pending;
+uint16_t g_reqCounter = 0;
+uint64_t g_sent = 0, g_refusedGhost = 0, g_granted = 0, g_expired = 0;
+
+size_t PendingFor(void* actor, int32_t idx) {
+    size_t n = 0;
+    for (const PendingPress& pp : g_pending)
+        if (pp.actor == actor && pp.idx == idx) ++n;
+    return n;
+}
 
 // ---- host side -------------------------------------------------------------------------------
 // One sender: its queued presses with their bucket, and the full queue's refusal clock; cleared with its occupant.
@@ -223,7 +246,18 @@ void Execute(coop::net::Session& s, const coop::net::PackTrashIntentPayload& p, 
                 static_cast<unsigned>(slot));
         return;
     }
-    PerformPack(target, slot, eid);
+    if (!PerformPack(target, slot, eid)) return;
+    // The pack ran: tell the sender, whose own tool is the thing that pays for it. A refusal above
+    // returns without a grant, so a refused press costs nothing. The host's own roll is never
+    // touched here -- the bagging player's roll lives on that player's machine.
+    coop::net::PackTrashGrantPayload gp{};
+    gp.eid = eid;
+    gp.reqId = p.reqId;
+    gp.toolKind = p.toolKind;
+    s.SendReliableToSlot(slot, coop::net::ReliableKind::PackTrashGrant, &gp, sizeof(gp));
+    UE_LOGI("[PACK] host granted pack for slot %u (eid=%u req=%u tool=%s)",
+            static_cast<unsigned>(slot), eid, static_cast<unsigned>(p.reqId),
+            p.toolKind == 1 ? "roll" : "fold");
 }
 
 // ---- the client's gate -----------------------------------------------------------------------
@@ -274,37 +308,80 @@ sg::Verdict OnHandUsePre(const sg::Call& call) {
         return sg::Verdict::Cancel;
     }
 
+    // Presses already in flight on this tool are bags it has not been charged for yet: a roll with N
+    // left takes at most N of them, a folded bag one, so a held-down button cannot ask the host for
+    // more packs than the tool holds.
+    const int32_t toolIdx = R::InternalIndexOf(call.object);
+    const size_t inFlight = PendingFor(call.object, toolIdx);
+    if (isFold && inFlight > 0) return sg::Verdict::Cancel;
+    if (isRoll) {
+        int32_t bags = 0;
+        if (ue_wrap::garbage_bag::ReadRollCount(call.object, bags)) {
+            if (static_cast<int64_t>(bags) - static_cast<int64_t>(inFlight) <= 0)
+                return sg::Verdict::Cancel;
+        } else {
+            static bool sWarned = false;
+            if (!sWarned) {
+                sWarned = true;
+                UE_LOGW("[PACK] the roll's bag counter could not be read -- its bags will not be spent");
+            }
+        }
+    }
+
     coop::net::PackTrashIntentPayload p{};
     p.eid = eid;
     p.targetKind = isClump ? 1u : 0u;
     p.toolKind = isRoll ? 1u : 0u;
+    p.reqId = static_cast<uint16_t>(++g_reqCounter);
     if (!s->SendReliable(coop::net::ReliableKind::PackTrashIntent, &p, sizeof(p)))
-        return sg::Verdict::Cancel;  // the press is spent either way; a bag the host refused is none
+        return sg::Verdict::Cancel;  // nothing asked, nothing spent
     ++g_sent;
-    // The tool is this peer's own state with no lane, so this peer spends it -- next tick, out of
-    // the body's frame.
-    g_spent.push_back(SpentTool{call.object, R::InternalIndexOf(call.object), isRoll});
+    g_pending.push_back(PendingPress{p.reqId, call.object, toolIdx, isRoll, coop::active_drive::NowMs()});
     if (g_sent <= 3 || g_sent % 50 == 0)
-        UE_LOGI("[PACK-TRASH] CLIENT SENT eid=%u kind=%u tool=%s (#%llu)", eid,
+        UE_LOGI("[PACK-TRASH] CLIENT SENT eid=%u kind=%u tool=%s req=%u (#%llu)", eid,
                 static_cast<unsigned>(p.targetKind), isRoll ? "roll" : "fold",
-                static_cast<unsigned long long>(g_sent));
+                static_cast<unsigned>(p.reqId), static_cast<unsigned long long>(g_sent));
     return sg::Verdict::Cancel;
 }
 
+// Spend what the host's grants paid for: one bag from the roll's own counter (the field its body
+// subtracts from and prints), or the whole folded bag. At none left the roll is destroyed, as its
+// body destroys it.
 void ConsumeSpentTools() {
     for (const SpentTool& t : g_spent) {
         if (!R::IsLiveByIndex(t.actor, t.idx)) continue;
         if (!t.roll) {
             E::DestroyActor(t.actor);
+            UE_LOGI("[PACK] client bag consumed -- folded bag spent (req %u)", static_cast<unsigned>(t.req));
             continue;
         }
         int32_t bags = 0;
-        if (!ue_wrap::garbage_bag::ReadRollCount(t.actor, bags)) continue;
+        if (!ue_wrap::garbage_bag::ReadRollCount(t.actor, bags)) {
+            UE_LOGW("[PACK] client bag NOT consumed -- the roll's counter is unreadable (req %u)",
+                    static_cast<unsigned>(t.req));
+            continue;
+        }
         bags -= 1;
-        ue_wrap::garbage_bag::WriteRollCount(t.actor, bags > 0 ? bags : 0);
+        if (bags < 0) bags = 0;
+        ue_wrap::garbage_bag::WriteRollCount(t.actor, bags);
+        UE_LOGI("[PACK] client bag consumed -- roll left %d (req %u)", bags, static_cast<unsigned>(t.req));
         if (bags <= 0) E::DestroyActor(t.actor);
     }
     g_spent.clear();
+}
+
+// Presses the host never answered (a refusal sends nothing) stop waiting.
+void ExpirePending() {
+    if (g_pending.empty()) return;
+    const uint64_t now = coop::active_drive::NowMs();
+    for (auto it = g_pending.begin(); it != g_pending.end();) {
+        if (now - it->atMs >= kPendingTtlMs) {
+            ++g_expired;
+            it = g_pending.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 }  // namespace
@@ -335,7 +412,10 @@ void Tick(coop::net::Session& session) {
     if (!session.running()) return;
 
     if (!g_spent.empty()) ConsumeSpentTools();
-    if (session.role() != coop::net::Role::Host) return;
+    if (session.role() != coop::net::Role::Host) {
+        ExpirePending();
+        return;
+    }
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot) {
         g_slots[slot].queue.Serve(kPackBudget, coop::active_drive::NowMs,
                                   [&](const coop::net::PackTrashIntentPayload& p) {
@@ -343,6 +423,19 @@ void Tick(coop::net::Session& session) {
             return coop::net::Served::Done;
         });
     }
+}
+
+void OnPackTrashGrant(const coop::net::PackTrashGrantPayload& payload) {
+    for (auto it = g_pending.begin(); it != g_pending.end(); ++it) {
+        if (it->req != payload.reqId) continue;
+        if (it->roll != (payload.toolKind == 1)) break;  // not the press this grant answers
+        g_spent.push_back(SpentTool{it->actor, it->idx, it->roll, it->req});
+        g_pending.erase(it);
+        ++g_granted;
+        return;
+    }
+    UE_LOGI("[PACK] grant for req %u matches no waiting press (expired or already spent)",
+            static_cast<unsigned>(payload.reqId));
 }
 
 void OnPackTrashIntent(coop::net::Session& session,
@@ -364,13 +457,16 @@ void OnPackTrashIntent(coop::net::Session& session,
 
 void OnDisconnect() {
     if (g_sent || g_packed || g_denied || g_refusedGhost)
-        UE_LOGI("[PACK-TRASH] session end -- sent=%llu packed=%llu denied=%llu ghost-refused=%llu",
-                static_cast<unsigned long long>(g_sent), static_cast<unsigned long long>(g_packed),
+        UE_LOGI("[PACK-TRASH] session end -- sent=%llu granted=%llu expired=%llu packed=%llu denied=%llu "
+                "ghost-refused=%llu",
+                static_cast<unsigned long long>(g_sent), static_cast<unsigned long long>(g_granted),
+                static_cast<unsigned long long>(g_expired), static_cast<unsigned long long>(g_packed),
                 static_cast<unsigned long long>(g_denied),
                 static_cast<unsigned long long>(g_refusedGhost));
     g_spent.clear();
+    g_pending.clear();
     g_remedyAtMs.clear();
-    g_sent = g_packed = g_denied = g_refusedGhost = 0;
+    g_sent = g_packed = g_denied = g_refusedGhost = g_granted = g_expired = 0;
 }
 
 }  // namespace coop::pack_trash_intent

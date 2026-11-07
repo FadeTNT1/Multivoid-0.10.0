@@ -1351,6 +1351,9 @@ inline constexpr float FoodSteamCelsius = 50.0f;
 // prop_cookingFood_C::ReceiveTick adds to `cookProgress` while celsius >= 51 and calls `cookItem` at `cookFinal`.
 inline constexpr const wchar_t* FoodCookProgressProp = L"cookProgress";
 inline constexpr const wchar_t* FoodCookFinalProp = L"cookFinal";
+// The bag roll (prop_garbBagRoll_C): its remaining count is `invRead_bags`, not `bags` -- the roll's
+// playerHandUse_LMB subtracts one after each pack, destroys itself at 0 and prints "Bags left: {invRead_bags}".
+inline constexpr const wchar_t* GarbBagRollCountProp = L"invRead_bags";
 // The non-food `uses` counter some consumables keep instead (prop_snack_C), read where invRead_uses is absent.
 inline constexpr const wchar_t* LegacyUsesProp = L"uses";
 inline constexpr const wchar_t* NotEdibleProp = L"notEdible";
