@@ -185,6 +185,13 @@ void OnTendPost(const sg::Call&) {
     if (--g_tendDepth == 0 && IsClient()) SendRaised();
 }
 
+bool ClientVerbsUnwind() {
+    if (g_tendDepth == 0) return false;
+    g_tendDepth = 0;
+    g_tendSnap.clear();
+    return true;
+}
+
 void ClientVerbsReset() {
     g_tendSnap.clear();
     g_tendDepth = 0;

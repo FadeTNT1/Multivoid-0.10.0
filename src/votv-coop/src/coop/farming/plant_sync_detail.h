@@ -75,6 +75,9 @@ ue_wrap::script_gate::Verdict OnMedicinePre(const ue_wrap::script_gate::Call& c)
 ue_wrap::script_gate::Verdict OnPotUsePre(const ue_wrap::script_gate::Call& c);
 ue_wrap::script_gate::Verdict OnTendPre(const ue_wrap::script_gate::Call& c);
 void OnTendPost(const ue_wrap::script_gate::Call& c);
+// A tend bracket still open while no watched body runs lost its post (another consumer cancelled the body after this
+// pre, or a fault was absorbed): it is closed, so the next tend snapshots again. True when one was.
+bool ClientVerbsUnwind();
 void ClientVerbsReset();
 
 // ---- plant_refusals.cpp ----

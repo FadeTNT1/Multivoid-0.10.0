@@ -452,7 +452,7 @@ coop::net::Served Execute(coop::net::Session& s, Queued& q, uint8_t slot) {
 
 void HostTick(coop::net::Session& s) {
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot)
-        g_slots[slot].queue.Serve(kBudget, NowMs, [&](Queued& q) { return Execute(s, q, slot); });
+        g_slots[slot].queue.Serve(slot, kBudget, NowMs, [&](Queued& q) { return Execute(s, q, slot); });
     const uint64_t now = NowMs();
     if (now < g_nextCensusMs) return;
     g_nextCensusMs = now + kCensusMs;

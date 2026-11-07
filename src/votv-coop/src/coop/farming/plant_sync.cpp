@@ -210,6 +210,22 @@ void Settle() {
     }
 }
 
+// A pre/post bracket stays open when its post never fires: another consumer's pre cancelled the body after this lane's
+// ran, or the ProcessEvent firewall absorbed a fault in it (script_gate.h, IsBodyActive). With no watched body running
+// on the game thread, every bracket is stale: it is closed here, so a later destroy is not read as a harvest and a later
+// tend snapshots again.
+bool g_unwindSaid = false;
+void UnwindBrackets() {
+    if (sg::CurrentThreadCall().active) return;
+    const bool host = !g_hostAction.empty();
+    g_hostAction.clear();
+    const bool tend = ClientVerbsUnwind();
+    if ((host || tend) && !g_unwindSaid) {
+        g_unwindSaid = true;
+        UE_LOGW("farm: a %s bracket lost its post (its body was cancelled elsewhere) -- closed", host ? "harvest" : "tend");
+    }
+}
+
 coop::blob_chunks::Assembler g_asmIntent, g_asmState;
 uint64_t g_nextSweepMs = 0;
 uint64_t g_dropped = 0;
@@ -270,6 +286,7 @@ void Tick(coop::net::Session& session) {
         ue_wrap::script_gate::ResolvePendingNames();
         detail::Settle();
     }
+    detail::UnwindBrackets();
     if (!session.running()) return;
     if (session.role() == coop::net::Role::Host) detail::HostTick(session);
     else detail::ClientTick();
