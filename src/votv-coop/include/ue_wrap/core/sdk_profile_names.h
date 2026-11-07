@@ -1507,7 +1507,7 @@ inline constexpr const wchar_t* PosterPlacedRedrawFn = L"setPoster";
 inline constexpr const wchar_t* PosterPutFn = L"put";
 inline constexpr const wchar_t* PosterPickerApplyFn = L"intComs_texturePickerApply";
 inline constexpr const wchar_t* PosterPickedFileNameParam = L"pickedFileName";
-inline constexpr const wchar_t* ComponentScaleFn = L"GetComponentScale";
+inline constexpr const wchar_t* ComponentScaleFn = L"K2_GetComponentScale";
 inline constexpr int PosterActionTakeDown = 7;
 inline constexpr int PosterActionPicker = 4;
 // The crowbar's pry. A held prop_crowbar_C's playerHandUse_RMB runs activatePrying, which finds the hidden
