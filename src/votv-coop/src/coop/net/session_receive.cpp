@@ -10,6 +10,8 @@
 #include "coop/net/net_clock.h"        // NowMs -- the probe's echo is timed on the net layer's clock
 #include "coop/net/peer_admission.h"   // the identity challenge every peer passes
 #include "coop/net/peer_identity.h"    // GuidForPublicKey -- the proved storage name
+#include "coop/player/pocket_travel.h"         // LocationOf: a co-located slot's body streams
+#include "coop/player/pocket_travel_client.h"  // the client's stand-down while on a pocket trip
 #include "coop/player/pocket_travel_host.h"  // the pocket rule at the receive edge
 #include "client_authorship.h"  // co-located private header: which kinds a client may author
 #include "session_lanes.h"      // co-located private header: the admission and relayable kind lists
@@ -36,6 +38,25 @@ constexpr bool RelayedKindsAreClientAuthored() {
     return true;
 }
 static_assert(RelayedKindsAreClientAuthored(), "a relayable kind that is not Client in client_authorship.h");
+
+// The pocket rule, client side (coop/player/pocket_travel_client): while this client's world lanes stand
+// down, the only streams it keeps are a body's -- pose, ragdoll, hand pose, voice -- from a slot standing
+// in the same level. The producer cannot judge this: a host stream sent before the host isolated this
+// slot, or before its table saw the trip, arrives after the travel, and would be applied in the pocket
+// or stored stale for the way home. Any thread (the location table and the trip state are atomics).
+bool ClientKeepsStreamWhileAway(MsgType type, int routeSlot) {
+    switch (type) {
+    case MsgType::PoseSnapshot:
+    case MsgType::RagdollPose:
+    case MsgType::HandPose:
+    case MsgType::VoiceFrame:
+        return routeSlot > 0 && routeSlot < kMaxPeers &&
+               coop::player::pocket_travel::LocationOf(static_cast<uint8_t>(routeSlot)) ==
+                   coop::player::pocket_travel_client::ViewerLocation();
+    default:
+        return false;
+    }
+}
 }  // namespace
 
 // ---- admission: what an unadmitted connection may do ----
@@ -246,6 +267,11 @@ void Session::HandleMessage(int peerSlot, uint32_t hConn, const void* data, int 
     // origin; reliables are counted once the kind is parsed.
     if (type != MsgType::Reliable && dev::wire_census::Enabled())
         dev::wire_census::NoteStream(routeSlot, static_cast<unsigned>(type));
+
+    if (cfg_.role == Role::Client && type != MsgType::Reliable &&
+        coop::player::pocket_travel_client::WorldLanesStandDown() &&
+        !ClientKeepsStreamWhileAway(type, routeSlot))
+        return;
 
     switch (type) {
     case MsgType::PoseSnapshot:

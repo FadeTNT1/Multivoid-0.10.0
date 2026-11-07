@@ -37,8 +37,13 @@ ue_wrap::script_gate::Verdict OnLocalLoadLevel(coop::player::pocket_travel::Pock
 bool LocalAway();
 
 // Do the world lanes stand down this tick? True while entering or away, and on the way home until
-// the host's world is up in place of the one the client left. Game thread.
+// the host's world is up in place of the one the client left. Any thread (atomics only): the net
+// thread's receive edge asks it too.
 bool WorldLanesStandDown();
+
+// The reliable drain dropped `count` host messages of world kinds while standing down (the first of
+// them `firstKind`): logged once per drain, as one line. Game thread.
+void NoteStandDownDrops(uint32_t count, uint8_t firstKind);
 
 // A new local pawn on a trip that is not the host's world's (the pocket's, or the old world's
 // before the travel): the join's placement and the start-point teleport must not move it. Game

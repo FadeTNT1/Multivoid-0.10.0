@@ -349,6 +349,9 @@ bool Begin(PT::Pocket from, PT::Reason why, uint32_t tripSeq, const float depart
     }
     // The host-held profile and the departure placement for the load to come.
     PIS::ClientRearmForReturn(departure);
+    // Nothing of the host's world streams received before the trip is applied in the world to come:
+    // the receive edge stored none while away, and what it held from before goes now.
+    s->ResetHostWorldStreams();
     // Nothing announced in, or loaded into, the world being left may stand for the world to come: the
     // episode waits for the NEXT world's replay, and the announce state goes back to a first one. A
     // world with no name is not armed against here (a null clears the exclusion); the arm before the

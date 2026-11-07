@@ -397,6 +397,14 @@ bool WorldLanesStandDown() {
     return false;
 }
 
+void NoteStandDownDrops(uint32_t count, uint8_t firstKind) {
+    if (count == 0) return;
+    UE_LOGI("[POCKET] client: dropped %u world message(s) from the host while %s, first kind %u (slot %u, "
+            "%s, trip %u, reason %s) -- sent before the host isolated this slot",
+            count, StateTag(g_state.load()), static_cast<unsigned>(firstKind), LocalSlot(),
+            PT::LevelTag(g_pocket.load()), g_tripSeq, PT::ReasonTag(PT::Reason::Trip));
+}
+
 bool SkipNewPawnPlacement() {
     const State st = g_state.load(std::memory_order_relaxed);
     if (st == State::Main) return false;

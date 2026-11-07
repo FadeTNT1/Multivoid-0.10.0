@@ -265,6 +265,11 @@ public:
 
     // Game thread: pop one delivered reliable message (a FIFO of arrivals across peers).
     bool TryGetReliable(ReliableMessage& out);
+    // The pocket rule's kinds that touch no world (session_lanes.h IsAwaySendableKind). Any thread.
+    static bool IsAwaySendable(ReliableKind kind);
+    // CLIENT: forget the host's world streams and the relayed world ones (prop, desk cursor, driven
+    // rows) with their latches, at a pocket return's start. Takes remoteMutex_. Game thread.
+    void ResetHostWorldStreams();
 
     // Voice: one VoiceFrame datagram (kVoiceFrameHeadBytes + frame.opusLen) to every world-ready
     // peer (a client: to the host). Fire and forget; the jitter buffer and PLC cover a dropped

@@ -176,7 +176,11 @@ three.
   cancels, the hotbar icons); the snapshot drain, the vent census and the held-prop receiver stop;
   the local streams send the pose alone; the inventory stream and `SendProfileNow` stop; the destroy
   seam broadcasts nothing; a new local pawn is not placed. The reaper's menu guard keeps the
-  session when the current world's map is one of the five pockets.
+  session when the current world's map is one of the five pockets. What the host sent before it
+  isolated the slot still arrives after the travel, and only this side can judge it: the reliable
+  drain drops every kind not in `IsAwaySendableKind` (one summed line per drain), and the receive
+  edge stores no stream but a body's (pose, ragdoll, hand pose, voice) from a slot in the same
+  level. The return's `Begin` clears the host's world stream stores (`ResetHostWorldStreams`).
 - **The puppet rule**, on every peer: a puppet is shown only when its player's location row equals
   this machine's (`ViewerLocation`: the host is always in the main world). Otherwise it is hidden
   with its ragdoll body, collision off, its drive suspended and no longer fed or ticked, its
@@ -189,7 +193,8 @@ three.
 Log lines (`[POCKET] client: ...`): entering, arrived, refused (mirror), going home, the way home's
 capture, back in the main world, the way home FAILED, in <pocket> -- not the menu, from <a> on to
 <b>, dead with no run-ending travel, the trip has not arrived after 60 s, the main world came back
-without the way home; `[POCKET] puppet: slot N hidden/shown`.
+without the way home, dropped N world message(s) while standing down, the session ended while away;
+`[POCKET] puppet: slot N hidden/shown`.
 
 Known limits: hook-driven producers (a pickup, a drop, a hit in the pocket) still fire and rely on
 the host refusing an away slot's world kinds; an away player's hand-item mirror on other peers is

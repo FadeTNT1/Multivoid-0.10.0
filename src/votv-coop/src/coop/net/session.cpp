@@ -758,6 +758,8 @@ bool Session::SlotTakesKind_(int peerSlot, ReliableKind kind) const {
     return IsSlotWorldReady(peerSlot) || IsPreWorldSendableKind(kind);
 }
 
+bool Session::IsAwaySendable(ReliableKind kind) { return IsAwaySendableKind(kind); }
+
 bool Session::AnyWorldReadyPeer(int skipSlot) const {
     for (int i = 0; i < kMaxPeers; ++i)
         if (i != skipSlot && peerConns_[i].load() != 0 &&
