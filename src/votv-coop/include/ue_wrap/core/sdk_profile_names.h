@@ -595,6 +595,11 @@ inline constexpr const wchar_t* AgravCloakFn            = L"cloak";
 inline constexpr const wchar_t* AgravForwardParam       = L"forward";
 inline constexpr const wchar_t* AgravHoverProp          = L"arirhover_cue";
 inline constexpr float          kAgravGatherRadiusCm    = 10000.f;  // gaher's SphereOverlapActors radius
+// runTrigger (and only it, on the machine whose player stands in the box) also attaches its `pointlight` (a point
+// light, r=10000 cm) to player 0's camera manager root and shows it, the blue wash round that player, and its end
+// destroys the component. `cloak` never touches it, so the replayed cloak left a client without it.
+inline constexpr const wchar_t* AgravPlayerLightProp    = L"pointlight";
+inline constexpr const wchar_t* AttachToComponentFn     = L"K2_AttachToComponent";
 // UPrimitiveComponent's gravity verbs (engine_physics).
 inline constexpr const wchar_t* SetEnableGravityFn      = L"SetEnableGravity";
 inline constexpr const wchar_t* IsGravityEnabledFn      = L"IsGravityEnabled";

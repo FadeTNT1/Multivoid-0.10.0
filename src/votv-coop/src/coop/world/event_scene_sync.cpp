@@ -182,7 +182,13 @@ bool ApplyToLevel(const coop::net::EventScenePhasePayload& p) {
         ok = true;
         if (p.phase == ph::kMidasRun) ok = ES::MidasRun(actor, snapshot ? static_cast<float>(p.progress) / 255.f : 0.f);
     } else {
-        ok = ES::AgravCloak(actor, p.phase == ph::kAgravCloakOn);
+        // The shimmer and the hover sound, and the blue light on the local camera: the game's own runTrigger attaches
+        // that to its player 0 only, and a client's trigger never runs it (its player is not in the box).
+        const bool on = p.phase == ph::kAgravCloakOn;
+        ok = ES::AgravCloak(actor, on);
+        const bool lit = ES::AgravPlayerLight(actor, on);
+        UE_LOGI("event_scene[agrav]: player light %s%s", on ? "attached to the camera" : "taken back",
+                lit ? "" : " -- did not resolve");
     }
     g_appliedByKey[key] = p.phase;
     UE_LOGI("event_scene[%s]: '%ls' phase %u%s applied%s",

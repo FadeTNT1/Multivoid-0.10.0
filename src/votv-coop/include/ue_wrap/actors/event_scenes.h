@@ -67,6 +67,12 @@ bool UfoShieldFlyAway(void* actor);
 // Its own cloak(forward), the shimmer timeline, and its hover sound started or stopped with it.
 bool AgravCloak(void* actor, bool forward);
 
+// The blue wash runTrigger gives the player standing in the box and `cloak` does not: its `pointlight` attached to
+// the LOCAL camera manager's root and shown (on), or destroyed as the game's own end does (off). A client whose
+// player is not in the box never runs runTrigger, so it replays this beside the cloak. False when the light, the
+// camera manager or a call did not resolve; a light already gone on `off` is true.
+bool AgravPlayerLight(void* actor, bool on);
+
 // ---- the Midas UFO (midasufotest_C, level-placed) ----
 
 // The flight so far, `a` in 0..1 (its tick advances it from 0 to 1 along the level spline). False when the field does
