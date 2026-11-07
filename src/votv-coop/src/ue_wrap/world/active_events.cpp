@@ -53,6 +53,14 @@ bool ReadCount(int32_t& out) {
     return true;
 }
 
+bool WriteCount(int32_t value) {
+    if (!Resolved()) return false;
+    void* gm = world_singleton::Gamemode();
+    if (!gm) return false;
+    *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(gm) + g_offActiveEvents) = value;
+    return true;
+}
+
 bool ReadSenders(Senders& out) {
     if (!Resolved()) return false;
     void* gm = world_singleton::Gamemode();

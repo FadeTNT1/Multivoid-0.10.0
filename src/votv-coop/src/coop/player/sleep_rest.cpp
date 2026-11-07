@@ -11,14 +11,18 @@
 #include "ue_wrap/actors/vitals.h"
 #include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/facts/function_row.h"
+#include "ue_wrap/world/active_events.h"
+#include "ue_wrap/world/sanity_ticker.h"
 #include "ue_wrap/world/world_singleton.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <string>
 
 namespace coop::sleep_rest {
 namespace {
@@ -28,6 +32,8 @@ namespace SLP = ue_wrap::sleep;
 namespace FX = ue_wrap::effects;
 namespace EN = ue_wrap::engine;
 namespace sg = ue_wrap::script_gate;
+namespace AE = ue_wrap::active_events;
+namespace R  = ue_wrap::reflection;
 
 // The factor the game's own sleep sets (mainGamemode.cpp:5428, SetGlobalTimeDilation(20)). The row below is
 // the census's entry for the `sleep` body that holds that literal (include/ue_wrap/facts/
@@ -136,6 +142,47 @@ void EndRest(const char* why) {
     UE_LOGI("sleep_rest: rest ended (%s) -- the body and the effects are back at 1", why);
 }
 
+// The game refused this client's sleep. Its refusals are lib_C::getEvent ("I do not want to sleep... i can sense
+// something..."): `activeEvents > 0` or the camera outside the base box; hunger; a fall; the stress (sanity <= 0.5);
+// elevation. Say which of the ones a client can see, once per refusal. The count is the game's refcount of
+// setEvent(true) callers kept in activeEvents_senders; a sender destroyed or retired without its setEvent(false)
+// (a mirror, a per-viewer figure) leaves the count above the senders still alive, and nothing ever lowers it
+// again, so every later sleep is refused for an event that no longer exists. When no live sender backs part of the
+// count, that part is taken back and said; the player's next try goes through. A count backed by live senders is
+// the game's own and is left alone.
+void OnSleepRefused() {
+    int32_t count = 0;
+    AE::Senders arr{};
+    const bool haveCount = AE::EnsureResolved() && AE::ReadCount(count) && AE::ReadSenders(arr);
+    std::string classes;
+    int32_t live = 0;
+    if (haveCount && arr.num >= 0 && arr.num <= 4096) {
+        for (int32_t i = 0; i < arr.num; ++i) {
+            void* obj = arr.data ? arr.data[i] : nullptr;
+            if (!obj || !R::IsLive(obj)) continue;
+            ++live;
+            if (classes.size() < 200) {
+                for (wchar_t c : R::ClassNameOf(obj)) classes.push_back((c > 0 && c < 128) ? static_cast<char>(c) : '?');
+                classes += ' ';
+            }
+        }
+    }
+    ue_wrap::sanity_ticker::State st;
+    const bool haveSanity = ue_wrap::sanity_ticker::Read(st);
+    UE_LOGI("sleep_rest: the game refused this client's sleep -- activeEvents=%d, %d live sender(s) [%s], sanity=%.3f "
+            "(refused at <= 0.5), %s", haveCount ? count : -1, live, classes.empty() ? "none" : classes.c_str(),
+            haveSanity ? st.sanity : -1.f,
+            !haveCount ? "the event registry does not resolve"
+            : count > 0 ? "the 'can sense something' check holds on the count"
+                        : "no event count; the other refusals (hunger, a fall, stress, elevation, camera outside the box) stand");
+    if (haveCount && count > live && live >= 0 && arr.num <= 4096) {
+        if (AE::WriteCount(live))
+            UE_LOGW("sleep_rest: activeEvents was %d with %d live sender(s) -- %d stale registration(s) of events that "
+                    "ended without their setEvent(false) taken back; the next sleep is not blocked by them",
+                    count, live, count - live);
+    }
+}
+
 // The call has run: the game set the world's dilation and the sleeping flag inside it. A refusal leaves the
 // flag down and nothing to undo. Our own reflected calls come through here as the game's do. The game has no
 // isSleep guard on `sleep` (mainGamemode.cpp:5495-5583), so a second call while resting sets the world's
@@ -144,7 +191,11 @@ void EndRest(const char* why) {
 void OnSleepPost(const sg::Call&) {
     if (!ConnectedClient()) return;
     float asleep = 0.f;
-    if (!V::Read(V::Field::Sleeping, &asleep) || asleep == 0.f) return;
+    if (!V::Read(V::Field::Sleeping, &asleep)) return;
+    if (asleep == 0.f) {
+        if (!g_resting) OnSleepRefused();
+        return;
+    }
     if (!SLP::EnsureResolved()) {
         UE_LOGE("sleep_rest: a sleep began and the dilation calls do not resolve -- the world stays at the game's factor");
         return;
