@@ -20,6 +20,7 @@
 #include "coop/net/session.h"
 #include "coop/player/death_revive.h"
 #include "coop/player/pocket_travel.h"
+#include "coop/player/pocket_travel_client.h"  // OnRunEndWhileAway: a run-ending in a pocket goes home
 #include "coop/player/players_registry.h"
 #include "coop/session/net_pump.h"
 #include "ue_wrap/core/game_thread.h"
@@ -188,6 +189,15 @@ sg::Verdict OnLoadLevelPre(const sg::Call& call) {
     }
 
     const Judgement v = JudgeMenuTravel(author);
+    // A run-ending in a pocket (a death there, above all) is answered by the way home, not by a revive
+    // in the pocket or by the menu: the player comes home alive. The player's own quit is not one.
+    if (v != Judgement::RunPlayerAsked && v != Judgement::RunNoSession &&
+        coop::player::pocket_travel_client::OnRunEndWhileAway(author)) {
+        g_cancelled.fetch_add(1, std::memory_order_relaxed);
+        UE_LOGW("run_end_travel: REFUSED lib_C::loadLevel(\"menu\") authored by %ls -- a run-ending in a "
+                "pocket; the pocket lane brings the player home", R::ClassNameOf(author).c_str());
+        return sg::Verdict::Cancel;
+    }
     if (v != Judgement::Cancel) {
         // Only the two that say something about this seam are worth a line per travel: a solo
         // travel is the common case and says nothing, and the two shortfalls latch below.

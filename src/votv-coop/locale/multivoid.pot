@@ -76,6 +76,11 @@ msgstr[1] ""
 
 #: src/coop/comms/peer_action_feed.cpp
 #, c-format
+msgid "%1$s came back"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
 msgid "%1$s caught signal '%2$s'"
 msgstr ""
 
@@ -204,6 +209,31 @@ msgstr ""
 #: src/coop/session/player_handshake_version.cpp
 #, c-format
 msgid "%1$s was turned away: unofficial build %2$s [%3$s]"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went into the goop"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went to Alex's dimension"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went to the place"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went to the poop dimension"
+msgstr ""
+
+#: src/coop/comms/peer_action_feed.cpp
+#, c-format
+msgid "%1$s went to the woid"
 msgstr ""
 
 #: src/ui/loading_screen.cpp
@@ -1816,6 +1846,26 @@ msgstr ""
 msgid "host or host:port"
 msgstr ""
 
+#: src/ui/scoreboard.cpp
+msgid "in Alex's dimension"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "in the goop"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "in the place"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "in the poop dimension"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "in the woid"
+msgstr ""
+
 #: src/ui/config_review_panel.cpp
 msgid "multivoid.ini could not be read"
 msgstr ""
@@ -1865,6 +1915,10 @@ msgstr ""
 
 #: src/ui/scoreboard.cpp
 msgid "offline"
+msgstr ""
+
+#: src/ui/scoreboard.cpp
+msgid "on the way back"
 msgstr ""
 
 #: src/ui/admin_panel.cpp

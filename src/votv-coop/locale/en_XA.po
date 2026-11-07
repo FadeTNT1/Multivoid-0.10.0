@@ -63,6 +63,10 @@ msgstr[0] "[[%1$s appears %2$llu time with different values; the FIRST line (lin
 msgstr[1] "[[%1$s appears %2$llu times with different values; the FIRST line (line %3$d) wins. Pick which one to keep:]]"
 
 #, c-format
+msgid "%1$s came back"
+msgstr "[[%1$s came back]]"
+
+#, c-format
 msgid "%1$s caught signal '%2$s'"
 msgstr "[[%1$s caught signal '%2$s']]"
 
@@ -167,6 +171,26 @@ msgstr "[[%1$s was turned away: official build %2$s [%3$s]]]"
 #, c-format
 msgid "%1$s was turned away: unofficial build %2$s [%3$s]"
 msgstr "[[%1$s was turned away: unofficial build %2$s [%3$s]]]"
+
+#, c-format
+msgid "%1$s went into the goop"
+msgstr "[[%1$s went into the goop]]"
+
+#, c-format
+msgid "%1$s went to Alex's dimension"
+msgstr "[[%1$s went to Alex's dimension]]"
+
+#, c-format
+msgid "%1$s went to the place"
+msgstr "[[%1$s went to the place]]"
+
+#, c-format
+msgid "%1$s went to the poop dimension"
+msgstr "[[%1$s went to the poop dimension]]"
+
+#, c-format
+msgid "%1$s went to the woid"
+msgstr "[[%1$s went to the woid]]"
 
 #, c-format
 msgid "%1$u / %2$u objects"
@@ -1446,6 +1470,21 @@ msgstr "[[direct]]"
 msgid "host or host:port"
 msgstr "[[host or host:port]]"
 
+msgid "in Alex's dimension"
+msgstr "[[in Alex's dimension]]"
+
+msgid "in the goop"
+msgstr "[[in the goop]]"
+
+msgid "in the place"
+msgstr "[[in the place]]"
+
+msgid "in the poop dimension"
+msgstr "[[in the poop dimension]]"
+
+msgid "in the woid"
+msgstr "[[in the woid]]"
+
 msgid "multivoid.ini could not be read"
 msgstr "[[multivoid.ini could not be read]]"
 
@@ -1490,6 +1529,9 @@ msgstr "[[now: %s]]"
 
 msgid "offline"
 msgstr "[[offline]]"
+
+msgid "on the way back"
+msgstr "[[on the way back]]"
 
 msgid "other build"
 msgstr "[[other build]]"

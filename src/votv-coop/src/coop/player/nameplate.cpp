@@ -4,6 +4,7 @@
 #include "coop/comms/chat_feed.h"
 #include "coop/player/nick_color.h"
 #include "coop/player/players_registry.h"
+#include "coop/player/puppet_drive.h"  // HiddenByLocation: a player in another level has no plate
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
 #include "coop/player/sleepers.h"
@@ -150,6 +151,7 @@ void Update() {
     for (int slot = 0; slot < static_cast<int>(coop::players::kMaxPeers); ++slot) {
         if (g_hiddenBySlot[slot].load(std::memory_order_relaxed))
             continue;  // that peer hid its own plate (synced pref)
+        if (coop::puppet_drive::HiddenByLocation(slot)) continue;  // in another level (a pocket trip)
         RemotePlayer* p = reg.Puppet(static_cast<uint8_t>(slot));
         if (!p || !p->valid()) continue;
 
