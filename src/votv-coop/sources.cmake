@@ -461,6 +461,7 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/wisp_grab_hold.cpp
     src/coop/creatures/wisp_tear_mirror.cpp
     src/coop/items/player_inventory_sync.cpp
+    src/coop/items/player_inventory_pocket.cpp
     src/coop/player/player_profile_store.cpp
     src/coop/player/stat_orders.cpp
     src/coop/player/stat_orders_wire.cpp
