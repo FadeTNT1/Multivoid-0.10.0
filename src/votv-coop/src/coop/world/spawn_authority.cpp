@@ -52,6 +52,7 @@ UE_FACT_FN(kRowReceiveTickCockroachMaster, "spawn_authority", L"cockroachMaster_
 UE_FACT_FN(kRowReceiveTickTickerRoachSummoner, "spawn_authority", L"ticker_roachSummoner_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveBeginPlayVentCrawler, "spawn_authority", L"ventCrawler_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowBoxBeginOverlapVentCrawler, "spawn_authority", L"ventCrawler_C", L"BndEvt__ventCrawler_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
+UE_FACT_FN(kRowBoxBeginOverlapKocker, "spawn_authority", L"kocker_C", L"BndEvt__ventCrawler_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
 UE_FACT_FN(kRowReceiveBeginPlayGrayTest, "spawn_authority", L"grayTest_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowSphereBeginOverlapGrayTest, "spawn_authority", L"grayTest_C", L"BndEvt__grayTest_Sphere_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
 UE_FACT_FN(kRowDeacCamsGrayTest, "spawn_authority", L"grayTest_C", L"deacCams", Declared);
@@ -154,6 +155,11 @@ constexpr Row kRows[] = {
     // box is the host's to test (event_scene_crawler), its one-shots the sound relay's.
     {&kRowReceiveBeginPlayVentCrawler,    "ventCrawler.ReceiveBeginPlay"},
     {&kRowBoxBeginOverlapVentCrawler,     "ventCrawler.BoxBeginOverlap"},
+    // kocker_C (ventKnocker's world actor): its Box begin-overlap, a ventCrawler copy with the same DoOnce and no actor
+    // filter, starts seven knocks and then destroys the actor. A client's mirror must not run its own: the host's
+    // knocks reach every client through the sound relay (kPositionalCueSourceClasses), and a client's player in the
+    // box is the host's to test (event_scene_crawler).
+    {&kRowBoxBeginOverlapKocker,          "kocker.BoxBeginOverlap"},
     // grayTest_C: BeginPlay re-attaches the mesh, waits a second and starts the wander MoveTo
     // (@1117); the 3 s loops arm from gatherTeam and step. The sphere overlap is the player
     // catch: on a mainPlayer touch it calls grayController->despawn() (@1508). disableCams is the

@@ -1,4 +1,5 @@
-// coop/world/event_scene_crawler.cpp -- the vent crawler's walk-in, any player's (see coop/world/event_scene_sync.h).
+// coop/world/event_scene_crawler.cpp -- the vent crawler's and the vent knocker's walk-in, any player's (see
+// coop/world/event_scene_sync.h).
 //
 // ventCrawler_C waits for its Box's begin-overlap, a DoOnce with no actor filter (the 0.10.0 capture's
 // BndEvt__ventCrawler_Box handler): two vent footsteps, then its crawl. The host's crawler is the only one that
@@ -8,8 +9,10 @@
 // Instead, while a host crawler lives and has not been started by us, the host tests each client's puppet against
 // the box (its rotated bounds, padded by a body's half width) four times a second, and the first one inside runs
 // the box's own handler with that puppet as the other actor, once. The handler's DoOnce makes a later native
-// overlap, or a second puppet, a no-op. The same pass arms the sound relay while a crawler lives, so its
-// footsteps and the vent's break are heard on every client. Host only; game thread.
+// overlap, or a second puppet, a no-op. The vent knocker (kocker_C, a world actor) is a copy of the same graph, its
+// handler the crawler's by name, so it takes the same pass; its client mirror's own overlap is refused
+// (coop/world/spawn_authority), so the host's test is the only start a client's player can give it. The sound relay
+// (coop/world/event_sound_relay) arms itself while a source actor lives. Host only; game thread.
 
 #include "event_scene_detail.h"
 
@@ -17,7 +20,6 @@
 #include "coop/element/registry.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
-#include "coop/world/event_sound_relay.h"
 
 #include "ue_wrap/actors/event_scenes.h"
 #include "ue_wrap/core/log.h"
@@ -43,6 +45,13 @@ constexpr long long kPollMs = 250;
 constexpr float kBodyPadCm = 40.f;   // a player capsule's half width: the location is the capsule's centre
 long long g_nextPollMs = 0;
 std::vector<coop::element::Registry::ActorIdPair> g_snap;   // kept for its capacity
+
+bool IsBoxScene(void* actor) {
+    const auto& name = R::NameOf(R::ClassOf(actor));
+    for (const wchar_t* cls : P::name::kBoxStartedSceneClasses)
+        if (R::NameEquals(name, cls)) return true;
+    return false;
+}
 
 // The crawlers this pass started, by slot and serial, so a recycled address is a new crawler.
 struct Started {
@@ -100,22 +109,26 @@ void CrawlerHostTick() {
     const long long now = NowMs();
     if (now < g_nextPollMs) return;
     g_nextPollMs = now + kPollMs;
-    coop::element::Registry::Get().SnapshotActorsByType(coop::element::ElementType::Npc, g_snap);
-    bool anyCrawler = false;
-    for (const auto& pr : g_snap) {
-        if (pr.mirror || !pr.actor || !R::IsLiveByIndex(pr.actor, pr.internalIdx)) continue;
-        if (!R::NameEquals(R::NameOf(R::ClassOf(pr.actor)), P::name::NpcClass_VentCrawler)) continue;
-        anyCrawler = true;
-        if (WasStarted(pr.internalIdx)) continue;
-        void* puppet = PuppetInBox(pr.actor);
-        if (!puppet) continue;
-        g_started.push_back(Started{pr.internalIdx, R::SlotSerial(pr.internalIdx)});
-        const bool ok = ES::CallVentCrawlerOverlap(pr.actor, puppet);
-        UE_LOGI("event_scene[ventCrawler]: eid=%u -- a client's player is in the vent box: its overlap run on the "
-                "host%s", static_cast<unsigned>(pr.id), ok ? "" : " -- the handler did not dispatch");
+    bool anyScene = false;
+    // The crawler is a character-lane npc, the knocker a world actor.
+    for (const coop::element::ElementType type :
+         {coop::element::ElementType::Npc, coop::element::ElementType::WorldActor}) {
+        coop::element::Registry::Get().SnapshotActorsByType(type, g_snap);
+        for (const auto& pr : g_snap) {
+            if (pr.mirror || !pr.actor || !R::IsLiveByIndex(pr.actor, pr.internalIdx)) continue;
+            if (!IsBoxScene(pr.actor)) continue;
+            anyScene = true;
+            if (WasStarted(pr.internalIdx)) continue;
+            void* puppet = PuppetInBox(pr.actor);
+            if (!puppet) continue;
+            g_started.push_back(Started{pr.internalIdx, R::SlotSerial(pr.internalIdx)});
+            const bool ok = ES::CallVentCrawlerOverlap(pr.actor, puppet);
+            UE_LOGI("event_scene[boxScene]: eid=%u (%ls) -- a client's player is in its box: its overlap run on the "
+                    "host%s", static_cast<unsigned>(pr.id), R::ClassNameOf(pr.actor).c_str(),
+                    ok ? "" : " -- the handler did not dispatch");
+        }
     }
-    if (!anyCrawler) g_started.clear();
-    coop::event_sound_relay::SetHostArmed(anyCrawler);
+    if (!anyScene) g_started.clear();
 }
 
 void CrawlerOnDisconnect() {

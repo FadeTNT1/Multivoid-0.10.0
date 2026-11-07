@@ -2,6 +2,8 @@
 
 #include "coop/world/event_sound_relay.h"
 
+#include "coop/element/element.h"
+#include "coop/element/registry.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
@@ -54,6 +56,16 @@ bool  g_armed = false;
 
 // The source classes, resolved by name as each loads.
 void* g_sourceClasses[sizeof(P::name::kPositionalCueSourceClasses) / sizeof(P::name::kPositionalCueSourceClasses[0])] = {};
+
+// Whether `obj` is a live source actor, by class name: the poll below asks it of every enrolled actor, so it
+// resolves no class (IsSource, in the seams, compares resolved class pointers).
+bool IsSourceByName(void* obj) {
+    if (!obj) return false;
+    const auto& cls = R::NameOf(R::ClassOf(obj));
+    for (const wchar_t* name : P::name::kPositionalCueSourceClasses)
+        if (R::NameEquals(cls, name)) return true;
+    return false;
+}
 
 bool IsSource(void* obj) {
     if (!obj) return false;
@@ -158,14 +170,7 @@ bool Finite3(const float (&v)[3]) {
     return std::isfinite(v[0]) && std::isfinite(v[1]) && std::isfinite(v[2]);
 }
 
-}  // namespace
-
-void Install(N::Session* session) {
-    g_session.store(session, std::memory_order_release);
-    TryInstall();
-}
-
-void SetHostArmed(bool armed) {
+void SetArmed(bool armed) {
     TryInstall();
     if (armed == g_armed) return;
     g_armed = armed;
@@ -176,9 +181,40 @@ void SetHostArmed(bool armed) {
             armed ? "lives" : "is gone");
 }
 
+// The seams are armed while a source actor lives on the host, found among the enrolled npcs (the crawler) and world
+// actors (the knocker) four times a second.
+constexpr long long kArmPollMs = 250;
+long long g_nextArmPollMs = 0;
+std::vector<coop::element::Registry::ActorIdPair> g_armSnap;   // kept for its capacity
+
+void PollArm() {
+    const long long now = NowMs();
+    if (now < g_nextArmPollMs) return;
+    g_nextArmPollMs = now + kArmPollMs;
+    bool any = false;
+    for (const coop::element::ElementType type :
+         {coop::element::ElementType::Npc, coop::element::ElementType::WorldActor}) {
+        coop::element::Registry::Get().SnapshotActorsByType(type, g_armSnap);
+        for (const auto& pr : g_armSnap) {
+            if (pr.mirror || !pr.actor || !R::IsLiveByIndex(pr.actor, pr.internalIdx)) continue;
+            if (IsSourceByName(pr.actor)) { any = true; break; }
+        }
+        if (any) break;
+    }
+    SetArmed(any);
+}
+
+}  // namespace
+
+void Install(N::Session* session) {
+    g_session.store(session, std::memory_order_release);
+    TryInstall();
+}
+
 void Tick() {
-    if (g_pending.empty()) return;
     auto* s = g_session.load(std::memory_order_acquire);
+    if (s && s->running() && s->role() == N::Role::Host) PollArm();
+    if (g_pending.empty()) return;
     std::vector<Pending> out;
     out.swap(g_pending);
     if (!s || !s->running() || s->role() != N::Role::Host || !s->AnyWorldReadyPeer()) return;
@@ -242,7 +278,8 @@ void OnCue(const N::EventSoundCuePayload& p) {
 }
 
 void OnDisconnect() {
-    SetHostArmed(false);
+    SetArmed(false);
+    g_nextArmPollMs = 0;
     g_pending.clear();
     for (void*& c : g_sourceClasses) c = nullptr;
 }
