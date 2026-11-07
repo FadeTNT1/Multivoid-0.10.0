@@ -1,6 +1,5 @@
-// coop/farming/plant_wire.h -- the bytes of the farming lane (ReliableKind::PlantIntent, ReliableKind::PlantState), and
-// nothing else: one message per blob. Pure byte work, no engine access; what a plant is and who may tend one is
-// coop/farming/plant_sync's.
+// coop/farming/plant_wire.h -- the bytes of the farming lane (ReliableKind::PlantIntent, ReliableKind::PlantState): one
+// message per blob. Pure byte work, no engine access; who may tend a plant is coop/farming/plant_sync's.
 //
 //   PlantState (host to all)
 //     row         [u8 1][str key][str cls][str plant][f32 x y z pitch yaw roll][str attachKey]
@@ -14,12 +13,6 @@
 //     tend        [u8 3][u32 reqId][str key][u8 mask][f32 water fertilizer grow fruitgrow]
 //     medicine    [u8 4][u32 reqId][str key][u8 type][f32 time]
 //     potPlant    [u8 5][u32 reqId][str potKey][str seedCls][str seedName]
-//
-//   str = [u8 n][n bytes, printable ASCII], n <= 96. Row flags: bit 0 a joiner's snapshot row, bit 1 grew, bit 2 the
-//   dirt is hidden. Gone flags: bit 0 harvested. Tend mask: bit 0 water, 1 fertilizer, 2 grow, 3 fruitgrow.
-//
-// HOSTILE-INPUT CONTRACT: every length is bounded before it is used, every float is finite, a string holds printable
-// ASCII only, a key is never empty, an unknown bit is Malformed, and a byte after a message's tail is Malformed.
 
 #pragma once
 
@@ -35,6 +28,11 @@ namespace coop::plant_wire {
 enum class StateOp : uint8_t { Row = 1, Gone = 2, SnapshotEnd = 3, Ack = 4 };
 enum class IntentOp : uint8_t { Harvest = 1, Discard = 2, Tend = 3, Medicine = 4, PotPlant = 5 };
 
+// str = [u8 n][n bytes, printable ASCII], n <= 96. Row flags: bit 0 a joiner's snapshot row, bit 1 grew, bit 2 the
+// dirt is hidden. Gone flags: bit 0 harvested. Tend mask: bit 0 water, 1 fertilizer, 2 grow, 3 fruitgrow.
+//
+// HOSTILE-INPUT CONTRACT: every length is bounded before it is used, every float is finite, a string holds printable
+// ASCII only, a key is never empty, an unknown bit is Malformed, and a byte after a message's tail is Malformed.
 inline constexpr size_t  kMaxStrBytes = 96;
 inline constexpr uint8_t kRowSnapshot = 1;
 inline constexpr uint8_t kRowGrew = 2;
