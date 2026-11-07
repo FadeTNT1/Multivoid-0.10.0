@@ -261,9 +261,9 @@ void OnHoseDetachPost(const sg::Call& c) {
     UE_LOGI("[IRRIGATION] client: hose key='%ls' let its sprinkler go -> host%s", key.c_str(), sent ? "" : " -- NOT SENT");
 }
 
-// A sprinkler waters the host's plants only (SprinklerWatersHere).
+// A sprinkler waters the host's plants only.
 sg::Verdict OnSprinklerWaterPre(const sg::Call& /*c*/) {
-    if (!IsClient(Session())) return sg::Verdict::Run;
+    if (SprinklerWatersHere()) return sg::Verdict::Run;
     ++g_waterCancelled;
     if (!g_waterSaid) {
         g_waterSaid = true;

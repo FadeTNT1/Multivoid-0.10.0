@@ -19,6 +19,7 @@
 namespace coop::irrigation_sync::detail {
 namespace {
 
+namespace IR = ue_wrap::irrigation;
 namespace W = coop::save_record_wire;
 namespace R = ue_wrap::reflection;
 

@@ -28,6 +28,7 @@
 namespace coop::irrigation_sync::detail::host {
 namespace {
 
+namespace IR = ue_wrap::irrigation;
 namespace EL = coop::element;
 namespace P  = ue_wrap::profile;
 
