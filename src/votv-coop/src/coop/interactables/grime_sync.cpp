@@ -464,8 +464,14 @@ size_t HubPassComplete(void*, bool isFull, uint32_t worldGen) {
                 total, static_cast<unsigned long long>(posHash), isFull ? "full" : "tail", added, lowered);
     }
     if (ProbeLog())
-        for (auto& f : g_scanFound)
-            UE_LOGI("grime[probe]: key='%ls' idx=%d actor=%p", f.key.c_str(), f.ref.idx, f.ref.actor);
+        for (auto& f : g_scanFound) {
+            if (!Holds(f.ref)) continue;
+            ue_wrap::FVector loc{};
+            float process = 0.f;
+            if (E::TryGetActorLocation(f.ref.actor, loc) && G::ReadProcess(f.ref.actor, process))
+                UE_LOGI("grime[probe]: indexed key='%ls' loc=(%.2f,%.2f,%.2f) process=%.3f actor=%p",
+                        f.key.c_str(), loc.X, loc.Y, loc.Z, process, f.ref.actor);
+        }
     g_scanFound.clear();
     g_scanNextCache.clear();
     return total;
@@ -724,10 +730,15 @@ void OnReliable(const coop::net::KeyedScalarPayload& payload, uint8_t senderPeer
         floor[key] = payload.value;
         LowerCell(key, payload.value);
     } else if (!Lower(key, payload.value)) {
+        if (ProbeLog()) UE_LOGI("grime[probe]: received key='%ls' process=%.3f ignored=existing-floor",
+                                key.c_str(), payload.value);
         return;  // not below what this peer already holds
     }
     std::wstring localKey;
     if (void* actor = ResolveFast(key, &localKey)) {
+        if (ProbeLog())
+            UE_LOGI("grime[probe]: received key='%ls' process=%.3f adopt=%d resolved='%ls'",
+                    key.c_str(), payload.value, adopt ? 1 : 0, localKey.c_str());
         if (localKey != key) {
             // The cell's one decal here, named by bits this copy does not have: it is that decal, and it
             // keeps the value under its own key too, so the floor and the reconcile find it.
@@ -736,6 +747,9 @@ void OnReliable(const coop::net::KeyedScalarPayload& payload, uint8_t senderPeer
             else Lower(localKey, payload.value);
         }
         ApplyResolved(actor, localKey, floor[key], adopt ? "adopted" : "a peer's fall", /*lowerOnly=*/!adopt);
+    } else if (ProbeLog()) {
+        UE_LOGI("grime[probe]: received key='%ls' process=%.3f adopt=%d unresolved",
+                key.c_str(), payload.value, adopt ? 1 : 0);
     }
 }
 
@@ -771,6 +785,8 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
             p.value = process;
             p.adopt = 1;  // the connect snapshot: the joiner adopts the host's world as is
             s->SendReliableToSlot(peerSlot, coop::net::ReliableKind::GrimeState, &p, sizeof(p));
+            if (ProbeLog()) UE_LOGI("grime[probe]: snapshot slot=%d live key='%ls' process=%.3f",
+                                    peerSlot, kv.first.c_str(), process);
             ++sent;
         }
         // And every key the index does not hold live, at the lowest of its floor and its parked decals: a
@@ -789,6 +805,8 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
             p.value = kv.second;
             p.adopt = 1;
             s->SendReliableToSlot(peerSlot, coop::net::ReliableKind::GrimeState, &p, sizeof(p));
+            if (ProbeLog()) UE_LOGI("grime[probe]: snapshot slot=%d away key='%ls' process=%.3f",
+                                    peerSlot, kv.first.c_str(), kv.second);
             ++floors;
         }
     }
