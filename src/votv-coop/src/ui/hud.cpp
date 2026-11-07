@@ -136,8 +136,10 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
     const float loX = m + ext, hiX = io.DisplaySize.x - m - ext;
     const float ax = (loX <= hiX) ? std::clamp(p.x, loX, hiX) : p.x;
     const float ay = std::clamp(p.y, m + sz.y + gap + bubbleH, io.DisplaySize.y - m - barH - barGap);
-    const ImVec2 textPos(ax - labelW * 0.5f, ay - sz.y - gap);
-    const ImVec2 bp(ax - barW * 0.5f, ay - barGap);
+    // Both on whole pixels: ImGui truncates a text origin to the pixel grid, and a bar left at a
+    // sub-pixel position would slide up to a pixel against the nick as the plate moves.
+    const ImVec2 textPos(std::round(ax - labelW * 0.5f), std::round(ay - sz.y - gap));
+    const ImVec2 bp(std::round(ax - barW * 0.5f), std::round(ay - barGap));
 
     // The plate extents (the nick and bar union), kept for the voice-badge anchor below. No
     // backing box is drawn: readability rides the text outline and the health bar's own outline.
