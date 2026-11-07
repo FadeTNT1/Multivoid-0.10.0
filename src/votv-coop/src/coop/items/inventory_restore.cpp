@@ -275,6 +275,15 @@ void OnAck(const coop::net::InventoryRestoreAckPayload& ack, uint8_t senderSlot)
     if (wake) coop::sleepers::OnWakeAck(senderSlot, ack);
 }
 
+void OnSlotLeft(int slot) {
+    if (slot < 1 || slot >= static_cast<int>(g_pending.size())) return;
+    Pending& p = g_pending[static_cast<size_t>(slot)];
+    if (!p.active) return;
+    UE_LOGI("[RESTORE] host: slot %d (%s) left with restore #%u of %s unanswered -- dropped", slot, p.who.c_str(), p.reqId,
+            p.label.c_str());
+    p = Pending{};
+}
+
 void OnDisconnect() {
     for (Pending& p : g_pending) p = Pending{};
     g_assembler.Clear();

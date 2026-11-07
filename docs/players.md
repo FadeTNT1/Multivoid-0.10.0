@@ -202,7 +202,8 @@ the only shape `inventory_wire` parses), whose machine writes a rollback copy of
 `inventory_rollback/rollback-<UTC>.json` in the mod's data folder, replaces its three item arrays through the game's own
 restore on the game thread (vitals and position are untouched), refreshes the equipment and answers
 `InventoryRestoreAck` with the item counts before and after. The host's own player is restored locally the same way. A
-dead player is refused. The host logs the request, the file read, each answer and the counts under `[RESTORE]`, and the
+dead player is refused. A request still unanswered when its player leaves is dropped at the leave (the 60-second wait would
+otherwise refuse a rejoin as "still waiting"). The host logs the request, the file read, each answer and the counts under `[RESTORE]`, and the
 action goes in the admin action log. The profile stream then sends the restored inventory to the host as any change.
 (`coop/items/inventory_restore`, `coop/commands/inventory_commands`, `coop/player/player_profile_store`.)
 

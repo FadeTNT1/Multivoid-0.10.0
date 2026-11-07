@@ -442,6 +442,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::owner_entity_sync::OnPeerLeftSlot(slot);  // destroy the leaver's owner-entity mirrors (its eyer dies with it)
     coop::hook_sync::OnPeerLeftSlot(slot);  // the leaver's OWNER-PHASE hook mirrors; anchored ones are the host's and stay
     coop::player_inventory_sync::OnDisconnectForSlot(slot);  // re-arm the on-join push; the leaver's profile stays held
+    coop::inventory_restore::OnSlotLeft(slot);  // a restore it never answered, or its rejoin is told "still waiting" for a minute
 }
 
 DisconnectStats DisconnectAll() {
