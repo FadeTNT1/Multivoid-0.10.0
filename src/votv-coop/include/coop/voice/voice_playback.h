@@ -12,6 +12,13 @@
 // callback touches only the PCM rings (SPSC), the position atomics, the range atomic (distanceCm_)
 // and the row's default (DefaultRangeCm(), a constant read). No engine access anywhere, and no
 // allocation after Start beyond the lazily created per-slot opus decoders.
+//
+// World sounds (PlayWorldSound): the same device and mixer also play a few short, positioned one-shots
+// that are not a peer's voice (the sleepers' snore, coop/player/sleeper_snore). Each is a fixed-pool
+// emitter: the game thread fills one and publishes it with a release store of its `active` flag, the
+// callback reads it after the matching acquire and clears the flag when it ends or is stopped. The
+// samples are borrowed, mono s16, and must outlive the playback. The listener of a world sound is its
+// own (SetWorldListener: the camera), not the voice listener.
 
 #pragma once
 
@@ -64,6 +71,18 @@ public:
     // state: voice_chat resets it where the person leaves.
     void ResetSlot(int slot);
 
+    // ---- world sounds (game thread; see the file comment) ----
+    // Start a one-shot of `frames` mono s16 samples at `rate` Hz, played `pitch` times as fast, at the
+    // world point (x, y, z). Full gain (times `gain`) within `fullCm` of the world listener, falling
+    // linearly to silence at `silentCm`. Returns a handle (non-zero), or 0 when the output is not
+    // running or all emitters are busy.
+    uint32_t PlayWorldSound(const int16_t* pcm, uint32_t frames, uint32_t rate, float pitch, float x,
+                            float y, float z, float gain, float fullCm, float silentCm);
+    void StopWorldSound(uint32_t handle);          // a stale or zero handle is a no-op
+    bool WorldSoundPlaying(uint32_t handle) const;
+    void SetWorldListener(float x, float y, float z, float yawDeg);
+    static constexpr int kMaxEmitters = 8;
+
     // Icon surface (any thread). True if a frame decoded < 250 ms ago.
     bool IsTalking(int slot, bool* whispering = nullptr) const;
 
@@ -109,11 +128,27 @@ private:
         std::atomic<float> volume{1.0f};
     };
 
+    struct Emitter {
+        std::atomic<bool> active{false};  // published last by the game thread; cleared by the callback
+        std::atomic<bool> stop{false};
+        std::atomic<uint32_t> gen{0};
+        // Written by the game thread before `active` is released; then read-only to the callback.
+        const int16_t* pcm = nullptr;
+        uint32_t frames = 0;
+        float step = 1.0f;  // source frames per output frame (rate / 48000 * pitch)
+        float x = 0, y = 0, z = 0;
+        float gain = 1.0f, fullCm = 100.0f, silentCm = 600.0f;
+        double cursor = 0.0;  // callback only
+    };
+
     void DeliverInOrder(Channel& ch, const coop::net::VoiceFramePayload& f);
     void PushPcm(Channel& ch, const int16_t* samples, int count);
     void MixOutput(float* out, uint32_t frameCount);
+    void MixWorldSounds(float* out, uint32_t frameCount);
 
     Channel channels_[coop::players::kMaxPeers];
+    Emitter emitters_[kMaxEmitters];
+    std::atomic<float> worldX_{0}, worldY_{0}, worldZ_{0}, worldYaw_{0};
 
     std::atomic<float> listenerX_{0}, listenerY_{0}, listenerZ_{0}, listenerYaw_{0};
     std::atomic<float> masterVolume_{1.0f};

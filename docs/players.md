@@ -326,6 +326,21 @@ the profile keeps what the looting left. A player who leaves dead, or one with n
 `sleepers.name_distance_m` (6 m by default, each viewer's own) and only with a clear line from the camera to its
 head; with a wall in between there is no plate at all. Online players' plates are unchanged.
 
+**Snoring.** A sleeper makes a soft snore, `sleepers.snore` (on by default, each viewer's own; `sleepers.snore_volume`,
+0.7 by default). Nothing crosses the wire: each peer derives who sleeps from what it already has -- an offline sleeper
+whose body is built and live, an online player whose lying pose has settled (in a bed or a sleeping bag; the local
+player never snores to themselves) -- and plays a one-shot for each every 3 to 6 s at random, pitched +-5 %, panned
+to the sleeper's head (along the lying body's up vector). It is full volume within a metre of the camera and silent
+by six. It plays through the voice output's own device and mixer (`voice_playback` world sounds, a pool of 8
+emitters), so with voice off or no output device it is silently off. It stops when the sleeper wakes, is removed or
+destroyed, disconnects, the session ends or the world changes; looting a sleeper does not stop it. The game ships no
+snore sound and a SoundWave cannot be cooked without the 4.27 editor, so the sound is generated at first use: three
+lo-fi 22 kHz mono snores of 1.7 to 2.4 s (a fluttering band-passed inhale over a low buzz, then a soft breath out).
+A `snore.wav` beside `main.dll` (or in the mod's data folder) replaces them; miniaudio's built-in WAV decoder reads it
+(any rate or channel count, mono-mixed, cut at 15 s). The log says `sleeper_snore: no snore.wav beside main.dll --
+generated 3 snores ..` or `using <path> ..`, `sleeper_snore: <offline sleeper N|online slot N> snores at (x, y, z) ..`
+on a sleeper's first snore, `.. stopped (woke, gone or removed)`, and once `the voice output is not running ..`.
+
 **Online sleepers.** A player who is still connected but at rest -- in a bed, a sleeping bag, or dreaming, the
 state `sleep_sync` already carries -- is shown the same way on every other peer: their puppet is laid flat under
 where they rest (onto the bed surface the trace meets, or the floor under a sleeping bag) by the same measured pose.

@@ -26,6 +26,26 @@ int64_t NowMs() {
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
+// SVC REDUCED-mode pan: lateral/forward in listener space (UE: yaw 0 = +X, right = (-sin yaw,
+// cos yaw)); the two channel volumes clamp(1 -+ pan * 1.4, 0.3, 1). Shared by the voice channels and
+// the world sounds.
+void PanVolumes(float dx, float dy, float dist, float yawRad, float& volL, float& volR) {
+    const float fwd = dx * std::cos(yawRad) + dy * std::sin(yawRad);
+    const float lat = -dx * std::sin(yawRad) + dy * std::cos(yawRad);
+    float pan = 0.0f;
+    if (dist > 1.0f) {
+        pan = std::atan2(lat, fwd) / kPi;  // [-1, 1]
+        if (pan > 0.5f) pan = 0.5f;        // SVC clamps to +-0.5
+        if (pan < -0.5f) pan = -0.5f;
+    }
+    volL = 1.0f - pan * 1.4f;
+    volR = 1.0f + pan * 1.4f;
+    if (volL > 1) volL = 1;
+    if (volL < 0.3f) volL = 0.3f;
+    if (volR > 1) volR = 1;
+    if (volR < 0.3f) volR = 0.3f;
+}
+
 }  // namespace
 
 // miniaudio playback callback (pUserData = the Playback*); f32 stereo out.
@@ -123,6 +143,7 @@ void Playback::Stop() {
         context_ = nullptr;
     }
     for (int i = 0; i < coop::players::kMaxPeers; ++i) ResetSlot(i);
+    for (Emitter& e : emitters_) e.active.store(false, std::memory_order_release);
 }
 
 void Playback::ResetSlot(int slot) {
@@ -360,22 +381,8 @@ void Playback::MixOutput(float* out, uint32_t frameCount) {
                 vfade = 1.0f - std::fabs(dz) / (base * kVerticalFadeRatio);
                 if (vfade < 0) vfade = 0;
             }
-            // SVC REDUCED-mode pan: lateral/forward in listener space (UE:
-            // yaw 0 = +X, right = (-sin yaw, cos yaw)).
-            const float fwd = dx * std::cos(yawRad) + dy * std::sin(yawRad);
-            const float lat = -dx * std::sin(yawRad) + dy * std::cos(yawRad);
-            float pan = 0.0f;
-            if (dist > 1.0f) {
-                pan = std::atan2(lat, fwd) / kPi;  // [-1, 1]
-                if (pan > 0.5f) pan = 0.5f;        // SVC clamps to +-0.5
-                if (pan < -0.5f) pan = -0.5f;
-            }
-            float volL = 1.0f - pan * 1.4f;
-            float volR = 1.0f + pan * 1.4f;
-            if (volL > 1) volL = 1;
-            if (volL < 0.3f) volL = 0.3f;
-            if (volR > 1) volR = 1;
-            if (volR < 0.3f) volR = 0.3f;
+            float volL = 1.0f, volR = 1.0f;
+            PanVolumes(dx, dy, dist, yawRad, volL, volR);
             const float g = att * vfade;
             gainL = g * volL;
             gainR = g * volR;
@@ -397,11 +404,107 @@ void Playback::MixOutput(float* out, uint32_t frameCount) {
         // re-prime triggers on the next callback when avail hits 0.)
     }
 
+    MixWorldSounds(out, frameCount);
+
     // Soft clip.
     const uint32_t n = 2 * frameCount;
     for (uint32_t i = 0; i < n; ++i) {
         if (out[i] > 1.0f) out[i] = 1.0f;
         else if (out[i] < -1.0f) out[i] = -1.0f;
+    }
+}
+
+// ---- world sounds ----
+
+void Playback::SetWorldListener(float x, float y, float z, float yawDeg) {
+    worldX_.store(x, std::memory_order_relaxed);
+    worldY_.store(y, std::memory_order_relaxed);
+    worldZ_.store(z, std::memory_order_relaxed);
+    worldYaw_.store(yawDeg, std::memory_order_relaxed);
+}
+
+// Handle = generation << 4 | emitter index; the generation changes per start, so a handle of an ended
+// sound never stops its emitter's next occupant.
+uint32_t Playback::PlayWorldSound(const int16_t* pcm, uint32_t frames, uint32_t rate, float pitch,
+                                  float x, float y, float z, float gain, float fullCm,
+                                  float silentCm) {
+    if (!running_ || !pcm || frames < 2 || rate == 0) return 0;
+    for (int i = 0; i < kMaxEmitters; ++i) {
+        Emitter& e = emitters_[i];
+        if (e.active.load(std::memory_order_acquire)) continue;
+        e.pcm = pcm;
+        e.frames = frames;
+        e.step = static_cast<float>(rate) / static_cast<float>(kSampleRate) * pitch;
+        e.x = x;
+        e.y = y;
+        e.z = z;
+        e.gain = gain;
+        e.fullCm = fullCm;
+        e.silentCm = silentCm > fullCm ? silentCm : fullCm + 1.0f;
+        e.cursor = 0.0;
+        e.stop.store(false, std::memory_order_relaxed);
+        uint32_t gen = (e.gen.load(std::memory_order_relaxed) + 1) & 0x0FFFFFFFu;
+        if (gen == 0) gen = 1;
+        e.gen.store(gen, std::memory_order_relaxed);
+        e.active.store(true, std::memory_order_release);
+        return (gen << 4) | static_cast<uint32_t>(i);
+    }
+    return 0;
+}
+
+void Playback::StopWorldSound(uint32_t handle) {
+    if (handle == 0) return;
+    const uint32_t idx = handle & 0xF;
+    if (idx >= static_cast<uint32_t>(kMaxEmitters)) return;
+    Emitter& e = emitters_[idx];
+    if (e.gen.load(std::memory_order_relaxed) == (handle >> 4)) e.stop.store(true, std::memory_order_release);
+}
+
+bool Playback::WorldSoundPlaying(uint32_t handle) const {
+    if (handle == 0) return false;
+    const uint32_t idx = handle & 0xF;
+    if (idx >= static_cast<uint32_t>(kMaxEmitters)) return false;
+    const Emitter& e = emitters_[idx];
+    return e.active.load(std::memory_order_acquire) && e.gen.load(std::memory_order_relaxed) == (handle >> 4) &&
+           !e.stop.load(std::memory_order_relaxed);
+}
+
+// Callback thread: each live emitter, resampled linearly, attenuated by the straight distance to the world
+// listener (full within fullCm, linear to silence at silentCm) and panned like a voice.
+void Playback::MixWorldSounds(float* out, uint32_t frameCount) {
+    const float lx = worldX_.load(std::memory_order_relaxed);
+    const float ly = worldY_.load(std::memory_order_relaxed);
+    const float lz = worldZ_.load(std::memory_order_relaxed);
+    const float yawRad = worldYaw_.load(std::memory_order_relaxed) * kPi / 180.0f;
+    for (Emitter& e : emitters_) {
+        if (!e.active.load(std::memory_order_acquire)) continue;
+        if (e.stop.load(std::memory_order_acquire)) {
+            e.active.store(false, std::memory_order_release);
+            continue;
+        }
+        const float dx = e.x - lx, dy = e.y - ly, dz = e.z - lz;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        float att = (e.silentCm - dist) / (e.silentCm - e.fullCm);
+        if (att > 1.0f) att = 1.0f;
+        float volL = 1.0f, volR = 1.0f;
+        PanVolumes(dx, dy, dist, yawRad, volL, volR);
+        const float g = (att > 0.0f ? att : 0.0f) * e.gain / 32768.0f;
+        const float gainL = g * volL, gainR = g * volR;
+        const double last = static_cast<double>(e.frames - 1);
+        bool ended = false;
+        for (uint32_t i = 0; i < frameCount; ++i) {
+            if (e.cursor >= last) {
+                ended = true;
+                break;
+            }
+            const uint32_t k = static_cast<uint32_t>(e.cursor);
+            const float frac = static_cast<float>(e.cursor - k);
+            const float s = static_cast<float>(e.pcm[k]) * (1.0f - frac) + static_cast<float>(e.pcm[k + 1]) * frac;
+            out[2 * i + 0] += s * gainL;
+            out[2 * i + 1] += s * gainR;
+            e.cursor += e.step;
+        }
+        if (ended || e.cursor >= last) e.active.store(false, std::memory_order_release);
     }
 }
 

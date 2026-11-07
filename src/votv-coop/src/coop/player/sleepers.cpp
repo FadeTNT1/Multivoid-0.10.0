@@ -15,6 +15,7 @@
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
 #include "coop/player/sleep_sync.h"
+#include "coop/player/sleeper_snore.h"
 #include "coop/player/sleeper_wire.h"
 #include "coop/props/prop_echo_suppress.h"
 #include "coop/props/storage_act.h"
@@ -1126,6 +1127,7 @@ void Tick() {
         g_onlineCache = CollectOnline(/*full=*/false);
     }
     if (!g_sleepers.empty()) TickBuilds(now);
+    coop::sleeper_snore::Tick();
     if (IsHost() && !g_wakes.empty()) {
         auto* sess = Session();
         for (auto it = g_wakes.begin(); it != g_wakes.end();) {
@@ -1160,6 +1162,7 @@ void OnClientDisconnect() {
 }
 
 void OnSessionEnd() {
+    coop::sleeper_snore::StopAll();
     g_open = LootOpen{};   // its crate goes with the sleepers below
     // Loot taken since the last 1 Hz write-back would be lost with the crates: write it back first.
     if (IsHost())
@@ -1383,6 +1386,32 @@ size_t PlateAnchors(PlateAnchor* out, size_t max) {
         a.head = Add(Add(loc, Mul(E::GetActorUpVector(s.body), 60.f)), FVector{0.f, 0.f, 20.f});
         coop::text::CopyUtf8ToBuffer(a.nick, s.nick);
         a.lootable = aimed == &s;
+    }
+    return n;
+}
+
+size_t SnoreSources(SnoreSource* out, size_t max) {
+    if (!out || max == 0) return 0;
+    size_t n = 0;
+    constexpr float kHeadAlongUpCm = 60.f;   // as the plate's head, below
+    for (auto& [id, s] : g_sleepers) {
+        if (n >= max) return n;
+        if (!s.built || !Live(s.body, s.bodyIdx)) continue;
+        FVector loc{};
+        if (!E::TryGetActorLocation(s.body, loc)) continue;
+        out[n].key = id;
+        out[n].head = Add(loc, Mul(E::GetActorUpVector(s.body), kHeadAlongUpCm));
+        ++n;
+    }
+    for (int slot = 0; slot < static_cast<int>(coop::players::kMaxPeers) && n < max; ++slot) {
+        if (!g_online[slot].lying) continue;
+        coop::RemotePlayer* const rp = coop::players::Registry::Get().Puppet(static_cast<uint8_t>(slot));
+        void* const body = rp ? rp->actor() : nullptr;
+        FVector loc{};
+        if (!body || !E::TryGetActorLocation(body, loc)) continue;
+        out[n].key = kSnoreOnlineKey | static_cast<uint32_t>(slot);
+        out[n].head = Add(loc, Mul(E::GetActorUpVector(body), kHeadAlongUpCm));
+        ++n;
     }
     return n;
 }

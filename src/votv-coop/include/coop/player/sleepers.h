@@ -107,6 +107,18 @@ struct PlateAnchor {
 };
 size_t PlateAnchors(PlateAnchor* out, size_t max);
 
+// ---- the snore (coop/player/sleeper_snore) ----
+// Every sleeper that should snore on this peer, as a stable key and the point its head lies at: an offline
+// sleeper whose body is built and live (key = its id), and an online player whose puppet lies settled (key =
+// kSnoreOnlineKey | slot). The head is along the lying body's up vector, as for a plate, without the plate's lift.
+// A woken, gone or unbuilt sleeper is simply not listed. Never the local player.
+constexpr uint32_t kSnoreOnlineKey = 0x80000000u;
+struct SnoreSource {
+    uint32_t key = 0;
+    ue_wrap::FVector head{};
+};
+size_t SnoreSources(SnoreSource* out, size_t max);
+
 // How many sleepers this peer holds (built or not), for a log line or a test.
 size_t Count();
 
