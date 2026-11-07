@@ -179,8 +179,9 @@ void SendRefusal(uint8_t slot, const Trip& t) {
 // (none is laid), its stat orders, its command bucket, its half-assembled blobs and its terminal.
 // Taken: its device claims and desk ping, the prop and the trash it carried, the lids it held, the
 // props it drove, its crowbar, its stalker and its hooks; a take, use, storage row or container
-// transfer it had reserved; the robots and Kerfuses that served it; its washer; its waiting flashlight
-// apply; the messages it sent that wait for a prop to bind; its panel presses, generator and tower ops.
+// transfer it had reserved; the robots and Kerfuses that served it; its washer; its flashlight beam's
+// binding to its old body (the beam itself is kept, so the body it comes back in is lit as it left); the
+// messages it sent that wait for a prop to bind; its panel presses, generator and tower ops.
 void ReleaseWorldHolds(coop::net::Session& s, uint8_t slot) {
     const int islot = slot;
     coop::device_occupancy::OnDisconnectForSlot(islot);
@@ -198,7 +199,7 @@ void ReleaseWorldHolds(coop::net::Session& s, uint8_t slot) {
     coop::served_player::OnPeerLeft(slot);
     coop::kerfus_lanes::OnPeerLeft(slot);
     coop::washer_fx::OnSlotDisconnected(slot);
-    coop::item_activate::OnDisconnectForSlot(islot);
+    coop::item_activate::OnSlotLeftWorld(islot);
     coop::element::bind_wait::OnSlotLeft(islot);
     coop::desk_input_sync::OnPeerLeft(islot);
     coop::desk_ping_sync::OnPeerLeft(slot);

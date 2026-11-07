@@ -1,13 +1,22 @@
 // coop/player/item_activate.h -- unified item-activation sync. First instance: the
-// flashlight. The world light cone is a component of the player pawn, not of the flashlight
-// item actor; the puppet (also a pawn orphan) has the same light at the same offset, so
-// driving its light is the full implementation. Sender path: a per-tick poll of the local
-// player's beam (on when the flashlight bool is set and a flashlight is equipped; its
-// intensity, cones, reach, colour and profile) sends the payload to peers on any change,
-// off included, whatever route changed it; an echo-suppression flag keeps the receiver's
-// apply from bouncing back. Receiver path: ApplyToPuppet drives the puppet's light through
-// the engine wrapper. The flashlight_log config flag logs every send, not only on and off;
-// off by default.
+// flashlight. The world light cone is a component of the player pawn (light_R on the lag_fl
+// spring arm), not of the flashlight item actor or the hand mirror; the puppet (also a pawn
+// orphan) has the same light at the same offset, so driving its light is the full
+// implementation, and the hand mirror's lifetime never touches it. Its aim is the lag_fl
+// pitch and yaw coop/player/remote_player drives from the pose stream.
+//
+// Sender path: a per-tick poll of the local player's beam (on when the flashlight bool is set
+// and a flashlight is equipped; its intensity, cones, reach, colour and profile) sends the
+// payload to peers on any change, off included, whatever route changed it; an
+// echo-suppression flag keeps the receiver's apply from bouncing back.
+//
+// Receiver path: a per-slot wanted beam, kept for as long as the peer is in the session. Each
+// tick it is put on whatever puppet the slot has now (a new puppet after a pocket trip, a
+// level change or a respawn is seeded silently), a drift of the puppet's light from it is
+// repaired, and the conditioning the puppet's parked actor tick skips is run in its place:
+// the game's own look trace that pulls light_R back up to 50 cm and turns its shadows off
+// while something is within reach. The flashlight_log config flag logs every send and every
+// shadow switch; off by default.
 #pragma once
 
 #include <cstdint>
@@ -30,10 +39,9 @@ void Install(coop::net::Session* session);
 void ApplyToPuppet(void* puppetActor, const coop::net::ItemActivatePayload& p,
                    uint8_t senderPeerSlot);
 
-// The connect-time replay receiver entry: if `puppetActor` is valid, applies immediately.
-// Otherwise stashes the latest payload in a per-peer slot keyed by `senderPeerSlot`, drained
-// on the next TickConnect once the puppet has spawned. Latest wins: a newer packet overrides
-// a still-pending older one. Game thread only.
+// The packet receiver entry: records the payload as the slot's wanted beam, then applies it now
+// if `puppetActor` is valid (a repeat of what that puppet already shows does nothing), else
+// TickConnect applies it once the puppet has spawned. Latest wins. Game thread only.
 void ApplyToPuppetOrDefer(uint8_t senderPeerSlot, void* puppetActor,
                           const coop::net::ItemActivatePayload& p);
 
@@ -53,20 +61,24 @@ void QueueConnectBroadcastForSlot(int peerSlot);
 // `newSlot` is the freshly connected client's slot. Game thread only.
 void ReplayPeerStatesToSlot(int newSlot);
 
-// The per-tick worker. Polls the local beam and sends a change (the sender), and drains the
-// per-peer pending applies (walks the puppet registry; each
-// slot with a pending payload and a valid puppet is applied and cleared). Cheap when nothing
-// is pending. Game thread only.
+// The per-tick worker. Polls the local beam and sends a change (the sender), then keeps each
+// slot's wanted beam on its current puppet: seeds a new puppet, repairs drift (checked every
+// 0.5 s) and conditions a lit beam (a 10 Hz look trace per lit puppet, the offset eased every
+// tick). Cheap when every beam is off. Game thread only.
 void TickConnect();
 
-// The disconnect hook: clears the pending broadcast and every per-peer pending apply. The
-// stashed state belonged to the dead session; replaying it onto the next session's peers
-// would be wrong.
+// The disconnect hook: clears every slot's wanted beam. It belonged to the dead session;
+// replaying it onto the next session's peers would be wrong.
 void OnDisconnect();
 
+// A peer still in the session left the main world (a pocket trip): its beam's binding to the old
+// puppet goes, the wanted beam stays, so the puppet it returns in is lit as it left and a joiner in
+// the meantime is still told. Game thread only.
+void OnSlotLeftWorld(int peerSlot);
+
 // The per-slot variant of OnDisconnect for mid-session peer drops. Clears only that slot's
-// pending apply, if any; without this a stale flashlight payload from a departed peer would
-// re-apply when a new peer reuses the slot. Safe to call when nothing is pending.
+// wanted beam; without this a departed peer's flashlight would light the puppet of a new peer
+// reusing the slot. Safe to call when nothing is known for the slot.
 void OnDisconnectForSlot(int peerSlot);
 
 // FNV-1a 32-bit hash of a wide string, the item class hash (cross-peer stable, simple to

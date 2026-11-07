@@ -46,6 +46,7 @@ struct LightFields {
     int32_t attenuationRadius = -1;  // ULocalLightComponent
     int32_t lightColor = -1;         // ULightComponent (FColor)
     int32_t iesTexture = -1;         // ULightComponent (UTextureLightProfile*)
+    int32_t maxDrawDistance = -1;    // ULightComponent (float)
 };
 const LightFields& Fields() {
     static LightFields f;
@@ -55,6 +56,7 @@ const LightFields& Fields() {
     f.attenuationRadius = R::FindPropertyOffset(cls, P::name::LightAttenuationRadiusProp);
     f.lightColor = R::FindPropertyOffset(cls, P::name::LightColorProp);
     f.iesTexture = R::FindPropertyOffset(cls, P::name::LightIESTextureProp);
+    f.maxDrawDistance = R::FindPropertyOffset(cls, P::name::LightMaxDrawDistanceProp);
     f.resolved = true;
     return f;
 }
@@ -62,6 +64,7 @@ const LightFields& Fields() {
 void* g_setAttenuationRadiusFn = nullptr;
 void* g_setLightColorFn = nullptr;
 void* g_setIESTextureFn = nullptr;
+void* g_setCastShadowsFn = nullptr;
 
 void* ResolveOn(void*& cache, const wchar_t* className, const wchar_t* fn) {
     if (cache) return cache;
@@ -107,6 +110,8 @@ bool ReadFlashlightSnapshot(void* light, FlashlightSnapshot& out) {
     out.innerConeAngle  = *reinterpret_cast<float*>(base + P::off::USpotLightComponent_InnerConeAngle);
     const uint8_t flags = *reinterpret_cast<uint8_t*>(base + P::off::USceneComponent_VisFlagsByte);
     out.visible         = (flags & 0x10) != 0;
+    const uint8_t hidden = *reinterpret_cast<uint8_t*>(base + P::off::USceneComponent_HiddenFlagsByte);
+    out.hiddenInGame    = (hidden & 0x04) != 0;
     return true;
 }
 
@@ -194,6 +199,42 @@ bool SetLightIESTexture(void* light, void* textureLightProfile) {
     ParamFrame f(fn);
     f.Set<void*>(L"NewValue", textureLightProfile);
     return Call(light, f);
+}
+
+bool SetLightCastShadows(void* light, bool castShadows) {
+    if (!light || !R::IsLive(light)) return false;
+    void* fn = ResolveOn(g_setCastShadowsFn, P::name::LightComponentBaseClass, P::name::SetCastShadowsFn);
+    if (!fn) return false;
+    ParamFrame f(fn);
+    f.Set<bool>(L"bNewValue", castShadows);
+    return Call(light, f);
+}
+
+float ReadLightMaxDrawDistance(void* light) {
+    if (!light || !R::IsLive(light)) return -1.f;
+    const LightFields& lf = Fields();
+    if (lf.maxDrawDistance < 0) return -1.f;
+    return *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(light) + lf.maxDrawDistance);
+}
+
+bool WriteLightMaxDrawDistance(void* light, float distance) {
+    if (!light || !R::IsLive(light)) return false;
+    const LightFields& lf = Fields();
+    if (lf.maxDrawDistance < 0) return false;
+    *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(light) + lf.maxDrawDistance) = distance;
+    return true;
+}
+
+float ReadMainPlayerArmLength(void* mainPlayer) {
+    if (!mainPlayer || !R::IsLive(mainPlayer)) return -1.f;
+    static int32_t s_off = -2;   // -2 unresolved, -1 absent
+    if (s_off == -2) {
+        void* cls = R::FindClass(P::name::MainPlayerClass);
+        if (!cls) return -1.f;
+        s_off = R::FindPropertyOffset(cls, P::name::MainPlayerArmLengthProp);
+    }
+    if (s_off < 0) return -1.f;
+    return *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(mainPlayer) + s_off);
 }
 
 }  // namespace ue_wrap::engine

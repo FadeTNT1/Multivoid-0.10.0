@@ -21,9 +21,11 @@
 namespace coop::flashlight_click_sound {
 
 // Play the click for a wire packet's just-applied state on `puppetActor`. A `newState` equal to
-// the last one applied for `peerSlot` is a no-op: that packet was a mode change. Otherwise the
-// sound asset and the attenuation are resolved on first use and PlaySoundAtLocation is
-// dispatched. Game thread only.
-void PlayIfStateChanged(void* puppetActor, uint8_t peerSlot, bool newState);
+// the last one applied for `peerSlot` is a no-op: that packet was a mode change. The first state
+// seen for a slot clicks only when it is on (a puppet spawns dark, so a first "off" changed nothing
+// anyone could see). `audible` false records the state without a sound: a re-seed onto a new
+// puppet, a repair, or a late joiner's catch-up is not a press. Otherwise the sound asset and the
+// attenuation are resolved on first use and PlaySoundAtLocation is dispatched. Game thread only.
+void PlayIfStateChanged(void* puppetActor, uint8_t peerSlot, bool newState, bool audible = true);
 
 }  // namespace coop::flashlight_click_sound

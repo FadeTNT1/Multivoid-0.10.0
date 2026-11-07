@@ -31,7 +31,7 @@ coop::roster_ledger::PerSlotState<LastApplied> g_lastAppliedStateByPeer;
 
 }  // namespace
 
-void PlayIfStateChanged(void* puppetActor, uint8_t peerSlot, bool newState) {
+void PlayIfStateChanged(void* puppetActor, uint8_t peerSlot, bool newState, bool audible) {
     if (!puppetActor) return;
 
     // 1) State-change gate: skip if state matches last apply for this peer.
@@ -40,7 +40,10 @@ void PlayIfStateChanged(void* puppetActor, uint8_t peerSlot, bool newState) {
     const int curState = newState ? 1 : 0;
     bool stateChanged = false;
     if (peerSlot < coop::players::kMaxPeers) {
-        stateChanged = (g_lastAppliedStateByPeer[peerSlot].state != curState);
+        const int lastState = g_lastAppliedStateByPeer[peerSlot].state;
+        // A first-seen off is the puppet's spawn default: no click (the old -1 -> 0 edge clicked at
+        // every puppet spawn).
+        stateChanged = (lastState != curState) && !(lastState == -1 && curState == 0);
         g_lastAppliedStateByPeer[peerSlot].state = curState;
     } else {
         // Out-of-range peer slot (defensive). Treat every apply as a state
@@ -49,7 +52,7 @@ void PlayIfStateChanged(void* puppetActor, uint8_t peerSlot, bool newState) {
         // legitimately invalid peerSlot.
         stateChanged = true;
     }
-    if (!stateChanged) return;
+    if (!stateChanged || !audible) return;
 
     // 2) Lazy-resolve the sound asset + attenuation. Each retried until
     //    non-null so we don't permanently cache nullptr if an early packet
