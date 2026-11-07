@@ -14,7 +14,10 @@
 #include "coop/props/join_membership_sweep.h"// RecordSelfAuthored (a player's own prop is never divergence)
 #include "coop/props/prop_lifecycle.h"      // IsPerPlayerPropClass / IsWireSuppressedPropClass (the host gate)
 #include "coop/props/prop_save_data.h"
-#include "coop/props/prop_spawn_authoring.h" // BirthIsPlayerAuthored (the spawn menu / the toolgun)
+#include "coop/props/prop_spawn_authoring.h" // BirthAuthorship: who asked for a birth, and the replace pairing
+#include "coop/props/prop_snapshot.h"         // ExpressSpawnToSlot: the duplicate guard's answer to its sender
+#include "coop/creatures/kerfur_entity.h"     // IsKerfurPropClass: a kerfur's prop form is the conversion lane's
+#include "coop/items/coingun_sync.h"          // IsInCoinGunVerb: a coin the gun drops is the sale lane's
 #include "coop/props/prop_damage_gate.h"    // AuthoredHere: a break this client runs is its own
 #include "coop/props/prop_drive_rules.h"    // kRestVelCmS: the floor under which a spawn is written no velocity
 #include "coop/props/prop_throw.h"          // ThrowSeqFor: the throw that launched a drained place
@@ -48,6 +51,7 @@
 #include "ue_wrap/desk/drive_chain.h"           // IsDriveClass whitelist
 #include "ue_wrap/core/types.h"
 #include "ue_wrap/core/ufunction_hook.h"         // InstallPostHook (chains after host_spawn_watcher's)
+#include "ue_wrap/world/explosion_source.h"      // KindOfProjectileClass: a launcher's shot is the explosion lane's
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
@@ -90,13 +94,22 @@ struct PendingPlace {
     // drop intent, since the client-extracted item's world actor is invisible to the host
     // otherwise (the fresh-birth whitelist covers only reel, module and drive births).
     bool    containerExtract = false;
-    // True when a PLAYER's own spawn verb -- the sandbox spawn menu or the toolgun -- was on the
-    // stack at the finish (coop/props/prop_spawn_authoring). Admitted at drain as an ordinary drop
-    // intent: the class is whatever the catalog offered, so no whitelist can name it, and the
+    // True when a PLAYER's act was on the stack at the finish -- the spawn menu, a tool, the hand
+    // item, an action event, a widget click (coop/props/prop_spawn_authoring). Admitted at drain as
+    // an ordinary drop intent: the class is whatever the act made, so no whitelist can name it, and the
     // authorship is what makes it shared-world state rather than the per-peer churn every other
     // unmarked birth here is. Read at the seam because that is the only moment the VM still holds
-    // the calling frame.
+    // the calling frame. `rule` says which (coop/props/prop_spawn_authoring.h).
     bool    playerSpawn = false;
+    coop::prop_spawn_authoring::Rule rule = coop::prop_spawn_authoring::Rule::None;
+    // The dispatch the birth was made in: the drain pairs it with a shared destroy the same dispatch
+    // sent, the replacement of a prop the player's act destroyed on every peer.
+    uint64_t token = 0;
+    // A birth another lane carries (a launcher's shot, the coin gun's coins, a kerfur's prop form): never
+    // admitted on authorship or pairing, only by the routes it had before.
+    bool    laneOwned = false;
+    // RecordSelfAuthored ran for it: once, at the drain, after the hand-axis re-check.
+    bool    selfRecorded = false;
     // True when an UNPACK verb's body (MarkUnpackScope: an MRE's open) was running at the finish:
     // the foods an MRE opens into, born on this client by the MRE's own Blueprint. Admitted at drain
     // as an ordinary drop intent, like a player-authored birth -- the host's grant of a shared MRE's
@@ -192,14 +205,25 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
         coop::dev::prop_birth_key_probe::NoteBirth(result);
     auto* s = LoadSession();
     if (!s || !s->connected()) return;
+    // Both roles: the dispatch this actor was born in, so the destroy seam can tell a Blueprint's
+    // spawn-read-destroy of a scratch actor from a world prop's death.
+    coop::prop_spawn_authoring::NoteBirthDispatch(result);
     if (s->role() != coop::net::Role::Client) return;      // host places broadcast via host_spawn_watcher
-    // Was a player's own spawn verb on the stack? Asked FIRST, because it is the one question only
-    // this instant can answer -- the VM's calling frame is gone by the drain -- and because it is
+    // Was a player's act on the stack? Asked FIRST, because it is the one question only this instant
+    // can answer -- the VM's frames and the open dispatches are gone by the drain -- and because it is
     // what exempts a birth from the load gates below.
-    const bool playerAuthored = coop::prop_spawn_authoring::BirthIsPlayerAuthored();
+    namespace PSA = coop::prop_spawn_authoring;
+    PSA::Rule rule = PSA::BirthAuthorship();
+    bool playerAuthored = rule != PSA::Rule::None;
     // The same question for an unpack verb (an MRE's open): its body is on this thread's chain right
-    // now or never. A deliberate act of this player, so it is exempt from the load gates as well.
-    const bool unpackScope = !playerAuthored && UnpackScopeActive();
+    // now or never. A deliberate act of this player, so it is exempt from the load gates as well. The
+    // unpack window is the narrower fact (it leaves the wrapper and bits pile to the trash lanes), so a
+    // birth inside it goes by the unpack route rather than by the general authorship rule.
+    const bool unpackScope = UnpackScopeActive();
+    if (unpackScope) {
+        playerAuthored = false;
+        rule = PSA::Rule::None;
+    }
     // The end condition: quiet during the load episode and the reconcile window's load-kind
     // segments (the join and reload bracket, whose spawn churn flooded this path; the mirror mark
     // below already scopes our own applies out). A mid-session bracket does not suppress: a
@@ -231,6 +255,21 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
     void* actor = result;
     if (!actor || !R::IsLive(actor)) return;
     if (coop::prop_echo_suppress::IsMirrorSpawn(actor)) return;  // a host-authored mirror we adopt, not a place
+    // A birth another lane already carries is that lane's, whoever asked for it: a launcher's rocket or
+    // sticky bomb goes as the explosion lane's shot, a coin the gun drops is held for the sale's barrier,
+    // and a kerfur's prop form is the conversion's. Crossing here too would make a second one on the host.
+    void* const cls = R::ClassOf(actor);
+    const bool laneOwned =
+        coop::coingun_sync::IsInCoinGunVerb() ||
+        ue_wrap::explosion_source::KindOfProjectileClass(cls) != ue_wrap::explosion_source::Kind::None ||
+        coop::kerfur_entity::IsKerfurPropClass(cls);
+    if (laneOwned) {
+        playerAuthored = false;
+        rule = PSA::Rule::None;
+    }
+    // Remembered before the prop-lineage gate: a projectile or a deployable a player's act made is not a
+    // prop, and what it makes next (the nail a nail projectile leaves) inherits the authorship.
+    if (playerAuthored) PSA::NoteAuthoredBirth(actor, rule);
     if (!ue_wrap::prop::IsDescendantOfProp(actor)) return;          // keyed Aprop_C lineage only
     // Born while a container's destroy or break runs here: the spill of a copy whose break is the host's, which spills
     // its own set as births. Dissolved, never sent.
@@ -267,8 +306,17 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
             fromContainerExtract);
     }
     if (coop::dev::container_route_census::IsEnabled()) g_lastPlace.Set(actor);   // the census drill's read, armed by its row only
-    g_pending.push_back(PendingPlace{actor, R::InternalIndexOf(actor), 0, fromContainerExtract,
-                                     playerAuthored, unpackAuthored, breakGib});
+    PendingPlace entry{};
+    entry.actor = actor;
+    entry.idx = R::InternalIndexOf(actor);
+    entry.containerExtract = fromContainerExtract;
+    entry.playerSpawn = playerAuthored;
+    entry.rule = rule;
+    entry.token = PSA::DispatchToken();
+    entry.laneOwned = laneOwned;
+    entry.unpackSpawn = unpackAuthored;
+    entry.breakGib = breakGib;
+    g_pending.push_back(entry);
     if (breakGib)
         UE_LOGI("[PROP-DROP] CLIENT enqueued BREAK-GIB birth actor=%p cls='%ls' (a gib of this client's own break of "
                 "'%ls'; admitted at drain)", actor, R::ClassNameOf(actor).c_str(),
@@ -276,18 +324,11 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
     if (fromContainerExtract)
         UE_LOGI("[PROP-DROP] CLIENT enqueued container-EXTRACT birth actor=%p (admitted at drain)", actor);
     if (playerAuthored) {
-        // The mid-join answer (principle 8), and it is owed HERE rather than at the drain. The
-        // divergence sweep dooms every live, unclaimed, in-universe keyed Aprop_C the host's
-        // snapshot did not name -- which a prop this player made a moment ago is, until the host's
-        // answer comes back. It is recorded as SELF-AUTHORED, not claimed: a claim is scoped to the
-        // bracket now open and cleared when the next one opens, and a measured birth beat its
-        // bracket by a second. Authorship is exact here and nowhere else -- an ambient birth
-        // carries no mark, is never recorded, and is still swept, which is what keeps the client
-        // adopting the host's world.
-        coop::join_membership_sweep::RecordSelfAuthored(actor);
-        UE_LOGI("[PROP-DROP] CLIENT enqueued PLAYER-AUTHORED birth actor=%p cls='%ls' "
-                "(spawn menu or toolgun; admitted at drain, spared by the join sweep)",
-                actor, R::ClassNameOf(actor).c_str());
+        // The join sweep's self-authored record waits for the drain's hand-axis re-check: a hand
+        // switch's display actor is born under the same act and is no world prop.
+        UE_LOGI("[PROP-DROP] CLIENT enqueued PLAYER-AUTHORED birth actor=%p cls='%ls' rule=%s "
+                "(admitted at drain unless it is the hand's display actor)",
+                actor, R::ClassNameOf(actor).c_str(), PSA::RuleName(rule));
     }
     if (unpackAuthored) {
         // Recorded self-authored for the reason the player-authored birth above is: the join sweep
@@ -308,8 +349,10 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
 void* HostSpawnPlacedProp(const coop::net::PropDropIntentPayload& p, const std::wstring& cls,
                           const std::wstring& key, uint8_t authorSlot) {
     // Host resolving a CLIENT's placed-prop class: object_index, so an attacker's unknown class is an
-    // O(1) miss, not a whole-array walk. Host world is always up, so the index is current.
-    void* clsObj = ue_wrap::object_index::ClassByName(cls.c_str());
+    // O(1) miss, not a whole-array walk. Host world is always up, so the index is current. A class
+    // no instance here has loaded yet (a glowstick the client lit, whose lit form the host never made)
+    // is loaded from the props folder, by a plain name only, once per name.
+    void* clsObj = ue_wrap::prop::ResolveOrLoadPropClass(cls);
     if (!clsObj) {
         UE_LOGW("[PROP-DROP] HOST class '%ls' not found -- cannot spawn placed prop key='%ls'",
                 cls.c_str(), key.c_str());
@@ -437,6 +480,22 @@ void* HostSpawnPlacedProp(const coop::net::PropDropIntentPayload& p, const std::
     return actor;
 }
 
+// Host: the duplicate guard's answer. `live` holds the key a client's intent named, and the sender's own
+// copy binds to it once that peer has the live actor's birth row. Only a world prop the host owns answers:
+// a hand item or a display mirror is the hand lane's, and a mirror row carries another peer's identity. A
+// prop the host never enrolled is enrolled first, as its express seam would.
+bool AnswerSenderWithLive(void* live, const std::wstring& key, uint8_t senderSlot) {
+    if (!live || !R::IsLive(live) || !ue_wrap::prop::IsDescendantOfProp(live)) return false;
+    if (coop::hand_item::IsHandAxisActor(live)) return false;
+    if (PT::GetPropElementIdForActor(live) == coop::element::kInvalidId) {
+        if (coop::element::Registry::Get().EidForActor(live) != coop::element::kInvalidId) return false;
+        PT::MarkPropElement(live, key, R::ClassNameOf(live), PT::EnrollSource::kExpressSeam);
+        PT::MarkKnownKeyedProp(live);
+        if (PT::GetPropElementIdForActor(live) == coop::element::kInvalidId) return false;
+    }
+    return coop::prop_snapshot::ExpressSpawnToSlot(live, senderSlot);
+}
+
 }  // namespace
 
 void Install(coop::net::Session* session) {
@@ -503,6 +562,25 @@ void Tick(coop::net::Session* session) {
             probe::NoteDrainExit(e.actor, "hand-axis-drop", e.tries, std::wstring());
             continue;
         }
+        // A class no peer is ever told of -- a peer's own (the inventory container, a washer shot, a
+        // hallucination) or a wire-suppressed intermediate -- is refused by the host's author too; it is
+        // left here, before anything is sent for it.
+        const std::wstring cls = R::ClassNameOf(e.actor);
+        if (coop::prop_lifecycle::IsPerPlayerPropClass(cls) || coop::prop_lifecycle::IsWireSuppressedPropClass(cls)) {
+            probe::NoteDrainExit(e.actor, "per-player-or-suppressed", e.tries, std::wstring());
+            continue;
+        }
+        // The mid-join answer (principle 8) for a player-authored birth, owed before the key wait below.
+        // The divergence sweep dooms every live, unclaimed, in-universe keyed Aprop_C the host's snapshot
+        // did not name -- which a prop this player made a moment ago is, until the host's answer comes
+        // back. It is recorded as SELF-AUTHORED, not claimed: a claim is scoped to the bracket now open
+        // and cleared when the next one opens, and a measured birth beat its bracket by a second. Here,
+        // not at the seam: the hand-axis re-check above is what tells a hand switch's display actor,
+        // born under the same act, from a world prop, and the seam cannot see it yet.
+        if (e.playerSpawn && !e.selfRecorded) {
+            coop::join_membership_sweep::RecordSelfAuthored(e.actor);
+            e.selfRecorded = true;
+        }
         std::wstring key = ue_wrap::prop::GetInteractableKeyString(e.actor);
         if (key.empty() || key == L"None") {
             // The key is not restored yet (the load runs after the finish). Re-defer a few ticks.
@@ -554,19 +632,28 @@ void Tick(coop::net::Session* session) {
         // and drive only) drops it at drain and the item never reaches the host's world. The host's
         // duplicate guard keeps the intent safe.
         //
-        // And a PLAYER-AUTHORED birth, the spawn menu and the toolgun. It cannot be a class row:
-        // the menu is the whole catalog, and every class on it is also what the world's own
-        // spawners, morphs and impacts make for themselves. What admits it is the authorship the
-        // seam read off the VM's calling frame, which the world's own births do not carry. It is
-        // NOT a freshBirth: that kind means a device put an item in a hand and sleeps the host's
-        // copy, while a menu prop is dropped in the world at the player's aim and must fall on the
-        // host exactly as it falls here -- the transform block below sends its real physics state.
+        // And a PLAYER-AUTHORED birth: the spawn menu, a tool, the hand item's own verb, one of the
+        // player's action events, a widget the player clicked. It cannot be a class row: the menu is
+        // the whole catalog, and every class on it is also what the world's own spawners, morphs and
+        // impacts make for themselves. What admits it is the authorship the seam read off the VM,
+        // which the world's own births do not carry. It is NOT a freshBirth unless its class is one of
+        // the whitelisted device births above, which keep their own route: that kind means a device put
+        // an item in a hand and sleeps the host's copy, while an authored prop is dropped in the world
+        // and must fall on the host exactly as it falls here -- the transform block below sends its
+        // real physics state.
+        namespace PSA = coop::prop_spawn_authoring;
+        // And a REPLACEMENT: a birth in the same dispatch that sent a shared destroy. The player's act
+        // destroyed a prop on every peer (a knife's slice, lib_C::replaceProp, a glowstick lit), so the
+        // prop it became must reach them too, or the act leaves the host with nothing. Decided here, a
+        // tick on, because the replacement is often born before the destroy runs.
+        const bool replacement = !parked && !e.playerSpawn && !e.unpackSpawn && !e.breakGib && !e.laneOwned &&
+                                 PSA::SharedDestroyCrossedIn(e.token);
         //
         // And an UNPACK birth: what an MRE opens into, born by the MRE's own body on this client
         // (MarkUnpackScope). The host's side of a shared MRE's open destroys the MRE and nothing
         // else, so these foods exist nowhere but here unless they go as intents -- and a keyed food
         // the host lacks refuses every bite. An ordinary drop intent: they fall where they were born.
-        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !e.unpackSpawn &&
+        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !replacement && !e.unpackSpawn &&
             !e.breakGib && !isNotebookSheet) {
             probe::NoteDrainExit(e.actor, "not-a-place-nor-whitelisted-birth", e.tries, key);
             continue;
@@ -585,7 +672,6 @@ void Tick(coop::net::Session* session) {
         }
         // Author the host-authoritative spawn intent (a place, or a fresh birth).
         coop::net::PropDropIntentPayload p{};
-        const std::wstring cls = R::ClassNameOf(e.actor);
         FillWireStr(p.className.len, p.className.data, cls);
         FillWireStr(p.key.len, p.key.data, key);
         namespace pf = coop::net::propspawn_flags;
@@ -651,9 +737,15 @@ void Tick(coop::net::Session* session) {
         // the wire, so the join sweep must not doom it while the host's answer is in flight. A
         // player-authored birth claimed itself at the seam; claiming twice is a set insert.
         coop::join_membership_sweep::RecordClaimIfTracking(e.actor);
+        // The rule tallies: what an authored or paired birth's crossing counts for.
+        if (!parked && !freshBirth && !e.containerExtract) {
+            if (e.playerSpawn) PSA::NoteAdmitted(e.actor, e.rule);
+            else if (replacement) PSA::NoteAdmitted(e.actor, PSA::Rule::Replace);
+        }
         probe::NoteDrainExit(e.actor,
                              freshBirth     ? "authored-fresh-birth"
                              : e.playerSpawn ? "authored-player-spawn"
+                             : replacement   ? "authored-replacement"
                              : e.unpackSpawn ? "authored-unpack-birth"
                              : e.breakGib    ? "authored-break-gib"
                              : isNotebookSheet ? "authored-notebook-sheet"
@@ -662,6 +754,7 @@ void Tick(coop::net::Session* session) {
         UE_LOGI("[PROP-DROP] CLIENT authored %s key='%ls' cls='%ls' name='%ls' loc=(%.1f,%.1f,%.1f) drain |v|=%.1f cm/s throw seq %u%s",
                 freshBirth     ? "FRESH-BIRTH intent"
                 : e.playerSpawn ? "PLAYER-SPAWN intent"
+                : replacement   ? "REPLACEMENT intent"
                 : e.unpackSpawn ? "UNPACK-BIRTH intent (MRE open)"
                 : e.breakGib    ? "BREAK-GIB intent"
                 : isNotebookSheet ? "NOTEBOOK-SHEET intent"
@@ -719,10 +812,17 @@ void OnPropDropIntent(coop::net::Session& session, const coop::net::PropDropInte
         return;
     }
     // The duplicate guard: if the host somehow still has this key live (the grab destroy did not
-    // cross), do not spawn a second one. The park-set invariant normally guarantees the host has
-    // no copy here.
-    if (coop::prop_key_index::Find(key)) {
-        UE_LOGW("[PROP-DROP] HOST already has key='%ls' live -- skip drop-intent re-spawn (no dup)", key.c_str());
+    // cross, or an authored birth carries a key the host's world still holds), do not spawn a second
+    // one. The sender's copy is answered instead: the live actor's own birth row, to that peer alone,
+    // so its copy binds to the host's by key rather than staying an unbound orphan there.
+    if (void* live = coop::prop_key_index::Find(key)) {
+        if (AnswerSenderWithLive(live, key, senderSlot)) {
+            UE_LOGW("[PROP-DROP] HOST already has key='%ls' live -- no re-spawn; its PropSpawn re-sent to slot=%u "
+                    "so the sender's copy binds", key.c_str(), senderSlot);
+        } else {
+            UE_LOGW("[PROP-DROP] HOST already has key='%ls' live -- no re-spawn (no dup); it is not a world prop "
+                    "of the host's own to answer with (a hand item, a mirror, unexpressible)", key.c_str());
+        }
         return;
     }
     void* actor = HostSpawnPlacedProp(p, cls, key, senderSlot);

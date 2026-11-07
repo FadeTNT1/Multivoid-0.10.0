@@ -24,6 +24,7 @@
 #include "coop/props/prop_act_request.h"
 #include "coop/props/prop_echo_suppress.h"
 #include "coop/props/prop_element_tracker.h"
+#include "coop/props/prop_spawn_authoring.h"  // the scratch-actor test and the replace pairing
 #include "coop/session/world_load_episode.h"
 #include "ue_wrap/engine/engine.h"  // IsChildActor
 #include "ue_wrap/core/game_thread.h"
@@ -128,6 +129,10 @@ void DestroySeamBody(void* self, HandView handView) {
     // noise (per-peer random keys never match) and at worst a same-key hazard. A cheap read; only
     // keyed actors reach it.
     if (ue_wrap::engine::IsChildActor(self)) return;
+    // A per-player class never crossed at its birth (each peer keeps its own washer shots, inventory
+    // container and hallucinations), so its death names nothing on any other peer: a key of its could
+    // only name somebody else's actor there. Either role.
+    if (IsPerPlayerPropClass(R::ClassNameOf(self))) return;
     const std::wstring keyStr = ue_wrap::prop::GetInteractableKeyString(self);
     // An empty name stringifies to None. A keyed prop broadcasts by key; the non-keyable trash
     // clump (its key never sticks and always reads None) rides our eid instead, key None plus eid,
@@ -197,6 +202,19 @@ void DestroySeamBody(void* self, HandView handView) {
             coop::prop_drop_intent::NoteClientKeyedDestroy(keyStr);
         return;
     }
+    // A scratch actor: born and destroyed inside one dispatch, as a Blueprint that spawns an item to
+    // read it does (an inventory slot's respawnReset, a double click). No peer was told of its birth,
+    // and its key is the item's saved one, so a death sent by key would destroy the world copy of that
+    // item on every other peer. With an element row it was expressed, and its death is sent as ever.
+    if (destroyEid == coop::element::kInvalidId && coop::prop_spawn_authoring::DiesInItsBirthDispatch(self)) {
+        coop::prop_spawn_authoring::NoteTransientDeath();
+        static uint32_t sSaid = 0;
+        if (++sSaid <= 5 || sSaid % 100 == 0)
+            UE_LOGI("grab_hook[destroy-seam]: actor %p (cls='%ls') dies in the dispatch it was born in -- a "
+                    "scratch actor no peer was told of, not broadcast (#%u)",
+                    self, R::ClassNameOf(self).c_str(), sSaid);
+        return;
+    }
     coop::net::WireKey wk{};
     wk.len = 0;
     if (!keyless) {
@@ -245,6 +263,9 @@ void DestroySeamBody(void* self, HandView handView) {
     // world-load episode, so join churn never parks.
     if (!keyless && s->role() == coop::net::Role::Client) {
         coop::prop_drop_intent::NoteClientKeyedDestroy(keyStr);
+        // This dispatch destroyed a shared prop on every peer: a birth in it is that prop's
+        // replacement, and the drop-intent drain sends it after the destroy.
+        if (!actLatched) coop::prop_spawn_authoring::NoteSharedDestroy();
     }
 }
 

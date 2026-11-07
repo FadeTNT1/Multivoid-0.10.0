@@ -4,9 +4,36 @@
 
 The tools that leave a persistent actor behind (the grappling hook and rope, the nail gun, the wall
 builder), timed explosives, the fishing rod and the physgun, each reverse-engineered with a design.
-The hook and the rope are built, and so is the irrigation set (the faucet, the ground hose and the
-sprinkler they feed); the rest are not. A prop a hook drags is the props page's driven-prop channel
-([props.md](props.md)).
+The hook and the rope are built, and so are the irrigation set (the faucet, the ground hose and the
+sprinkler they feed) and one shared lane for the save actors a held tool leaves (below); timed
+explosives, the fishing rod and the physgun are not. A prop a hook drags is the props page's
+driven-prop channel ([props.md](props.md)).
+
+## The deployed save actors
+
+A sticker, a candle, a string of lights, a weld, a nail, a taped door, a rug, a snowman, a built
+wall and a jumper cable are each an `actor_save_C` and not a `prop_C`, so no prop lane sees them.
+One lane carries them all (`coop/items/save_actor_sync`), keyed by the actor's own save key and
+carried as the actor's own records: the legacy `getData` record, which names the class, the
+transform and the key, and the 0.10.0 `betterGetData` record when this peer's codec is measured,
+which is what the game's own save keeps. The allowlist and its two exception lists are in
+`ue_wrap/core/sdk_profile_names.h` (`kPlayerDeployedSaveActorClasses`).
+
+- A post on `FinishSpawningActor` sees each birth of an allowlisted class; a birth the gamemode
+  makes is a save load and never crosses. An end-of-play sink sees each death.
+- The host publishes every other birth a frame later (the Blueprint fills the actor after the
+  finish), minting the key through the game's own `getKey`, and every death by key.
+- A client's birth crosses only when a player authored it (`prop_spawn_authoring`), as an intent
+  with the client's key; the host spawns the canonical copy under that key (or a new one), and its
+  broadcast binds the client's own copy. A birth an allowlisted actor makes itself (the wall
+  scaffold becoming the wall) is the host's to make: a client retires its own.
+- The nail's `processKeys` ties two props with a physics constraint, so a client's own nail is
+  replaced by the host's mirror and no mirror runs `processKeys`: the fifth rule holds.
+- A mirror is spawned out of the save, its key written in the deferred window.
+- A known mutator (`addLight`, `finish`, `weld`, `ignite`, `attemptIgnite`, `setSkin`, `connect`)
+  republishes the record when it changed; a client's is an intent.
+- A joiner gets the host's copies from the save, then every birth and removal of the session at
+  its ready edge, adopting a save-loaded copy by key.
 
 ## How it works
 
@@ -101,6 +128,8 @@ and a client's plants are the farming lane's to carry (`SprinklerWatersHere`). T
 | `HookDestroy` | the owner to all, or the host for a leaver | that hook is gone |
 | `HookAnchorCommit` | a client to the host | the anchored hook's own save record, chunked |
 | `HookAnchored` | the host to all | an anchored hook exists, as the same record |
+| `SaveActorIntent` | a client to the host | a deployed save actor's birth (request id, key, both records), a state after a mutator, or a removal by key; chunked |
+| `SaveActorState` | the host to all | the same ops as the host holds them, and a refused birth to its client alone; chunked |
 | `IrrigationCommit` | a client to the host | a placed faucet or hose as its own record, or a take, a pickup or a detach by key; chunked, never relayed |
 | `IrrigationState` | the host to all, or to a joiner | a placed faucet or hose as its record with live links, or its key when gone; a joiner's bracketed by a snapshot's begin and end |
 
@@ -109,14 +138,19 @@ and a client's plants are the farming lane's to carry (`SprinklerWatersHere`). T
 A hook its thrower still owns reaches a joiner on its keepalive. An anchored hook is a save actor
 of the host's and arrives with the save, and the game's own load re-resolves both of its attach
 keys in the joiner's world. A placed faucet and hose arrive with the save too, keyed; the world-ready
-edge then sends every one, bracketed, and the joiner destroys any the host did not name. The
-deployables that are not built reach a joiner only through the save.
+edge then sends every one, bracketed, and the joiner destroys any the host did not name. A deployed
+save actor arrives with the save as well; the ones born and removed since the save was taken follow
+at the joiner's ready edge. The deployables that are not built reach a joiner only through the save.
 
 ## Known limits
 
 | Limit | Evidence |
 |---|---|
-| The deployables other than the hook and the rope (nail gun, wall builder, explosives, fishing rod, physgun) are not synced; a nail or a wall placed by one peer reaches the others only through the save at their next join | `[V]` no lane under `coop/props` catches them |
+| Explosives, the fishing rod and the physgun are not synced | `[V]` no lane catches them |
+| A client's deployed save actor crosses only when `prop_spawn_authoring` calls the birth a player's (the hand item, the player's action events, a widget, an authored projectile's own birth); a save actor a device or a timer makes on a client with no such act behind it stays on that client | `[?]` not measured on two peers |
+| The cigarette, a printed object, a wire, the ceiling stars and a transmitted signal are not carried (each said why in `sdk_profile_names.h`) | `[V]` absent from the allowlist |
+| A string of lights still being laid trails its last cable to the viewing player on a mirror (`genInstances` reads the local player until `finish`) | `[V]` capture, `xmaslight_C.genInstances` |
+| A record applied twice (a mutator's republish) re-runs the class's load verbs; whether every class's load is idempotent is not measured | `[?]` |
 | A hose being laid shows only to the peer laying it, and a client's resumed hose stays on the other peers in its old shape until it settles again | `[RD]` the lane commits a hose once it settles |
 | A client's held-hose spray waters only that client's copies of the plants | `[RD]` the spray is groundhose_C's own tick on the layer's machine; plant water is the farming lane's |
 | A refused placement leaves the client without the held item: the game consumed it before the host answered | `[RD]` the placement runs natively, then commits |
@@ -130,5 +164,7 @@ deployables that are not built reach a joiner only through the save.
 | the anchor handoff | `coop/items/hook_anchor` |
 | the tie, host-only | `coop/items/hook_constraint` |
 | the props a tie claims for the driven-prop channel | `coop/items/hook_prop_claim` |
+| the deployed save actors: the seams, the host's copies, a client's intents and mirrors | `coop/items/save_actor_sync` |
+| their classes, key, save flag and records | `ue_wrap/actors/save_actor` |
 | the irrigation set: the client's commits, the host's judge and poll, the grammar and the apply | `coop/items/irrigation_sync`, `irrigation_host`, `irrigation_wire` |
 | the faucet, hose and sprinkler engine access | `ue_wrap/devices/irrigation` |

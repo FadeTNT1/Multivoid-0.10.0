@@ -34,6 +34,7 @@
 #include "coop/interactables/surface_clean_sync.h"
 #include "coop/interactables/window_sync.h"
 #include "coop/props/dig_sync.h"
+#include "coop/items/save_actor_sync.h"  // the persistent actors a held tool leaves behind
 #include "coop/player/sleepers.h"
 #include "coop/player/pocket_travel.h"         // IsValidWire: a pocket byte this build knows
 #include "coop/player/pocket_travel_client.h"  // CLIENT: the host's PlayerLocation rows
@@ -632,6 +633,32 @@ bool HandleStateEvent(net::Session& session,
                                      ? static_cast<uint8_t>(msg.senderPeerSlot)
                                      : static_cast<uint8_t>(0xFF);
         coop::dig_sync::OnStateChunk(ds, fromSlot);
+        break;
+    }
+    case net::ReliableKind::SaveActorIntent: {
+        // CLIENT->HOST: a deployed save actor's birth, state or destroy (coop::save_actor_sync). Client-authored only
+        // (client_authorship.h); the module takes it only on the host, from a client slot. Never relayed.
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
+            UE_LOGW("event_feed: SaveActorIntent payload too short (%zu < %zu)", static_cast<size_t>(msg.payloadLen),
+                    sizeof(net::BlobChunkPayload));
+            break;
+        }
+        net::BlobChunkPayload sa{};
+        std::memcpy(&sa, msg.payload, sizeof(sa));
+        coop::save_actor_sync::OnIntentChunk(sa, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::SaveActorState: {
+        // HOST->ALL: a deployed save actor's birth, state, destroy or a refused birth (coop::save_actor_sync).
+        // Host-authored only (client_authorship.h); the module takes it only from slot 0 on a client.
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
+            UE_LOGW("event_feed: SaveActorState payload too short (%zu < %zu)", static_cast<size_t>(msg.payloadLen),
+                    sizeof(net::BlobChunkPayload));
+            break;
+        }
+        net::BlobChunkPayload ss{};
+        std::memcpy(&ss, msg.payload, sizeof(ss));
+        coop::save_actor_sync::OnStateChunk(ss, static_cast<uint8_t>(msg.senderPeerSlot < 0 ? 0xFF : msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::InventoryRestoreAck: {

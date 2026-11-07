@@ -5,6 +5,7 @@
 
 #include "ue_wrap/actors/prop.h"
 
+#include "ue_wrap/core/asset_load.h"  // ResolveOrLoadPropClass: a prop class no instance has loaded
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/core/game_thread.h"  // IsDefinitelyOffGameThread: where a base may resolve
 #include "ue_wrap/engine/engine.h"
@@ -24,6 +25,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace ue_wrap::prop {
 namespace {
@@ -93,6 +95,50 @@ bool IsClassDescendantOfProp(void* cls) {
             reinterpret_cast<uint8_t*>(cls) + P::off::UStruct_SuperStruct);
     }
     return false;
+}
+
+void* ResolveOrLoadPropClass(const std::wstring& className) {
+    const size_t n = className.size();
+    if (n == 0) return nullptr;
+    if (void* cls = object_index::ClassByName(className.c_str())) return cls;
+    // The name builds a load path, so it is a plain identifier ending in _C and nothing else: no
+    // separators, no dots, no path a wire name could steer.
+    if (n < 3 || n > 63 || className.compare(n - 2, 2, L"_C") != 0) return nullptr;
+    for (const wchar_t c : className) {
+        const bool ok = (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') || (c >= L'0' && c <= L'9') ||
+                        c == L'_';
+        if (!ok) return nullptr;
+    }
+    static std::unordered_set<std::wstring> s_missed;   // game thread only
+    if (s_missed.count(className)) return nullptr;
+    // Once the miss latch is full, no new name is tried at all: a peer naming endless unknown classes
+    // must not buy a synchronous load per message.
+    if (s_missed.size() >= 256) return nullptr;
+    // A class this loaded is answered from here until the index lists it, and again only while its slot
+    // still holds it.
+    static std::unordered_map<std::wstring, std::pair<void*, int32_t>> s_loaded;   // game thread only
+    if (const auto it = s_loaded.find(className); it != s_loaded.end()) {
+        if (R::IsLiveByIndex(it->second.first, it->second.second)) return it->second.first;
+        s_loaded.erase(it);
+    }
+    std::wstring path = P::name::PropsContentDir;
+    path.append(className, 0, n - 2);
+    path += L'.';
+    path += className;
+    void* obj = asset_load::LoadObjectByPath(path.c_str());
+    // Only a blueprint class is read as a class: the descent test walks SuperStruct, which another
+    // kind of object does not have.
+    const bool isClass = obj && R::NameEquals(R::NameOf(R::ClassOf(obj)), P::name::BlueprintGeneratedClassName);
+    if (!isClass || !IsClassDescendantOfProp(obj)) {
+        if (s_missed.size() < 256) s_missed.insert(className);
+        UE_LOGW("prop: class '%ls' is not loaded here and '%ls' did not load a prop class -- not tried again",
+                className.c_str(), path.c_str());
+        return nullptr;
+    }
+    UE_LOGI("prop: loaded class '%ls' from '%ls' -- no instance on this peer had loaded it", className.c_str(),
+            path.c_str());
+    if (s_loaded.size() < 256) s_loaded[className] = {obj, R::InternalIndexOf(obj)};
+    return obj;
 }
 
 // IsKeyedInteractable: the non-prop interactable bases (the trash pile, the garbage clump, the

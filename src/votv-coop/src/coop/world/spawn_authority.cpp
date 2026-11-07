@@ -112,6 +112,23 @@ UE_FACT_FN(kRowDropUfoDropper, "spawn_authority", L"ufoDropper_C", L"Timeline_0_
 // arirShip's level-placed apparition (0.10.0): the finish of its fade timeline, whose reversed run (the ship
 // faded out) mails sixteen scrambled emails after 10 s.
 UE_FACT_FN(kRowFadeFinishedArirShipAppear, "spawn_authority", L"arirShipAppear_C", L"A__FinishedFunc", Declared);
+// The producers of the host-born creatures (coop/creatures/host_born_spawn): the Erie plush's two transformations,
+// the cremator's bang timer, the Christmas tree's krampus roll, the zombie horde's controller, the angry flesh's
+// artillery timer and the alien dropper's bodies.
+UE_FACT_FN(kRowFuckEriePlush, "spawn_authority", L"prop_eriePlush_C", L"fuck", Declared);
+UE_FACT_FN(kRowAngerEriePlush, "spawn_authority", L"prop_eriePlush_C", L"anger", Declared);
+UE_FACT_FN(kRowTimerBangCremator, "spawn_authority", L"cremator_C", L"timerBang", Declared);
+UE_FACT_FN(kRowSpawnKrampusXmasTree, "spawn_authority", L"prop_xmasTree_C", L"spawnKrampus", Declared);
+UE_FACT_FN(kRowReceiveBeginPlayZombieHorde, "spawn_authority", L"zombieHordeController_C", L"ReceiveBeginPlay", Declared);
+UE_FACT_FN(kRowSpawnFromStackZombieHorde, "spawn_authority", L"zombieHordeController_C", L"spawnZombieFromStack", Declared);
+UE_FACT_FN(kRowInitiateWaveZombieHorde, "spawn_authority", L"zombieHordeController_C", L"initiateWave", Declared);
+UE_FACT_FN(kRowArtilleryTimerAngryErie, "spawn_authority", L"npc_angryErieFlesh_C", L"artilleryTimer", Declared);
+UE_FACT_FN(kRowReceiveBeginPlayAlienDropper, "spawn_authority", L"ufoAlienDropper_C", L"ReceiveBeginPlay", Declared);
+UE_FACT_FN(kRowCustomEventAlienDropper, "spawn_authority", L"ufoAlienDropper_C", L"CustomEvent", Declared);
+UE_FACT_FN(kRowCustomEvent1AlienDropper, "spawn_authority", L"ufoAlienDropper_C", L"CustomEvent_1", Declared);
+UE_FACT_FN(kRowTickerMortarAlienDropper, "spawn_authority", L"ufoAlienDropper_C", L"tickerMortar", Declared);
+UE_FACT_FN(kRowTimelineFinishedAlienDropper, "spawn_authority", L"ufoAlienDropper_C", L"Timeline_0__FinishedFunc",
+           Declared);
 
 // One row: the facts row a client must not run, and the tag its refusal log carries.
 struct Row {
@@ -307,6 +324,31 @@ constexpr Row kRows[] = {
     // has seen it, a per-viewer sighting. The emails its fade-out mails are the host's, and reach a client
     // on the email feed; a client's own would stay in its inbox alone, as a client never sends an append.
     {&kRowFadeFinishedArirShipAppear,     "arirShipAppear.fadeFinished"},
+
+    // The host-born creatures' producers. Each body rolls or times a shared-world creature on this machine's own
+    // clock; the host's run mints it and the class catch mirrors it (coop/creatures/host_born_spawn), which also
+    // dissolves a client's birth these rows miss. The plush's fuck mints the living Erie and destroys the plush,
+    // and its anger the angry flesh and the plush: both crossings are the host's (the creature, the prop's death).
+    {&kRowFuckEriePlush,                  "eriePlush.fuck"},
+    {&kRowAngerEriePlush,                 "eriePlush.anger"},
+    // The cremator's bang timer (eriebanging arms it) opens the door, mints the angry flesh and re-arms itself.
+    {&kRowTimerBangCremator,              "cremator.timerBang"},
+    // The tree's new-day delegate rolls a krampus at a random far point unless player 0 wears the hat.
+    {&kRowSpawnKrampusXmasTree,           "xmasTree.spawnKrampus"},
+    // The horde controller's whole run: its BeginPlay's countdown and hints, the stack's zombies around player 0's
+    // camera, and the wave end's rewards, achievement and save. A client's copy is a husk; the zombies are the host's.
+    {&kRowReceiveBeginPlayZombieHorde,    "zombieHorde.ReceiveBeginPlay"},
+    {&kRowSpawnFromStackZombieHorde,      "zombieHorde.spawnZombieFromStack"},
+    {&kRowInitiateWaveZombieHorde,        "zombieHorde.initiateWave"},
+    // A client's angry flesh is a host mirror: its artillery timer's missile is the host's to throw.
+    {&kRowArtilleryTimerAngryErie,        "angryErieFlesh.artilleryTimer"},
+    // A client's alien dropper is a world-actor mirror: its BeginPlay (hints, the timers, the power write, the
+    // ariral ship), the camera storm, the harmless killer wisp, the mortar and the aliens' drop are the host's.
+    {&kRowReceiveBeginPlayAlienDropper,   "alienDropper.ReceiveBeginPlay"},
+    {&kRowCustomEventAlienDropper,        "alienDropper.CustomEvent"},
+    {&kRowCustomEvent1AlienDropper,       "alienDropper.CustomEvent_1"},
+    {&kRowTickerMortarAlienDropper,       "alienDropper.tickerMortar"},
+    {&kRowTimelineFinishedAlienDropper,   "alienDropper.timelineFinished"},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x53410000;   // 'SA', then the row

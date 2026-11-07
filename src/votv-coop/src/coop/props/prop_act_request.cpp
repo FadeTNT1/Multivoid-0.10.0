@@ -664,6 +664,8 @@ bool NoteSeamDestroy(void* actor) {
     return true;
 }
 
+bool ReplayRunning() { return g_latch.target != nullptr; }
+
 void OnDisconnect() {
     Close();
     g_nextId = 0;

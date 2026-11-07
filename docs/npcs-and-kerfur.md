@@ -19,7 +19,15 @@ finishes, and broadcasts it (`coop/creatures/npc_sync`). Two births that interce
 are enrolled by other means (`coop/creatures/npc_world_enum`): characters that loaded with the
 level, by a walk at world start, and characters a Blueprint spawns from inside its own graph (the
 wisp swarm, the ambient sky wisps, the pyramid's spawner), caught at the native function seam and
-gated by the spawning class. A save-persisted character, the kerfur above all, is materialised on
+gated by the spawning class. Beside those source rows the same catch holds a table of classes the
+host authors whatever Blueprint mints them (`coop/creatures/host_born_spawn`): the zombie family,
+the krampus, the gore slither, the ariral shooter and pig beater, the killer wisp, the living Erie
+and its good and evil forms, the angry flesh, the rufus, the alien dropper and its ariral ship. On
+the host every such birth is caught and mirrored; on a client the same birth made by a Blueprint is
+dissolved, its result nulled and the unfinished actor destroyed by a posted task, the explosion
+lane's shape. The gamemode is never a producer there (its save load, its dreams and its rolls keep
+their own rows), and a client's own mirror spawns go through ProcessEvent and stand at no bytecode,
+so they are never dissolved. A save-persisted character, the kerfur above all, is materialised on
 a joiner by the game's own save load at an unpredictable moment, so the joiner adopts its own
 local twin by class after a deferred poll instead of spawning a second one
 (`coop/creatures/npc_adoption`).
@@ -28,7 +36,10 @@ On a client the mirror is the game's actor with its brain parked: the AI timers 
 the movement tick off, with the actor tick kept where the class's tick is per-viewer cosmetic,
 such as the wisp's fade and bob (`ue_wrap/actors/kerfur`, `ue_wrap/actors/wisp`). The zombie family and the
 fossilhound go further: their Blueprint's event graph is refused entry by entry on a mirror, but for the footstep and
-the fossilhound's per-viewer loop (`coop/creatures/npc_mirror_brain`). The Geom Octa is parked the other way
+the fossilhound's per-viewer loop (`coop/creatures/npc_mirror_brain`); the living Erie's and the rufus's graphs
+are refused whole, so a client's hit on one reaches the host as the zombie's does. The angry flesh keeps its actor
+tick on a mirror: its walk is movement input the parked movement ignores, and its kill is the tick's sphere test
+against this machine's own player. The Geom Octa is parked the other way
 round: its BeginPlay, tick, timelines and sounds run on a mirror, with its actor tick kept for the turn toward its
 target, and only the twelve entries that decide (the wander, the target, the leave, the fire verdict) are refused
 `[V]` (`octa_drill`). What the host decides crosses as `GeomOctaEvent` (`coop/creatures/geom_octa_sync` on the
@@ -51,7 +62,9 @@ from the dark. The eyer is minted by `ticker_eyers_C` and `blackFog_C::spawnghos
 which the ProcessEvent detour never sees, so the owner catch is a Func-thunk hook on the native
 `BeginDeferredActorSpawnFromClass`, the seam every route runs; the entity's pose is read on the next tick,
 once its spawn has finished. A client's black fog `spawnghost` is refused at the script gate, which sees
-every route, so its eyers are the host's.
+every route, so its eyers are the host's. The second member is the wasp swarm: a nest rolls it while
+the local player is within 5000 units, and its tick chases that player. Another peer's mirror is held
+kinematic with its tick off, and its BeginPlay still stings that peer's own player within reach.
 
 ### Which spawners a client refuses
 
@@ -79,8 +92,13 @@ leaving one leaves nothing to restore.
 | vent crawler, grays, eggs, tentacle balls | gameplay entries refused (BeginPlay, tick, overlaps, AI and despawn verbs); the AnimBP and the pose stay | on a client they exist only as host mirrors through the npc lane's allowlist. A mirror loses what its BeginPlay also set up: the crawler's footsteps, vent break and metal-break burst, a ball's and a gray's mesh attach, a ball's ambient loop. A peer that joins mid-event gets every living creature from the npc lane's join census; the event's own scene is not replayed |
 | gray controller, balls follower, super egger | the mint and activation bodies refused | their creature BeginDeferred calls are bytecode-internal: no spawn interceptor can see them, so the bodies must not run |
 | the UFO controllers (knob, UK, enemy UK), the calvine saucer's fall | start, stop, tick and enemy pick refused; the calvine's fall verbs refused | the flocks are minted inside the controllers' graphs; the host's ships mirror on the world-actor lane through the source-gated catch, and a mirrored ship's own speed, enemy, shot and crash timers are refused (`docs/events-and-weather.md`) |
+| Erie plush | `fuck` and `anger` refused | the plush's own feeding and pain rolls mint the living Erie or the angry flesh and destroy the plush; the host's run crosses as the creature (the class catch) and the prop's death |
+| cremator | `timerBang` refused | the bang timer an Erie in the fire arms opens the door, mints the angry flesh and re-arms itself; the host's flesh is the one flesh |
+| Christmas tree | `spawnKrampus` refused | its new-day roll mints a krampus at a random far point; the host's crosses through the class catch |
+| zombie horde controller | BeginPlay, `spawnZombieFromStack` and `initiateWave` refused | its waves spawn around player 0's camera and its end pays rewards and saves: the host runs the horde, so its zombies spawn around the host and reach every peer |
+| alien dropper (and the angry flesh's artillery) | BeginPlay, its two timers, the mortar and the drop's finish refused; the flesh's `artilleryTimer` refused | on a client both are host mirrors (the dropper on the world-actor lane); the storm, the hints, the mortar, the killer wisp and the aliens are the host's, the creatures crossing through the class catch |
 | firefly, pinecone | left running | anchored on the local player's camera: each peer owns its roll and the others render a mirror |
-| eyer | left running | it stalks its own peer's player: each peer owns its eyer and the others render a mirror (`coop/creatures/owner_entity_sync`) |
+| eyer, wasp nest | left running | each stalks its own peer's player: each peer owns its eyer and its swarm, and the others render a mirror (`coop/creatures/owner_entity_sync`) |
 | underground garbage | left running | per-peer loot mounds; refusing one would delete a client's loot with no host replacement |
 | deer, bp7, hexahive, walking tree, sus hole, beehive, bush, tick, mannequin | left running | the product has no mirror of its own for these, and refusing a spawner whose output nothing replaces would just remove the content. The walking mannequin is the exception in the making: the host's walker already crosses as a plain prop mirror that runs a second brain on the client (measured on the rig), so the client's spawner stays running only until that mirror is parked and the host's walker is the one walker |
 
@@ -204,7 +222,9 @@ wisp in flight is transient and owes nothing.
 | The Omega's take-object, pat, equipment, kill and sit-on-the-ATV verbs are not synced | `[V]` `coop/creatures/kerfur_command`, the verb table |
 | The Omega's floppy state is not synced, so a relayed get-reports diverges on its result; its accessories and carried object likewise | `[V]` no lane under `coop/creatures` carries them |
 | The insomniac, Funguy and killer wisp mirrors are not brain-parked: only the zombie family, the hound and the Octa are (`coop/creatures/npc_mirror_brain_table`), so a mirror of the others runs its own BeginPlay on the client (the insomniac's own walk toward the client's player and its distance self-destroy, the Funguy's own AI), over a pose-driven body with its movement tick off. The host's natural births of all three now reach clients | `[V]` the table's class list; the births' crossing and the mirrors' looks are `[?]` until a session shows them |
-| Only one stalker class is owned per peer so far | `[V]` `coop/creatures/owner_entity_sync`, the member table |
+| Two stalker classes are owned per peer so far, the eyer and the wasp swarm; a client's hit on a nest still rolls its swarm on the host alone, chasing the host's player | `[V]` `coop/creatures/owner_entity_sync`, the member table |
+| The host-born classes are host-authored, and a client loses its own copy of what they did: a client's interaction with the living Erie or the rufus (their mirrors' graphs are refused), the alien dropper's hints and camera storm, a horde around a client far from the host. The killer wisps, aliens and ship the dropper leaves cross; its mortar's missiles, the krampus's fireballs and the other creatures' projectiles do not | `[V]` `coop/creatures/host_born_spawn` and the rows above; the births on a client are `[?]` until a two-peer session shows them |
+| The angry flesh's kill of a client is the client's mirror's tick, a pose-driven body: its reach follows the host's flesh a pose window late | `[?]` read from the capture, not yet run |
 | The conversion is detected by a poll, five times a second, not at the verb | `[V]` `coop/creatures/kerfur_convert`; the lane reads the result rather than the call, because a peer's own conversion has already happened by the time any watch of ours runs |
 | Nine ambient spawner families are neither mirrored nor refused, so each peer grows its own deer, hexahives, walking trees and the rest | `[V]` they appear in no lane under `coop/creatures` and in no row of `coop/world/spawn_authority` |
 
@@ -212,7 +232,7 @@ wisp in flight is transient and owes nothing.
 
 | Concept | Files |
 |---|---|
-| host-owned characters | `coop/creatures/npc_sync`, `coop/creatures/npc_mirror`, `coop/creatures/npc_world_enum`, `coop/creatures/npc_adoption`, `coop/creatures/npc_pose_host.cpp`, `coop/creatures/npc_pose_drive.cpp` |
+| host-owned characters | `coop/creatures/npc_sync`, `coop/creatures/npc_mirror`, `coop/creatures/npc_world_enum`, `coop/creatures/host_born_spawn`, `coop/creatures/npc_adoption`, `coop/creatures/npc_pose_host.cpp`, `coop/creatures/npc_pose_drive.cpp` |
 | the engine wrappers | `ue_wrap/actors/kerfur`, `ue_wrap/actors/wisp` |
 | per-peer creatures | `coop/creatures/owner_entity_sync` |
 | the killer wisp | `coop/creatures/wisp_attack_sync`, `coop/creatures/wisp_grab_hold`, `coop/creatures/wisp_tear_mirror`, `coop/player/ragdoll_gate` |

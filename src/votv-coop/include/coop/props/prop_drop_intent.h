@@ -57,9 +57,9 @@ void MarkUnpackScope(const ue_wrap::script_gate::Call& c);
 // HOST handler for a received PropDropIntent: spawn the authoritative Aprop_C by Key at the
 // transform, NOT echo-suppressed, so the host's own FinishSpawn watcher expresses it and broadcasts
 // PropSpawn to every peer. The placing client adopts its own untracked local rock by Key, through the
-// prop key index, which holds every live keyed prop, tracked or not. Dup-guarded: skipped if the host
-// already has the Key live.
-// Game thread.
+// prop key index, which holds every live keyed prop, tracked or not. Dup-guarded: when the host already
+// has the Key live it spawns nothing and re-sends that live world prop's PropSpawn to the sender alone, so
+// the sender's copy binds to it by key. Game thread.
 void OnPropDropIntent(coop::net::Session& session, const coop::net::PropDropIntentPayload& p,
                       uint8_t senderSlot);
 

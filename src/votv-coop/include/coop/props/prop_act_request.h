@@ -35,6 +35,11 @@ void OnReply(const coop::net::PropActReplyPayload& p);
 // latch's destroyed flag on a match.
 bool NoteSeamDestroy(void* actor);
 
+// Is a granted verb's replay running now, on this thread's call stack? A birth inside it is this player's:
+// the replay is our own reflected call, so the authorship walk (coop/props/prop_spawn_authoring) finds no
+// player frame above it.
+bool ReplayRunning();
+
 namespace internal {   // pure: prop_act_selftest drives it
 enum class ReplyAction : uint8_t { Stale, Refused, BadReason, Granted };
 ReplyAction DecideReply(bool pending, uint16_t pendingId, const coop::net::PropActReplyPayload& p);

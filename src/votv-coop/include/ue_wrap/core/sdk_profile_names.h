@@ -372,6 +372,13 @@ inline constexpr const wchar_t* NpcClass_Kavotia      = L"kavotia_C";
 // its mesh toward the local camera from its tick, and its 0.1 s timer destroys it once the local camera is within 175
 // units of it, so a mirror keeps its actor tick and has that timer refused (coop/world/spawn_authority).
 inline constexpr const wchar_t* NpcClass_Figura       = L"figura_C";
+// The Erie creatures, each a Character (the graphs read character.charactermovement): eriePlushLive_C, the living
+// plush prop_eriePlush_C::fuck mints (its _good and _evil children are its reducerep's), and npc_angryErieFlesh_C,
+// which prop_eriePlush_C::anger and cremator_C::timerbang mint. rufus_C, the Character prop_goose_C::broken mints.
+// Each is minted under EX_CallMath, so it crosses through the class catch (coop/creatures/host_born_spawn).
+inline constexpr const wchar_t* NpcClass_EriePlushLive  = L"eriePlushLive_C";
+inline constexpr const wchar_t* NpcClass_AngryErieFlesh = L"npc_angryErieFlesh_C";
+inline constexpr const wchar_t* NpcClass_Rufus          = L"rufus_C";
 
 // The allowlist array: resolved through R::FindClass and cached per entry. The classes load on the
 // first gameplay-level transition, not at the menu: the install waits for the first one to load,
@@ -407,6 +414,9 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_GeomOcta,          // the Geom Octahedron; host-authored ACharacter, pose rides EntityPose
     NpcClass_Kavotia,           // rozitalHole's patrollers; host-authored ACharacter, brain refused on a mirror
     NpcClass_Figura,            // the gamemode's CustomEvent_3 figure; host-authored ACharacter, self-destroy timer refused on a mirror
+    NpcClass_EriePlushLive,     // the living Erie and its _good/_evil children; a mirror's graph is refused whole
+    NpcClass_AngryErieFlesh,    // the angry flesh; a mirror keeps its tick (its kill of this machine's player)
+    NpcClass_Rufus,             // the goose's rufus; a mirror's graph is refused whole
     NpcClass_GoreSlitherCheese, // the blue brain cheese's hatchling; EX_CallMath, npc_world_enum source row
 };
 inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcAllowlist[0]);
@@ -463,11 +473,26 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     L"ufo_boofo_spawn1_C",         // the boofo fly-by (a ufo_boofo_C child; ufo_boo)
     L"ufo_joel_C",                 // the radio tower's UFO (ufo_joel)
     L"ufo_pillfo_C",               // the lake glow's UFO (ufo_pill)
+    // The alien dropper (an actor_save_C) npc_zombie_alienSummoner_C mints on its landing; its graph is refused on a
+    // client (coop/world/spawn_authority), so a mirror is the saucer the host's killer wisp, aliens and ship leave.
+    L"ufoAlienDropper_C",
     // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
     // base classes are unverified -- a prop-derived wreck would ride the prop lane as well.
 };
 inline constexpr size_t kWorldActorAllowlistSize =
     sizeof(kWorldActorAllowlist) / sizeof(kWorldActorAllowlist[0]);
+
+// The births the class catch owns whatever made them (coop/creatures/host_born_spawn): the alien dropper and the
+// ariral ship its BeginPlay mints, and the strike the stolas protection volume's tick throws at the pawns inside
+// it (the host's strike reaches a client through coop/world/weather_lightning).
+inline constexpr const wchar_t* UfoAlienDropperClass        = L"ufoAlienDropper_C";
+inline constexpr const wchar_t* ArirShipClass               = L"arirShip_C";
+inline constexpr const wchar_t* StolasProtectionVolumeClass = L"stolasProtectionVolume_C";
+// The wasp swarm (an Actor): prop_waspNest_C's BeginPlay loop mints one while this machine's player 0 is within
+// 5000 units, its hit and its break mint one, and prop_beebox_C's playerUsedOn mints one; the swarm's tick chases
+// player 0 and its BeginPlay stings the pawns within 300 units. Owned by the peer that rolled it
+// (coop/creatures/owner_entity_sync).
+inline constexpr const wchar_t* WaspSwarmClass              = L"waspSwarm_C";
 
 // The eventer's world-actor outputs (trigger_eventer_C::runEvent, each minted under EX_CallMath, so
 // they cross only through the eventer's source row in npc_world_enum): ventKnocker's knocker (knocks
@@ -1947,6 +1972,91 @@ inline constexpr const wchar_t* FilterItemsBlockedParam = L"blocked";
 inline constexpr const wchar_t* DirtBallClass = L"prop_dirtball_C";
 inline constexpr const wchar_t* ProcessBuriedItemActorParam = L"actor";
 inline constexpr const wchar_t* MainPlayerHoldingActorProp = L"holdingActor_main";
+
+// Who authored a client's birth (coop/props/prop_spawn_authoring). mainPlayer_C's own input events are
+// named InpActEvt_<action>_K2Node_Input{Action,Key}Event_<n> (70 of them on 0.10.0); a birth under one of
+// these actions is the player's. Movement, look, menus, saves and the hotbar are not listed: they author no
+// world prop, and a hand switch's display actor is the hand lane's.
+inline constexpr const wchar_t* kPlayerActionInputPrefixes[] = {
+    L"InpActEvt_Fire_",              // playerHandUse_LMB on the hand item, playerUsedOn on the target
+    L"InpActEvt_Use_",               // E: the look-at actor's use, the grab
+    L"InpActEvt_Drop_",
+    L"InpActEvt_Rotate_",            // the hand item's RMB use and release
+    L"InpActEvt_Alt_",
+    L"InpActEvt_LeftMouseButton_",
+    L"InpActEvt_ActivateEquipment_",
+    L"InpActEvt_LockObject_",
+};
+inline constexpr size_t kPlayerActionInputPrefixesSize =
+    sizeof(kPlayerActionInputPrefixes) / sizeof(kPlayerActionInputPrefixes[0]);
+// mainPlayer_C verbs that act for the player when they are reached through a dispatch of their own (a timer, the
+// E menu's widget): the selected E-menu action, the melee swing, the simulated clicks and the drops.
+inline constexpr const wchar_t* kPlayerActionVerbs[] = {
+    L"useSelectedAction", L"attack", L"simulateLMB", L"simulateRMB",
+    L"dropItem_mainhand", L"dropItem_offhand", L"dropGrabObject", L"dropEquipmentByName",
+};
+inline constexpr size_t kPlayerActionVerbsSize = sizeof(kPlayerActionVerbs) / sizeof(kPlayerActionVerbs[0]);
+// A widget's per-frame event: a HUD's tick is no player's act.
+inline constexpr const wchar_t* WidgetTickFn = L"Tick";
+// The game's hallucinations: each peer's own, drawn around its own player. maingamemode_C::addHallFood spawns
+// the burger from the player's hunger (ticker_foodHall_C), ticker_lightSanity_C::spawnInsanityProp the dissolving
+// prop from its sanity (prop_lifecycle::IsPerPlayerPropClass).
+inline constexpr const wchar_t* BurgerHallucinationClass = L"prop_burgerHallucinate_C";
+inline constexpr const wchar_t* InsanityPropClass = L"insanityProp_C";
+// Where the game's prop classes live, as /Game/objects/<stem>.<stem>_C: the load of a prop class no instance on
+// this peer has loaded yet (ue_wrap::prop::ResolveOrLoadPropClass).
+inline constexpr const wchar_t* PropsContentDir = L"/Game/objects/";
+inline constexpr const wchar_t* BlueprintGeneratedClassName = L"BlueprintGeneratedClass";
+// The persistent actors a held tool leaves behind (coop/items/save_actor_sync, ue_wrap/actors/save_actor). Each is an
+// actor_save_C, NOT a prop_C, so no prop lane sees it. Read from the 0.10.0 bytecode capture (the producer, then the
+// class): prop_stickers_C lmb -> sticker_C (attaches by `attachto`, resolved in its processKeys); prop_candle_C lmb ->
+// candle_C (its action and its `dest` turn it back into prop_candle_C); prop_xmaslights_C lmb -> xmaslight_C (later
+// clicks run addLight on it, rmb runs finish); prop_welder_C lmb -> weld_C (completed by weld); prop_nailgun_C's
+// nailProjectile_C -> its `nailType` (nail_C, nail_pin_C), nailNail building a physics constraint between two props;
+// prop_ducttape_C -> portal_phys_tapedoor_C; prop_rug_C -> rug_C; prop_snowballRoll_C -> snowman_C;
+// prop_wallbuilder_C -> customwall_unfinished_C, whose buildWall converts itself into customwall_C; prop_jumpercable_C
+// -> jumpercable_C. Every one serializes itself through actor_save_C's getData / loadData and resolves any attach key
+// in its own processKeys.
+//
+// Deliberately absent: poster_C (coop/items/poster_sync owns it), hook_C and its rope (coop/items/hook_sync), the cig
+// family (cig_C attaches itself to the LOCAL player's camera and binds the local input, so a mirror would put a cigarette
+// in every viewer's mouth), fire_C (spread by the host's own breaks and burns), wire_C and printedObject_C (each keeps
+// its own key and save flag, off actor_save_C), ceilingStars_C (no save interface), transmittedSignal_C (the signal
+// sender's own tick calls transmit, so every peer holding the sender mints one), and the world's own actor_save
+// spawners (beehiveBranch_C, hexPillar_C, erieRise_C, ufoAlienDropper_C), which every peer runs for itself.
+inline constexpr const wchar_t* kPlayerDeployedSaveActorClasses[] = {
+    L"sticker_C",
+    L"candle_C",
+    L"xmaslight_C",
+    L"weld_C",
+    L"nail_C",
+    L"nail_pin_C",
+    L"portal_phys_tapedoor_C",
+    L"rug_C",
+    L"snowman_C",
+    L"customwall_unfinished_C",
+    L"customwall_C",
+    L"jumpercable_C",
+};
+// Of those, the classes whose processKeys builds a physics constraint between two props (nail_C's nailNail, reached
+// through processKeys' frameDelay): a mirror never runs processKeys, and a client's own one is replaced by the host's
+// mirror, so the constraint exists on the host alone (docs/deployables.md, the fifth mirror rule).
+inline constexpr const wchar_t* kSaveActorHostConstraintClasses[] = {
+    L"nail_C",
+    L"nail_pin_C",
+};
+// Of those, the classes that destroy THEMSELVES on every peer as a step of their own lifecycle (buildWall spawns the
+// finished wall and destroys the scaffold), so a client's copy going is never a player's verb to forward.
+inline constexpr const wchar_t* kSaveActorSelfRetiringClasses[] = {
+    L"customwall_unfinished_C",
+};
+inline constexpr const wchar_t* ActorSaveClass = L"actor_save_C";
+inline constexpr const wchar_t* ActorSaveSkipSaveProp = L"skipSave";   // ignoreSave returns it; the save walk asks it
+inline constexpr const wchar_t* ActorSaveGetKeyFn = L"getKey";         // lib_C::assignKey mints a None key and files it
+inline constexpr const wchar_t* ActorSaveGetKeyParam = L"key";
+inline constexpr const wchar_t* ActorSaveGetDataFn = L"getData";
+inline constexpr const wchar_t* ActorSaveLoadDataFn = L"loadData";
+inline constexpr const wchar_t* ActorSaveProcessKeysFn = L"processKeys";
 // Irrigation. The held faucet (prop_faucet_C) on its left button, when the trace below the hit finds water under
 // grass, sand, gravel or dirt, spawns `faucet_C` (an actor_save_C) at the hit, yaw = the player's + 90, and destroys
 // itself. faucet_C: action 5 toggles `active` then upd() (the appliance lane's bit); action 7 spawns a prop_faucet_C,

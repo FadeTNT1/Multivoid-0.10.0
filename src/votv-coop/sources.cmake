@@ -132,6 +132,7 @@ set(VOTVCOOP_SOURCES
     src/coop/props/dig_sync.cpp
     src/coop/items/poster_sync.cpp
     src/coop/items/poster_mirror.cpp
+    src/coop/items/save_actor_sync.cpp
     src/coop/items/irrigation_sync.cpp
     src/coop/items/irrigation_host.cpp
     src/coop/items/irrigation_wire.cpp
@@ -218,6 +219,7 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/npc_sync.cpp
     src/coop/creatures/npc_sync_install.cpp
     src/coop/creatures/npc_world_enum.cpp
+    src/coop/creatures/host_born_spawn.cpp
     src/coop/creatures/piramid_sync.cpp
     src/coop/creatures/geom_octa_sync.cpp
     src/coop/creatures/geom_octa_relay.cpp

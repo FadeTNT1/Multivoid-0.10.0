@@ -38,6 +38,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_1
     src/ue_wrap/core/script_gate.cpp
     src/ue_wrap/core/script_gate_names.cpp
     src/ue_wrap/core/script_loop.cpp
+    src/ue_wrap/core/script_stack.cpp
     src/ue_wrap/engine/engine.cpp
     src/ue_wrap/engine/engine_save.cpp
     src/ue_wrap/engine/engine_save_return.cpp
@@ -210,6 +211,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/prop_use.cpp
     src/ue_wrap/actors/prop_fire.cpp
     src/ue_wrap/actors/poster.cpp
+    src/ue_wrap/actors/save_actor.cpp
     src/ue_wrap/actors/growing_plant.cpp
     src/ue_wrap/actors/dirt.cpp
     src/ue_wrap/actors/event_scenes.cpp

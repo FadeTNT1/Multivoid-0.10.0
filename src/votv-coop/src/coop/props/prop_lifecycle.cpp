@@ -383,8 +383,14 @@ bool IsPerPlayerPropClass(const std::wstring& cls) {
     // that could clean a second time where it dropped. Each peer keeps its own shots; what they clean
     // crosses on the cleaning lanes (grime, surfaces, the window's dabs) and how they look on the
     // washer echo.
+    //
+    // The game's hallucinations too: the hunger burger and the sanity prop are spawned by a ticker round
+    // the peer's own player, from that player's hunger or sanity, and dissolve on their own. Each peer
+    // sees its own; expressed, the host's went out as real props every client could pick up.
     return ::_wcsicmp(cls.c_str(), P::name::PropInventoryContainerPlayerClass) == 0 ||
-           ::_wcsicmp(cls.c_str(), P::name::SpongeShotClass) == 0;
+           ::_wcsicmp(cls.c_str(), P::name::SpongeShotClass) == 0 ||
+           ::_wcsicmp(cls.c_str(), P::name::BurgerHallucinationClass) == 0 ||
+           ::_wcsicmp(cls.c_str(), P::name::InsanityPropClass) == 0;
 }
 
 void Install(coop::net::Session* session) {

@@ -147,6 +147,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::PosterIntent:
     case ReliableKind::PlantIntent:
     case ReliableKind::DigIntent:
+    case ReliableKind::SaveActorIntent:
     case ReliableKind::IrrigationCommit:
     case ReliableKind::ProjectileFired:
     case ReliableKind::ExplosionRequest:
@@ -189,6 +190,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::PosterState:
     case ReliableKind::PlantState:
     case ReliableKind::DigState:
+    case ReliableKind::SaveActorState:
     case ReliableKind::IrrigationState:
     case ReliableKind::ToolActionState:
     case ReliableKind::EventScenePhase:
