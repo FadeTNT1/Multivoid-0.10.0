@@ -1762,6 +1762,33 @@ inline constexpr const wchar_t* WasherSplashFx = L"eff_waterThrowSplash";
 inline constexpr const wchar_t* WasherCue = L"wade_Cue";
 inline constexpr const wchar_t* ParticleSystemClass = L"ParticleSystem";
 inline constexpr const wchar_t* SoundCueClass = L"SoundCue";
+
+// Player-dug holes and what is put in them (coop/props/dig_sync, ue_wrap/actors/dirt). The shovel's
+// event_dighole spawns its `dirtholeType` (dirthole_C, a prop_C that mints no key: its getKey answers None) at the
+// point its trace struck, writing `matType` (0 dirt, 1 gravel, 2 sand: the hole's material) and `attachTo` in the
+// deferred window. A hole used with a held item runs processburieditem: a farm plant row spawns its plant, an erie
+// plush spawns erieRise, anything else spawns a dirthole_item_C and buries the item in it (the mound keeps the
+// item's whole save record in `betterData`, a struct_betterSave), and the hole destroys itself. A new hole's
+// BeginPlay digs the mound under it up (pullout) and destroys it. A mound with a valid betterData class is a player
+// burial; the underground loot mounds (ticker_susHoleSpawner) keep `object` or `name` instead and stay per-peer.
+inline constexpr const wchar_t* DirtHoleClass = L"dirthole_C";
+inline constexpr const wchar_t* DirtMoundClass = L"dirthole_item_C";
+inline constexpr const wchar_t* DirtShovelClass = L"prop_shovel_C";
+inline constexpr const wchar_t* GrowingPlantClass = L"growingPlant_C";
+inline constexpr const wchar_t* DirtHoleMatTypeProp = L"matType";
+inline constexpr const wchar_t* DirtMoundBetterDataProp = L"betterData";
+inline constexpr const wchar_t* GrowingPlantNameProp = L"plant";
+inline constexpr const wchar_t* GrowingPlantUpdFn = L"upd";
+inline constexpr const wchar_t* BetterGetDataFn = L"betterGetData";
+inline constexpr const wchar_t* BetterLoadDataFn = L"betterLoadData";
+inline constexpr const wchar_t* BetterDataParam = L"betterData";
+inline constexpr const wchar_t* ProcessBuriedItemFn = L"processBuriedItem";
+inline constexpr const wchar_t* FilterItemsFn = L"filterItems";
+inline constexpr const wchar_t* FilterItemsActorParam = L"object";
+inline constexpr const wchar_t* FilterItemsBlockedParam = L"blocked";
+inline constexpr const wchar_t* DirtBallClass = L"prop_dirtball_C";
+inline constexpr const wchar_t* ProcessBuriedItemActorParam = L"actor";
+inline constexpr const wchar_t* MainPlayerHoldingActorProp = L"holdingActor_main";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

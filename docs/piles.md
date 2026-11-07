@@ -218,6 +218,12 @@ is set right by the host's position message, with the identity following the hos
 than the frozen save position. The index-to-id sidecar on [join.md](join.md) is the intended
 replacement for the position key.
 
+### Loot mounds are not piles, and not shared
+
+The underground garbage spawner (`ticker_susHoleSpawner`) mints loot mounds, not chip piles: a `dirthole_item_C` whose
+`betterData` names no class. They are per-peer by design and no lane carries them, so each peer's game rolls its own. A
+hole or a mound a player makes is the opposite and is the host's ([props.md](props.md), "Holes and buried items").
+
 ## Who owns what
 
 | State | Owner | Shape |

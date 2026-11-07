@@ -22,6 +22,7 @@
 #include "coop/items/point_sack_intent.h"
 #include "coop/items/poster_sync.h"
 #include "coop/net/session.h"
+#include "coop/props/dig_sync.h"
 #include "coop/props/water_fill_sync.h"
 #include "coop/world/basement_flood_sync.h"
 #include "coop/world/basement_pipe_sync.h"
@@ -49,6 +50,7 @@ void Install(coop::net::Session& session) {
     coop::water_fill_sync::Install(&session);    // a world bucket's water is the host's: a client's tap-tick fill is cancelled, the host's level reaches every peer
     coop::basement_pipe_sync::Install(&session);  // a pipe's burst flag is the host's: a client's own writers are parked, the host's flag reaches every peer
     coop::basement_flood_sync::Install(&session);  // the basement's water level is the host's: a client's drain, pipe and cheat writers are parked, the host's level reaches every peer
+    coop::dig_sync::Install(&session);           // the holes a player digs are the host's: a client's dig, burial and fill run there, the dirt reaches every peer as DigState
     coop::poster_sync::Install(&session);        // a poster is the host's: a client's put, take-down and picture run there, placed posters reach every peer as PosterState
     coop::tool_action::Install(&session);        // a crowbar's pry and a hacksaw's cut: shown on every peer, their end run once on the host
     coop::piece_break_fx::Install(&session);     // a pried wall piece's break particles and tear-off sound: the host's break() is sent to every client
@@ -73,6 +75,7 @@ void Tick(coop::net::Session& session) {
     { ue_wrap::ScopedWalkTimer _w{"sync:water_fill"}; coop::water_fill_sync::Tick(session); }  // settle the tap-tick watches; HOST: the changed buckets' levels
     { ue_wrap::ScopedWalkTimer _w{"sync:basement_pipe"}; coop::basement_pipe_sync::Tick(session); }
     { ue_wrap::ScopedWalkTimer _w{"sync:basement_flood"}; coop::basement_flood_sync::Tick(session); }  // settle its watches; HOST: the level when it moved; CLIENT: a level that waited for the water volume
+    { ue_wrap::ScopedWalkTimer _w{"sync:dig"}; coop::dig_sync::Tick(session); }  // the watches' settle; HOST: the intents, the census; CLIENT: the captured digs, the parked rows
     { ue_wrap::ScopedWalkTimer _w{"sync:poster"}; coop::poster_sync::Tick(session); }  // settle its watches; HOST: queued verbs, the placed posters' changes; CLIENT: parked states
     { ue_wrap::ScopedWalkTimer _w{"sync:tool_action"}; coop::tool_action::Tick(session); }  // settle the pry and saw watches; the owner's progress; HOST: sessions whose target or tool left
     coop::piece_break_fx::Tick();       // settle the piece break watch; CLIENT: retry a cue whose copy had not resolved
@@ -80,6 +83,7 @@ void Tick(coop::net::Session& session) {
 
 void ConnectReplayForSlot(int slot) {
     coop::microwave_sync::OnPeerWorldReady(slot);  // HOST: every noted microwave's state to the joiner
+    coop::dig_sync::OnPeerWorldReady(slot);        // HOST: every named hole, mound and plant to the joiner, then the snapshot's end
     coop::poster_sync::OnPeerWorldReady(slot);     // HOST: every placed poster to the joiner, then the snapshot's end
     coop::cord_sync::QueueConnectBroadcastForSlot(slot);  // HOST: every corded prop's link to the joiner, then the seed's end
     coop::surface_clean_sync::QueueConnectBroadcastForSlot(slot);  // HOST: the sink's and the shower's dirt to the joiner (adopt)
@@ -109,6 +113,7 @@ void OnDisconnect() {
     coop::water_fill_sync::OnDisconnect();  // a bucket fills from a tap on the peer that holds it
     coop::basement_pipe_sync::OnDisconnect();
     coop::basement_flood_sync::OnDisconnect();  // the water stands where it is; the game's own writers run again
+    coop::dig_sync::OnDisconnect();        // a hole stays where it is; the tables and queues go
     coop::poster_sync::OnDisconnect();     // a poster's own verbs run where they are made
     coop::tool_action::OnDisconnect();      // a pry and a cut run whole where they are made
     coop::piece_break_fx::OnDisconnect();   // a waiting cue goes with its session

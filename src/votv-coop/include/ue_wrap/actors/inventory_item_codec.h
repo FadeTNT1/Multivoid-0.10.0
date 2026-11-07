@@ -60,4 +60,20 @@ bool Placement(const uint8_t* row, float& x, float& y, float& rotation);
 // Write the row's place on its canvas and its rotation.
 bool SetPlacement(uint8_t* row, float x, float y, float rotation);
 
+// ---- a struct_betterSave on its own ----
+//
+// The record the game keeps of one actor (class path, names, key, transform, serialized state): the `data` member of an
+// inventory row, and on its own dirthole_item_C::betterData, a buried item's whole record. Same encoding as a row's
+// members, plan-driven and bounded the same way; the plan is measured off dirthole_item_C's `betterData`.
+// Ready: whether that class is loaded and the struct is a tree of carried types (asked again at most once a second).
+bool BetterSaveReady();
+// Append the encoding of the record at `st`. False, `out` as it was, when not ready, unreadable or past kMaxItemBytes.
+bool EncodeBetterSave(const uint8_t* st, std::vector<uint8_t>& out);
+// Decode one encoding at `b[o..]` into the record at `st`, which the caller zeroed (or which holds only a default
+// record: nothing in it is freed). False on a malformed or over-bound encoding.
+bool DecodeBetterSave(const std::vector<uint8_t>& b, size_t& o, uint8_t* st);
+// The record's class path ("" when it names none: a record that holds no actor) and its name.
+std::wstring BetterSaveClassPath(const uint8_t* st);
+std::wstring BetterSaveName(const uint8_t* st);
+
 }  // namespace ue_wrap::inventory_item_codec

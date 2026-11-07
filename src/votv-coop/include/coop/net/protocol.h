@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 308;
+inline constexpr uint16_t kProtocolVersion = 310;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1456,6 +1456,22 @@ enum class ReliableKind : uint8_t {
     // The prop is named by its Element id. Never relayed; a client's copy is refused at the host's receive edge. Late
     // join: none -- a one-shot cue. PieceBreakFxPayload.
     PieceBreakFx = 243,
+
+    // CLIENT->HOST: a client's verb on the dirt it digs (coop::dig_sync), one message per blob (coop::dig_wire): op 1 a
+    // dig (the hole's class, transform and material, read from the hole the client's shovel just made), op 2 a burial
+    // or planting (the hole's place, the held item's class and its whole save record), op 3 a fill (a dirt ball used on
+    // a hole). The client's own hole is destroyed and its own burial refused; the host judges life and reach and runs
+    // the verb on its own copy. Never relayed; not pre-world. Late join: nothing to replay. BlobChunkPayload.
+    DigIntent = 244,
+
+    // HOST->ALL: the dirt a player dug, by a number the host mints (coop::dig_sync): op 1 a hole (class, transform,
+    // material), op 2 a mound holding a buried item (class, transform, the item's encoded save record), op 3 a plant a
+    // seed became (class, row name, transform), op 4 one of them gone, op 5 the end of a joiner's snapshot, op 6 the
+    // answer to a DigIntent (granted or refused; a grant tells the client to spend the item it held). Sent on every
+    // change the host's census sees, and every row to a joiner at its ready edge, then op 5. A receiver adopts its own
+    // native actor at a row's place or spawns one. The underground loot mounds are not in it. Never relayed; a client's
+    // copy is refused at the host's receive edge. BlobChunkPayload.
+    DigState = 245,
 };
 
 #pragma pack(push, 1)

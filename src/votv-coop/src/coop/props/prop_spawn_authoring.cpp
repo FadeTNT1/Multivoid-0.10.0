@@ -30,6 +30,7 @@ constexpr int kGateTag = 0x53504157;  // 'SPAW'
 void* g_gamemodeSpawnFn = nullptr;   // mainGamemode_C::spawnPropThroughGamemode -- watched
 void* g_menuSpawnFn     = nullptr;   // ui_spawnmenu_C::spawn -- the caller that makes it a player's
 void* g_toolUberFn      = nullptr;   // tool_spawn_C::ExecuteUbergraph_tool_spawn -- the toolgun
+void* g_shovelUberFn    = nullptr;   // prop_shovel_C::ExecuteUbergraph_prop_shovel -- the dirt a shovel throws
 bool  g_watchInstalled  = false;
 
 // The negative arm, and it is the half a run cannot otherwise see. Catching every menu spawn and
@@ -44,6 +45,7 @@ unsigned g_verbFromOther = 0;   // ... by anything else (lib_C::replaceProp, com
 // and never a string build. Zeroed ComparisonIndex means "not yet converted".
 R::FName g_menuSpawnName{0, 0};   // "spawn"
 R::FName g_toolUberName{0, 0};    // "ExecuteUbergraph_tool_spawn"
+R::FName g_shovelUberName{0, 0};  // "ExecuteUbergraph_prop_shovel"
 
 // Is `fn` a function named `name` whose owner (a UFunction's Outer is its declaring class) is
 // called `className`? Both compares are allocation-free: the FName pair is two ints, and the
@@ -112,6 +114,8 @@ void Install(bool isClient) {
         g_menuSpawnName = ue_wrap::fname_utils::StringToFName(L"spawn");
     if (g_toolUberName.ComparisonIndex == 0)
         g_toolUberName = ue_wrap::fname_utils::StringToFName(L"ExecuteUbergraph_tool_spawn");
+    if (g_shovelUberName.ComparisonIndex == 0)
+        g_shovelUberName = ue_wrap::fname_utils::StringToFName(L"ExecuteUbergraph_prop_shovel");
 
     ue_wrap::facts::Resolved gamemodeSpawn;
     if (!g_gamemodeSpawnFn) {
@@ -158,6 +162,17 @@ bool BirthIsPlayerAuthored() {
         g_toolUberFn = const_cast<void*>(caller);
         UE_LOGI("prop_spawn_authoring: the toolgun's ubergraph is the calling frame -- its births "
                 "are a player's");
+        return true;
+    }
+    // The shovel: its ubergraph finishes the dirt ball it throws, a prop the host has no copy of until the thrown ball
+    // crosses (coop/props/dig_sync has the hole it digs, which no key names and this door never carries). The same
+    // ubergraph finishes the hole; a hole has no key, so that birth leaves the drain at its key wait.
+    if (caller == g_shovelUberFn) return true;
+    if (!g_shovelUberFn &&
+        FunctionIs(const_cast<void*>(caller), g_shovelUberName, L"prop_shovel_C")) {
+        g_shovelUberFn = const_cast<void*>(caller);
+        UE_LOGI("prop_spawn_authoring: the shovel's ubergraph is the calling frame -- the dirt it throws is a "
+                "player's");
         return true;
     }
     return false;

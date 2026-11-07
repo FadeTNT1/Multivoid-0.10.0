@@ -125,6 +125,7 @@ set(VOTVCOOP_SOURCES
     src/coop/items/coingun_arbiter.cpp
     src/coop/items/coingun_collect.cpp
     src/coop/items/point_sack_intent.cpp
+    src/coop/props/dig_sync.cpp
     src/coop/items/poster_sync.cpp
     src/coop/items/poster_mirror.cpp
     src/coop/items/order_sync.cpp
