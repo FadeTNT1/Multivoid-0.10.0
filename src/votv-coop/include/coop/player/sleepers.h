@@ -17,7 +17,11 @@
 // change (ue_wrap/actors/storage_inventory RebuildProfileItems).
 //
 // The host itself never sleeps: a listen host that leaves ends the session. A kick or a ban lays no sleeper down and
-// takes an existing one away (the player's profile keeps what the looting left). Gameplay layer (principle 7).
+// takes an existing one away (the player's profile keeps what the looting left).
+//
+// A client who is still connected when the world is saved, or when the session ends, is written to the saved list as
+// well -- at their spot, facing, floor and name -- but laid down only when that world is loaded again, and only if they
+// are not back by then. Their inventory is the host's stored profile of them. Gameplay layer (principle 7).
 // Game thread.
 
 #pragma once
@@ -41,6 +45,10 @@ void Install(coop::net::Session* session);  // the loot press seam; retried unti
 void Tick();                                // build, pose watch, the host's write-back and its saved list
 void OnClientDisconnect();                  // a client's session ended: its sleepers go
 void OnSessionEnd();                        // any role: every sleeper and record of this session dropped
+// Host: the session is ending (a quit, or the teardown after a stop), BEFORE its players' puppets go: every connected
+// client is written to the saved list as a sleeper at their last spot, so the world loaded again has them lying
+// there. Once per session; a no-op for a client, a world whose list was not read, or `sleepers.enabled` off.
+void OnSessionEnding(const char* why);
 
 // ---- online sleepers ----
 // An online player at rest (coop/player/sleep_sync: resting in a bed or a sleeping bag, or dreaming) is shown as a

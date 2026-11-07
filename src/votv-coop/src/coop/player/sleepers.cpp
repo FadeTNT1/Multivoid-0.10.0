@@ -80,6 +80,7 @@ constexpr auto kBuildRetry = std::chrono::milliseconds(1000);
 constexpr int kMaxBuildTries = 60;
 constexpr auto kWritebackEvery = std::chrono::milliseconds(1000);
 constexpr auto kPoseWatchEvery = std::chrono::milliseconds(2000);
+constexpr auto kOnlineScanEvery = std::chrono::milliseconds(1000);
 constexpr const wchar_t* kSidecar = L"sleepers.txt";
 constexpr const char* kSidecarMagic = "VCSL1";
 
@@ -149,6 +150,14 @@ bool g_loadedAny = false;
 struct Saved { std::string guid; std::wstring nick; std::string skin; FVector stand; float standYaw; FVector lie; FRotator rot; };
 std::vector<Saved> g_atGather;                // host: the list as the last gather saw it
 bool g_gatherTaken = false;
+size_t g_atGatherOnline = 0;                  // host: how many of g_atGather are connected players, not sleepers
+// Host: the connected clients as the last scan saw them (their standing spot), the list a quit writes when the
+// engine can no longer be asked. `g_hostSeen` is set while a hosted session ticks, so the session's end -- which
+// reads a stopped session -- still knows it was a host's; `g_endFlushed` makes the end's write run once.
+std::vector<Saved> g_onlineCache;
+Clock::time_point g_nextOnlineScan{};
+bool g_hostSeen = false;
+bool g_endFlushed = false;
 bool g_installed = false;
 Clock::time_point g_swallowUntil{};
 bool g_swallowRelease = false;
@@ -555,10 +564,94 @@ bool UnHex(const std::string& h, std::string& out) {
     return true;
 }
 
-std::vector<Saved> CurrentList() {
+enum class Spot { Found, Dead, None };
+
+// Where the player of `slot` stands and which way they face: their puppet on the host, else the standing spot in their
+// stored profile. Dead players have none (a corpse is not laid down).
+Spot StandingSpot(int slot, const std::string& guid, FVector& stand, float& yaw) {
+    bool have = false;
+    if (RemotePlayer* p = coop::players::Registry::Get().Puppet(static_cast<uint8_t>(slot)); p && p->valid()) {
+        if (p->GetHealth() <= 0.001f) return Spot::Dead;
+        FRotator r{};
+        if (E::TryGetActorLocation(p->actor(), stand)) {
+            have = true;
+            if (E::TryGetActorRotation(p->actor(), r)) yaw = r.Yaw;
+        }
+    }
+    if (have) return Spot::Found;
+    coop::player_profile::Profile prof;
+    if (!ReadProfile(guid, prof) || !prof.pose.valid) return Spot::None;
+    stand = FVector{prof.pose.x, prof.pose.y, prof.pose.z};
+    yaw = prof.pose.yaw;
+    return Spot::Found;
+}
+
+// The floor under a standing spot, traced as the lying pose does it, so the saved spot is the one on the floor.
+void SnapStandToFloor(FVector& stand) {
+    void* const local = coop::players::Registry::Get().Local();
+    if (!local) return;
+    const float halfH = E::GetActorCharacterHalfHeight(local);
+    if (halfH <= 1.f) return;
+    ue_wrap::trace::Hit hit;
+    const FVector from{stand.X, stand.Y, stand.Z + 50.f};
+    const FVector to{stand.X, stand.Y, stand.Z - 600.f};
+    if (ue_wrap::trace::LineHitStatDyn(local, from, to, &hit) && hit.blocked) stand.Z = hit.point.Z + halfH + 2.f;
+}
+
+// Host: every connected client (never slot 0: the listen host does not sleep, and a dedicated server has no player)
+// as a sleeper entry at their spot now. These are written to the saved list but NOT laid down while their owner is
+// online. `full` (game thread) traces the floor and drops a player with no stored items, who could not be laid down
+// again; the scan a quit falls back on is `full == false`. A dead player is skipped; one in a bed or asleep keeps the
+// lying pose every peer saw.
+std::vector<Saved> CollectOnline(bool full) {
+    std::vector<Saved> out;
+    if (!Enabled()) return out;
+    for (int k = 1; k < static_cast<int>(coop::players::kMaxPeers); ++k) {
+        if (!coop::roster_ledger::Occupied(k)) continue;
+        const coop::roster_ledger::Row& row = coop::roster_ledger::Get(k);
+        const std::string guid = row.guid.empty() ? coop::player_handshake::GuidForSlot(k) : row.guid;
+        if (!coop::player_handshake::IsValidGuid(guid) || g_noSleeper.count(guid) || FindByGuid(guid)) continue;
+        if (full) {
+            coop::player_profile::Profile prof;
+            if (!ReadProfile(guid, prof) || !prof.hasItems || prof.items.empty()) continue;
+        }
+        Saved v{};
+        v.guid = guid;
+        v.nick = row.nick;
+        v.skin = row.skin;
+        const OnlineRest& rest = g_online[k];
+        if (rest.lying) {
+            v.stand = rest.anchor;
+            v.standYaw = rest.standYaw;
+            v.lie = rest.lie;
+            v.rot = rest.rot;
+        } else {
+            const Spot sp = StandingSpot(k, guid, v.stand, v.standYaw);
+            if (sp == Spot::Dead) {
+                if (full) UE_LOGI("sleeper: %s is dead -- not saved as a sleeper", Utf8(row.nick).c_str());
+                continue;
+            }
+            if (sp == Spot::None) continue;
+            if (full) SnapStandToFloor(v.stand);
+            v.lie = v.stand;                          // not a final lying pose: the body is measured when it is built
+            v.rot = FRotator{0.f, v.standYaw, 0.f};
+        }
+        out.push_back(std::move(v));
+    }
+    return out;
+}
+
+// The saved list: the sleepers lying now, then (`withOnline`) the connected clients, so a world loaded again has every
+// player in it. `onlineOut` gets how many of the second kind.
+std::vector<Saved> CurrentList(bool withOnline, size_t* onlineOut = nullptr) {
     std::vector<Saved> out;
     for (const auto& [id, s] : g_sleepers)
         if (s.poseFinal) out.push_back(Saved{s.guid, s.nick, s.skin, s.stand, s.standYaw, s.lie, s.lieRot});
+    size_t n = 0;
+    if (withOnline) {
+        for (Saved& v : CollectOnline(/*full=*/true)) { out.push_back(std::move(v)); ++n; }
+    }
+    if (onlineOut) *onlineOut = n;
     return out;
 }
 
@@ -604,7 +697,11 @@ void LoadSavedList() {
         std::wstring wnick;
         if (!coop::text::FromUtf8Strict(nick.data(), nick.size(), &wnick)) continue;
         if (GuidOnline(guid)) continue;   // already back in: no sleeper
-        if (LayDown(guid, wnick, skin, v.stand, v.standYaw, &v.lie, &v.rot, "read back from the saved world")) ++laid;
+        // A player who was online at the save has no lying pose yet: the body is measured when it is built.
+        const bool lying = IsLying(v.rot);
+        if (LayDown(guid, wnick, skin, v.stand, v.standYaw, lying ? &v.lie : nullptr, lying ? &v.rot : nullptr,
+                    "read back from the saved world"))
+            ++laid;
     }
     UE_LOGI("sleeper: %zu of %zu saved sleepers laid down again", laid, lines);
 }
@@ -783,12 +880,18 @@ void Tick() {
     }
     const auto now = Clock::now();
     if (IsHost()) {
+        g_hostSeen = true;
         const uint32_t serial = coop::save_transfer::HostSlotSerial();
         if ((serial != g_loadedSerial || !g_loadedAny) && coop::players::Registry::Get().Local() && IC::Ready()) {
             g_loadedSerial = serial;
             g_loadedAny = true;
             if (Enabled()) LoadSavedList();
         }
+    }
+    if (IsHost() && g_loadedAny && now >= g_nextOnlineScan) {
+        // The connected clients' last known spots, for a quit that cannot ask the engine.
+        g_nextOnlineScan = now + kOnlineScanEvery;
+        g_onlineCache = CollectOnline(/*full=*/false);
     }
     if (!g_sleepers.empty()) TickBuilds(now);
     if (IsHost() && !g_wakes.empty()) {
@@ -835,7 +938,34 @@ void OnSessionEnd() {
     g_loadedAny = false;
     g_atGather.clear();
     g_gatherTaken = false;
+    g_atGatherOnline = 0;
+    g_onlineCache.clear();
+    g_hostSeen = false;
+    g_endFlushed = false;
     g_swallowRelease = false;
+}
+
+void OnSessionEnding(const char* why) {
+    // Only a hosted session whose saved list was read: the file on disk is otherwise left as it was. Once per session.
+    if (!g_hostSeen || !g_loadedAny || g_endFlushed || !Enabled()) return;
+    g_endFlushed = true;
+    // On the game thread the clients are asked now (their puppets and the roster are still up); anywhere else the last
+    // scan stands, as the engine is not ours to read from there.
+    size_t online = 0;
+    std::vector<Saved> list;
+    if (GT::IsGameThread()) {
+        list = CurrentList(/*withOnline=*/true, &online);
+    } else {
+        list = CurrentList(/*withOnline=*/false);
+        for (Saved& v : g_onlineCache)
+            if (!FindByGuid(v.guid)) { list.push_back(v); ++online; }
+    }
+    if (PS::WriteWorldSidecar(kSidecar, SerializeList(list))) {
+        UE_LOGI("sleeper: session ending -- %zu connected player(s) laid down (%s); %zu sleeper(s) saved beside the "
+                "world's profiles", online, why ? why : "", list.size());
+    } else {
+        UE_LOGW("sleeper: session ending (%s) -- the saved sleepers could not be written", why ? why : "");
+    }
 }
 
 void OnPlayerLeaving(int slot, const coop::roster_ledger::Row& outgoing) {
@@ -853,27 +983,16 @@ void OnPlayerLeaving(int slot, const coop::roster_ledger::Row& outgoing) {
     if (!Enabled()) return;
     FVector stand{};
     float yaw = 0.f;
-    bool have = false;
-    if (RemotePlayer* p = coop::players::Registry::Get().Puppet(static_cast<uint8_t>(slot)); p && p->valid()) {
-        if (p->GetHealth() <= 0.001f) {
+    switch (StandingSpot(slot, guid, stand, yaw)) {
+        case Spot::Dead:
             UE_LOGI("sleeper: %s left dead -- no sleeper", Utf8(outgoing.nick).c_str());
             return;
-        }
-        FRotator r{};
-        if (E::TryGetActorLocation(p->actor(), stand)) {
-            have = true;
-            if (E::TryGetActorRotation(p->actor(), r)) yaw = r.Yaw;
-        }
-    }
-    if (!have) {
-        coop::player_profile::Profile prof;
-        if (!ReadProfile(guid, prof) || !prof.pose.valid) {
+        case Spot::None:
             UE_LOGI("sleeper: %s left with no body here and no standing spot on record -- no sleeper",
                     Utf8(outgoing.nick).c_str());
             return;
-        }
-        stand = FVector{prof.pose.x, prof.pose.y, prof.pose.z};
-        yaw = prof.pose.yaw;
+        case Spot::Found:
+            break;
     }
     // One who left while asleep keeps the very pose every peer saw, so the body does not jump as it goes offline.
     if (rest.lying) {
@@ -952,17 +1071,21 @@ void QueueConnectBroadcastForSlot(int slot) {
 void OnWorldGathered() {
     if (!IsHost()) return;
     for (auto& [id, s] : g_sleepers) Writeback(s, "the world is being saved");
-    g_atGather = CurrentList();
+    g_atGather = CurrentList(/*withOnline=*/true, &g_atGatherOnline);   // and every connected client, at their spot now
     g_gatherTaken = true;
 }
 
 void OnWorldSaveWritten() {
     // Off, or this world's saved list not read yet: the list on disk is left as it was.
     if (!IsHost() || !Enabled() || !g_loadedAny) return;
-    const std::vector<Saved> list = g_gatherTaken ? g_atGather : CurrentList();
+    size_t online = g_atGatherOnline;
+    const std::vector<Saved> list = g_gatherTaken ? g_atGather : CurrentList(/*withOnline=*/true, &online);
     g_gatherTaken = false;
-    if (PS::WriteWorldSidecar(kSidecar, SerializeList(list)))
+    g_atGatherOnline = 0;
+    if (PS::WriteWorldSidecar(kSidecar, SerializeList(list))) {
+        UE_LOGI("sleeper: saved %zu online player(s) as sleepers at world save", online);
         UE_LOGI("sleeper: %zu sleeper(s) saved beside the world's profiles", list.size());
+    }
 }
 
 void OnStateChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot) {
