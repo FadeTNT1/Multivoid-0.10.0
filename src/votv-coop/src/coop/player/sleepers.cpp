@@ -24,6 +24,7 @@
 #include "coop/save/save_transfer.h"
 #include "coop/session/player_handshake.h"
 #include "ue_wrap/actors/inventory_item_codec.h"
+#include "ue_wrap/actors/prop.h"
 #include "ue_wrap/actors/prop_flags.h"
 #include "ue_wrap/actors/puppet.h"
 #include "ue_wrap/actors/storage_inventory.h"
@@ -86,6 +87,7 @@ constexpr auto kBuildRetry = std::chrono::milliseconds(1000);
 constexpr int kMaxBuildTries = 60;
 constexpr auto kWritebackEvery = std::chrono::milliseconds(1000);
 constexpr auto kPoseWatchEvery = std::chrono::milliseconds(2000);
+constexpr auto kCrateWatchEvery = std::chrono::milliseconds(500);
 constexpr auto kOnlineScanEvery = std::chrono::milliseconds(1000);
 constexpr auto kWakeDebounce = std::chrono::milliseconds(1000);     // an awake read shorter than this is a flicker
 constexpr auto kSettleStill = std::chrono::milliseconds(300);       // the streamed spot held still this long: settle
@@ -120,6 +122,8 @@ struct Sleeper {
     int tries = 0;
     Clock::time_point nextTry{};
     Clock::time_point nextPoseWatch{};
+    Clock::time_point nextCrateWatch{};
+    int crateFixes = 0;        // times the crate was found shown, colliding, simulating or off the body
     bool poseFixedSaid = false;
     bool closing = false;      // host: the owner is coming back; no new loot, the held ones settle
     bool closingSaid = false;
@@ -243,6 +247,14 @@ void DestroyActors(Sleeper& s) {
     s.built = false;
 }
 
+// The loot crate's resting state on every peer: not drawn, no collision, not simulating. The body's [E] Loot is the
+// only way into it; a crate anyone can see, walk into or knock over is a bug.
+void HideCrate(void* crate) {
+    E::SetActorSimulatePhysics(crate, false);
+    E::SetActorEnableCollision(crate, false);
+    E::SetActorHiddenInGame(crate, true);
+}
+
 // The hidden crate that holds the loot: a display-only prop of this peer, as a held item's mirror is one -- marked
 // before its finish so no lane enrols or broadcasts it, static, out of the save, hidden and with no collision.
 void* SpawnCrate(const Sleeper& s) {
@@ -264,9 +276,7 @@ void* SpawnCrate(const Sleeper& s) {
         return nullptr;
     }
     if (!noSave) UE_LOGW("sleeper: the loot crate's ignoreSav did not resolve -- it may be written into a save");
-    E::SetActorSimulatePhysics(actor, false);
-    E::SetActorEnableCollision(actor, false);
-    E::SetActorHiddenInGame(actor, true);
+    HideCrate(actor);
     return actor;
 }
 
@@ -847,8 +857,12 @@ constexpr const char* kOpenWay[4] = {"", "openPropInv", "the crate's openContain
 
 void Reveal(LootOpen& o, bool on) {
     if (!Live(o.crate, o.crateIdx)) return;
-    E::SetActorHiddenInGame(o.crate, !on);
-    E::SetActorEnableCollision(o.crate, on);
+    if (on) {
+        E::SetActorHiddenInGame(o.crate, false);
+        E::SetActorEnableCollision(o.crate, true);
+    } else {
+        HideCrate(o.crate);
+    }
     o.revealed = on;
 }
 
@@ -1088,6 +1102,36 @@ void PoseWatch(Sleeper& s, Clock::time_point now) {
     Lay(s, /*measure=*/false);
 }
 
+// The crate held hidden: the game's own prop code (an open through the crate's openContainer, its wake and freeze
+// handling) can show it, give it collision back or set it simulating, and then every peer sees a crate sitting on or
+// rolling off the body. Checked twice a second, from memory and two cheap reads, and put back -- hidden, no collision,
+// not simulating, at the body's spot -- whenever it is not. An open in flight owns the crate until it ends.
+void CrateWatch(Sleeper& s, Clock::time_point now) {
+    if (s.joining || !Live(s.crate, s.crateIdx) || now < s.nextCrateWatch) return;
+    s.nextCrateWatch = now + kCrateWatchEvery;
+    if (g_open.active && g_open.crate == s.crate) return;
+    ue_wrap::prop::PropVisibility v{};
+    ue_wrap::prop::ReadPropVisibility(s.crate, v);
+    const bool shown = v.actorHiddenRead && !v.actorHidden;
+    const bool colliding = v.rootCollision > 0;
+    const bool simulating = E::IsActorRootSimulatingPhysics(s.crate);
+    FVector at{};
+    const bool haveAt = E::TryGetActorLocation(s.crate, at);
+    const float off = haveAt ? Len(Sub(at, s.lie)) : 0.f;
+    const bool moved = haveAt && off > 5.f;
+    if (!shown && !colliding && !simulating && !moved) return;
+    if (moved) {
+        E::SetActorLocation(s.crate, s.lie);
+        E::SetActorRotation(s.crate, FRotator{0.f, s.lieRot.Yaw, 0.f});
+    }
+    HideCrate(s.crate);
+    ++s.crateFixes;
+    if (s.crateFixes <= 3 || s.crateFixes % 100 == 0)
+        UE_LOGW("sleeper: %s's loot crate was found %s%s%s%s(%.0f cm off the body, fix #%d) -- hidden again",
+                Utf8(s.nick).c_str(), shown ? "shown " : "", colliding ? "colliding " : "",
+                simulating ? "simulating " : "", moved ? "moved " : "", off, s.crateFixes);
+}
+
 void TickBuilds(Clock::time_point now) {
     for (auto& [id, s] : g_sleepers) {
         if (s.built && (!Live(s.body, s.bodyIdx) || (!s.joining && !Live(s.crate, s.crateIdx)))) {
@@ -1099,6 +1143,7 @@ void TickBuilds(Clock::time_point now) {
         }
         if (s.built) {
             PoseWatch(s, now);
+            CrateWatch(s, now);
             continue;
         }
         if (now < s.nextTry || s.tries >= kMaxBuildTries) continue;
@@ -1334,6 +1379,7 @@ void OnClientDisconnect() {
 void OnSessionEnd() {
     coop::sleeper_snore::StopAll();
     coop::sleeper_drag::OnSessionEnd();
+    if (g_open.revealed) Reveal(g_open, false);
     g_open = LootOpen{};   // its crate goes with the sleepers below
     // Loot taken since the last 1 Hz write-back would be lost with the crates: write it back first.
     if (IsHost())
@@ -1700,6 +1746,7 @@ bool DragPlace(uint32_t id, const FVector& lie, float yaw, bool settle) {
     if (Live(s.crate, s.crateIdx)) {
         E::SetActorLocation(s.crate, s.lie);
         E::SetActorRotation(s.crate, FRotator{0.f, yaw, 0.f});
+        if (settle && !(g_open.active && g_open.crate == s.crate)) HideCrate(s.crate);
     }
     if (settle) PinHead(s.body, s.lie);
     return true;
