@@ -10,6 +10,7 @@
 #include "coop/element/element.h"
 
 #include "ue_wrap/actors/fossilhound.h"
+#include "ue_wrap/actors/goreslither.h"
 #include "ue_wrap/actors/zombie.h"
 #include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
@@ -41,6 +42,8 @@ UE_FACT_FN(kRowSkerfuro, "npc_mirror_brain", L"npc_zombie_skerfuro_C", L"Execute
            Declared);
 UE_FACT_FN(kRowHound, "npc_mirror_brain", L"fossilhound_C", L"ExecuteUbergraph_fossilhound", Declared);
 UE_FACT_FN(kRowGeomOcta, "npc_mirror_brain", L"geomOcta_C", L"ExecuteUbergraph_geomOcta", Declared);
+UE_FACT_FN(kRowGoreSlither, "npc_mirror_brain", L"npc_goreSlither_C", L"ExecuteUbergraph_npc_goreSlither",
+           Declared);
 
 constexpr int kTagZombie   = 0x4D505A30;  // 'MPZ0'
 constexpr int kTagSummoner = 0x4D505A41;  // 'MPZA'
@@ -48,6 +51,7 @@ constexpr int kTagCorpse   = 0x4D505A43;  // 'MPZC'
 constexpr int kTagSkerfuro = 0x4D505A53;  // 'MPZS'
 constexpr int kTagHound    = 0x4D504630;  // 'MPF0'
 constexpr int kTagGeomOcta = 0x4D504730;  // 'MPG0'
+constexpr int kTagSlither  = 0x4D505330;  // 'MPS0'
 
 // ---- The mark ----
 
@@ -140,6 +144,7 @@ Watch g_watches[] = {
     {&kRowSkerfuro, kTagSkerfuro, R::ParamOffset{L"EntryPoint"}},
     {&kRowHound, kTagHound, R::ParamOffset{L"EntryPoint"}},
     {&kRowGeomOcta, kTagGeomOcta, R::ParamOffset{L"EntryPoint"}},
+    {&kRowGoreSlither, kTagSlither, R::ParamOffset{L"EntryPoint"}},
 };
 constexpr size_t kWatches = sizeof(g_watches) / sizeof(g_watches[0]);
 
@@ -380,6 +385,7 @@ void SetUpPresentation(void* actor, Origin origin) {
     static const EntryTable* const zombieTable = TableNamed(P::name::NpcClass_Zombie);
     static const EntryTable* const houndTable = TableNamed(P::name::NpcClass_Fossilhound);
     static const EntryTable* const octaTable = TableNamed(P::name::NpcClass_GeomOcta);
+    static const EntryTable* const slitherTable = TableNamed(P::name::NpcClass_GoreSlither);
     // The Octa's BeginPlay runs whole, so nothing is set up and nothing is said.
     if (octaTable && ChainHasTable(cls, *octaTable)) return;
     bool ok = true;
@@ -390,6 +396,9 @@ void SetUpPresentation(void* actor, Origin origin) {
         const bool ownBeginPlayRan = origin == Origin::Adopted;
         ok = ue_wrap::fossilhound::ApplyBeginPlayPresentation(actor, ownBeginPlayRan);
         if (ownBeginPlayRan) ++g_adoptedKickSkips;
+    } else if (slitherTable && ChainHasTable(cls, *slitherTable)) {
+        // An adopted twin's own BeginPlay already attached its mesh and rolled its phase; a second attach is the same.
+        ok = ue_wrap::goreslither::ApplyBeginPlayPresentation(actor);
     }
     UE_LOGI("npc_mirror_brain: %ls mirror brain off, presentation %s", R::ClassNameOf(actor).c_str(),
             ok ? "set up" : "incomplete");

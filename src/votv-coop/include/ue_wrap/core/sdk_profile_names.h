@@ -318,6 +318,9 @@ inline constexpr const wchar_t* NpcClass_KerfurOmega  = L"kerfurOmega_C";
 inline constexpr const wchar_t* NpcClass_Krampus      = L"npc_krampus_C";
 inline constexpr const wchar_t* NpcClass_Funguy       = L"npc_funguy_C";
 inline constexpr const wchar_t* NpcClass_GoreSlither  = L"npc_goreSlither_C";
+// The blue brain cheese's hatchling (BlueBrainCheeseClass below). A child of npc_goreSlither_C, so the super-chain
+// walk already takes it; listed by name too, so the hatch mirrors whatever its parent becomes.
+inline constexpr const wchar_t* NpcClass_GoreSlitherCheese = L"npc_goreslither_cheese_C";
 inline constexpr const wchar_t* NpcClass_Insomniac    = L"insomniac_C";
 inline constexpr const wchar_t* NpcClass_Fossilhound  = L"fossilhound_C";
 inline constexpr const wchar_t* NpcClass_Antibreather = L"antibreather_C";
@@ -404,6 +407,7 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_GeomOcta,          // the Geom Octahedron; host-authored ACharacter, pose rides EntityPose
     NpcClass_Kavotia,           // rozitalHole's patrollers; host-authored ACharacter, brain refused on a mirror
     NpcClass_Figura,            // the gamemode's CustomEvent_3 figure; host-authored ACharacter, self-destroy timer refused on a mirror
+    NpcClass_GoreSlitherCheese, // the blue brain cheese's hatchling; EX_CallMath, npc_world_enum source row
 };
 inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcAllowlist[0]);
 
@@ -488,6 +492,12 @@ inline constexpr const wchar_t* UfoDropperPigClass  = L"ufoDropper_pig_C";
 // npc_world_enum. The firetanks stay out of that row: a firetank_C mirror's BeginPlay arms five AI timers
 // (update, senseupdate, fire, speak, makehealthnoise) that no row refuses yet.
 inline constexpr const wchar_t* BoarInvasionClass = L"boarInvasion_C";
+// The blue brain cheese (prop_food_blueBrainCheese_C, a prop_food_C whose ReceiveTick replaces the food tick): every
+// 45 to 75 s it rolls 10 %, and with a pawn inside its sphere (else, at 50 %, another gore slither) it hatches into a
+// cheese gore slither (npc_goreslither_cheese_C, a child of npc_goreSlither_C that only blanks setMesh and preDied)
+// and destroys itself. The hatch is a BeginDeferred under EX_CallMath in the tick, so it crosses only through the
+// cheese's source row in npc_world_enum; a client's tick of a shared cheese is refused in coop/props/prop_food_state.
+inline constexpr const wchar_t* BlueBrainCheeseClass = L"prop_food_blueBrainCheese_C";
 // ---- The story-event scenes (coop/world/event_scene_sync, ue_wrap/actors/event_scenes) ----
 // Warning Obelisk: the obelisk box's trigger_spawnProp_C (its runTrigger mints the class its prop row names) mints
 // obelisk_C, an actor_save_C. Its BeginPlay rises the mesh, then plays the fall timeline `a`; the finish
@@ -1103,6 +1113,9 @@ inline constexpr const wchar_t* PhysAudioImpactProp          = L"sound_impact"; 
 inline constexpr const wchar_t* PhysAudioDamagedProp         = L"sound_damaged";    // damage taken, still standing
 inline constexpr const wchar_t* PhysAudioDestroyedProp       = L"sound_destroyed";  // the break
 inline constexpr const wchar_t* PropPhysicsImpactProp        = L"physicsImpact";      // prop_C -> comp_physicsImpact_C
+// The component class itself: its graph's `destroyed` entry (a break) mints the prop's gibs (struct_breakableprop's
+// propGibs, e.g. a cheese wheel's pieces) under EX_CallMath, with the component as the spawning frame's object.
+inline constexpr const wchar_t* PhysImpactComponentClass     = L"comp_physicsImpact_C";
 inline constexpr const wchar_t* PhysImpactMatOverrideProp    = L"physmat_override";   // comp_physicsImpact_C UPhysicalMaterial*, wins when valid
 inline constexpr const wchar_t* PhysImpactMatProp            = L"physmat";            // comp_physicsImpact_C UPhysicalMaterial*
 inline constexpr const wchar_t* PhysImpactDamageFn           = L"impactDamage";       // comp_physicsImpact_C (damage, impact, hit, actor)

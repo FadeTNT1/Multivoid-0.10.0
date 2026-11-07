@@ -97,12 +97,13 @@ constexpr int kDamageVerbTag = 0x504C4447;  // 'PLDG'
 bool g_damageWatchDone = false;
 std::atomic<uint32_t> g_verbCanceled{0};
 
-// One refusal of any of the four verbs on a puppet, counted in RefusedDamage and logged on a rate.
-void NoteRefused(const char* verb, void* puppet) {
+// One refusal of any of the four verbs on a puppet, counted in RefusedDamage and logged on a rate. The caller is the
+// Blueprint object whose graph made the call (null through ProcessEvent): it names what hit the puppet.
+void NoteRefused(const char* verb, void* puppet, void* caller = nullptr) {
     const uint32_t n = ++g_verbCanceled;
     if (n <= 5 || (n % 100) == 0)
-        UE_LOGI("player_damage: canceled %s on a peer's puppet %p (#%u) -- its owner computes its own damage", verb,
-                puppet, n);
+        UE_LOGI("player_damage: canceled %s on a peer's puppet %p (#%u) caller=%ls -- its owner computes its own "
+                "damage", verb, puppet, n, caller ? R::ClassNameOf(caller).c_str() : L"none");
 }
 
 sg::Verdict OnDamageVerbPre(const sg::Call& c) {
@@ -180,6 +181,17 @@ bool FirstSent(void* cls, uint8_t verb) {
     return true;
 }
 
+SeenKey g_undeliveredSeen[kSeenMax];  // (caller class, why) pairs whose undelivered hit was said
+size_t  g_undeliveredSeenCount = 0;
+
+bool FirstUndelivered(void* cls, uint8_t why) {
+    for (size_t i = 0; i < g_undeliveredSeenCount; ++i)
+        if (g_undeliveredSeen[i].cls == cls && g_undeliveredSeen[i].verb == why) return false;
+    if (g_undeliveredSeenCount >= kSeenMax) return false;
+    g_undeliveredSeen[g_undeliveredSeenCount++] = SeenKey{cls, why};
+    return true;
+}
+
 bool FirstMirror(void* cls) {
     for (size_t i = 0; i < g_mirrorSeenCount; ++i)
         if (g_mirrorSeen[i] == cls) return false;
@@ -240,7 +252,20 @@ coop::net::PlayerHitPayload BuildPunch(const sg::Call& c) {
 void DeliverToOwner(const sg::Call& c, bool punch) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
-    if (!coop::creature_hit::IsDelivered(c.callerObject)) return;
+    if (!coop::creature_hit::IsDelivered(c.callerObject)) {
+        // A creature's hit that is not delivered: its family is not parked, so its client mirror is trusted to make
+        // the owner's hit itself. Said once per class; a creature that has no mirror at all (it never crossed) is the
+        // case this line exists to show, since then nobody's machine damages the owner.
+        if (c.callerObject && coop::creature_hit::IsCreature(c.callerObject) &&
+            FirstUndelivered(R::ClassOf(c.callerObject), 0))
+            UE_LOGI("[HIT] not delivered: %ls hit a puppet but its family is not parked -- the owner's mirror of it "
+                    "makes the hit there", R::ClassNameOf(c.callerObject).c_str());
+        else if (c.callerObject && !coop::creature_hit::IsCreature(c.callerObject) &&
+                 FirstUndelivered(R::ClassOf(c.callerObject), 1))
+            UE_LOGI("[HIT] not delivered: %ls hit a puppet and is no synced creature (no Npc element) -- the owner "
+                    "takes no hit from it unless its own copy makes one", R::ClassNameOf(c.callerObject).c_str());
+        return;
+    }
     const uint8_t slot = coop::players::Registry::Get().PeerIdOfActor(c.object);
     if (slot == coop::players::kPeerIdHost || slot >= coop::players::kMaxPeers) return;
     const coop::net::PlayerHitPayload p = punch ? BuildPunch(c) : BuildAddDamage(c);
@@ -278,7 +303,7 @@ sg::Verdict OnHitVerbPre(const sg::Call& c) {
         if (!ragdoll) WatchMirrorHit(c);
         return sg::Verdict::Run;
     }
-    NoteRefused(ragdoll ? "ragdollMode" : punch ? "punch" : "addDamage", c.object);
+    NoteRefused(ragdoll ? "ragdollMode" : punch ? "punch" : "addDamage", c.object, c.callerObject);
     if (!ragdoll) DeliverToOwner(c, punch);
     return sg::Verdict::Cancel;
 }
