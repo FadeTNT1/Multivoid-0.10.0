@@ -459,7 +459,7 @@ bool ApplyBeam(uint8_t slot, void* puppet, const char* why, bool audible) {
 void Condition(uint8_t slot, PeerBeam& b, coop::RemotePlayer& rp, uint64_t now) {
     void* const puppet = b.actor;
     void* const light = b.light;
-    const float dt = b.lastCondMs ? std::min(0.1f, static_cast<float>(now - b.lastCondMs) / 1000.f) : 0.f;
+    const float dt = b.lastCondMs ? (std::min)(0.1f, static_cast<float>(now - b.lastCondMs) / 1000.f) : 0.f;
     b.lastCondMs = now;
 
     if (now >= b.nextTraceMs) {
