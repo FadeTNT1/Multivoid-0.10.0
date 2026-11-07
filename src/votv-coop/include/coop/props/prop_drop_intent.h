@@ -21,6 +21,7 @@
 #include "coop/net/protocol.h"
 
 namespace coop::net { class Session; }
+namespace ue_wrap::script_gate { struct Call; }
 
 namespace coop::prop_drop_intent {
 
@@ -42,6 +43,16 @@ void Tick(coop::net::Session* session);
 // The park is the SAFETY INVARIANT -- the host destroys its copy before the drop intent can arrive, so the
 // later re-spawn authors exactly ONE host prop and there is no dup. Game thread. Bounded FIFO set.
 void NoteClientKeyedDestroy(const std::wstring& key);
+
+// CLIENT: mark the body a script-gate PRE is about to let run as an UNPACK verb -- a player's own
+// action whose body births new props out of the one it runs on (an MRE's open, prop_food_mre_C's
+// actionOptionIndex, run natively or as a granted replay). Every prop-lineage birth the body makes
+// while it runs is admitted at the drain as an ordinary drop intent, so the host spawns it for every
+// peer and this client adopts its own copy by key, and it is recorded self-authored so the join
+// sweep spares it. The window is the gate's own scope around the body (script_gate::MarkScope), so it
+// cannot outlive the body on any exit path. Call it from the PRE only, and only for a verdict of Run.
+// Game thread.
+void MarkUnpackScope(const ue_wrap::script_gate::Call& c);
 
 // HOST handler for a received PropDropIntent: spawn the authoritative Aprop_C by Key at the
 // transform, NOT echo-suppressed, so the host's own FinishSpawn watcher expresses it and broadcasts

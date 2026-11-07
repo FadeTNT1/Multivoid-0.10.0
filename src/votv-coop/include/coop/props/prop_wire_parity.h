@@ -69,7 +69,12 @@ void ConvergeGravity(void* actor, uint8_t physFlags);
 // unstick (prop_stick_sync, ConvergeStuck) and a trash clump to its own lane. With `restorePhysics` the
 // SP-parity simulate state follows at once (RestoreSpParityPhysicsAfterConverge); a caller with its own
 // physics decision after (the drive end) passes false. Logs "static released for eid X class Y" and, with
-// restorePhysics, "physics restored". Returns true when it wrote. Game thread.
+// restorePhysics, "physics restored". Returns true when it RELEASED.
+//
+// The same host-authored, live-state call also goes the other way: a row carrying kStatic that reaches a copy
+// that is not Static sets Static there (base setter, then simulate off), so a client cannot grab and stream a
+// body the host's copy refuses to hold. It skips a wall-attachable, a trash clump and a copy the local hand holds
+// right now, logs "static set for eid X class Y", and returns false (it is not a release). Game thread.
 bool ConvergeStaticRelease(void* actor, uint8_t physFlags, bool hostAuthored, bool restorePhysics);
 
 // SP-parity simulate state from the wire identity flags. Aprop_C::init() computes

@@ -8,6 +8,8 @@
 #include "coop/net/intent_queue.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
+#include "coop/player/hint_route.h"
+#include "coop/player/players_registry.h"  // kPeerIdHost
 #include "coop/player/roster_ledger.h"  // PerSlotState
 #include "coop/props/active_drive.h"
 
@@ -131,6 +133,9 @@ bool Execute(coop::net::Session& s, const coop::net::DroneFlyIntentPayload& p, u
         return true;
     }
     ++g_flown;
+    // The flight this press starts ends at the sell point, from the drone's own tick: its sale's hints are the
+    // presser's (coop/player/hint_route).
+    coop::hint_route::Credit(ue_wrap::drone::Find(), slot);
     UE_LOGI("[DRONE-CALL] PRESSED console %p for slot=%u (#%llu) -- the drone's own body owns the "
             "outcome", console, static_cast<unsigned>(slot),
             static_cast<unsigned long long>(g_flown));
@@ -140,6 +145,19 @@ bool Execute(coop::net::Session& s, const coop::net::DroneFlyIntentPayload& p, u
 // ---- the client's gate -----------------------------------------------------------------------
 sg::Verdict OnActionPre(const sg::Call& call) {
     auto* s = g_session.load(std::memory_order_acquire);
+    if (s && s->running() && s->role() == coop::net::Role::Host && call.object) {
+        // The host's own keyboard press sends the drone for the host: the credit a client's press left goes.
+        static void*   sHostFn = nullptr;
+        static int32_t sHostActionOff = -1;
+        if (call.function != sHostFn) {
+            sHostFn = call.function;
+            sHostActionOff = R::FindParamOffset(call.function, L"action");
+        }
+        if (sHostActionOff >= 0 && *reinterpret_cast<uint8_t*>(call.locals + sHostActionOff) == kActionUse &&
+            D::IsCursorOnKeyboard(call.object))
+            coop::hint_route::Credit(ue_wrap::drone::Find(), coop::players::kPeerIdHost);
+        return sg::Verdict::Run;
+    }
     if (!s || !s->connected() || s->role() != coop::net::Role::Client || !call.object) return sg::Verdict::Run;
 
     static void*   sFn = nullptr;
@@ -208,7 +226,7 @@ void Tick(coop::net::Session& session) {
     if (session.role() != coop::net::Role::Host) return;
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot) {
         Slot& sl = g_slots[slot];
-        sl.queue.Serve(kPressBudget, coop::active_drive::NowMs, [&](const coop::net::DroneFlyIntentPayload& p) {
+        sl.queue.Serve(slot, kPressBudget, coop::active_drive::NowMs, [&](const coop::net::DroneFlyIntentPayload& p) {
             if (!Execute(session, p, slot)) return coop::net::Served::Wait;  // a wait runs nothing: no token spent
             sl.waitSaid = false;  // a consumed press ends the wait's streak
             return coop::net::Served::Done;

@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <string>
 
+namespace ue_wrap::script_gate { struct Call; }
+
 namespace ue_wrap::votv_lib {
 
 // Dispatch lib_C::step(Character, ...) -- THE shared footstep verb every VOTV
@@ -36,6 +38,30 @@ bool AddGloss(const std::wstring& name, int32_t level, void* worldContext);
 // its award) and the laptop's list is refreshed; in any other mode it does nothing. False until lib_C resolves, or
 // when the name does not convert. Game thread (ProcessEvent).
 bool ProgressAdvancement(const std::wstring& name, bool disablePopup, void* worldContext);
+
+// lib_C::addHint(inText, type, debug, __WorldContext), the one function every in-game hint (the info-icon toast,
+// bottom right) is raised through: it creates a ui_hint_C, sets its `type` (enum_notifytype, the icon) and adds it
+// to the game mode's hint box, unless `debug` is set outside the editor or the settings disable pop-ups. Its
+// duration is the widget's own. The frame of one call, read at its entry.
+struct HintCall {
+    std::wstring text;           // the hint's display string (Conv_TextToString of inText)
+    uint8_t      type = 0;       // enum_notifytype
+    bool         debug = false;  // an editor-only hint: the game shows nothing outside the editor
+    void*        worldContext = nullptr;  // the raiser's Self, as every caller passes it
+};
+
+// Read lib_C::addHint's parameters out of a script-gate call to it. False when the function carries no such
+// parameter (another build) or the text does not read. Game thread (the text reads through ProcessEvent).
+bool ReadAddHintCall(const ue_wrap::script_gate::Call& call, HintCall& out);
+
+// Dispatch lib_C::addHint(text, type, false, worldContext): this machine's own hint, as the game raises it --
+// same widget, icon and duration. False until lib_C resolves, or when the text does not mint. Game thread.
+bool AddHint(const std::wstring& text, uint8_t type, void* worldContext);
+
+// Whether the Blueprint chain a script-gate call was entered through began in the local player's class
+// (mainPlayer_C): its input events and the verbs its use key dispatches. A body the player's own hand reached,
+// as opposed to an actor's tick, timer or latent resume, or a reflected call of ours. Game thread, in a PRE.
+bool BeganAtPlayer(const ue_wrap::script_gate::Call& call);
 
 
 }  // namespace ue_wrap::votv_lib

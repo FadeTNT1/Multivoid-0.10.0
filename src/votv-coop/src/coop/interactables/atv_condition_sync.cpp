@@ -26,7 +26,8 @@ namespace {
 // idle gate cannot drift from the struct silently.
 constexpr size_t kCondOff = offsetof(coop::net::AtvStatePayload, tiresDurability);
 constexpr size_t kCondBytes = sizeof(coop::net::AtvStatePayload) - kCondOff;
-static_assert(kCondBytes == 64, "the condition block must be 64 bytes (and AtvEntry::lastSentCond with it)");
+static_assert(kCondBytes == 68, "the condition block must be 68 bytes (and AtvEntry::lastSentCond with it)");
+static_assert(sizeof(coop::atv_sync::AtvEntry::lastSentCond) == kCondBytes, "lastSentCond must hold the condition block");
 
 // Change-edge quanta -- purely visual, not correctness bounds. Dirt domain is
 // 0..1 (a 1% step is invisible in the shader lerp); health domain 0..100 drives smoke
@@ -35,7 +36,8 @@ constexpr float kDirtEps = 0.01f;
 constexpr float kHealthEps = 0.5f;
 
 std::atomic<unsigned long long> g_applied{0}, g_updTires{0}, g_updDirt{0}, g_updSpare{0},
-    g_updHealth{0}, g_presenceSkipped{0}, g_deferred{0}, g_invalid{0};
+    g_updHealth{0}, g_presenceSkipped{0}, g_deferred{0}, g_invalid{0}, g_updBattery{0},
+    g_batteryPresenceSkipped{0};
 
 void PayloadToSnapshot(const coop::net::AtvStatePayload& p, AC::Snapshot& s) {
     for (int i = 0; i < 4; ++i) {
@@ -49,6 +51,7 @@ void PayloadToSnapshot(const coop::net::AtvStatePayload& p, AC::Snapshot& s) {
     s.spareDirt = p.spareDirt;
     s.fuel = p.fuel;
     s.health = p.health;
+    s.battery = p.battery;
     s.mask = p.tiresMask;
     s.hasSpare = p.hasSpare != 0;
     s.spareFixes = p.spareFixes;
@@ -92,6 +95,9 @@ void FillPayload(void* actor, coop::net::AtvStatePayload& p) {
     p.spareDirt = s.spareDirt;
     p.fuel = s.fuel;
     p.health = s.health;
+    // The charge in tenths: an idle ATV in the sun charges every tick, and an unquantized float would trip the idle
+    // syncer's byte-compare change gate at its full 5 Hz. -1 (no battery) passes as is.
+    p.battery = s.battery >= 0.f ? std::round(s.battery * 10.f) / 10.f : -1.f;
     p.tiresMask = s.mask;
     p.hasSpare = s.hasSpare ? 1 : 0;
     p.spareFixes = s.spareFixes;
@@ -143,7 +149,8 @@ void ApplyPayload(coop::atv_sync::AtvEntry& e, const coop::net::AtvStatePayload&
     {
         const float* fs[] = { &in.dur[0], &in.dur[1], &in.dur[2], &in.dur[3],
                               &in.dirt[0], &in.dirt[1], &in.dirt[2], &in.dirt[3],
-                              &in.bodyDirt, &in.spareDur, &in.spareDirt, &in.fuel, &in.health };
+                              &in.bodyDirt, &in.spareDur, &in.spareDirt, &in.fuel, &in.health,
+                              &in.battery };
         for (const float* f : fs) {
             if (!std::isfinite(*f)) {
                 g_invalid.fetch_add(1, std::memory_order_relaxed);
@@ -167,6 +174,7 @@ void ApplyPayload(coop::atv_sync::AtvEntry& e, const coop::net::AtvStatePayload&
         for (int i = 0; i < 4; ++i) { c100(in.dur[i]); c01(in.dirt[i]); }
         c01(in.bodyDirt); c100(in.spareDur); c01(in.spareDirt); c100(in.fuel);
         if (in.health < -1.f) in.health = -1.f; else if (in.health > 100.f) in.health = 100.f;
+        if (in.battery < 0.f) in.battery = -1.f; else if (in.battery > 100.f) in.battery = 100.f;
     }
 
     const AC::Snapshot& ex = e.condExpressed;
@@ -186,6 +194,24 @@ void ApplyPayload(coop::atv_sync::AtvEntry& e, const coop::net::AtvStatePayload&
                             std::fabs(in.spareDirt - ex.spareDirt) > kDirtEps;
     const bool groupHealth = std::fabs(in.health - ex.health) > kHealthEps;
 
+    // The battery: its charge is the syncer's (the drain runs only on the copy whose driver sits in it), but whether a
+    // battery is in at all is presence, consumed from the host's own copy only, as the tires are: a client's own
+    // insert or removal destroys or births a battery prop the host never saw. A block that disagrees with this copy on
+    // presence leaves the field alone; one that agrees writes the charge.
+    float localBattery = in.battery;
+    const bool batteryRead = AC::ReadBattery(actor, localBattery);
+    const bool batteryPresenceDiffers = batteryRead && ((in.battery >= 0.f) != (localBattery >= 0.f));
+    const bool writeBattery = batteryRead && (applyPresence || !batteryPresenceDiffers);
+    // updBattery shows the back lights while the charge is above zero: re-derived on that edge and on presence.
+    const bool groupBattery = writeBattery && (((in.battery > 0.f) != (ex.battery > 0.f)) ||
+                                               ((in.battery >= 0.f) != (ex.battery >= 0.f)));
+    if (batteryRead && !writeBattery) {
+        const auto n = g_batteryPresenceSkipped.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n == 1 || n % 100 == 0)
+            UE_LOGW("atv_condition: battery presence from a client syncer DIFFERS (%.1f vs this copy's %.1f) -- "
+                    "kept, the host's copy decides whether a battery is in, x%llu", in.battery, localBattery, n);
+    }
+
     if (!applyPresence && presenceDiffers) {
         // The KNOWN-BROKEN direction, counted and visible (CRUTCHES row; (b2) asserts it):
         // a client syncer's presence claim is not consumed -- its paired wheel-prop birth
@@ -202,9 +228,10 @@ void ApplyPayload(coop::atv_sync::AtvEntry& e, const coop::net::AtvStatePayload&
     AC::WriteAccumulators(actor, in);
     if (applyPresence && presenceDiffers)
         AC::WritePresence(actor, in.mask, in.hasSpare);
+    if (writeBattery) AC::WriteBattery(actor, in.battery);
     g_applied.fetch_add(1, std::memory_order_relaxed);
 
-    if (!(groupTires || groupDirt || groupSpare || groupHealth)) return;
+    if (!(groupTires || groupDirt || groupSpare || groupHealth || groupBattery)) return;
 
     // The defer guard: skipTireUpdate is measured writer-less and default-FALSE,
     // but if some future external writer sets it, the reducers no-op silently -- so defer
@@ -267,6 +294,14 @@ void ApplyPayload(coop::atv_sync::AtvEntry& e, const coop::net::AtvStatePayload&
             e.condExpressed.health = in.health;
         }
     }
+    if (groupBattery) {
+        const float was = ex.battery;
+        if (AC::CallVerb(actor, AC::Verb::UpdBattery)) {
+            g_updBattery.fetch_add(1, std::memory_order_relaxed);
+            e.condExpressed.battery = in.battery;
+            UE_LOGI("atv_condition: updBattery dispatched (battery %.1f -> %.1f)", was, in.battery);
+        }
+    }
     // fuel and the spare/tire durabilities have no verb: no expression to advance (values
     // were written above; nothing derives from them at apply time).
 }
@@ -290,6 +325,8 @@ Counters ReadCounters() {
     c.updDirtCalled = g_updDirt.load();
     c.updSpareCalled = g_updSpare.load();
     c.updHealthCalled = g_updHealth.load();
+    c.updBatteryCalled = g_updBattery.load();
+    c.batteryPresenceSkipped = g_batteryPresenceSkipped.load();
     c.presenceSkippedDiffering = g_presenceSkipped.load();
     c.deferred = g_deferred.load();
     c.invalidBlocks = g_invalid.load();

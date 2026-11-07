@@ -9,6 +9,7 @@
 
 #include "coop/comms/chat_sync.h"
 #include "coop/commands/command_sync.h"
+#include "coop/player/hint_route.h"  // HOST->CLIENT a hint the host raised for this player
 #include "coop/world/achievement_sync.h"  // the shared completed achievements and advancements
 #include "coop/world/alarm_sync.h"
 #include "coop/world/basement_flood_sync.h"  // HOST->CLIENT the basement's water level
@@ -486,6 +487,20 @@ bool HandleWorldEvent(const net::Session::ReliableMessage& msg) {
         net::CommandReplyPayload rp{};
         std::memcpy(&rp, msg.payload, sizeof(rp));
         coop::command_sync::OnReply(rp);
+        break;
+    }
+    case net::ReliableKind::HintRoute: {
+        // A hint the host's game raised for this player (an intent of ours, a robot or drone job we set going): shown
+        // here through this game's own hint call.
+        if (msg.payloadLen < sizeof(net::HintRoutePayload)) {
+            UE_LOGW("event_feed: HintRoute payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::HintRoutePayload));
+            break;
+        }
+        // Only the host routes: the host's receive edge refuses a client's copy (client_authorship.h).
+        net::HintRoutePayload hp{};
+        std::memcpy(&hp, msg.payload, sizeof(hp));
+        coop::hint_route::OnRouted(hp);
         break;
     }
     case net::ReliableKind::SkyState: {

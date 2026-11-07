@@ -136,8 +136,10 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
     const float loX = m + ext, hiX = io.DisplaySize.x - m - ext;
     const float ax = (loX <= hiX) ? std::clamp(p.x, loX, hiX) : p.x;
     const float ay = std::clamp(p.y, m + sz.y + gap + bubbleH, io.DisplaySize.y - m - barH - barGap);
-    const ImVec2 textPos(ax - labelW * 0.5f, ay - sz.y - gap);
-    const ImVec2 bp(ax - barW * 0.5f, ay - barGap);
+    // Both on whole pixels: ImGui truncates a text origin to the pixel grid, and a bar left at a
+    // sub-pixel position would slide up to a pixel against the nick as the plate moves.
+    const ImVec2 textPos(std::round(ax - labelW * 0.5f), std::round(ay - sz.y - gap));
+    const ImVec2 bp(std::round(ax - barW * 0.5f), std::round(ay - barGap));
 
     // The plate extents (the nick and bar union), kept for the voice-badge anchor below. No
     // backing box is drawn: readability rides the text outline and the health bar's own outline.
@@ -181,9 +183,10 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
     // it. The nick takes the grey treatment; the hurt flash wins.
     const float frac = std::clamp(p.healthPct / 100.f, 0.f, 1.f);
     if (p.sleeper) {
-        // No health bar on a sleeper; the loot hint sits where it would be, while the viewer can loot it.
-        if (p.lootHint) {
-            const char* hint = l10n::T("[E] Loot");
+        // No health bar on a sleeper; the loot hint sits where it would be, while the viewer can loot it. A joining
+        // body is never lootable; it says the player is on the way in.
+        if (p.lootHint || p.joining) {
+            const char* hint = p.joining ? l10n::T("(joining...)") : l10n::T("[E] Loot");
             const float hpx = px * 0.8f;
             const ImVec2 hsz = font->CalcTextSizeA(hpx, FLT_MAX, 0.f, hint);
             TextOutlined(dl, font, hpx, ImVec2(ax - hsz.x * 0.5f, bp.y), IM_COL32(230, 230, 200, static_cast<int>(a * 245.f)),

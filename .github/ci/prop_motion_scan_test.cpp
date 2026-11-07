@@ -23,6 +23,8 @@ struct Prop {
 std::vector<Prop> props;                 // actor i is &props[i]; eid i + 1
 std::unordered_set<void*> driven;        // rows the drive channel holds (all coasting here)
 std::vector<void*> coastOrder;           // every Coast the scan asked for, in order
+std::vector<void*> water;                // the props a water volume holds (the buoyancy master's list)
+bool settled = true;                     // the host's world has finished starting
 uint64_t nowMs = 0;
 std::unordered_map<int, uint64_t> endAtMs;   // eid -> when an End last applied to its copy
 ue_wrap::FVector camera{};
@@ -66,11 +68,13 @@ namespace prop_drive_host {
 inline bool IsDriven(void* a) { return fixture::driven.count(a) != 0; }
 inline bool InAHand(void* a) { return static_cast<fixture::Prop*>(a)->inHand; }
 inline size_t CoastingCount() { return fixture::driven.size(); }
+inline void OverrideClientSyncer(void*, const char*) {}
 inline void Coast(void* a, const char*) {
     fixture::coastOrder.push_back(a);
     if (!InAHand(a)) fixture::driven.insert(a);
 }
 }  // namespace prop_drive_host
+namespace host_world_settle { inline bool Settled() { return fixture::settled; } }
 namespace prop_drive_stream {
 inline uint64_t LastEndAgeMs(uint32_t eid) {
     const auto it = fixture::endAtMs.find(static_cast<int>(eid));
@@ -88,6 +92,9 @@ namespace prop {
 inline bool IsDescendantOfProp(void* a) { return static_cast<fixture::Prop*>(a)->isProp; }
 inline void* GetStaticMesh(void* a) { return a; }   // the mesh stands for its prop
 }  // namespace prop
+namespace water_float_master {
+inline size_t ActorsInWater(std::vector<void*>& out) { out = fixture::water; return out.size(); }
+}  // namespace water_float_master
 namespace engine {
 inline bool TryGetActorLocation(void* a, FVector& out) { out = static_cast<fixture::Prop*>(a)->loc; return true; }
 inline bool TryGetActorRotation(void* a, FRotator& out) { out = static_cast<fixture::Prop*>(a)->rot; return true; }
@@ -118,6 +125,8 @@ void Reset(size_t n, float farX) {
     for (size_t i = 0; i < n; ++i) fixture::props[i].loc = ue_wrap::FVector{farX + 10.f * i, 0.f, 0.f};
     fixture::driven.clear();
     fixture::coastOrder.clear();
+    fixture::water.clear();
+    fixture::settled = true;
     fixture::endAtMs.clear();
     fixture::nowMs = 1000;
     fixture::camera = ue_wrap::FVector{};
@@ -235,6 +244,25 @@ int main() {
     Run(60);
     Check(fixture::coastOrder.size() == 1 && fixture::coastOrder.front() == &fixture::props[6],
           "a real move after the window coasts as before");
+
+    // The buoyancy feeder: a prop the water holds coasts once, and when that coast ends at rest it is not reopened every
+    // feed while it stays put; a real push reopens it; and nothing is fed before the host's world has settled.
+    Reset(4, 0.f);
+    Run(30);
+    fixture::water = {&fixture::props[2]};
+    fixture::settled = false;
+    Run(60);
+    Check(fixture::coastOrder.empty(), "no buoyancy coast before the host's world has settled");
+    fixture::settled = true;
+    Run(60);
+    Check(fixture::coastOrder.size() == 1 && fixture::coastOrder.front() == &fixture::props[2],
+          "a prop in water coasts once");
+    fixture::driven.clear();   // the coast ended "rested"
+    Run(250);
+    Check(fixture::coastOrder.size() == 1, "a prop at rest in water is not coasted again every feed");
+    fixture::props[2].loc.Z += 40.f;
+    Run(60);
+    Check(fixture::coastOrder.size() == 2, "a push in the water coasts it again");
 
     if (g_fail == 0) std::printf("prop_motion_scan_test: all checks passed\n");
     return g_fail == 0 ? 0 : 1;

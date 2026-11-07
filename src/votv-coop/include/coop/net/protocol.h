@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 312;
+inline constexpr uint16_t kProtocolVersion = 322;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1428,8 +1428,10 @@ enum class ReliableKind : uint8_t {
 
     // HOST->ALL: the sleepers, offline players lying where they left (coop::sleepers). A chunked blob of one op: Add
     // (the sleeper's host-session id, its lying transform as the host traced it onto the floor, its display name and
-    // skin) or Remove (the id). The host sends an Add when a sleeper is laid down and to a joiner at its ready edge
-    // for every sleeper, before the world storages' seed, and a Remove when the owner rejoins or is kicked. Its loot is
+    // skin, and the slot of a player whose joining body it is, or none) or Remove (the id). The host sends an Add when
+    // a sleeper is laid down, again when a body turns into a joining one (its owner is connecting: no loot) or back,
+    // and to a joiner at its ready edge for every body but its own, before the world storages' seed, and a Remove when
+    // a joining body's owner stands up as their puppet, or the owner is kicked. Its loot is
     // a world storage of address kind Sleeper on the ContainerContents and ContainerAct lanes. Never relayed; a
     // client's copy is refused at the host's receive edge; not pre-world. BlobChunkPayload.
     SleeperState = 240,
@@ -1464,7 +1466,7 @@ enum class ReliableKind : uint8_t {
     // judges each against the sender's puppet (alive, in reach), runs the game's own verb with that puppet, raises a
     // tended field only up to the game's caps, and answers PlantState Ack. Never relayed; not pre-world; late join: none,
     // a request is a moment. BlobChunkPayload.
-    PlantIntent = 248,
+    PlantIntent = 254,
 
     // HOST->ALL: the growing plants (coop::farming), named by their actor_save key or level identity. A chunked blob of
     // one op (coop/farming/plant_wire.h): Row (class, row name, transform, the pot it grows in, growth, water, dryness,
@@ -1473,7 +1475,54 @@ enum class ReliableKind : uint8_t {
     // or spawns one, applies it through the plant's own upd, updLoc and processGrown and parks its tick. Late join: every
     // row to the joiner at its world-ready, then SnapshotEnd, which removes the plants the host did not name. Never
     // relayed; a client's copy is refused at the host's receive edge; not pre-world. BlobChunkPayload.
-    PlantState = 249,
+    PlantState = 255,
+    // CLIENT->HOST: a client's verb on the dirt it digs (coop::dig_sync), one message per blob (coop::dig_wire): op 1 a
+    // dig (the hole's class, transform and material, read from the hole the client's shovel just made), op 2 a burial
+    // or planting (the hole's place, the held item's class and its whole save record), op 3 a fill (a dirt ball used on
+    // a hole). The client's own hole is destroyed and its own burial refused; the host judges life and reach and runs
+    // the verb on its own copy. Never relayed; not pre-world. Late join: nothing to replay. BlobChunkPayload.
+    DigIntent = 244,
+
+    // HOST->ALL: the dirt a player dug, by a number the host mints (coop::dig_sync): op 1 a hole (class, transform,
+    // material), op 2 a mound holding a buried item (class, transform, the item's encoded save record), op 3 a plant a
+    // seed became (class, row name, transform), op 4 one of them gone, op 5 the end of a joiner's snapshot, op 6 the
+    // answer to a DigIntent (granted or refused; a grant tells the client to spend the item it held). Sent on every
+    // change the host's census sees, and every row to a joiner at its ready edge, then op 5. A receiver adopts its own
+    // native actor at a row's place or spawns one. The underground loot mounds are not in it. Never relayed; a client's
+    // copy is refused at the host's receive edge. BlobChunkPayload.
+    DigState = 245,
+
+    // HOST->ALL: a corner hint the drone sale's daily-task grader raised on the host (lib_C::addHint inside
+    // droneSellLocation_C::sell: a sent tape's fill), so the player who sent the package sees it wherever they
+    // stand. Display only; the task itself rides TaskNewState. Never relayed; a client's copy is refused at the
+    // host's receive edge. TaskSaleHintPayload.
+    TaskSaleHint = 251,
+    // CLIENT->HOST: the irrigation set (coop::irrigation_sync). One chunked blob per verb under an op byte: a faucet
+    // or a ground hose this player placed, as the actor's own getData record (its links rewritten to the live ones);
+    // a faucet taken up (its action 7, cancelled here); a hose picked up or resumed (action 4, run here too); a hose's
+    // sprinkler detached. The host judges life, reach and the named keys and runs each on its own copy. Never relayed:
+    // the host's IrrigationState is what the other peers get. BlobChunkPayload.
+    IrrigationCommit = 252,
+
+    // HOST->ALL: a placed faucet or ground hose exists (its record, links as the live ones) or is gone (its key);
+    // HOST->JOINER: the same, bracketed by a snapshot's begin and end, after which a joiner destroys the ones the host
+    // did not name. Never relayed; a client's copy is refused at the host's receive edge. BlobChunkPayload.
+    IrrigationState = 253,
+    // CLIENT->HOST: a repair this client made on an ATV, by the ATV's Key (coop::atv_repair). Fitting a battery, a spare
+    // or a wheel from the hand, a gas can's refuel and a toolbox fix run on the client's own copy, since the item is its
+    // own, and send the values they left; the host writes them on its copy if they still fit (no battery in, no spare,
+    // the socket empty, the fuel lower, the health below full). An unscrew (a wheel or the battery coming off as a prop)
+    // is cancelled on the client and the host runs the game's own unscrew, so the prop is the host's. Either way the
+    // host then sends every client a block of its own copy marked kAtvRepair, which a client applies even to an ATV it
+    // syncs. Never relayed; not pre-world. Late join: nothing to replay; the connect snapshot carries the condition.
+    // AtvRepairIntentPayload.
+    AtvRepairIntent = 239,
+    // HOST->ONE CLIENT: an in-game hint the game raised on the host while the host ran something on that client's
+    // behalf (coop::hint_route): one of its intents, or a robot or drone job it set going. The host's lib_C::addHint
+    // is refused there and the client raises the same hint through its own lib_C::addHint -- the same text, icon
+    // and duration. Never relayed; a client's copy is refused at the host's receive edge; not pre-world (a hint
+    // before the world has nowhere to show). Late join: nothing to replay. HintRoutePayload.
+    HintRoute = 246,
 };
 
 #pragma pack(push, 1)
@@ -3467,8 +3516,12 @@ struct AtvStatePayload {
     int8_t   tiresFixes[4];       // 4  -- per-wheel repair countdown (int32 in-game, int8 on wire)
     uint8_t  tiresTypes[4];       // 4  -- setWheelsType input (zero runtime writers measured; kept
                                   //      because it IS reducer input and 4 B closes the class)
+    float    battery;             // 4  -- the inserted battery's charge, 0..100; -1 = no battery (PRESENCE: whether one is
+                                  //      in is consumed from the host's own copy only, the charge from the syncer). The
+                                  //      drain runs only on the copy whose driver sits in it, so without this every
+                                  //      peer's battery drifted apart and a dead copy could not drive
 };
-static_assert(sizeof(AtvStatePayload) == 148, "AtvStatePayload must be 148 bytes");
+static_assert(sizeof(AtvStatePayload) == 152, "AtvStatePayload must be 152 bytes");
 
 // stateBits bit 3: the block is the syncer's, re-sent by the host (a client syncer's pose and condition), not the
 // host's own copy. A receiver applies the pose and condition of such a block to an ATV it does not sync; the host's
@@ -3478,6 +3531,11 @@ constexpr uint8_t kAtvFromSyncer = 0x08;
 // stateBits bit 4: the host's own copy has its `trap` set (the story event's explosion). The host writes it in every
 // block it sends and ignores a client's bit; a client copy takes it from the stamp (atv_sync.cpp).
 constexpr uint8_t kAtvTrap = 0x10;
+
+// stateBits bit 5: a block of the host's own copy sent because a repair changed it (coop::atv_repair). A client applies
+// its condition block, presence included, even to an ATV it syncs or has a request in flight for, and takes no pose
+// from it. Only the host sets it; a client's bit is masked off when the host re-sends its block.
+constexpr uint8_t kAtvRepair = 0x20;
 
 // An ATV (AtvSpawn): the host ATV's own game Key and its class, so the receiver spawns the exact skin
 // under that Key. The Key is at most 31 chars (an ATV's is 22, or "ATV"); a receiver drops a longer one.
@@ -4007,6 +4065,17 @@ struct CommandRequestPayload {
 static_assert(sizeof(CommandRequestPayload) == 204, "CommandRequestPayload must be 204 bytes");
 static_assert(sizeof(CommandRequestPayload) <= 256 - 20 - 8,
               "CommandRequestPayload must fit in one reliable datagram");
+
+// One routed in-game hint (HintRoute), host to the client it belongs to: the game's notify type (its icon) and the
+// display text, UTF-8, length-prefixed, not NUL-terminated, cut at a code point to fit.
+struct HintRoutePayload {
+    uint8_t type;       // enum_notifytype, as the host's lib_C::addHint was given it
+    uint8_t len;        // bytes used in text[] (0 < len <= sizeof(text))
+    char    text[200];  // the hint, UTF-8
+};
+static_assert(sizeof(HintRoutePayload) == 202, "HintRoutePayload must be 202 bytes");
+static_assert(sizeof(HintRoutePayload) <= 256 - 20 - 8,
+              "HintRoutePayload must fit in one reliable datagram");
 
 // One reply line the host sends one client (CommandReply): UTF-8, length-prefixed, not NUL-terminated.
 struct CommandReplyPayload {
@@ -4573,6 +4642,19 @@ static_assert(sizeof(TaskNewStatePayload) == 180, "TaskNewStatePayload must be 1
 static_assert(sizeof(TaskNewStatePayload) <= 256 - 20 - 8,
               "TaskNewStatePayload must fit in one reliable datagram");
 
+// TaskSaleHintPayload (ReliableKind::TaskSaleHint=251) -- one corner hint of the host's drone sale. The text is
+// UTF-16 code units, clamped at send (a sale's hints are one short line each); the type is the hint's
+// enum_notifytype byte, passed through.
+inline constexpr uint8_t kTaskSaleHintCap = 110;
+struct TaskSaleHintPayload {
+    uint8_t  type;                     // 1 -- enum_notifytype
+    uint8_t  len;                      // 1 -- code units used in text
+    uint16_t text[kTaskSaleHintCap];   // 220
+};
+static_assert(sizeof(TaskSaleHintPayload) == 222, "TaskSaleHintPayload must be 222 bytes");
+static_assert(sizeof(TaskSaleHintPayload) <= 256 - 20 - 8,
+              "TaskSaleHintPayload must fit in one reliable datagram");
+
 // The night sky (SkyState): the star dome's world rotation (its random initial yaw plus spin), the
 // moon phase and the eye; the client writes the first two and runs the sky's setEye for the eye.
 struct SkyStatePayload {
@@ -4824,6 +4906,30 @@ struct ExplosionRequestPayload {
 };
 static_assert(sizeof(ExplosionRequestPayload) == 22, "ExplosionRequestPayload must be 22 bytes");
 static_assert(sizeof(ExplosionRequestPayload) <= 256 - 20 - 8, "ExplosionRequestPayload must fit in one reliable datagram");
+
+// A client's repair on an ATV (AtvRepairIntent): the ATV by its Key, the op and the values the client's own copy holds
+// after it. `index` is the wheel socket (put a wheel) or the fitted wheel (unscrew it, -1 the battery).
+struct AtvRepairIntentPayload {
+    WireKey key;          // 32
+    uint8_t op;           // 1 -- AtvRepairOp
+    int8_t  index;        // 1 -- 0..3, or -1
+    int8_t  fixes;        // 1 -- a fitted wheel's or the spare's repair countdown
+    uint8_t reserved;     // 1 -- zero
+    float   value;        // 4 -- the battery's charge, the fuel, or the wheel's durability
+    float   dirt;         // 4 -- the wheel's dirt
+};
+static_assert(sizeof(AtvRepairIntentPayload) == 44, "AtvRepairIntentPayload must be 44 bytes");
+static_assert(sizeof(AtvRepairIntentPayload) <= 256 - 20 - 8, "AtvRepairIntentPayload must fit in one reliable datagram");
+
+// AtvRepairIntentPayload::op. Wire-visible: the values are stable.
+enum class AtvRepairOp : uint8_t {
+    BatteryIn = 1,   // value = the charge the client's copy took from the battery in its hand
+    SpareIn = 2,     // value, dirt, fixes = the spare's
+    PutTire = 3,     // index = the socket; value, dirt, fixes = the wheel's
+    Unscrew = 4,     // index = the fitted wheel to take off, or -1 for the battery
+    Fuel = 5,        // value = the fuel after the client's gas can
+    Fix = 6,         // the client's toolbox fix: health to full
+};
 
 // A client's ATV exploded (AtvExplodeRequest): the ATV by its Key. `trapFired` is 1 when the story event's trap fell
 // in the explode's frame on the client's copy, which tells the host to clear its own copy's trap.

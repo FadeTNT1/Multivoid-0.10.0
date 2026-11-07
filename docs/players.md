@@ -80,7 +80,8 @@ the puppet stays attached as the anchor for the nameplate and the recovery hand-
 
 The item in a player's hand is player state, not a world entity: the game destroys and respawns
 the held actor on every hotbar switch. The owner polls its own holding actor and broadcasts the
-class and name on change, and every peer keeps a display-only mirror, physics and collision off,
+class and name on change, and every peer keeps a display-only mirror, physics and collision off and
+out of the save (`ignoreSav`, so the host's world save never writes one),
 attached to the puppet's weapon component at the native hold transform
 (`coop/player/hand_item`). The flashlight rides the item-activation kind
 (`coop/player/item_activate`). In 0.10.0 it is equipment: the beam is on while the player's
@@ -90,6 +91,8 @@ on more routes than a press -- hold-F, an empty battery, an unequip, another fla
 most of them are Blueprint-to-Blueprint calls, so the owner reads its own beam every tick and
 sends whatever a peer would see on a change, off included; the receiver drives the puppet's own
 light with all of it and plays a positional click (`coop/player/flashlight_click_sound`) `[RD]`.
+A host with no world-ready peer sends nothing and says nothing (`ItemActivate` is not a pre-world kind), and a send that
+fails is logged once per run of failures; the connect broadcast covers a peer that becomes ready later.
 The battery itself drains on the owner's machine only. A carried trash clump is driven to the puppet's hand on
 the host each tick (`coop/player/puppet_carry_drive`); a held physics prop is on the props lane.
 
@@ -118,6 +121,12 @@ them cannot draw the name.
 
 The nameplate is drawn by the mod's own overlay as a screen-space projection of the puppet's
 head: nickname, ping and a health bar, faded with distance (`coop/player/nameplate`, `ui/hud`).
+The pump decides which plates exist and what they say; where they sit is projected once per frame
+in the HUD widget's own tick (`ui_ui_C::Tick`), after the camera has moved for that frame, and the
+overlay pairs each present with the capture of its own frame. A plate projected on the ~60 Hz pump
+instead held one screen point over several rendered frames and shook against the body on a fast
+turn. `ui.nameplate.frame_sync=0` goes back to the pump's projection; the log line
+`nameplate: projection path -> ...` says which one is drawing.
 A per-player preference hides your own plate from others, and a nickname colour is a per-player
 preference that every surface (plate, chat, scoreboard) reads from one store
 (`coop/player/nick_color`). The scoreboard renders a game-thread snapshot of the roster
@@ -196,11 +205,13 @@ from the hosted world's profile folder: `good` (the default: the newest full pro
 the newest `<guid>.json.good`), `good.1`, `good.2`, or a relative path to a profile file in that folder, such as a
 hand-made sidecar (`item-recovery-20261106-005930/Miko-004810.json`; a path may not leave the folder). The file's magic
 and checksum are verified and it must parse as a profile with an inventory in it. For a client the host sends the
-inventory bytes to that one player (`InventoryRestoreBlob`), whose machine writes a rollback copy of what it holds to
+inventory to that one player (`InventoryRestoreBlob`; a whole profile blob with the items and empty vitals and pose,
+the only shape `inventory_wire` parses), whose machine writes a rollback copy of what it holds to
 `inventory_rollback/rollback-<UTC>.json` in the mod's data folder, replaces its three item arrays through the game's own
 restore on the game thread (vitals and position are untouched), refreshes the equipment and answers
 `InventoryRestoreAck` with the item counts before and after. The host's own player is restored locally the same way. A
-dead player is refused. The host logs the request, the file read, each answer and the counts under `[RESTORE]`, and the
+dead player is refused. A request still unanswered when its player leaves is dropped at the leave (the 60-second wait would
+otherwise refuse a rejoin as "still waiting"). The host logs the request, the file read, each answer and the counts under `[RESTORE]`, and the
 action goes in the admin action log. The profile stream then sends the restored inventory to the host as any change.
 (`coop/items/inventory_restore`, `coop/commands/inventory_commands`, `coop/player/player_profile_store`.)
 
@@ -300,9 +311,9 @@ the next world save.
 sleeper holds, never their older, fuller inventory:
 - The moment the host is about to hand them their profile (pre-world), any loot transaction on the sleeper that is
   still held (granted, not yet committed or aborted) settles first -- the join waits, a tick at a time, at most the
-  30 s hold -- and the sleeper takes no new one meanwhile; then its loot is written back one last time and it goes,
-  on every peer. The item of a settled take is with the looter, an aborted one back in the crate, so it is in exactly
-  one place when the crate is read.
+  30 s hold -- and the sleeper takes no new one meanwhile; then its loot is written back one last time and its crate
+  goes, on every peer. The item of a settled take is with the looter, an aborted one back in the crate, so it is in
+  exactly one place when the crate is read. The body stays down as the player's joining body (below).
 - Every write-back is checked before it is kept: per item kind, the rebuilt profile must hold exactly the crate's
   total (`storage_inventory::ItemsMatchRows`, the plan's own invariant in `ue_wrap/actors/sleeper_rebuild_plan`, which
   a CI test drives with loot-then-rejoin cases). A rebuild with worn items kept in their slots that does not check
@@ -315,6 +326,13 @@ sleeper holds, never their older, fuller inventory:
   it. The log says `sleeper: <name> woke with N item(s) from the sleeper record (local had M; replaced)`, M being the
   item arrays' entries the client held just before.
 - The player appears where the sleeper lay, with what is left.
+
+**Joining.** While a player connects, every other peer sees them asleep on the floor, not nothing: a rejoiner's sleeper
+stays down (its crate gone at the profile hand-over, so nothing is looted meanwhile); anyone else gets a crate-less body
+at the spot they will appear (profile, else start point), plate "(joining...)". It reaches later joiners too. Each peer
+swaps it for the puppet the moment that exists there (host: once the player's world is ready too); the puppet stands
+where it lay, no get-up animation. A mid-join leaver lies on as a sleeper if their profile holds items, else it goes.
+Log: `sleeper: joining body laid for ..`, `.. is down, N ms after ..`, `sleeper: joining body replaced by puppet -- ..`.
 
 An online sleeper cannot be looted in this build (below), so nothing is taken from a live inventory while its owner
 sleeps.
@@ -532,7 +550,7 @@ run reads those lines.
 | `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |
 | `TeleportClient` | host to one peer | a placement; the administration action, not the join |
 | `InventoryRestoreBlob`, `InventoryRestoreAck` | host to one client; that client to the host | a backed-up inventory's bytes, chunked, to put back on that player; the answer with the item counts before and after |
-| `SleeperState` | host to all | a sleeper laid down (its id, its lying transform, its name and skin) or removed (its id); its loot rides `ContainerContents` and `ContainerAct*` as a storage of address kind Sleeper |
+| `SleeperState` | host to all | a sleeper laid down (its id, its lying transform, its name and skin, and the slot of a player whose joining body it is, or none) or removed (its id); an Add for an id a peer holds turns that body into a joining one or back; its loot rides `ContainerContents` and `ContainerAct*` as a storage of address kind Sleeper |
 
 ## Late join
 
@@ -543,7 +561,7 @@ at its ready edge. A joiner is sent the host's sleeping flag and the rest state 
 that is not awake. A joiner that rests before the host holds its world ready has that report refused, and repeats
 it each time the host's sleeping flag reaches it, which the host sends once it holds the joiner ready. The inventory is seeded before the world. A peer's death state is not seeded; a joiner sees a
 dead peer through the ragdoll bit of its next pose. Every sleeper is sent to a joiner at its ready edge, just before
-the world storages' rows, its loot's among them.
+the world storages' rows, its loot's among them, and every other player's joining body (Sleepers, Joining).
 
 ## Known limits
 

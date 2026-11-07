@@ -408,4 +408,80 @@ bool SetPlacement(uint8_t* row, float x, float y, float rotation) {
     return true;
 }
 
+// ---- a struct_betterSave on its own ----
+
+namespace {
+
+struct BetterPlan {
+    bool ready = false;
+    Node st;                       // the struct_betterSave, kind Struct
+    int32_t nameOff = -1, classOff = -1;
+};
+BetterPlan g_better;
+std::chrono::steady_clock::time_point g_betterNextTry{};
+
+bool MeasureBetter() {
+    if (g_better.ready) return true;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < g_betterNextTry) return false;
+    g_betterNextTry = now + std::chrono::seconds(1);
+    void* const cls = ue_wrap::object_index::ClassByName(N::DirtMoundClass);
+    if (!cls) return false;
+    void* const st = R::PropertyInnerStruct(cls, N::DirtMoundBetterDataProp);
+    if (!st) return false;
+    BetterPlan p;
+    if (!BuildStruct(st, p.st, 0)) {
+        g_betterNextTry = now + std::chrono::hours(24);   // a type it does not carry will not appear later in this build
+        return false;
+    }
+    for (const Node& d : p.st.fields) {
+        if (StartsWithI(d.name, N::BetterSaveNamePrefix) && d.kind == Kind::Name) p.nameOff = d.off;
+        if (StartsWithI(d.name, N::BetterSaveClassPrefix) && d.kind == Kind::Soft) p.classOff = d.off;
+    }
+    if (p.nameOff < 0 || p.classOff < 0) {
+        UE_LOGE("inventory_item_codec: struct_betterSave lacks a member by role (name %d class %d) -- buried items are "
+                "not synced on this build", p.nameOff, p.classOff);
+        g_betterNextTry = now + std::chrono::hours(24);
+        return false;
+    }
+    p.ready = true;
+    g_better = std::move(p);
+    UE_LOGI("inventory_item_codec: struct_betterSave measured (%zu members)", g_better.st.fields.size());
+    return true;
+}
+
+}  // namespace
+
+bool BetterSaveReady() { return MeasureBetter(); }
+
+bool EncodeBetterSave(const uint8_t* st, std::vector<uint8_t>& out) {
+    if (!st || !MeasureBetter()) return false;
+    const size_t start = out.size();
+    for (const Node& f : g_better.st.fields) {
+        if (!EncodeNode(f, st, out, 0) || out.size() - start > kMaxItemBytes) {
+            out.resize(start);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool DecodeBetterSave(const std::vector<uint8_t>& b, size_t& o, uint8_t* st) {
+    if (!st || !MeasureBetter()) return false;
+    const size_t start = o;
+    Reader r{b, o};
+    for (const Node& f : g_better.st.fields)
+        if (!DecodeValue(f, st + f.off, r, 0)) return false;
+    return o - start <= kMaxItemBytes;
+}
+
+std::wstring BetterSaveClassPath(const uint8_t* st) {
+    if (!st || !MeasureBetter()) return {};
+    return NameAt(st + g_better.classOff + O::FSoftObjectPtr_AssetPathName);
+}
+
+std::wstring BetterSaveName(const uint8_t* st) {
+    return (st && MeasureBetter()) ? NameAt(st + g_better.nameOff) : std::wstring{};
+}
+
 }  // namespace ue_wrap::inventory_item_codec

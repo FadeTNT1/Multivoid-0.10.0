@@ -259,6 +259,10 @@ msgstr ""
 msgid "(hidden -- friends join by invite/IP)"
 msgstr ""
 
+#: src/ui/hud.cpp
+msgid "(joining...)"
+msgstr ""
+
 #: src/ui/server_browser_panels.cpp
 msgid "(locked)"
 msgstr ""
@@ -1248,6 +1252,30 @@ msgstr ""
 
 #: src/ui/server_browser_actions.cpp
 msgid "That's your own server -- you're already hosting it."
+msgstr ""
+
+#: src/coop/interactables/atv_drive_gates.cpp
+msgid "The ATV won't drive: it has no battery."
+msgstr ""
+
+#: src/coop/interactables/atv_drive_gates.cpp
+msgid "The ATV won't drive: it is broken. Repair it with a toolbox."
+msgstr ""
+
+#: src/coop/interactables/atv_drive_gates.cpp
+msgid "The ATV won't drive: it is out of fuel."
+msgstr ""
+
+#: src/coop/interactables/atv_drive_gates.cpp
+msgid "The ATV won't drive: it is under water."
+msgstr ""
+
+#: src/coop/interactables/atv_drive_gates.cpp
+msgid "The ATV won't drive: its battery is dead. Charge it or fit a charged one."
+msgstr ""
+
+#: src/coop/interactables/atv_drive_gates.cpp
+msgid "The ATV won't drive: the handbrake is on."
 msgstr ""
 
 #: src/ui/admin_panel.cpp

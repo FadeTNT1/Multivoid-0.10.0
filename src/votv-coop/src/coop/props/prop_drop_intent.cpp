@@ -36,6 +36,7 @@
 #include "ue_wrap/actors/prop.h"                   // the prop lineage, key, name and parity-identity accessors
 #include "ue_wrap/core/object_index.h"  // ClassByName -- the host's O(1) class resolve for a client's intent
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/script_gate.h"           // MarkScope/ScopeBits -- the unpack verb's window
 #include "ue_wrap/core/sdk_profile.h"            // profile::name::{GameplayStaticsClass,FinishSpawningActorFn,PropSetKeyFn}
 #include "ue_wrap/desk/tape_caddy.h"            // IsReelClass whitelist + the Progress birth scalar
 #include "ue_wrap/desk/phys_mods.h"             // IsModuleClass whitelist
@@ -64,6 +65,7 @@ namespace R  = ue_wrap::reflection;
 namespace E  = ue_wrap::engine;
 namespace GT = ue_wrap::game_thread;
 namespace PT = coop::prop_element_tracker;
+namespace sg = ue_wrap::script_gate;
 
 // The throw arms' read of what the host gave a thrown copy at its spawn (|v| cm/s of the latest, 0 when none was written).
 uint32_t g_launches = 0;
@@ -94,8 +96,26 @@ struct PendingPlace {
     // unmarked birth here is. Read at the seam because that is the only moment the VM still holds
     // the calling frame.
     bool    playerSpawn = false;
+    // True when an UNPACK verb's body (MarkUnpackScope: an MRE's open) was running at the finish:
+    // the foods an MRE opens into, born on this client by the MRE's own Blueprint. Admitted at drain
+    // as an ordinary drop intent, like a player-authored birth -- the host's grant of a shared MRE's
+    // open only destroys the MRE, so the foods have no other way into the host's world, and a keyed
+    // food the host does not hold refuses every bite this client sends for it.
+    bool    unpackSpawn = false;
 };
 std::vector<PendingPlace> g_pending;         // GT-only
+
+// The unpack verb's window (MarkUnpackScope). The bit is this lane's scope-mark bit, taken once; the
+// function is the unpack body's UFunction as its last PRE saw it, refreshed on every PRE so a class
+// re-created by a world load is followed. The window itself is the gate's scope around the body:
+// ScopeBits reads it from the finish-spawn seam while the body runs, and it is gone when the body is.
+uintptr_t g_unpackBit       = 0;       // GT-only; 0 until the first mark
+bool      g_unpackBitFailed = false;   // GT-only; the gate had no bit left (logged once)
+void*     g_unpackFn        = nullptr; // GT-only
+
+bool UnpackScopeActive() {
+    return g_unpackFn && g_unpackBit && (sg::ScopeBits(g_unpackFn) & g_unpackBit) != 0;
+}
 ue_wrap::CachedObjRef g_lastPlace;           // GT-only; the most recent pending place spawn's actor (dev read only)
 constexpr size_t kMaxPending  = 32;          // runaway backstop (a settled client rarely has >1 in flight)
 constexpr int    kMaxKeyTries = 8;           // ~8 net-pump ticks (~64 ms) for the Key to restore, then give up
@@ -154,6 +174,9 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     // this instant can answer -- the VM's calling frame is gone by the drain -- and because it is
     // what exempts a birth from the load gates below.
     const bool playerAuthored = coop::prop_spawn_authoring::BirthIsPlayerAuthored();
+    // The same question for an unpack verb (an MRE's open): its body is on this thread's chain right
+    // now or never. A deliberate act of this player, so it is exempt from the load gates as well.
+    const bool unpackScope = !playerAuthored && UnpackScopeActive();
     // The end condition: quiet during the load episode and the reconcile window's load-kind
     // segments (the join and reload bracket, whose spawn churn flooded this path; the mirror mark
     // below already scopes our own applies out). A mid-session bracket does not suppress: a
@@ -168,7 +191,7 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     // never churn, and has no second delivery if dropped: the express is host-only, so a
     // suppressed one is lost for the session. Measured: the player's birth crossed while three
     // churn births in the following second were still refused.
-    if (!playerAuthored) {
+    if (!playerAuthored && !unpackScope) {
         if (coop::world_load_episode::InEpisode()) return;  // quiet during the join loadObjects churn
         if (coop::world_load_episode::InReconcileWindow() &&
             coop::world_load_episode::ReconcileWindowIsLoadKind()) {
@@ -208,6 +231,10 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     // materialises inside the take call, so the latch is live exactly here. Marks the entry as a
     // container-extraction birth, admitted at drain.
     const bool fromContainerExtract = coop::props::container_writer_watch::TakeObjInFlight();
+    // An unpack birth the trash lanes own (a wrapper, a bits pile) is theirs, not this lane's: it is
+    // left to them, as it was before the unpack window existed.
+    const bool unpackAuthored = unpackScope && !ue_wrap::prop::IsTrashActor(actor) &&
+                                !ue_wrap::prop::IsTrashBitsPile(actor);
     if (coop::dev::prop_birth_key_probe::IsEnabled()) {
         // The seam reading the probe exists for: is the Key there before any drain tick waits?
         coop::dev::prop_birth_key_probe::NoteEnqueue(
@@ -216,7 +243,7 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     }
     if (coop::dev::container_route_census::IsEnabled()) g_lastPlace.Set(actor);   // the census drill's read, armed by its row only
     g_pending.push_back(PendingPlace{actor, R::InternalIndexOf(actor), 0, fromContainerExtract,
-                                     playerAuthored});
+                                     playerAuthored, unpackAuthored});
     if (fromContainerExtract)
         UE_LOGI("[PROP-DROP] CLIENT enqueued container-EXTRACT birth actor=%p (admitted at drain)", actor);
     if (playerAuthored) {
@@ -232,6 +259,16 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
         UE_LOGI("[PROP-DROP] CLIENT enqueued PLAYER-AUTHORED birth actor=%p cls='%ls' "
                 "(spawn menu or toolgun; admitted at drain, spared by the join sweep)",
                 actor, R::ClassNameOf(actor).c_str());
+    }
+    if (unpackAuthored) {
+        // Recorded self-authored for the reason the player-authored birth above is: the join sweep
+        // would doom a keyed prop the host's snapshot did not name, and this one is named only once
+        // the host's answer to its intent comes back.
+        coop::join_membership_sweep::RecordSelfAuthored(actor);
+        UE_LOGI("[PROP-DROP] CLIENT enqueued UNPACK birth actor=%p cls='%ls' key='%ls' (born inside "
+                "an MRE open on this client; admitted at drain, spared by the join sweep)",
+                actor, R::ClassNameOf(actor).c_str(),
+                ue_wrap::prop::GetInteractableKeyString(actor).c_str());
     }
 }
 
@@ -469,7 +506,11 @@ void Tick(coop::net::Session* session) {
         // needs the host-authoritative keyed-prop birth route or it exists only for the client that
         // tore it out. Like a menu prop and unlike a freshBirth it is not born into a hand: it falls
         // where it was torn, so it goes as an ordinary drop intent and its host copy is not put to sleep.
-        const bool isNotebookSheet = ue_wrap::notebook::IsNotebookSheet(e.actor);
+        // A drawn sheet (prop_paper_drawable_C, the pencil's paper) is born the same way and went the
+        // same way before this: dropped at the drain, so the sheet only ever existed for the one who drew
+        // it. It rides the notebook sheet's route; its pixels still do not cross (docs/props.md).
+        const bool isNotebookSheet = ue_wrap::notebook::IsNotebookSheet(e.actor) ||
+                                     ue_wrap::notebook::IsDrawablePaper(e.actor);
         const bool freshBirth = !parked &&
             (isDiscBirth ||
              (ue_wrap::tape_caddy::EnsureResolved() &&
@@ -491,7 +532,13 @@ void Tick(coop::net::Session* session) {
         // NOT a freshBirth: that kind means a device put an item in a hand and sleeps the host's
         // copy, while a menu prop is dropped in the world at the player's aim and must fall on the
         // host exactly as it falls here -- the transform block below sends its real physics state.
-        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !isNotebookSheet) {
+        //
+        // And an UNPACK birth: what an MRE opens into, born by the MRE's own body on this client
+        // (MarkUnpackScope). The host's side of a shared MRE's open destroys the MRE and nothing
+        // else, so these foods exist nowhere but here unless they go as intents -- and a keyed food
+        // the host lacks refuses every bite. An ordinary drop intent: they fall where they were born.
+        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !e.unpackSpawn &&
+            !isNotebookSheet) {
             probe::NoteDrainExit(e.actor, "not-a-place-nor-whitelisted-birth", e.tries, key);
             continue;
         }
@@ -578,12 +625,14 @@ void Tick(coop::net::Session* session) {
         probe::NoteDrainExit(e.actor,
                              freshBirth     ? "authored-fresh-birth"
                              : e.playerSpawn ? "authored-player-spawn"
+                             : e.unpackSpawn ? "authored-unpack-birth"
                              : isNotebookSheet ? "authored-notebook-sheet"
                                              : "authored-drop-intent",
                              e.tries, key);
         UE_LOGI("[PROP-DROP] CLIENT authored %s key='%ls' cls='%ls' name='%ls' loc=(%.1f,%.1f,%.1f) drain |v|=%.1f cm/s throw seq %u%s",
                 freshBirth     ? "FRESH-BIRTH intent"
                 : e.playerSpawn ? "PLAYER-SPAWN intent"
+                : e.unpackSpawn ? "UNPACK-BIRTH intent (MRE open)"
                 : isNotebookSheet ? "NOTEBOOK-SHEET intent"
                                 : "drop intent",
                 key.c_str(), cls.c_str(),
@@ -606,6 +655,23 @@ void NoteClientKeyedDestroy(const std::wstring& key) {
             g_parkFifo.pop_front();
         }
     }
+}
+
+void MarkUnpackScope(const ue_wrap::script_gate::Call& c) {
+    UE_ASSERT_GAME_THREAD("prop_drop_intent::MarkUnpackScope");
+    if (!c.function) return;
+    if (!g_unpackBit) {
+        if (g_unpackBitFailed) return;
+        g_unpackBit = sg::ScopeBitFor(&g_unpackBit);
+        if (!g_unpackBit) {
+            g_unpackBitFailed = true;
+            UE_LOGW("[PROP-DROP] no script-gate scope bit left for the unpack window -- the foods an MRE "
+                    "opens into stay this client's own (said once)");
+            return;
+        }
+    }
+    g_unpackFn = c.function;
+    sg::MarkScope(c, g_unpackBit);
 }
 
 void OnPropDropIntent(coop::net::Session& session, const coop::net::PropDropIntentPayload& sent,

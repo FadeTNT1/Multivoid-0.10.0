@@ -31,6 +31,7 @@
 #include <cmath>
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace coop::prop_drive_host {
@@ -115,10 +116,11 @@ Driven* Open(void* actor, bool claimed, const char* why, uint8_t syncer = 0) {
     if (InAHand(actor)) return nullptr;   // the held-prop lane owns a prop in a hand
     const coop::element::ElementId eid = coop::prop_element_tracker::GetPropElementIdForActor(actor);
     if (eid == coop::element::kInvalidId || eid == 0u) {
-        // A feeder asks again every pass while the tie holds, so the line is per actor, not per pass.
-        static void* sRefusedSaid = nullptr;
-        if (actor != sRefusedSaid) {
-            sRefusedSaid = actor;
+        // A feeder asks again every pass while the tie holds, so the line is per actor, not per pass. A set, not the
+        // last pointer: two refused actors asked in turn (two floating props with no element id) said it every pass.
+        static std::unordered_set<void*> sRefusedSaid;
+        if (sRefusedSaid.size() > 512) sRefusedSaid.clear();   // bounded; a repeat after the clear is one line
+        if (sRefusedSaid.insert(actor).second) {
             // A class the wire never expresses has no copy on any peer to move, so its motion is
             // parity and its refusal no news.
             if (!coop::prop_lifecycle::IsWireSuppressedPropClass(R::ClassNameOf(actor)))

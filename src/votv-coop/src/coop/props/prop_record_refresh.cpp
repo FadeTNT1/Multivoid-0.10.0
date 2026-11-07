@@ -118,9 +118,36 @@ std::string DescribeReelCase(void* rc) {
 }
 
 // The watched classes. `relook`: the drive box's look does not follow its record and is
-// re-derived on receipt (RefreshLook); the reel case's upd() reads `lid` itself.
-UE_FACT_FN(kRowUpdBox,     "prop_record_refresh", L"prop_box_C",     L"upd", Dispatch);
-UE_FACT_FN(kRowUpdReelbox, "prop_record_refresh", L"prop_reelbox_C", L"upd", Dispatch);
+// re-derived on receipt (RefreshLook); the reel case's upd() reads `lid` itself. A null `describe`
+// is a class whose own loadData re-applies its look from the record (so nothing is re-derived
+// here) and whose receipts are too many to log one by one: a join lands every lamp in a base.
+//
+// Each row below was read against the 0.10.0 bytecode capture: the record carries the state, the
+// named function runs after every in-place change of it, and the class's loadData calls that same
+// function (or the lid / property refresh) so the receiver repaints.
+//   floorlamp, desklamp, lightintwall1, spotlighthead: record `active`; the switch calls upd();
+//     loadData sets `active` and calls upd() (light visibility, material).
+//   tableclock: record alarm / ringing / alarmed / hour / minute; the alarm switch and the ring
+//     call upd(); loadData ends in upd().
+//   tv2: record brightness, squeeze and volume (and `channel`); the TV's screen UI calls
+//     updproperties() after each slider and loadData calls it after setting them. `channel` does
+//     NOT repaint on the receiver: loadData stores it but never calls usechannel(), so a channel
+//     change travels in the record without re-attaching the picture.
+//   bbq: record coal count and lid; setlid() ends in updlid(), which loadData calls too; addcoal()
+//     changes the count.
+// Not added: minioven, cookingpad and woodchipper keep their on / off state (`active`) out of the
+// record (the first two carry only the cord base, the chipper only `fuel`) and their loadData does
+// not run their refresh, so a republished record would change nothing on the far side.
+UE_FACT_FN(kRowUpdBox,         "prop_record_refresh", L"prop_box_C",           L"upd",         Dispatch);
+UE_FACT_FN(kRowUpdReelbox,     "prop_record_refresh", L"prop_reelbox_C",       L"upd",         Dispatch);
+UE_FACT_FN(kRowUpdFloorlamp,   "prop_record_refresh", L"prop_floorlamp_C",     L"upd",         Dispatch);
+UE_FACT_FN(kRowUpdDesklamp,    "prop_record_refresh", L"prop_desklamp_C",      L"upd",         Dispatch);
+UE_FACT_FN(kRowUpdWallLight,   "prop_record_refresh", L"prop_lightintwall1_C", L"upd",         Dispatch);
+UE_FACT_FN(kRowUpdSpotHead,    "prop_record_refresh", L"prop_spotlighthead_C",  L"upd",         Dispatch);
+UE_FACT_FN(kRowUpdTableclock,  "prop_record_refresh", L"prop_tableclock_C",    L"upd",         Dispatch);
+UE_FACT_FN(kRowUpdPropsTv2,    "prop_record_refresh", L"prop_tv2_C",           L"updproperties", Dispatch);
+UE_FACT_FN(kRowUpdlidBbq,      "prop_record_refresh", L"prop_bbq_C",           L"updlid",      Dispatch);
+UE_FACT_FN(kRowAddcoalBbq,     "prop_record_refresh", L"prop_bbq_C",           L"addcoal",     Dispatch);
 
 struct Watched {
     const ue_wrap::facts::Function* row;
@@ -129,8 +156,16 @@ struct Watched {
     std::string (*describe)(void*);
 };
 constexpr Watched kWatched[] = {
-    { &kRowUpdBox,     0x44424F58, true,  &DescribeBox },       // 'DBOX'
-    { &kRowUpdReelbox, 0x5242584F, false, &DescribeReelCase },  // 'RBXO'
+    { &kRowUpdBox,        0x44424F58, true,  &DescribeBox },       // 'DBOX'
+    { &kRowUpdReelbox,    0x5242584F, false, &DescribeReelCase },  // 'RBXO'
+    { &kRowUpdFloorlamp,  0x464C4D50, false, nullptr },            // 'FLMP'
+    { &kRowUpdDesklamp,   0x444B4C50, false, nullptr },            // 'DKLP'
+    { &kRowUpdWallLight,  0x574C4954, false, nullptr },            // 'WLIT'
+    { &kRowUpdSpotHead,   0x5350484D, false, nullptr },            // 'SPHD'
+    { &kRowUpdTableclock, 0x54434C4B, false, nullptr },            // 'TCLK'
+    { &kRowUpdPropsTv2,   0x54563250, false, nullptr },            // 'TV2P'
+    { &kRowUpdlidBbq,     0x42425130, false, nullptr },            // 'BBQ0'
+    { &kRowAddcoalBbq,    0x42425131, false, nullptr },            // 'BBQ1'
 };
 // The UFunction each watch was armed on, so a re-armed one can be recognised. A world change can
 // re-create a Blueprint class and its functions (127 were in a same-process rejoin; these two kept
@@ -178,7 +213,7 @@ void OnUpdPost(const sg::Call& call) {
         bool opened = false;
         if (w->relook) {
             if (ReadOpened(call.object, opened)) RefreshLook(call.object, opened);
-        } else {
+        } else if (w->describe) {
             UE_LOGI("prop_record_refresh: a record landed on %ls -> %s", w->row->Class(),
                     w->describe(call.object).c_str());
         }
@@ -213,7 +248,7 @@ void OnUpdPost(const sg::Call& call) {
     if (coop::prop_save_data::Publish(s, actor, key)) {
         ++g_cPublished;
         UE_LOGI("prop_record_refresh: published %ls key='%ls' %s (%s)", w->row->Class(), key.c_str(),
-                w->describe(actor).c_str(),
+                w->describe ? w->describe(actor).c_str() : "",
                 s->role() == coop::net::Role::Client ? "client intent" : "host broadcast");
     }
 }
@@ -243,8 +278,8 @@ void Install(coop::net::Session* session) {
             static bool s_saidMissing[std::size(kWatched)] = {};
             if (!s_saidMissing[i]) {
                 s_saidMissing[i] = true;
-                UE_LOGW("prop_record_refresh: %ls::upd UFunction not found -- its record will only "
-                        "travel on its birth paths (an in-place change stays local)", w.row->Class());
+                UE_LOGW("prop_record_refresh: %ls::%ls UFunction not found -- its record will only "
+                        "travel on its birth paths (an in-place change stays local)", w.row->Class(), w.row->Name());
             }
             s_retry = 60;
             continue;
@@ -264,14 +299,14 @@ void Install(coop::net::Session* session) {
             static bool s_saidRefused = false;
             if (!s_saidRefused) {
                 s_saidRefused = true;
-                UE_LOGW("prop_record_refresh: script-gate watch on %ls::upd refused -- retrying", w.row->Class());
+                UE_LOGW("prop_record_refresh: script-gate watch on %ls::%ls refused -- retrying", w.row->Class(), w.row->Name());
             }
             continue;
         }
         const bool rearm = static_cast<bool>(g_watchedFn[i]);
         g_watchedFn[i] = armed;
-        UE_LOGI("prop_record_refresh: %hs %ls::upd -- it republishes its own save record on "
-                "every in-place change", rearm ? "re-armed on" : "watching", w.row->Class());
+        UE_LOGI("prop_record_refresh: %hs %ls::%ls -- it republishes its own save record on "
+                "every in-place change", rearm ? "re-armed on" : "watching", w.row->Class(), w.row->Name());
     }
 }
 

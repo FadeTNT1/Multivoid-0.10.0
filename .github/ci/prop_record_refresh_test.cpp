@@ -34,6 +34,15 @@ int main() {
           "two rapid reel-case mutations preserve the final state");
 
     fixture::records.clear();
+    box.record = 5;
+    pr::OnUpdPost({&box, 0x464C4D50, false});  // 'FLMP': a lamp's upd, a row with no describe
+    box.record = 6;
+    pr::OnUpdPost({&box, 0x54563250, false});  // 'TV2P': the TV's updproperties
+    pr::OnUpdPost({&box, 0x54563250, true});   // its own loadData re-applying a record: never echoed
+    check(fixture::records == std::vector<int>({5, 6}), "a lamp and a TV row publish, and a mirrored apply does not");
+    box.record = 4;
+
+    fixture::records.clear();
     fixture::publishOk = false;
     pr::OnUpdPost({&other, 0x44424F58, false});
     fixture::publishOk = true;

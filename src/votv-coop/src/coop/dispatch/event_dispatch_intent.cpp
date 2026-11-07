@@ -18,6 +18,7 @@
 #include "coop/creatures/kerfur_convert_host.h"
 #include "coop/creatures/roach_sync.h"    // CLIENT->HOST local roach consumption intent
 #include "coop/interactables/atv_authority.h"  // CLIENT->HOST an ATV seat or takeover request, judged by the host
+#include "coop/interactables/atv_repair.h"     // CLIENT->HOST an ATV repair, checked and written by the host
 #include "coop/interactables/camera_toggle_intent.h"  // CLIENT->HOST use of a security camera, or its laptop light button
 #include "coop/interactables/door_verb_intent.h"  // CLIENT->HOST press, hit or pry of a base door
 #include "coop/interactables/sleepingbag_sync.h"  // CLIENT->HOST fold/unfold; HOST runs the source Blueprint
@@ -854,6 +855,27 @@ bool HandleIntentEvent(net::Session& session,
         net::AtvTakeoverPayload p{};
         std::memcpy(&p, msg.payload, sizeof(p));
         coop::atv_authority::OnTakeover(p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::AtvRepairIntent: {
+        // CLIENT->HOST: a repair this client made on an ATV (coop::atv_repair). The host checks it against its own
+        // copy, writes or runs it there and sends every client its copy's condition. Never relayed.
+        if (session.role() != net::Role::Host) {
+            UE_LOGW("event_feed: AtvRepairIntent received on a client -- dropping");
+            break;
+        }
+        if (msg.senderPeerSlot < 1 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: AtvRepairIntent from invalid senderPeerSlot=%d -- dropping", msg.senderPeerSlot);
+            break;
+        }
+        if (msg.payloadLen < sizeof(net::AtvRepairIntentPayload)) {
+            UE_LOGW("event_feed: AtvRepairIntent payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::AtvRepairIntentPayload));
+            break;
+        }
+        net::AtvRepairIntentPayload p{};
+        std::memcpy(&p, msg.payload, sizeof(p));
+        coop::atv_repair::OnIntent(session, p, static_cast<uint8_t>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::PropActRequest: {

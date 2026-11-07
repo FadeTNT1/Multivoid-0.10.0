@@ -22,6 +22,7 @@
 #include "coop/interactables/atv_damage_gate.h"
 #include "coop/interactables/atv_hit_guard.h"
 #include "coop/interactables/atv_index_internal.h"
+#include "coop/interactables/atv_repair.h"
 #include "coop/interactables/atv_sync_internal.h"
 
 #include "coop/net/protocol.h"
@@ -278,6 +279,8 @@ void Install(coop::net::Session* session) {
     // First, before the latch: the damage gate has its own, and registers its watches by name on every pump tick
     // until they are live, whether or not the ATV class has loaded.
     coop::atv_damage_gate::Install();
+    // The repair watches the same way (playerUsedOn, putTire, unscrewPanel, fuelUp, toolboxFix).
+    coop::atv_repair::Install(session);
     // Install is the per-tick ensure path (net_pump re-calls it until the class loads), latched so
     // the one-time registration happens once.
     if (!g_installed && A::EnsureResolved()) {
@@ -340,6 +343,12 @@ void OnReliable(const coop::net::AtvStatePayload& payload, uint8_t senderPeerSlo
     static const bool s_redTrapbit =
         coop::config::ResolveEnum(coop::config_registry::rows::atv_health_red) == "trapbit";
     TakeStampTrap(e, !s_redTrapbit && (payload.stateBits & coop::net::kAtvTrap) != 0, IsLocalSyncer(e, localSlot));
+    // A repair block (kAtvRepair): the host's copy after a repair. Its condition applies here, presence included, even to
+    // an ATV this machine syncs; its pose is not taken.
+    if ((payload.stateBits & coop::net::kAtvRepair) != 0) {
+        coop::atv_condition_sync::ApplyPayload(e, payload, /*fromHost*/ true);
+        return;
+    }
     // An ATV this machine syncs, or has a request in flight for, keeps its own state and takes only the stamp; MTA's
     // StartSync ships the server's pose and state to the new syncer
     // (reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CUnoccupiedVehicleStartSyncPacket.cpp).
@@ -576,6 +585,20 @@ void Tick() {
             // A wreck handed back to the host: its own copy's health is the stream to read.
             NoteSyncerHealth(e, 0, A::GetHealth(e.actor));
         }
+        // Every copy, synced or mirrored: a stale fuel or health latch is cleared, a blocked local throttle reported.
+        TickDriveGates(e, kv.first, localSlot, nowMs);
+        // HOST: a repair changed this copy (a client's request or the host's own hand): every client gets the copy's
+        // condition, presence included, even the one that syncs it (kAtvRepair; atv_repair.h). No pose is taken from it.
+        if (isHost && coop::atv_repair::TakeDue(e.actor)) {
+            coop::net::AtvStatePayload p{};
+            if (ReadPayload(e.actor, kv.first, e.occupantSlot, e.syncerSlot, /*adopt*/false, p)) {
+                StampHostTrap(e, p);
+                p.stateBits = static_cast<uint8_t>(p.stateBits | coop::net::kAtvRepair);
+                SendToReadyClients(*s, p, -1);
+                UE_LOGI("atv: repair block for '%ls' sent (battery %.1f, fuel %.1f, health %.1f, wheels %02X, spare %u)",
+                        kv.first.c_str(), p.battery, p.fuel, p.health, p.tiresMask, static_cast<unsigned>(p.hasSpare));
+            }
+        }
 
         // Tick ownership: this machine syncs the ATV (on the host: the table names the host), so it runs the
         // brain and the collision damage. There is no brain-off (parking the tick was measured useless, since
@@ -663,6 +686,8 @@ void OnDisconnect() {
     g_lastHostTickMs = 0;
     g_drillMute = false;
     g_blockRefusals.Clear();
+    ForgetDriveGates();
+    coop::atv_repair::Reset();
     const auto c  = coop::atv_corrector::ReadCounters();
     const auto hg = coop::atv_hit_guard::ReadCounters();
     const auto dg = coop::atv_damage_gate::ReadCounters();

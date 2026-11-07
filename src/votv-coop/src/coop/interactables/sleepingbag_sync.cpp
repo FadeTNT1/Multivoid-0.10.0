@@ -186,7 +186,7 @@ void Tick(coop::net::Session& session) {
     if (!session.running() || session.role() != coop::net::Role::Host) return;
     for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot) {
         Slot& state = g_slots[slot];
-        state.queue.Serve(kBudget, NowMs, [&](const coop::net::SleepingbagIntentPayload& p) {
+        state.queue.Serve(slot, kBudget, NowMs, [&](const coop::net::SleepingbagIntentPayload& p) {
             if (!Execute(session, p, slot)) return coop::net::Served::Wait;
             return coop::net::Served::Done;
         });

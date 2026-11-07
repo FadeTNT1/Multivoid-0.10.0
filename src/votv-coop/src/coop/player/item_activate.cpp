@@ -178,6 +178,10 @@ void PollLocal() {
     if (g_echoSuppress.load(std::memory_order_acquire)) return;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
+    // ItemActivate is not a pre-world kind (session_lanes.h): a host whose only peers are still loading cannot
+    // send it, and the old retry-and-warn every tick logged 2103 lines in 40 s of a joiner's load. Nobody to tell
+    // is not a failure; the connect broadcast and the first change after a peer is ready carry the state.
+    if (s->role() == coop::net::Role::Host && !s->AnyWorldReadyPeer()) return;
     void* mp = coop::players::Registry::Get().Local();
     if (!mp) return;
     coop::net::ItemActivatePayload p{};
@@ -190,10 +194,15 @@ void PollLocal() {
     // A hash equal to kNoSendYet is shifted by one so the sentinel stays unambiguous.
     const uint64_t storeSig = (sig == kNoSendYet) ? (kNoSendYet - 1) : sig;
     if (g_lastSentSig.load(std::memory_order_acquire) == storeSig) return;
+    static bool s_failSaid = false;   // once per run of failures, not once per retry
     if (!s->SendReliable(coop::net::ReliableKind::ItemActivate, &p, sizeof(p))) {
-        UE_LOGW("flashlight: SendReliable failed (channel busy or not connected) -- retried next tick");
+        if (!s_failSaid) {
+            s_failSaid = true;
+            UE_LOGW("flashlight: SendReliable failed (channel busy or not connected) -- retried each tick, said once");
+        }
         return;
     }
+    s_failSaid = false;
     g_lastSentSig.store(storeSig, std::memory_order_release);
     if (ProbeLogEnabled() || g_lastLoggedState != p.state) {
         g_lastLoggedState = p.state;

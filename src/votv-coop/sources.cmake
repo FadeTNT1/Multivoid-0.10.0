@@ -29,6 +29,7 @@ set(VOTVCOOP_SOURCES
     src/coop/items/vacuum_pile_intent.cpp
     ${VOTVCOOP_SOURCES_UE_WRAP_2}
     src/coop/player/movement_ledger.cpp
+    src/coop/player/hint_route.cpp
     src/coop/player/remote_player.cpp
     src/coop/player/remote_player_ragdoll.cpp
     src/coop/player/client_model.cpp
@@ -48,6 +49,7 @@ set(VOTVCOOP_SOURCES
     src/coop/save/save_guard.cpp
     src/coop/world/balance_sync.cpp
     src/coop/world/achievement_sync.cpp
+    src/coop/world/daily_task_sale.cpp
     src/coop/world/daily_task_sync.cpp
     src/coop/save/save_block.cpp
     src/coop/save/save_player_filter.cpp
@@ -110,6 +112,8 @@ set(VOTVCOOP_SOURCES
     src/coop/world/fuse_tower_rows.cpp
     src/coop/world/fuse_tower_kind.cpp
     src/coop/interactables/atv_sync.cpp
+    src/coop/interactables/atv_drive_gates.cpp
+    src/coop/interactables/atv_repair.cpp
     src/coop/interactables/atv_stream_gates.cpp
     src/coop/interactables/atv_authority.cpp
     src/coop/interactables/atv_body.cpp
@@ -125,8 +129,12 @@ set(VOTVCOOP_SOURCES
     src/coop/items/coingun_arbiter.cpp
     src/coop/items/coingun_collect.cpp
     src/coop/items/point_sack_intent.cpp
+    src/coop/props/dig_sync.cpp
     src/coop/items/poster_sync.cpp
     src/coop/items/poster_mirror.cpp
+    src/coop/items/irrigation_sync.cpp
+    src/coop/items/irrigation_host.cpp
+    src/coop/items/irrigation_wire.cpp
     src/coop/items/order_sync.cpp
     src/coop/items/order_queue_sync.cpp
     src/coop/world/firefly_sync.cpp
