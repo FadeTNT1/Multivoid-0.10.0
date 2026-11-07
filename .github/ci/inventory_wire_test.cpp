@@ -112,6 +112,20 @@ int main() {
     IW::AppendState(noItemsWithBytes, nullptr, {});
     Check(!IW::Deserialize(noItemsWithBytes, back), "items bytes behind an absent flag are refused");
 
+    // A restore / rollback blob is a whole profile of items with empty vitals and pose. The items
+    // half alone is what the poll hashes; sent as a restore it did not parse ("the bytes did not
+    // parse"), so the sender must build the whole profile.
+    const std::vector<uint8_t> itemBytes = {9, 8, 7, 6, 5};
+    coop::player_profile::Profile restore;
+    restore.hasItems = true;
+    restore.items = itemBytes;
+    coop::player_profile::Profile restoreBack;
+    Check(IW::Deserialize(IW::Serialize(restore), restoreBack) && restoreBack.hasItems &&
+              restoreBack.items == itemBytes && !restoreBack.hasVitals && !restoreBack.pose.valid,
+          "a restore profile (items, no vitals, no pose) round-trips");
+    Check(!IW::Deserialize(IW::SerializeItems(true, itemBytes), restoreBack),
+          "the items half alone does not parse as a profile");
+
     std::printf("inventory_wire_test: %s\n", g_failed ? "FAIL" : "ALL PASS");
     return g_failed ? 1 : 0;
 }

@@ -92,7 +92,9 @@ const EquipLayout* EquipLayoutOf(void* save) {
             L.offHold = offHold;
     }
     if (!eqOk) {
-        UE_LOGW("inventory: %ls.equipment does not read as an array of {propDynamic, record, tag} "
+        // INFO, not a warning: this is the 0.9.0n fallback, which 0.10.0 never uses (its inventory is the
+        // component's own bytes, ue_wrap/actors/inventory_component), so on 0.10.0 it is expected.
+        UE_LOGI("inventory: %ls.equipment does not read as an array of {propDynamic, record, tag} "
                 "(this build files equipment differently) -- the worn and held halves are NOT read or "
                 "written; the carried half is unaffected (this line prints once per save class)",
                 R::ToString(R::NameOf(cls)).c_str());
@@ -124,7 +126,8 @@ int32_t CachedOffset(int32_t& slot, void* cls, const wchar_t* name) {
     if (slot == -2) {
         slot = cls ? R::FindPropertyOffset(cls, name) : -1;
         if (slot < 0)
-            UE_LOGW("inventory: could not resolve %ls -- the live-store reader is inert", name);
+            UE_LOGI("inventory: could not resolve %ls -- the live-store reader is inert (the 0.9.0n store; "
+                    "0.10.0 does not have it)", name);
     }
     return slot;
 }

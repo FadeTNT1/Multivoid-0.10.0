@@ -49,6 +49,15 @@ without publishing its final record. Mirrored applications and a joining client'
 excluded so records do not echo. `[V]` `.github/ci/prop_record_refresh_drill.py` executes the
 production callback with isolated engine boundaries; two-peer gameplay remains a separate check.
 
+The same lane also watches the in-place switches of lamps and a few appliances, each row read against
+the 0.10.0 bytecode: `upd()` of the floor lamp, desk lamp, wall light, spotlight head and table clock
+(their records carry `active`, or the clock's alarm, ringing and time, and `loadData` ends in `upd()`
+to repaint), `updproperties()` of the second TV (brightness, squeeze and volume; the channel number
+travels but `loadData` never calls `usechannel()`, so a channel change does not re-attach the picture
+on the far peer) and `updlid()` and `addcoal()` of the barbecue (lid and coal count). The mini oven, the
+cooking pad and the wood chipper are not watched: their on / off state is not in the record, so
+republishing it would change nothing.
+
 On the host, a prop born during play -- a device's eject, a drop, a place -- gets its record from
 the finish-spawning drain a tick after the birth, because the Blueprint that spawned it fills its
 state in after the finish call returns: a disc's eject loads it from the slot's JSON there. The
@@ -233,7 +242,11 @@ coasts those props at once, ahead of the sweep, under the same coast budget: sim
 (the held-prop lane owns a held prop, as everywhere). A prop a client is syncing and nobody holds is overridden to
 the host, as a push on it would (`prop_drive_host::OverrideClientSyncer`); a row a host verb holds stays that verb's.
 The row ends as any coast does, at rest, with the final pose, flags and velocity, and a joiner at its ready edge is
-sent every driven prop's pose again. The water itself is the host's too (`BasementFloodState`,
+sent every driven prop's pose again. The feeder does not reopen a coast for a prop that is still where its last coast
+left it (inside the scan's epsilons): the body simulates all the while it floats, so a reopen once a second only ended
+"rested" again with a reliable End, which flipped the clients' copies kinematic and simulating and made them jitter (a
+10-minute session opened some 27 000 coasts, eids at generation 130). A push that moves it reopens one, and the feeder
+waits for `host_world_settle` before it feeds at all. The water itself is the host's too (`BasementFloodState`,
 [events-and-weather.md](events-and-weather.md)), so a client's own buoyancy master floats its copies in the same
 water the host's floats them in while the host's rows lead them.
 
@@ -266,7 +279,10 @@ is released on the host's word only (`hostAuthored`): a drive end the host sent,
 join correction from slot 0, the end of a hold from slot 0, and the first pose of a host hold on a copy that is
 Static here (the host held it, so its copy is free). A client-authored flag never releases a Static; a wall-attachable
 keeps its component's unstick (`prop_stick_sync`) and a trash clump its own lane. The log says `static released for eid
-X class Y` and `physics restored: yes|no`. `[?]` Whether the game keeps a second native "pryable" state that the
+X class Y` and `physics restored: yes|no`. The converge also goes the other way, on the same host-only terms: a row
+with the static flag reaching a copy that is not Static sets Static there (`static set for eid X class Y`), unless the local
+hand holds the copy right now; before this a client copy of a prop the host had left Static could be grabbed and
+streamed, and the host answered `streams a prop that is STATIC here`. `[?]` Whether the game keeps a second native "pryable" state that the
 prompt reads has not been confirmed in a two-peer run.
 
 ### A client's swing at an asologo piece
@@ -604,9 +620,11 @@ text is the prop's save record and crosses on the record lane above with no mess
   denied the editor while another peer holds it; the close then reaches it as an ordinary record.
 - **The ceiling.** A record over 32 KiB is refused with a log line and stays on the editing peer.
 
-A page torn out of a notebook is `prop_notebook_paper_C`, born by a client's prop birth route
-(`coop/props/prop_drop_intent`). The drawn pixels of `prop_paper_drawable_C` are in no save
-record and do not cross; that paper has a claim only. `[RD]` for the Blueprints, `[?]` until the
+A page torn out of a notebook is `prop_notebook_paper_C`, and a sheet the pencil draws on is
+`prop_paper_drawable_C`; a client's birth of either goes through the prop birth route
+(`coop/props/prop_drop_intent`), so the sheet exists for the other peers. The drawn pixels of
+`prop_paper_drawable_C` are in no save record and do not cross: the other peers hold a blank sheet of that
+paper, which has a claim only. `[RD]` for the Blueprints, `[?]` until the
 notebook drill has run.
 
 ### Sleeping bags and mattresses
@@ -896,7 +914,7 @@ as its absence and its spill as the host's props, and a cue is a one-shot with n
 | a held prop's knock and break effects | `coop/player/melee_fx_contact`, `coop/player/melee_fx` |
 | a container's damage, break and cues | `coop/props/crate_break`, `coop/props/prop_impact_fx`, `coop/props/prop_damage_gate`, `coop/props/hit_target_prop`, `ue_wrap/actors/physics_impact` |
 | a fire extinguisher's burst | `coop/props/fire_extinguisher_sync`, `coop/props/prop_record_gates` (its applier), `coop/props/crate_break` (its host-damaged swing and contact), `ue_wrap/actors/fire_extinguisher` |
-| a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case) |
+| a record that changes in place | `coop/props/prop_record_refresh` (the drive box, the reel case, the lamps, the table clock, the second TV's settings, the barbecue) |
 | a food's state | `coop/props/prop_food_state`, `ue_wrap/actors/food` |
 | posters, rolled and placed | `coop/items/poster_sync`, `coop/items/poster_mirror` (a client's placed posters), `coop/items/poster_put_ledger`, `ue_wrap/actors/poster`, `coop/props/prop_record_gates` (the rolled form's applier) |
 | a shrimp tray's portions | `coop/props/shrimp_tray_sync`, `ue_wrap/actors/shrimp_tray`, `coop/props/prop_food_state` (the count's carrier) |
