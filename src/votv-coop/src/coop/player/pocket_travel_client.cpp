@@ -352,6 +352,20 @@ void OnSessionStart() {
     coop::player::pocket_return_client::OnSessionStart();
 }
 
+void OnSessionEnd() {
+    // A session that stops mid-trip (the host quit or kicked, the link dropped) runs no tick of this
+    // lane again: whatever the trip holds goes here, or the menu would keep the return's cover up
+    // and a later session would start away.
+    const State st = g_state.load();
+    if (st != State::Main)
+        UE_LOGW("[POCKET] client: the session ended while %s in %s (slot %u, trip %u, reason %s) -- the "
+                "trip is dropped", StateTag(st), PT::LevelTag(g_pocket.load()), LocalSlot(), g_tripSeq,
+                PT::ReasonTag(PT::Reason::Disconnected));
+    coop::player::pocket_return_client::Abort(PT::Reason::Disconnected);
+    ResetTrip();
+    PIS::ClientForgetCarried();
+}
+
 bool LocalAway() { return g_state.load(std::memory_order_relaxed) != State::Main; }
 
 PT::Pocket ViewerLocation() {
@@ -517,6 +531,15 @@ void OnPlayerLocation(const coop::net::PlayerLocationPayload& p) {
     }
     const PT::Pocket pocket = static_cast<PT::Pocket>(p.pocket);
     const PT::Reason cause = static_cast<PT::Reason>(p.cause);
+    if (p.slot == coop::players::Registry::Get().LocalPeerId() && cause == PT::Reason::Refused) {
+        // The host refused this slot's way home (its ReturnRequest, or the return's announce while it
+        // still holds the slot parked). Not a location: the table keeps its row, and the return fails.
+        UE_LOGW("[POCKET] client: the host refused the way home (slot %u, host has %s, trip %u, reason %s) "
+                "-- the return fails", static_cast<unsigned>(p.slot), PT::LevelTag(pocket), p.tripSeq,
+                PT::ReasonTag(cause));
+        coop::player::pocket_return_client::NoteRefusedByHost();
+        return;
+    }
     const PT::Pocket before = PT::LocationOf(p.slot);
     PT::SetLocation(p.slot, pocket, p.tripSeq);
     if (p.slot == coop::players::Registry::Get().LocalPeerId()) {

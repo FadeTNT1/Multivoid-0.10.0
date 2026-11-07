@@ -21,6 +21,9 @@ namespace coop::player::pocket_travel_client {
 void Install(coop::net::Session* session);
 void Tick();
 void OnSessionStart();
+// The session ended (pocket_travel::OnSessionEnd): the trip is dropped and a return in flight aborted,
+// so nothing of it outlives the session -- the stand-down, the return's cover and curtain. Game thread.
+void OnSessionEnd();
 
 // The host's PlayerLocation row, from the reliable drain.
 void OnPlayerLocation(const coop::net::PlayerLocationPayload& p);

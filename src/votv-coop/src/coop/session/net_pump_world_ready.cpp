@@ -142,10 +142,7 @@ const char* TickWorldReadyAnnounce(coop::net::Session& session, void* localNow, 
     // pathological load still announces. Re-fires on a re-announce request under the same coherence
     // gate.
     if (!isHost) {
-        // A pocket return's phases run on while no local player exists (its load's world swap), so its
-        // bounds run out even when no world comes up; with a player, pocket_travel_client::Tick drives
-        // it from the gameplay chain.
-        if (!worldUp) coop::player::pocket_return_client::Tick();
+        // A pocket return's phases are ticked by net_pump (its no-world branch included), not here.
         // An away client announces nothing until its return has loaded the host's world: neither the
         // pocket level nor the stale main world the game may bring back is the shared world.
         // The probe still runs every tick (its reconcile-window ceiling lives there).

@@ -37,8 +37,8 @@ bool Begin(coop::player::pocket_travel::Pocket from, coop::player::pocket_travel
 // Drive the phases: the transfer, the inventory profile, the load, the world-ready announce, the
 // host's PlayerLocation. Every phase is bounded; a bound that runs out fails the return, and
 // pocket_travel_client::OnReturnFinished hears the outcome either way. Called every session tick
-// by pocket_travel_client::Tick, and by the world-ready announce tick while no local player exists
-// (the load's world swap), so a bound runs out even when no world comes up. Game thread.
+// by pocket_travel_client::Tick, which net_pump runs on frames with no local player too (the load's
+// world swap), so a bound runs out even when no world comes up. Game thread.
 void Tick();
 
 // A return is in flight (Begin succeeded, OnReturnFinished not yet called).
@@ -48,9 +48,15 @@ bool Active();
 // may go while the player is still counted away. Game thread.
 bool AnnounceOwed();
 
-// Stop a return in flight without a callback (the session is ending: a disconnect mid-return). The
-// curtain comes down. Game thread.
+// Stop a return in flight without a callback (the session is ending: net_pump's teardown, through
+// pocket_travel::OnSessionEnd). Its panel and the join curtain it raised come down, also when the
+// return has finished and only the host's bracket was left to lift the curtain. Game thread.
 void Abort(coop::player::pocket_travel::Reason why);
+
+// The host refused this slot's way home (its own PlayerLocation row with cause Refused): the return in
+// flight fails on its next tick, and the client half ends the session cleanly. A no-op with no return
+// in flight. Game thread.
+void NoteRefusedByHost();
 
 // Session start: forget any return. Game thread.
 void OnSessionStart();

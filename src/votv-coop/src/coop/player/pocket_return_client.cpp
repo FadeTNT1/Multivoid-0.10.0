@@ -50,6 +50,7 @@ constexpr int64_t kProfileMs        = 20'000;   // the transfer done, no profile
 constexpr int64_t kLoadMs           = 180'000;  // the open issued, no settled gameplay world
 constexpr int64_t kAnnounceMs       = 180'000;  // the world up, no world-ready announce
 constexpr int64_t kLocationMs       = 15'000;   // announced, the host's PlayerLocation not yet Main
+constexpr int64_t kNoWorldMs        = 10'000;   // the profile in hand, the world being left cannot be named
 constexpr int64_t kCurtainMs        = 60'000;   // done, the host's bracket never lowered the window
 constexpr int64_t kLoadPollMs       = 1'000;    // the load verb's poll cadence (the join boot's is 1.5 s)
 
@@ -81,6 +82,9 @@ int64_t     g_lastPollMs = 0;      // the load verb's last poll (Load)
 int64_t     g_announcedAtMs = 0;   // the world-ready announce went (WaitReady); 0 = not yet
 bool        g_loadIssued = false;  // a load campaign of ours is registered on the engine
 int64_t     g_curtainWatchMs = 0;  // done with the bracket's window still up; 0 = no watch
+bool        g_curtainRaised = false;  // join_curtain::Show was ours and nothing has lowered it since
+int64_t     g_noWorldSinceMs = 0;  // WaitApply: the world being left has had no name since; 0 = named
+bool        g_refusedByHost = false;  // the host's own row said it refused this way home
 
 // The cover the loading screen reads, from any thread.
 std::atomic<bool>     g_coverUp{false};
@@ -117,6 +121,8 @@ void Clear() {
     g_announcedAtMs = 0;
     g_lastPollMs = 0;
     g_lastDone = 0;
+    g_noWorldSinceMs = 0;
+    g_refusedByHost = false;
     g_coverUp.store(false, std::memory_order_release);
     g_coverDone.store(0, std::memory_order_relaxed);
     g_coverTotal.store(0, std::memory_order_relaxed);
@@ -136,6 +142,7 @@ void Fail(PT::Reason code, const char* cause) {
     g_curtainWatchMs = 0;
     Clear();
     coop::join_curtain::Reset();
+    g_curtainRaised = false;
     coop::player::pocket_travel_client::OnReturnFinished(false, code);
 }
 
@@ -147,6 +154,7 @@ void Finish() {
     // The curtain is the host's bracket's to lift (event_feed fades it at SnapshotComplete, which
     // also lowers the reconcile window). When that has already happened there is nothing to watch.
     g_curtainWatchMs = WLE::InReconcileWindow() ? NowMs() : 0;
+    if (g_curtainWatchMs == 0) g_curtainRaised = false;  // the bracket has already lifted it
     Clear();
     coop::player::pocket_travel_client::OnReturnFinished(true, PT::Reason::Returned);
 }
@@ -203,7 +211,24 @@ void TickApply(int64_t now) {
     }
     // The world being left is the one the episode must not take as loaded, and the announce state is
     // forgotten again right at the load, so nothing announced in the old world can stand for the new.
-    WLE::ArmForReturn(WorldNow());
+    // Never armed without it: a null would clear the exclusion, and the replay of the world being left
+    // (a pocket's own loadObjects) could then satisfy the request. A world with no name (a degraded
+    // identity, or mid-travel) is waited out, bounded.
+    void* const leaving = WorldNow();
+    if (!leaving) {
+        if (g_noWorldSinceMs == 0) {
+            g_noWorldSinceMs = now;
+            UE_LOGW("[POCKET] client: return waits to name the world being left (slot %u, from %s, trip %u, "
+                    "reason %s) -- the world identity has none (degraded or mid-travel)",
+                    static_cast<unsigned>(g_slot), PT::LevelTag(g_from), g_trip, PT::ReasonTag(g_why));
+        }
+        if (now - g_noWorldSinceMs > kNoWorldMs)
+            Fail(PT::Reason::LoadFailed, "the world being left had no name for 10 s; the load could not tell "
+                                         "its own replay from that world's");
+        return;
+    }
+    g_noWorldSinceMs = 0;
+    WLE::ArmForReturn(leaving);
     coop::net_pump::ForgetAnnounceForReturn();
     // The next save object to come ready is this return's: the profile is substituted into it.
     PIS::BeginJoinApply();
@@ -258,13 +283,11 @@ void TickReady(int64_t now) {
         Finish();
         return;
     }
-    if (now - g_announcedAtMs > kLocationMs) {
-        UE_LOGW("[POCKET] client: return -- the host's PlayerLocation still names %s for slot %u %lld s "
-                "after the announce (trip %u); finishing on the announce",
-                PT::LevelTag(PT::LocationOf(g_slot)), static_cast<unsigned>(g_slot),
-                static_cast<long long>(kLocationMs / 1000), g_trip);
-        Finish();
-    }
+    // No row: the host may still hold the slot parked, and world lanes resumed against a slot the
+    // host isolates would be refused one by one. The failure path ends the session cleanly instead.
+    if (now - g_announcedAtMs > kLocationMs)
+        Fail(PT::Reason::LoadFailed, "the host's PlayerLocation never named this slot home (15 s after the "
+                                     "announce)");
 }
 
 // After a return: the curtain belongs to the host's bracket, and is lifted here only if the bracket
@@ -273,6 +296,7 @@ void TickCurtainWatch(int64_t now) {
     if (g_curtainWatchMs == 0) return;
     if (!WLE::InReconcileWindow()) {
         g_curtainWatchMs = 0;
+        g_curtainRaised = false;
         return;
     }
     if (now - g_curtainWatchMs > kCurtainMs) {
@@ -281,6 +305,7 @@ void TickCurtainWatch(int64_t now) {
                 static_cast<unsigned>(g_slot), g_trip);
         coop::join_curtain::BeginDismiss();
         g_curtainWatchMs = 0;
+        g_curtainRaised = false;
     }
 }
 
@@ -325,8 +350,15 @@ bool Begin(PT::Pocket from, PT::Reason why, uint32_t tripSeq, const float depart
     // The host-held profile and the departure placement for the load to come.
     PIS::ClientRearmForReturn(departure);
     // Nothing announced in, or loaded into, the world being left may stand for the world to come: the
-    // episode waits for the NEXT world's replay, and the announce state goes back to a first one.
-    WLE::ArmForReturn(WorldNow());
+    // episode waits for the NEXT world's replay, and the announce state goes back to a first one. A
+    // world with no name is not armed against here (a null clears the exclusion); the arm before the
+    // load (TickApply) waits for one.
+    if (void* const leaving = WorldNow())
+        WLE::ArmForReturn(leaving);
+    else
+        UE_LOGW("[POCKET] client: return starts with no name for the world being left (slot %u, from %s, "
+                "trip %u, reason %s) -- the episode is armed before the load instead",
+                static_cast<unsigned>(slot), PT::LevelTag(from), tripSeq, PT::ReasonTag(why));
     coop::net_pump::ForgetAnnounceForReturn();
 
     g_from = from;
@@ -338,6 +370,8 @@ bool Begin(PT::Pocket from, PT::Reason why, uint32_t tripSeq, const float depart
     g_announcedAtMs = 0;
     g_loadIssued = false;
     g_curtainWatchMs = 0;
+    g_noWorldSinceMs = 0;
+    g_refusedByHost = false;
     Enter(Phase::WaitTransfer);
     g_coverFrom.store(static_cast<uint8_t>(from), std::memory_order_relaxed);
     g_coverDone.store(0, std::memory_order_relaxed);
@@ -346,6 +380,7 @@ bool Begin(PT::Pocket from, PT::Reason why, uint32_t tripSeq, const float depart
     g_coverPhaseAtMs.store(NowMs(), std::memory_order_relaxed);
     g_coverUp.store(true, std::memory_order_release);
     coop::join_curtain::Show();
+    g_curtainRaised = true;
     UE_LOGI("[POCKET] client: return started from %s (slot %u, trip %u, reason %s) -- ReturnRequest and "
             "SaveTransferRequest sent", PT::LevelTag(from), static_cast<unsigned>(slot), tripSeq,
             PT::ReasonTag(why));
@@ -359,6 +394,13 @@ void Tick() {
     coop::net::Session* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running() || !s->connected()) {
         Fail(PT::Reason::TransferFailed, "the session is no longer connected");
+        return;
+    }
+    if (g_refusedByHost) {
+        // Before the load the host's world never came; after it, the host will not take this slot home.
+        const bool beforeLoad = g_phase == Phase::WaitTransfer || g_phase == Phase::WaitApply;
+        Fail(beforeLoad ? PT::Reason::TransferFailed : PT::Reason::LoadFailed,
+             "the host refused this way home (its own row, cause refused)");
         return;
     }
     switch (g_phase) {
@@ -375,24 +417,35 @@ bool Active() { return g_phase != Phase::Idle; }
 bool AnnounceOwed() { return g_phase == Phase::Load || g_phase == Phase::WaitReady; }
 
 void Abort(PT::Reason why) {
-    if (g_phase == Phase::Idle) {
-        g_curtainWatchMs = 0;
-        return;
-    }
-    UE_LOGW("[POCKET] client: return aborted in the %s phase (slot %u, from %s, trip %u, reason %s)",
-            PhaseName(g_phase), static_cast<unsigned>(g_slot), PT::LevelTag(g_from), g_trip,
-            PT::ReasonTag(why));
+    // The session is ending (net_pump's teardown runs this on every end, whatever stopped it): no tick
+    // of this return runs again, so what it raised comes down here -- its panel (the loading screen's
+    // cover, which captures input while it stands) and the join curtain, also when the return has
+    // finished and only the host's bracket was left to lift the curtain.
+    if (g_phase != Phase::Idle)
+        UE_LOGW("[POCKET] client: return aborted in the %s phase (slot %u, from %s, trip %u, reason %s)",
+                PhaseName(g_phase), static_cast<unsigned>(g_slot), PT::LevelTag(g_from), g_trip,
+                PT::ReasonTag(why));
+    else if (g_curtainRaised)
+        UE_LOGW("[POCKET] client: return's curtain dropped with the session (slot %u, from %s, trip %u, "
+                "reason %s) -- the host's bracket never lifted it", static_cast<unsigned>(g_slot),
+                PT::LevelTag(g_from), g_trip, PT::ReasonTag(why));
     if (g_loadIssued) {
         ue_wrap::engine::ResetCachedSave();
         g_loadIssued = false;
     }
     g_curtainWatchMs = 0;
     Clear();
-    coop::join_curtain::Reset();
+    if (g_curtainRaised) coop::join_curtain::Reset();
+    g_curtainRaised = false;
+}
+
+void NoteRefusedByHost() {
+    if (g_phase != Phase::Idle) g_refusedByHost = true;
 }
 
 void OnSessionStart() {
     g_curtainWatchMs = 0;
+    g_curtainRaised = false;
     g_loadIssued = false;
     g_slot = coop::players::kPeerIdUnknown;
     Clear();

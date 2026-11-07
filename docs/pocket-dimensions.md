@@ -208,7 +208,7 @@ curtain. Then four phases, each bounded:
 | transfer | the host's live world in `zcoop_<pid>` | 30 s to the begin, then 20 s without a byte (the join's) | `TransferFailed` |
 | profile | the host's push of the slot's held profile | 20 s (the join's) | `TransferFailed` |
 | load | `LoadStorySaveForReturn`: a new gameplay world, pawn placed, restore ran | 180 s from the open | `LoadFailed` |
-| world-ready | the first announce of the new world, then `PlayerLocation{Main}` | 180 s to the announce, then 15 s for the row (finishes on the announce) | `LoadFailed` |
+| world-ready | the first announce of the new world, then `PlayerLocation{Main}` | 180 s to the announce, then 15 s for the row (no row fails: the host may still hold the slot parked) | `LoadFailed` |
 
 `LoadStorySaveForReturn` is the story-save load without the boot survey, which answers "in
 gameplay" for any placed pawn and so would never travel from a pocket: it issues `open untitled_1`
@@ -218,14 +218,20 @@ travel, so no `loadLevel` seam sees it and untitled_1 needs no token. `ArmForRet
 episode and the load-kind reconcile window, and its request is not satisfied by the replay of the
 world being left (the pocket's own `loadObjects`, or the stale main world's). With the baseline
 world forgotten the reaper's re-announce path raises nothing for the new world, so the host sees one
-announce. While the client is away no announce goes until the return's load is issued.
+announce. While the client is away no announce goes until the return's load is issued. The episode is
+never armed against a world with no name (a degraded identity, or mid-travel): a null would clear the
+exclusion, so the arm before the load waits for a name, 10 s at most (`LoadFailed`). The host's own
+row for the slot with cause `Refused` fails the return at once (`TransferFailed` before the load,
+`LoadFailed` after); it moves no table. net_pump ticks the return, on frames with no local player too.
 
 The curtain is the join's black cover with the return's own panel ("Returning from the poop
 dimension", else "Returning to the main world"; the step, its seconds, the download's bytes). The
 panel comes down when the return ends; the cover is lifted by the host's bracket, as at a join,
 or after 60 s without one. A failure logs the phase and the cause, drops the cover and calls
 `OnReturnFinished(false, ...)`, and the client half ends the session. The fallback is the same flow
-from the stale main world, which the load replaces whole.
+from the stale main world, which the load replaces whole. A session that ends mid-trip, whatever ended
+it, drops the trip and aborts the return from `TearDownSession` (`pocket_travel::OnSessionEnd`): the
+panel and the curtain it raised come down, also when only the host's bracket was left to lift it.
 
 ### The host's side
 
@@ -245,9 +251,11 @@ one atomic byte, since the net thread asks it at every send, relay and receive; 
   (`CancelForSlot`) and clears the one-shot request latch, for a returning slot only, so the request
   behind it is served as at a join; `player_inventory_sync::HostRearmApplyForSlot` pushes the held
   profile again. A repeat is ignored. A return unannounced after 120 s is warned once; the client owns
-  its failure.
+  its failure. A request the host refuses (no trip away, or another trip number) is answered with the
+  slot's own row, cause `Refused`, to that client alone.
 - **The ready edge** (`world_ready_answer`, before `MarkSlotWorldReady`): an away slot's announce is
-  refused (it has no main world). A returning slot's is its first announce: its row goes back to the
+  refused (it has no main world) and answered with the same `Refused` row. A returning slot's is
+  its first announce: its row goes back to the
   main world first (the connect replay is gated by it) and is broadcast; then the full join edge runs.
   Every first announce, a join's too, is sent the rows of the slots that are away.
 - **A disconnect while away**: the row goes back to the main world and is broadcast; the puppet and

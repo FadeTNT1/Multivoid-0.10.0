@@ -88,6 +88,9 @@ bool SameLocation(uint8_t a, uint8_t b);
 void Install(coop::net::Session* session);  // idempotent, every frame (harness/pump)
 void Tick();                                 // session tick, game thread (subsystems)
 void OnSessionStart();                       // net_pump's session start
+// net_pump's TearDownSession, every session end of either role: a client's trip and a return in
+// flight are dropped (the return's panel and curtain come down) and the location table is cleared.
+void OnSessionEnd();
 void OnDisconnectForSlot(uint8_t slot);      // HOST: a slot left (subsystems::DisconnectSlot)
 
 // run_end_travel's non-menu branch: lib_C::loadLevel(`level`) authored by `author`, at the body's

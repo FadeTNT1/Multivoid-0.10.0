@@ -137,6 +137,11 @@ void OnSessionStart() {
     pocket_travel_client::OnSessionStart();
 }
 
+void OnSessionEnd() {
+    pocket_travel_client::OnSessionEnd();
+    ResetLocations();
+}
+
 void OnDisconnectForSlot(uint8_t slot) {
     pocket_travel_host::OnDisconnectForSlot(slot);
 }

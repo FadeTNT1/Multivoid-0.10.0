@@ -309,6 +309,9 @@ void TearDownSession(coop::net::Session& session, const char* why) {
     g_wasConnected = false;
     g_wasConnectedBySlot.fill(false);
     ForgetWorldReadyAnnounce();
+    // A pocket trip or its way home in flight: no tick of either runs again, so the return's cover and
+    // curtain come down here, on every end, whatever stopped the session.
+    coop::player::pocket_travel::OnSessionEnd();
     for (int slot = 0; slot < coop::players::kMaxPeers; ++slot) {
         // DestroySlot is the puppet's Destroy plus UnregisterPuppet; its interleave with DisconnectSlot
         // is composed here only.
@@ -613,10 +616,13 @@ void Tick(coop::net::Session& session) {
     // queued connect broadcast describes in-world state, so waiting costs nothing.
     if (worldUp && !standDown) {
         coop::subsystems::TickGameplay(session, isConnected, isHost, g_fleeing);
-    } else if (standDown) {
-        // The pocket lane ticks through a trip's loads too, where no local player exists.
-        if (worldUp) TickAwayLanes(session, isConnected);
-        else         coop::player::pocket_travel::Tick();
+    } else if (worldUp) {
+        TickAwayLanes(session, isConnected);
+    } else if (!isHost) {
+        // The pocket lane ticks through a trip's loads and a return's world swap too, where no local
+        // player exists: this is the one tick of it on such a frame (its return's bounds run out here
+        // even when no world comes up).
+        coop::player::pocket_travel::Tick();
     }
 
     if (g_netLocal.Raw() && !g_netLocal.Alive()) { g_netLocal.Reset(); g_netLocalController.Reset(); }

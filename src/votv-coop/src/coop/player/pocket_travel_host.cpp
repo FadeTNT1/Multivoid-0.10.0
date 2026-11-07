@@ -135,6 +135,21 @@ void Broadcast(coop::net::Session& s, uint8_t slot, Pocket p, Reason cause, uint
     s.SendReliable(coop::net::ReliableKind::PlayerLocation, &row, sizeof(row));
 }
 
+// A refusal of the slot's way home, made visible to its own client without a new message: its own
+// row, cause Refused, to it alone (PlayerLocation is away sendable). The client's return takes it as a
+// failure and ends its session cleanly rather than wait out its bounds; the row moves no table.
+void SendRefusal(uint8_t slot, const Trip& t) {
+    coop::net::Session* s = HostSession();
+    if (!s) return;
+    coop::net::PlayerLocationPayload row{};
+    row.slot = slot;
+    row.pocket = static_cast<uint8_t>(t.away ? t.pocket : Pocket::Main);
+    row.cause = static_cast<uint8_t>(Reason::Refused);
+    row.reserved = 0;
+    row.tripSeq = t.trip;
+    s->SendReliableToSlot(slot, coop::net::ReliableKind::PlayerLocation, &row, sizeof(row));
+}
+
 // The slot's hold on things in the main world, let go as a leave would let them go: its device
 // claims, the prop and the trash it carried, the lids it held, the props it drove, its crowbar, its
 // stalker and its hooks. Its return is a join's world load and connect replay, which rebuilds what
@@ -222,8 +237,9 @@ void OnReturnRequest(uint8_t slot, const coop::net::PocketTravelPayload& p) {
     const Reason why = static_cast<Reason>(p.reason);
     if (!t.away || p.tripSeq != t.trip) {
         UE_LOGW("[POCKET] host: slot %u's return request refused (trip %u, reason %s) -- the host holds %s "
-                "trip %u", slot, p.tripSeq, PT::ReasonTag(why), t.away ? "away on" : "no trip away, last",
-                t.trip);
+                "trip %u; its client is told", slot, p.tripSeq, PT::ReasonTag(why),
+                t.away ? "away on" : "no trip away, last", t.trip);
+        SendRefusal(slot, t);
         return;
     }
     if (t.returnSinceMs != 0) {
@@ -434,8 +450,9 @@ bool OnFirstWorldReady(uint8_t slot) {
     Trip& t = g_trip[slot];
     if (st == State::Away) {
         UE_LOGW("[POCKET] host: slot %u announced world-ready while away in %s (trip %u, reason %s) -- refused, "
-                "it has no main world until it asks to come home", slot, PT::LevelTag(t.pocket), t.trip,
-                PT::ReasonTag(t.cause));
+                "it has no main world until it asks to come home; its client is told", slot,
+                PT::LevelTag(t.pocket), t.trip, PT::ReasonTag(t.cause));
+        SendRefusal(slot, t);
         return false;
     }
     if (st == State::Returning || st == State::Announced) {
