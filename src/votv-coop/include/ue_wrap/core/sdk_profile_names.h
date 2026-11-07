@@ -1034,6 +1034,9 @@ inline constexpr const wchar_t* PhysAudioImpactProp          = L"sound_impact"; 
 inline constexpr const wchar_t* PhysAudioDamagedProp         = L"sound_damaged";    // damage taken, still standing
 inline constexpr const wchar_t* PhysAudioDestroyedProp       = L"sound_destroyed";  // the break
 inline constexpr const wchar_t* PropPhysicsImpactProp        = L"physicsImpact";      // prop_C -> comp_physicsImpact_C
+// The component class itself: its graph's `destroyed` entry (a break) mints the prop's gibs (struct_breakableprop's
+// propGibs, e.g. a cheese wheel's pieces) under EX_CallMath, with the component as the spawning frame's object.
+inline constexpr const wchar_t* PhysImpactComponentClass     = L"comp_physicsImpact_C";
 inline constexpr const wchar_t* PhysImpactMatOverrideProp    = L"physmat_override";   // comp_physicsImpact_C UPhysicalMaterial*, wins when valid
 inline constexpr const wchar_t* PhysImpactMatProp            = L"physmat";            // comp_physicsImpact_C UPhysicalMaterial*
 inline constexpr const wchar_t* PhysImpactDamageFn           = L"impactDamage";       // comp_physicsImpact_C (damage, impact, hit, actor)

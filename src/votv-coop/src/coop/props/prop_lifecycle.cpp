@@ -218,11 +218,15 @@ void GrabObserver_Aprop_Init_POST_Body(void* self) {
     p.physFlags = coop::prop_wire_parity::PhysFlagsOf(self) |
                   coop::net::propspawn_flags::kSimulatePhysics;
     p.propName.len = 0;
+    std::wstring rowName;   // the list_props row the mirror's init() resolves its mesh from; logged with the send
     if (ue_wrap::prop::IsDescendantOfProp(self)) {
-        const std::wstring nm = ue_wrap::prop::GetPropNameString(self);
-        for (size_t i = 0; i < nm.size() && i < 31; ++i) {
-            p.propName.data[p.propName.len++] = static_cast<char>(nm[i]);
+        rowName = ue_wrap::prop::GetPropNameString(self);
+        for (size_t i = 0; i < rowName.size() && i < 31; ++i) {
+            p.propName.data[p.propName.len++] = static_cast<char>(rowName[i]);
         }
+        if (rowName.size() > 31)
+            UE_LOGW("grab_hook[Aprop.Init POST]: cls='%ls' row '%ls' is longer than the wire's 31 characters -- the "
+                    "mirror gets a cut row and may build the error mesh", cls.c_str(), rowName.c_str());
     }
     p.initLinVelX = p.initLinVelY = p.initLinVelZ = 0.f;
     p.initAngVelX = p.initAngVelY = p.initAngVelZ = 0.f;
@@ -241,8 +245,9 @@ void GrabObserver_Aprop_Init_POST_Body(void* self) {
     } else {
         // Logged only where the broadcast happens, so a suppressed conversion never prints
         // "broadcasting".
-        UE_LOGI("grab_hook[Aprop.Init POST]: HOST broadcasting SPAWN cls='%ls' key='%ls' loc=(%.1f,%.1f,%.1f) heavy=%d frozen=%d",
-                cls.c_str(), keyStr.c_str(), p.locX, p.locY, p.locZ,
+        UE_LOGI("grab_hook[Aprop.Init POST]: HOST broadcasting SPAWN cls='%ls' key='%ls' name='%ls' "
+                "loc=(%.1f,%.1f,%.1f) heavy=%d frozen=%d",
+                cls.c_str(), keyStr.c_str(), rowName.c_str(), p.locX, p.locY, p.locZ,
                 (p.physFlags & coop::net::propspawn_flags::kIsHeavy)  ? 1 : 0,
                 (p.physFlags & coop::net::propspawn_flags::kFrozen)   ? 1 : 0);
         s->SendPropSpawn(p);

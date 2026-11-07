@@ -15,6 +15,7 @@
 #include "coop/props/prop_lifecycle.h"      // IsPerPlayerPropClass / IsWireSuppressedPropClass (the host gate)
 #include "coop/props/prop_save_data.h"
 #include "coop/props/prop_spawn_authoring.h" // BirthIsPlayerAuthored (the spawn menu / the toolgun)
+#include "coop/props/prop_damage_gate.h"    // AuthoredHere: a break this client runs is its own
 #include "coop/props/prop_drive_rules.h"    // kRestVelCmS: the floor under which a spawn is written no velocity
 #include "coop/props/prop_throw.h"          // ThrowSeqFor: the throw that launched a drained place
 #include "coop/props/prop_wire_parity.h"    // PhysFlagsOf, the one builder of a live prop's flags
@@ -94,6 +95,13 @@ struct PendingPlace {
     // unmarked birth here is. Read at the seam because that is the only moment the VM still holds
     // the calling frame.
     bool    playerSpawn = false;
+    // True when the birth is a GIB of a break this client ran on a prop it authors: the spawning frame was a prop's
+    // comp_physicsImpact_C (its `destroyed` mints struct_breakableprop's propGibs) and its owner is held, thrown or
+    // synced here (coop/props/prop_damage_gate lets only such a break run on a client). The host's copy never breaks,
+    // so these are the only pieces anywhere; dropped at the drain they existed for this client alone (a thrown cheese
+    // wheel's pieces, invisible to every other peer, and a bite of one the host refused: "no food holds the key").
+    // Read at the seam, the only moment the frame still names the component.
+    bool    breakGib = false;
 };
 std::vector<PendingPlace> g_pending;         // GT-only
 ue_wrap::CachedObjRef g_lastPlace;           // GT-only; the most recent pending place spawn's actor (dev read only)
@@ -136,11 +144,26 @@ std::wstring WireToWide(const uint8_t len, const char* data, size_t cap) {
     return w;
 }
 
+// Is `src`, the object whose bytecode made a birth, a prop's physics-impact component whose break this client authors?
+// A client's copy runs a prop's impactDamage and fireDamage only when it authors the prop (prop_damage_gate), so a
+// birth inside such a break is that break's gib. A copy's break this client does not author (an explosion on a
+// mirror) is not admitted: the host's own break mints that set. The owner is still alive here: the graph destroys it
+// after its gibs. The class is looked up per call (object_index, O(1)); a break is rare.
+bool IsOwnBreakGib(void* src) {
+    if (!src || !R::IsLive(src)) return false;
+    void* compCls = ue_wrap::object_index::ClassByName(P::name::PhysImpactComponentClass);
+    void* cls = R::ClassOf(src);
+    if (!compCls || !cls || !R::IsDescendantOfAny(cls, &compCls, 1)) return false;
+    void* owner = R::OuterOf(src);
+    return owner && R::IsLive(owner) && ue_wrap::prop::IsDescendantOfProp(owner) &&
+           coop::props::prop_damage_gate::AuthoredHere(owner);
+}
+
 // The client finish-spawn post-hook: enqueue a fresh, untracked, non-echo keyed prop spawn in
 // a settled session for place detection. Chains after the host spawn watcher's callback on
 // the same UFunction, role-disjoint (that one is host-only, this client-only). Runs on the
 // dispatching thread; the finish spawn is game-thread only in UE4 (actor construction).
-void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
+void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
     if (!GT::IsGameThread()) return;
     // The probe's birth record comes before the session gates: the menu world's births after a quit
     // happen with no session, and they are what the pause-quit drill measures.
@@ -208,6 +231,8 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     // materialises inside the take call, so the latch is live exactly here. Marks the entry as a
     // container-extraction birth, admitted at drain.
     const bool fromContainerExtract = coop::props::container_writer_watch::TakeObjInFlight();
+    // A gib of this client's own break: the frame's object is the breaking prop's component, readable only now.
+    const bool breakGib = !playerAuthored && !fromContainerExtract && IsOwnBreakGib(srcObj);
     if (coop::dev::prop_birth_key_probe::IsEnabled()) {
         // The seam reading the probe exists for: is the Key there before any drain tick waits?
         coop::dev::prop_birth_key_probe::NoteEnqueue(
@@ -216,7 +241,11 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     }
     if (coop::dev::container_route_census::IsEnabled()) g_lastPlace.Set(actor);   // the census drill's read, armed by its row only
     g_pending.push_back(PendingPlace{actor, R::InternalIndexOf(actor), 0, fromContainerExtract,
-                                     playerAuthored});
+                                     playerAuthored, breakGib});
+    if (breakGib)
+        UE_LOGI("[PROP-DROP] CLIENT enqueued BREAK-GIB birth actor=%p cls='%ls' (a gib of this client's own break of "
+                "'%ls'; admitted at drain)", actor, R::ClassNameOf(actor).c_str(),
+                R::ClassNameOf(R::OuterOf(srcObj)).c_str());
     if (fromContainerExtract)
         UE_LOGI("[PROP-DROP] CLIENT enqueued container-EXTRACT birth actor=%p (admitted at drain)", actor);
     if (playerAuthored) {
@@ -495,7 +524,7 @@ void Tick(coop::net::Session* session) {
         // NOT a freshBirth: that kind means a device put an item in a hand and sleeps the host's
         // copy, while a menu prop is dropped in the world at the player's aim and must fall on the
         // host exactly as it falls here -- the transform block below sends its real physics state.
-        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !isNotebookSheet) {
+        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !e.breakGib && !isNotebookSheet) {
             probe::NoteDrainExit(e.actor, "not-a-place-nor-whitelisted-birth", e.tries, key);
             continue;
         }
@@ -582,12 +611,14 @@ void Tick(coop::net::Session* session) {
         probe::NoteDrainExit(e.actor,
                              freshBirth     ? "authored-fresh-birth"
                              : e.playerSpawn ? "authored-player-spawn"
+                             : e.breakGib    ? "authored-break-gib"
                              : isNotebookSheet ? "authored-notebook-sheet"
                                              : "authored-drop-intent",
                              e.tries, key);
         UE_LOGI("[PROP-DROP] CLIENT authored %s key='%ls' cls='%ls' name='%ls' loc=(%.1f,%.1f,%.1f) drain |v|=%.1f cm/s throw seq %u%s",
                 freshBirth     ? "FRESH-BIRTH intent"
                 : e.playerSpawn ? "PLAYER-SPAWN intent"
+                : e.breakGib    ? "BREAK-GIB intent"
                 : isNotebookSheet ? "NOTEBOOK-SHEET intent"
                                 : "drop intent",
                 key.c_str(), cls.c_str(),

@@ -91,8 +91,11 @@ are peer-gated. `[V]`
 - **A client never authors a save-loaded prop.** Three intent doors route around it: the drop
   intent for a parked key placed after a pickup, the whitelisted births (a reel, a module, a
   drive, a container extract) the client cannot avoid, and a birth a PLAYER's own spawn verb
-  asked for; the host performs all three. Any other client-born keyed prop is dropped at the
-  door. `[V]`
+  asked for; the host performs all three. A fourth rides the drop intent: a gib of a break this
+  client ran on a prop it holds, threw or syncs (the spawning frame is the prop's
+  `comp_physicsImpact_C`; only such a break runs on a client, so its pieces exist nowhere else).
+  Any other client-born keyed prop is dropped at the door. `[V]`; the gib door `[?]` until a run
+  reads `[PROP-DROP] CLIENT authored BREAK-GIB intent`.
 - **Who asked, for a client's fresh birth.** The third door cannot be a class list, because the
   spawn menu is the whole catalog and every class on it is also what the world's own spawners,
   morphs and impacts mint for themselves on each peer independently -- a class test would double
