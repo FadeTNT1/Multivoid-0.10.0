@@ -202,7 +202,7 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {L"trigger_wispSwarm_C",     nullptr},          // the wisps event swarm
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
     {L"ticker_wispSpawner_C",    nullptr},          // the ambient sky wisps
-    {L"ticker_egSpawner_C",      nullptr},          // the ambient night eggs, one eg_C per roll
+    {L"ticker_egSpawner_C",      nullptr},          // 0.9.0n's night eggs; absent on 0.10.0 (CustomEvent_5 rolls the egg)
     // The hostile tickers (0.10.0): each rolls inside its ReceiveTick, a client's tick refused in spawn_authority, so
     // the host's birth is the only one and rides the npc lane. insomniac mints insomniac_child_C (a child class of
     // insomniac_C, so the allowlist's super-chain walk takes it) or insomniac_C; yellowWisp a killerwisp_C.

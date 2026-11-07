@@ -102,7 +102,10 @@ const ClassRow kClassRowMap[] = {
     { "superEgger_C", "eggvasion" },
     { "boarInvasion_C", "boarwar" },
     { "dreamer_dreambase_C", "dreambase" },
-    { "arirShip_C", "arirShip" },
+    // The arirShip row's sender is the level-placed apparition: the eventer's runTrigger(0) reaches its appear,
+    // which calls setEvent(dir) on itself (arirShipAppear_C::appear in the 0.10.0 capture). arirShip_C is the
+    // alien dropper's ship and never calls setEvent.
+    { "arirShipAppear_C", "arirShip" },
 };
 
 const char* RowForClass(const std::string& className) {
@@ -130,6 +133,12 @@ const LaneOwned kLaneOwnedClasses[] = {
     { "ufo_joel_C", "world_actor_sync" },
     { "ufo_pillfo_C", "world_actor_sync" },
     { "midasufotest_C", "event_scene" },            // the ufo_midas flight: the host's phase switches a client's on
+    // The eventer's droppers (fallbody, fallcar, graystank): ufoDropper_C's box overlap calls setEvent(true) on
+    // itself, so ClassOf names the subclass; each is a world-actor mirror the connect snapshot re-spawns.
+    { "ufoDropper_body_C", "world_actor_sync" },
+    { "ufoDropper_car_C", "world_actor_sync" },
+    { "ufoDropper_tank_C", "world_actor_sync" },
+    { "ufoDropper_pig_C", "world_actor_sync" },
 };
 const char* LaneFor(const std::string& className) {
     for (const auto& e : kLaneOwnedClasses)
@@ -199,7 +208,14 @@ void OnSetEventPost(const sg::Call& call) {
     ForgetOtherWorlds();
     const long long now = NowMs();
     if (active) {
-        const auto [it, fresh] = g_began.emplace(sender, Began{R::InternalIndexOf(sender), Narrow(R::ClassNameOf(sender)), now});
+        const Began began{R::InternalIndexOf(sender), Narrow(R::ClassNameOf(sender)), now};
+        auto [it, fresh] = g_began.emplace(sender, began);
+        // An entry whose sender died without its setEvent(false) (destroyed mid-event) can share its address
+        // with this new sender: the slot check tells them apart, and the new event gets its own begin time.
+        if (!fresh && !R::IsLiveByIndex(sender, it->second.objIdx)) {
+            it->second = began;
+            fresh = true;
+        }
         if (fresh) UE_LOGI("event_active: BEGIN class=%s n=%d", it->second.className.c_str(), ReadRefcount());
         return;
     }
