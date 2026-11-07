@@ -11,7 +11,9 @@
 // forwarded to it (desk_verb_effects), and its signals_processed point put back on the host and sent. The host
 // streams CompState while decoding, on its edges and on a completion, the level-up riding the CompData edge; a
 // client applies the host's alone, writing progress and downloading, painting the texts the mirror's own calls
-// leave wrong and driving the cues off the wire's edges, never the latch. Game thread throughout.
+// leave wrong and driving the cues off the wire's edges, never the latch. The green output console, which only the
+// native decode step writes, is fed on a client with cosmetic lines through the desk's comp_writehecer while the
+// host's decode advances (downloading above zero, progress moving between states). Game thread throughout.
 
 #pragma once
 

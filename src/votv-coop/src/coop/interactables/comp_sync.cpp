@@ -18,6 +18,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <cwchar>
+#include <cwctype>
+#include <random>
+#include <string>
 #include <vector>
 
 namespace coop::comp_sync {
@@ -114,6 +118,143 @@ int DerivePhase(bool active, float progress) {
 void PaintPhaseIfChanged(int phase) {
     if (phase == g_lastPaintedPhase) return;
     if (CMP::PaintCompProcess(PhaseText(phase))) g_lastPaintedPhase = phase;
+}
+
+// ---- the mirror's green console (CLIENT) ---------------------------------------------------------------------------
+//
+// The desk's green output console is written by the decode step itself: each tick calculate_comp adds clamp((downloading
+// * 100)^3, 1, 32) to comp_mining, and the 1 it always clears is one attempt per tick: with a random weight, a line
+// "<processorcounter as 8 hex> <str1> <str2>" goes to comp_writehecer (which prepends a line break and the line to
+// comp_hecertext, keeps 1500 characters and paints text_compconsole), and the counter steps either way. A mirror never
+// runs that step, so it asks for the same text by the same function -- cosmetic, from local randomness, and never the
+// latch or calculate_comp.
+//
+// It runs while the host's decode ADVANCES, which the wire shows two ways: the mirrored per-tick increment
+// (comp_downloading) is above zero -- the decode step zeroes it when there is no power, and a join's first state has
+// nothing else to go on -- and the progress changed since the previous state (a host paused in a menu stops stepping
+// while its latch, its streamed state and its last increment stay as they were). A state older than kFeedStale also
+// stops it.
+constexpr auto kFeedStale = std::chrono::seconds(3);
+bool g_feedOn = false;
+bool g_feedHaveProgress = false;
+float g_feedProgress = 0.0f;
+Clock::time_point g_feedStateAt{};
+uint32_t g_feedCounter = 0;
+unsigned long long g_feedLines = 0;
+unsigned long long g_feedRuns = 0;
+
+std::mt19937& FeedRng() {
+    static std::mt19937 rng{std::random_device{}()};
+    return rng;
+}
+float Rand01() { return std::uniform_real_distribution<float>(0.0f, 1.0f)(FeedRng()); }
+// kismet's RandomBoolWithWeight
+bool Chance(float weight) { return Rand01() < weight; }
+
+// str1: six tokens, each a random byte in hex or "00" by a per-call weight, with a 1% chance per token of "AM OG US"
+// being appended (the list is cut to six at the end), joined by a space.
+std::wstring FeedStr1() {
+    std::vector<std::wstring> chars;
+    const float weight = Rand01();
+    for (int i = 1; i <= 6; ++i) {
+        if (Chance(weight)) {
+            wchar_t hex[3];
+            swprintf(hex, 3, L"%02X", static_cast<unsigned>(FeedRng()() & 0xFF));
+            chars.emplace_back(hex);
+        } else {
+            chars.emplace_back(L"00");
+        }
+        if (Chance(0.01f)) {
+            chars.emplace_back(L"AM");
+            chars.emplace_back(L"OG");
+            chars.emplace_back(L"US");
+        }
+    }
+    chars.resize(6);
+    std::wstring out;
+    for (size_t i = 0; i < chars.size(); ++i) {
+        if (i) out += L' ';
+        out += chars[i];
+    }
+    return out;
+}
+
+// str2: twelve cells, each one character of a random byte or "." by a per-call weight (random cubed).
+std::wstring FeedStr2() {
+    static const wchar_t kPunct[] = L"!@#$%^&*()_+=-{}:\"<>?[];',./`~";
+    static const wchar_t kB64Tail[] = L"AQgw";  // the last sextet of one byte in base64url
+    const float r = Rand01();
+    const float weight = r * r * r;
+    std::wstring out;
+    for (int i = 0; i < 12; ++i) {
+        if (!Chance(weight)) {
+            out += L'.';
+            continue;
+        }
+        const unsigned b = static_cast<unsigned>(FeedRng()() & 0xFF);
+        const wchar_t c = static_cast<wchar_t>(b);
+        const bool printable = b > 0 && b < 0x80 && (iswalnum(c) || wcschr(kPunct, c));
+        out += printable ? c : kB64Tail[b & 3];
+    }
+    return out;
+}
+
+void FeedStop(const char* why) {
+    if (g_feedOn) UE_LOGI("comp_sync: CLIENT's green console feed stopped -- %s (%llu lines this run)", why, g_feedLines);
+    g_feedOn = false;
+}
+
+void FeedReset() {
+    g_feedOn = false;
+    g_feedHaveProgress = false;
+    g_feedProgress = 0.0f;
+    g_feedCounter = 0;
+    g_feedLines = 0;
+}
+
+// One native-tick's worth, per mod tick.
+void FeedStep(Clock::time_point now) {
+    if (!g_feedOn || g_worldDown) return;
+    if (now - g_feedStateAt > kFeedStale) {
+        FeedStop("the host's state went quiet");
+        return;
+    }
+    CD::Scalars desk;
+    if (!CD::ReadScalars(desk) || !desk.activeComp) return;  // the native step waits on the pane being in use too
+    if (!Chance(Rand01())) {  // the weight is itself random: half the ticks, on average, write
+        ++g_feedCounter;
+        return;
+    }
+    wchar_t head[12];
+    swprintf(head, 12, L"%08X", g_feedCounter);
+    const std::wstring line = L"\r\n" + std::wstring(head) + L" " + FeedStr1() + L" " + FeedStr2();
+    if (!CMP::WriteHecer(line.c_str())) return;
+    ++g_feedCounter;
+    ++g_feedLines;
+}
+
+// The wire's state: whether the host's decode is advancing, and so whether the console runs.
+void FeedOnState(const coop::net::CompStatePayload& p, Clock::time_point now) {
+    const bool active = p.decodeActive != 0;
+    if (!active) {
+        FeedStop("the host's decode stopped");
+        g_feedHaveProgress = false;
+        return;
+    }
+    const bool moved = !g_feedHaveProgress || p.progress != g_feedProgress;
+    g_feedHaveProgress = true;
+    g_feedProgress = p.progress;
+    g_feedStateAt = now;
+    const bool advancing = p.downloading > 0.0f && moved;
+    if (advancing && !g_feedOn) {
+        ++g_feedRuns;
+        UE_LOGI("comp_sync: CLIENT's green console feed started (progress %.3f%%, +%.5f per tick)", p.progress,
+                p.downloading);
+    } else if (!advancing) {
+        FeedStop(p.downloading > 0.0f ? "the host's progress is not moving (paused?)"
+                                      : "the host's decode makes no progress (no power?)");
+    }
+    g_feedOn = advancing;
 }
 
 void SendState(coop::net::Session* s, const CMP::CompScalars& cs, bool completed, bool finalLevel, int toSlot) {
@@ -342,6 +483,7 @@ void Tick() {
     if (!s || !s->running()) return;
     if (!CD::EnsureResolved()) return;
     const auto now = Clock::now();
+    if (s->role() == Role::Client) FeedStep(now);
     if (now < g_nextPoll) return;
     g_nextPoll = now + kPollInterval;
 
@@ -355,6 +497,7 @@ void Tick() {
             g_lastDataKey = {};
             g_wireActive = false;
             g_lastPaintedPhase = -1;
+            FeedReset();  // the console's text went with the world; the next state restarts the feed
         }
         return;
     }
@@ -402,6 +545,7 @@ void OnState(const coop::net::CompStatePayload& p) {
     g_wireActive = active;
     if (active || p.progress > 0.0f) CMP::PaintCompProgress(p.progress);
     PaintPhaseIfChanged(DerivePhase(active, p.progress));
+    FeedOnState(p, Clock::now());
 }
 
 void OnDataChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot) {
@@ -433,6 +577,10 @@ void OnDisconnect() {
     if (c.startsRefused || c.clientDecodes || c.completions || c.processedSent)
         UE_LOGI("comp_sync: session end -- starts refused=%llu, client decodes=%llu, completions=%llu, processed "
                 "sent=%llu", c.startsRefused, c.clientDecodes, c.completions, c.processedSent);
+    if (g_feedRuns) UE_LOGI("comp_sync: session end -- green console feed ran %llu time(s)", g_feedRuns);
+    FeedStop("the session ended");
+    FeedReset();
+    g_feedRuns = 0;
     g_counts = Counts{};
     g_assembler.Clear();
     if (g_wireActive) {

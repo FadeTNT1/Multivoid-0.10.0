@@ -128,7 +128,14 @@ simulator, the host's machine: a client's own `comp_start`, its join's restore o
 included, is refused, and a decode a client's start began is that client's, its completion gloss and
 processed signal sent to it. The host streams the refiner's state while decoding, on its edges and on
 each completion; a client is a passive mirror that paints what nothing native repaints
-(`coop/interactables/comp_sync`).
+(`coop/interactables/comp_sync`). The green output console is native decode-step output that the wire
+does not carry, so a client's mirror writes its own cosmetic lines through the desk's `comp_writehecer`
+(same cadence and line format as `calculate_comp`, local randomness; never the latch and never
+`calculate_comp`). It runs while the host's decode advances and the pane is in use: the state's
+`downloading` is above zero (the decode step zeroes it without power) and its `progress` changed since
+the previous state (a paused host stops stepping while its latch and last increment stay), and a state
+older than 3 s stops it. It starts from a joiner's first state, stops on the wire's stop or completion,
+and resets with the world and the session. No wire change.
 
 ### Drives, racks, modules, tapes, the laptop, the database
 
