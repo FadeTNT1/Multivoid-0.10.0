@@ -268,6 +268,7 @@ docs/**
 !docs/base-computer.md
 !docs/deployables.md
 !docs/events-and-weather.md
+!docs/farming.md
 !docs/join.md
 !docs/saving.md
 !docs/master-server.md

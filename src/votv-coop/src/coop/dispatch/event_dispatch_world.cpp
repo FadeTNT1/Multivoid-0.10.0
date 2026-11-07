@@ -1,6 +1,6 @@
 // coop/dispatch/event_dispatch_world.cpp -- the ambient and world-event reliable-kind case
 // bodies (the firefly, the event cue, fire and snapshot, the alarm, the server box, the
-// roaches, the inventory pickup, chat, the sky, the red sky, lightning, weather)
+// roaches, the inventory pickup, chat, the sky, the red sky, lightning, weather, the growing plants)
 // and the shared sender-eid range check; see coop/dispatch/event_dispatch.h.
 
 #include "event_dispatch.h"  // co-located private header (src tree, not include/)
@@ -15,6 +15,7 @@
 #include "coop/world/basement_flood_sync.h"  // HOST->CLIENT the basement's water level
 #include "coop/world/basement_pipe_sync.h"   // HOST->CLIENT a burst water pipe's damage
 #include "coop/world/church_sync.h"
+#include "coop/farming/plant_sync.h"  // the growing plants: a client's verbs to the host, the host's rows back
 #include "coop/interactables/serverbox_sync.h"  // the host-authoritative signal-server state
 #include "coop/interactables/server_upgrade_sync.h"  // the servers' physical upgrades
 #include "coop/creatures/roach_sync.h"           // the host-authoritative roach snapshot
@@ -272,6 +273,26 @@ bool HandleWorldEvent(const net::Session::ReliableMessage& msg) {
             break;
         }
         coop::basement_pipe_sync::OnState(p);
+        break;
+    }
+    case net::ReliableKind::PlantIntent:
+    case net::ReliableKind::PlantState: {
+        // The growing plants (coop::farming): a client's plant verb to the host, the host's rows, deaths and answers
+        // back. Chunked blobs; the module takes an intent only on the host from a client slot and a state only on a
+        // client from slot 0, and parses each whole (coop/farming/plant_wire.h).
+        if (msg.payloadLen < sizeof(net::BlobChunkPayload)) {
+            UE_LOGW("event_feed: %s payload too short (%zu < %zu)",
+                    msg.kind == net::ReliableKind::PlantIntent ? "PlantIntent" : "PlantState",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::BlobChunkPayload));
+            break;
+        }
+        net::BlobChunkPayload pc{};
+        std::memcpy(&pc, msg.payload, sizeof(pc));
+        const uint8_t pslot = (msg.senderPeerSlot >= 0 && msg.senderPeerSlot < net::kMaxPeers)
+                                  ? static_cast<uint8_t>(msg.senderPeerSlot)
+                                  : static_cast<uint8_t>(0xFF);
+        if (msg.kind == net::ReliableKind::PlantIntent) coop::farming::OnIntentChunk(pc, pslot);
+        else coop::farming::OnStateChunk(pc, pslot);
         break;
     }
     case net::ReliableKind::ChurchState: {

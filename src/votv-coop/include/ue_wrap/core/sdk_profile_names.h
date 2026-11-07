@@ -1861,6 +1861,50 @@ inline constexpr const wchar_t* WasherCue = L"wade_Cue";
 inline constexpr const wchar_t* ParticleSystemClass = L"ParticleSystem";
 inline constexpr const wchar_t* SoundCueClass = L"SoundCue";
 
+// The growing plants, growingPlant_C (an actor_save_C, never a prop) and its descendants (grass patch, pine, Stolas herb,
+// shroom). `plant` names the list_farmplants row the static `data` (struct_farmPlant) is read from; growth, water,
+// dryness (-1 = dead), fertilizer, fruit timer, disease pool and the berry `amount` are instance floats and ints. upd(false)
+// re-reads the row and rebuilds the look and sets the tick from dryness; updLoc scales and wets the mesh; processGrown
+// latches `grew` and the ripe mesh; actionOptionIndex(action 4) is the harvest and the discard. A pot (prop_farmPot_C)
+// holds its plant in `plant` and plants the hand item mainPlayer_C.holdingActor_main names. The watched verbs are fact
+// rows in coop/farming.
+inline constexpr const wchar_t* GrowingPlantStolasHerbClass     = L"growingplant_stolasherb_C";
+inline constexpr const wchar_t* GrowingPlantPlantProp           = L"plant";
+inline constexpr const wchar_t* GrowingPlantGrowProp            = L"grow";
+inline constexpr const wchar_t* GrowingPlantGrewProp            = L"grew";
+inline constexpr const wchar_t* GrowingPlantWaterProp           = L"water";
+inline constexpr const wchar_t* GrowingPlantDrynessProp         = L"dryness";
+inline constexpr const wchar_t* GrowingPlantFertilizerProp      = L"fertilizer";
+inline constexpr const wchar_t* GrowingPlantFruitGrowProp       = L"fruitgrow";
+inline constexpr const wchar_t* GrowingPlantHealthProp          = L"health";
+inline constexpr const wchar_t* GrowingPlantAmountProp          = L"amount";
+inline constexpr const wchar_t* GrowingPlantDiseaseNameProp     = L"activeDisease_name";
+inline constexpr const wchar_t* GrowingPlantDiseaseCompProp     = L"diseaseComponent";
+inline constexpr const wchar_t* GrowingPlantDiscardProp         = L"discard";
+inline constexpr const wchar_t* GrowingPlantHideDirtProp        = L"hidedirt";
+inline constexpr const wchar_t* GrowingPlantAttachToProp        = L"attachTo";
+inline constexpr const wchar_t* GrowingPlantDataProp            = L"data";
+inline constexpr const wchar_t* FarmPlantTypeMember             = L"planttype_";
+inline constexpr const wchar_t* FarmPlantAmountRangeMember      = L"amount_range_";
+inline constexpr const wchar_t* FarmPlantCanGrowInPotsMember    = L"cangrowinpots_";
+inline constexpr const wchar_t* FarmPlantMinSizeMember          = L"minsize_";
+inline constexpr const wchar_t* FarmPlantTable                  = L"list_farmplants";
+inline constexpr const wchar_t* GrowingPlantUpdSkipParam        = L"skipDataTable";
+inline constexpr const wchar_t* GrowingPlantUpdLocFn            = L"updLoc";
+inline constexpr const wchar_t* GrowingPlantProcessGrownFn      = L"processGrown";
+inline constexpr const wchar_t* GrowingPlantProcessGrownParam   = L"skipGrowCheck";
+inline constexpr const wchar_t* GrowingPlantAddDiseaseFn        = L"addDisease";
+inline constexpr const wchar_t* GrowingPlantAddDiseaseNameParam = L"name";
+inline constexpr const wchar_t* GrowingPlantAddMedicineFn       = L"addMedicine";
+inline constexpr const wchar_t* GrowingPlantMedicineTypeParam   = L"type";
+inline constexpr const wchar_t* GrowingPlantMedicineTimeParam   = L"time";
+inline constexpr const wchar_t* GrowingPlantHarvestSoundFn      = L"harvestSound";
+inline constexpr const wchar_t* PlantDiseaseHealFn              = L"heal";
+inline constexpr const wchar_t* FarmPotClass                    = L"prop_farmPot_C";
+inline constexpr const wchar_t* FarmPotPlantProp                = L"plant";
+inline constexpr const wchar_t* MainPlayerInputAltProp          = L"input_alt";
+inline constexpr const wchar_t* MainPlayerRetargetAddFn         = L"retarget add object to inventory";
+inline constexpr const wchar_t* MainPlayerRetargetItemParam     = L"item";
 // Player-dug holes and what is put in them (coop/props/dig_sync, ue_wrap/actors/dirt). The shovel's
 // event_dighole spawns its `dirtholeType` (dirthole_C, a prop_C that mints no key: its getKey answers None) at the
 // point its trace struck, writing `matType` (0 dirt, 1 gravel, 2 sand: the hole's material) and `attachTo` in the

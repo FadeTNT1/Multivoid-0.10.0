@@ -145,6 +145,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::ToolActionIntent:
     case ReliableKind::MicrowaveIntent:
     case ReliableKind::PosterIntent:
+    case ReliableKind::PlantIntent:
     case ReliableKind::DigIntent:
     case ReliableKind::IrrigationCommit:
     case ReliableKind::ProjectileFired:
@@ -186,6 +187,7 @@ constexpr ClientAuthorship AuthorshipOf(ReliableKind k) {
     case ReliableKind::MicrowaveState:
     case ReliableKind::BucketFillState:
     case ReliableKind::PosterState:
+    case ReliableKind::PlantState:
     case ReliableKind::DigState:
     case ReliableKind::IrrigationState:
     case ReliableKind::ToolActionState:
