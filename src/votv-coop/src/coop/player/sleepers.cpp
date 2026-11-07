@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -168,18 +169,28 @@ uint32_t g_sendSeq = 1;
 coop::blob_chunks::Assembler g_asm;
 Clock::time_point g_nextWriteback{};
 uint32_t g_loadedSerial = 0;                  // host: the hosted world whose saved list was read
-bool g_loadedAny = false;
+std::atomic<bool> g_loadedAny{false};
 struct Saved { std::string guid; std::wstring nick; std::string skin; FVector stand; float standYaw; FVector lie; FRotator rot; };
 std::vector<Saved> g_atGather;                // host: the list as the last gather saw it
 bool g_gatherTaken = false;
 size_t g_atGatherOnline = 0;                  // host: how many of g_atGather are connected players, not sleepers
-// Host: the connected clients as the last scan saw them (their standing spot), the list a quit writes when the
-// engine can no longer be asked. `g_hostSeen` is set while a hosted session ticks, so the session's end -- which
-// reads a stopped session -- still knows it was a host's; `g_endFlushed` makes the end's write run once.
-std::vector<Saved> g_onlineCache;
+// Host: the whole saved list as the last 1 Hz scan saw it (the sleepers lying and the connected clients at their
+// standing spot), already serialized, with the sidecar's resolved path. A quit that cannot ask the engine writes exactly
+// this and reads nothing else; the scan (game thread) replaces it and the quit (any thread) reads it, under the mutex.
+struct PrebuiltEnd {
+    bool valid = false;
+    std::wstring path;
+    std::string text;
+    size_t online = 0;     // how many entries are connected players
+    size_t entries = 0;
+};
+std::mutex g_prebuiltMutex;
+PrebuiltEnd g_prebuilt;
 Clock::time_point g_nextOnlineScan{};
-bool g_hostSeen = false;
-bool g_endFlushed = false;
+// `g_hostSeen` is set while a hosted session ticks, so the session's end -- which reads a stopped session -- still
+// knows it was a host's; `g_endFlushed` makes the end's write run once. The end may run off the game thread.
+std::atomic<bool> g_hostSeen{false};
+std::atomic<bool> g_endFlushed{false};
 bool g_installed = false;
 Clock::time_point g_swallowUntil{};
 bool g_swallowRelease = false;
@@ -707,6 +718,23 @@ std::string SerializeList(const std::vector<Saved>& list) {
     return o;
 }
 
+// Game thread, 1 Hz on a host: cut the whole saved list now -- the sleepers lying, then the connected clients at their
+// standing spot -- as the text a quit off the game thread writes, with the sidecar's path resolved.
+void RefreshPrebuiltEnd() {
+    PrebuiltEnd b;
+    if (Enabled()) {
+        std::vector<Saved> list = CurrentList(/*withOnline=*/false);
+        std::vector<Saved> online = CollectOnline(/*full=*/false);   // never a guid that has a sleeper already
+        b.online = online.size();
+        for (Saved& v : online) list.push_back(std::move(v));
+        b.entries = list.size();
+        b.text = SerializeList(list);
+        b.valid = PS::PrepareWorldSidecar(kSidecar, b.path);
+    }
+    std::lock_guard<std::mutex> lock(g_prebuiltMutex);
+    g_prebuilt = std::move(b);
+}
+
 void LoadSavedList() {
     std::string text;
     if (!PS::ReadWorldSidecar(kSidecar, text)) {
@@ -1122,9 +1150,8 @@ void Tick() {
         }
     }
     if (IsHost() && g_loadedAny && now >= g_nextOnlineScan) {
-        // The connected clients' last known spots, for a quit that cannot ask the engine.
         g_nextOnlineScan = now + kOnlineScanEvery;
-        g_onlineCache = CollectOnline(/*full=*/false);
+        RefreshPrebuiltEnd();
     }
     if (!g_sleepers.empty()) TickBuilds(now);
     coop::sleeper_snore::Tick();
@@ -1178,7 +1205,10 @@ void OnSessionEnd() {
     g_atGather.clear();
     g_gatherTaken = false;
     g_atGatherOnline = 0;
-    g_onlineCache.clear();
+    {
+        std::lock_guard<std::mutex> lock(g_prebuiltMutex);
+        g_prebuilt = PrebuiltEnd{};
+    }
     g_hostSeen = false;
     g_endFlushed = false;
     g_swallowRelease = false;
@@ -1186,22 +1216,37 @@ void OnSessionEnd() {
 
 void OnSessionEnding(const char* why) {
     // Only a hosted session whose saved list was read: the file on disk is otherwise left as it was. Once per session.
-    if (!g_hostSeen || !g_loadedAny || g_endFlushed || !Enabled()) return;
-    g_endFlushed = true;
-    // On the game thread the clients are asked now (their puppets and the roster are still up); anywhere else the last
-    // scan stands, as the engine is not ours to read from there.
+    if (!g_hostSeen || !g_loadedAny) return;
+    const bool gameThread = GT::IsGameThread();
+    if (gameThread && !Enabled()) return;
+    if (g_endFlushed.exchange(true)) return;
+    // On the game thread the clients are asked now (their puppets and the roster are still up). Anywhere else the engine,
+    // the sleeper map and the profile store are not ours to read: the last scan's prebuilt text is written as it stands.
     size_t online = 0;
-    std::vector<Saved> list;
-    if (GT::IsGameThread()) {
-        list = CurrentList(/*withOnline=*/true, &online);
+    size_t entries = 0;
+    bool written = false;
+    if (gameThread) {
+        const std::vector<Saved> list = CurrentList(/*withOnline=*/true, &online);
+        entries = list.size();
+        written = PS::WriteWorldSidecar(kSidecar, SerializeList(list));
     } else {
-        list = CurrentList(/*withOnline=*/false);
-        for (Saved& v : g_onlineCache)
-            if (!FindByGuid(v.guid)) { list.push_back(v); ++online; }
+        PrebuiltEnd pre;
+        {
+            std::lock_guard<std::mutex> lock(g_prebuiltMutex);
+            pre = g_prebuilt;
+        }
+        if (!pre.valid) {
+            UE_LOGW("sleeper: session ending (%s) off the game thread with no scan to write -- the saved sleepers are "
+                    "left as they were", why ? why : "");
+            return;
+        }
+        online = pre.online;
+        entries = pre.entries;
+        written = PS::WritePreparedSidecar(pre.path, pre.text);
     }
-    if (PS::WriteWorldSidecar(kSidecar, SerializeList(list))) {
+    if (written) {
         UE_LOGI("sleeper: session ending -- %zu connected player(s) laid down (%s); %zu sleeper(s) saved beside the "
-                "world's profiles", online, why ? why : "", list.size());
+                "world's profiles", online, why ? why : "", entries);
     } else {
         UE_LOGW("sleeper: session ending (%s) -- the saved sleepers could not be written", why ? why : "");
     }

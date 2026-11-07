@@ -8,6 +8,7 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 
 #include <atomic>
 #include <mutex>
@@ -91,33 +92,33 @@ int32_t GetOrResolve(OffsetCache& cache, const wchar_t* className, const wchar_t
 
 }  // namespace
 
-VC_DEFINE_OFFSET(MainPlayer_heavyGrab,            L"mainPlayer_C", L"heavyGrab")
-VC_DEFINE_OFFSET(MainPlayer_grabHandle,           L"mainPlayer_C", L"grabHandle")
-VC_DEFINE_OFFSET(MainPlayer_grabTimeline,         L"mainPlayer_C", L"grab")        // the UTimelineComponent member is named `grab`
-VC_DEFINE_OFFSET(MainPlayer_grabbing_actor,       L"mainPlayer_C", L"grabbing_actor")
-VC_DEFINE_OFFSET(MainPlayer_grabbing_component,   L"mainPlayer_C", L"grabbing_component")
-VC_DEFINE_OFFSET(MainPlayer_grabsHeavy,           L"mainPlayer_C", L"grabsHeavy")
-VC_DEFINE_OFFSET(MainPlayer_grabLen,              L"mainPlayer_C", L"grabLen")
-VC_DEFINE_OFFSET(MainPlayer_Camera,               L"mainPlayer_C", L"Camera")
-VC_DEFINE_OFFSET(MainPlayer_armLength,            L"mainPlayer_C", L"armLength")
-VC_DEFINE_OFFSET(MainPlayer_Heavy,                L"mainPlayer_C", L"Heavy")
-VC_DEFINE_OFFSET(MainPlayer_holding_actor,        L"mainPlayer_C", L"holdingActor_main")  // holding_actor before 0.10.0 split the hands
-VC_DEFINE_OFFSET(MainPlayer_lookAtActor,          L"mainPlayer_C", L"lookAtActor")
-VC_DEFINE_OFFSET(MainPlayer_droppedItem,          L"mainPlayer_C", L"droppedItem")
-VC_DEFINE_OFFSET(MainPlayer_lookAtComponent,      L"mainPlayer_C", L"lookAtComponent")
-VC_DEFINE_OFFSET(MainPlayer_lookAtBoundsReplace,  L"mainPlayer_C", L"lookAtBoundsReplace")
-VC_DEFINE_OFFSET(MainPlayer_lookAtVerify,         L"mainPlayer_C", L"lookAtVerify")
-VC_DEFINE_OFFSET(MainPlayer_lookAtState,          L"mainPlayer_C", L"lookAtState")
-VC_DEFINE_OFFSET(MainPlayer_isRagdoll,            L"mainPlayer_C", L"isRagdoll")
-VC_DEFINE_OFFSET(MainPlayer_dead,                 L"mainPlayer_C", L"dead")
-VC_DEFINE_OFFSET(MainPlayer_activeInterface,      L"mainPlayer_C", L"activeInterface")
-VC_DEFINE_OFFSET(MainPlayer_HitResult,            L"mainPlayer_C", L"HitResult")
-VC_DEFINE_OFFSET(MainPlayer_releaseEToUse,        L"mainPlayer_C", L"releaseEToUse")
-VC_DEFINE_OFFSET(MainPlayer_actionIndex,          L"mainPlayer_C", L"actionIndex")
-VC_DEFINE_OFFSET(MainPlayer_equipped_flashlight,  L"mainPlayer_C", L"equipped_flashlight")
-VC_DEFINE_OFFSET(MainPlayer_ticker_flashlightController, L"mainPlayer_C", L"ticker_flashlightController")
+VC_DEFINE_OFFSET(MainPlayer_heavyGrab,            P::name::MainPlayerClass, L"heavyGrab")
+VC_DEFINE_OFFSET(MainPlayer_grabHandle,           P::name::MainPlayerClass, L"grabHandle")
+VC_DEFINE_OFFSET(MainPlayer_grabTimeline,         P::name::MainPlayerClass, L"grab")        // the UTimelineComponent member is named `grab`
+VC_DEFINE_OFFSET(MainPlayer_grabbing_actor,       P::name::MainPlayerClass, L"grabbing_actor")
+VC_DEFINE_OFFSET(MainPlayer_grabbing_component,   P::name::MainPlayerClass, L"grabbing_component")
+VC_DEFINE_OFFSET(MainPlayer_grabsHeavy,           P::name::MainPlayerClass, L"grabsHeavy")
+VC_DEFINE_OFFSET(MainPlayer_grabLen,              P::name::MainPlayerClass, L"grabLen")
+VC_DEFINE_OFFSET(MainPlayer_Camera,               P::name::MainPlayerClass, L"Camera")
+VC_DEFINE_OFFSET(MainPlayer_armLength,            P::name::MainPlayerClass, L"armLength")
+VC_DEFINE_OFFSET(MainPlayer_Heavy,                P::name::MainPlayerClass, L"Heavy")
+VC_DEFINE_OFFSET(MainPlayer_holding_actor,        P::name::MainPlayerClass, L"holdingActor_main")  // holding_actor before 0.10.0 split the hands
+VC_DEFINE_OFFSET(MainPlayer_lookAtActor,          P::name::MainPlayerClass, L"lookAtActor")
+VC_DEFINE_OFFSET(MainPlayer_droppedItem,          P::name::MainPlayerClass, L"droppedItem")
+VC_DEFINE_OFFSET(MainPlayer_lookAtComponent,      P::name::MainPlayerClass, L"lookAtComponent")
+VC_DEFINE_OFFSET(MainPlayer_lookAtBoundsReplace,  P::name::MainPlayerClass, L"lookAtBoundsReplace")
+VC_DEFINE_OFFSET(MainPlayer_lookAtVerify,         P::name::MainPlayerClass, L"lookAtVerify")
+VC_DEFINE_OFFSET(MainPlayer_lookAtState,          P::name::MainPlayerClass, L"lookAtState")
+VC_DEFINE_OFFSET(MainPlayer_isRagdoll,            P::name::MainPlayerClass, L"isRagdoll")
+VC_DEFINE_OFFSET(MainPlayer_dead,                 P::name::MainPlayerClass, L"dead")
+VC_DEFINE_OFFSET(MainPlayer_activeInterface,      P::name::MainPlayerClass, L"activeInterface")
+VC_DEFINE_OFFSET(MainPlayer_HitResult,            P::name::MainPlayerClass, L"HitResult")
+VC_DEFINE_OFFSET(MainPlayer_releaseEToUse,        P::name::MainPlayerClass, L"releaseEToUse")
+VC_DEFINE_OFFSET(MainPlayer_actionIndex,          P::name::MainPlayerClass, L"actionIndex")
+VC_DEFINE_OFFSET(MainPlayer_equipped_flashlight,  P::name::MainPlayerClass, L"equipped_flashlight")
+VC_DEFINE_OFFSET(MainPlayer_ticker_flashlightController, P::name::MainPlayerClass, L"ticker_flashlightController")
 VC_DEFINE_OFFSET(TickerFlashlight_player,         P::name::TickerPlayerFlashlightClass, L"player")
-VC_DEFINE_OFFSET(MainPlayer_ragdollActor,         L"mainPlayer_C", L"ragdollActor")
+VC_DEFINE_OFFSET(MainPlayer_ragdollActor,         P::name::MainPlayerClass, P::name::MainPlayerRagdollActorProp)
 VC_DEFINE_OFFSET(PlayerRagdoll_Player,            P::name::PlayerRagdollClass, L"Player")
 VC_DEFINE_OFFSET(Ragdoll_SkeletalMesh,            P::name::RagdollBaseClass, L"SkeletalMesh")
 
