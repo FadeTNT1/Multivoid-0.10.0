@@ -158,6 +158,45 @@ until two peers have run it. Host logs for the others: `ufo_event[host]: boofo e
 `ufo_event[host]: joel|pillfo eid=... phase=... position=...`; client: `ufo_event[client]: ... seeded ...` or `... seeked ...`;
 for Midas, `event_scene: host scene 5 reached phase 1` and `event_scene[midas]: ... phase 1 applied`. All `[RD]`.
 
+### The gamemode's one-off events
+
+`mainGamemode_C` carries eleven numbered timer bodies (`CustomEvent_0` to `CustomEvent_10`) beside the named UFO and night
+rolls. Five of them mint an actor that is not the eventer's. The 0.10.0 capture (`multivoid-fingerprints-capture.txt`,
+read at the bodies and at their output classes' graphs) sorts them by what the output does:
+
+| Body | Chance and gate | Mints | What the output does | Outcome |
+|---|---|---|---|---|
+| `CustomEvent_3` | 1 % per call | `figura_C` 200 m from player 0's pawn, 50 m up (its only spawn site) | falls, then stands and turns its mesh toward the local camera; its 0.1 s timer destroys it once the local camera is within 175 units | world occurrence: the client's roll is refused, the host's figure is an npc-lane output, the mirror keeps its tick (the turn toward each peer's own camera) and has the timer refused `[RD]` |
+| `CustomEvent_0` | the machine's real clock, 29 Nov 22:49 | `screamingCorpseController_C`, which spawns a `screamingCorpse_C` at a navmesh point near the local camera on every tick | camera-anchored spam on a calendar minute | per viewer, left alone: every peer reaches the minute on its own clock, so the occurrence is already simultaneous; a mirror of a per-tick camera spawn would flood the wire |
+| `CustomEvent_4` | 1 in 65536 per call | `newBlueprint4_C` at a random navmesh point | a pawn that chases player 0, takes the cursor while the game is paused and prints an "escape" hint; its begin-play ends the game unless the flag the body sets is true | per viewer, left alone (below) |
+| `CustomEvent_6` | `(time - 10800 s) / 2000000 s` per call, only while player 0 stands still | `newBlueprint5_C` (the fake crash: see below) at 200 m from the camera | pauses the game, hides the world behind glitch widgets and a black screen, then ends the game | per viewer, left alone (below) |
+| `CustomEvent_7` | every call | `newBlueprint19_C` at 500 to 650 m either way, 850 m up | a pawn that moves on player 0 with a sideways drift, and pauses the game and mints the same fake crash on arrival | per viewer, left alone (below) |
+
+Why 4, 6 and 7 are not made shared: each ends in `quitgame` (`lib_c::end` is a `quitgame` wrapper, and the class guards
+call it too), pauses the machine it runs on, or moves its player's cursor, and each is aimed at its own machine's
+pawn or camera. A host-rolled cue replayed on every peer would close or freeze every peer's game at once, which no
+sync of a "world event" should do, and a transform mirror carries none of it (the scare is the widgets and the pause,
+not the actor). The client's roll is therefore left as the game wrote it, one peer's own scare. This is a decision
+for the maintainers: the alternative, a wire cue that triggers the same local scare on every peer, needs protocol 308
+and the loud warning that it ends everyone's session `[?]`.
+
+**`newBlueprint5_C` is two classes.** The capture holds two distinct graphs under that short name, and the lead that
+named the debug-drawn trace as the red and green dots read the wrong one for `CustomEvent_6`:
+
+- The class whose begin-play requires `newvar_0` is the debug tracer (a downward `LineTraceSingleForObjects` of 250
+  units from a random point round the camera, drawn for one frame, trace colour red and hit colour green, moves itself
+  to the hit and faces the camera). Its spawner is the gamemode's begin-play, inside a branch that holds only at
+  the machine's real clock reading 28 June, 21:00:00 to 21:00:14, and it sets `newvar_0`.
+- The class whose begin-play requires `newvar_3` (and has `newvar_4`, the glitch threshold) is the fake crash:
+  a scene capture of its mesh through a figura widget, a post-process, the pause, a black screen and `end()` after
+  ten seconds. `CustomEvent_6` and the two other callers (`newBlueprint14_C`'s tick and `newBlueprint19_C`'s) set
+  `newvar_3` and `newvar_4` by name on the actor they mint, so the gamemode's reference resolves to this one.
+
+The two classes share a short name, so the capture cannot name their packages; the property each guard reads is the
+discriminator. The debug tracer is therefore not what `CustomEvent_6` spawns, and neither class draws two small dots
+that sit 30 cm apart on a car park: the fake crash is invisible until it pauses the game, and the tracer needs a real
+date this report does not have. The two dots Logan saw are not explained by the five bodies in this section `[?]`.
+
 ### Story and scheduled events
 
 The scheduler is the save's own time step: it walks the event table and runs each due row
@@ -442,7 +481,7 @@ edge. A one-shot cue a joiner was not present for is missed, by definition.
 | The earthTp cue and black hole and the alien-sound replay have not been seen in a play session yet; the earthTp sounds' asset class is looked up as a sound wave, then a sound cue | `[RD]` `coop/world/sky_sync`, `ue_wrap/world/skysphere`, `coop/world/event_fire_policy` |
 | The flesh rain is rolled by every peer's own hour pulse and is not mirrored (the sky eye and the jellyfish are not: `SkyState` carries the eye, the world-actor lane the host's fish, and a client's own `setEye` and path spawn are refused) | `[RD]` the clock's hour roll; the jellyfish is on the world-actor mirror's list, but its spawn happens inside a Blueprint where the mirror's catch does not see it |
 | A decorated Christmas tree spawns its gifts on each peer whose player sleeps through midnight, and a client's gifts are its own | `[RD]` the tree's own check of the local player's sleep at hour 0 |
-| Several rolls are still per peer: the rare gamemode rolls (the one-percent forced quit), the server break-minigame variant, the underground loot mounds, the signal scramble and the radio-tower shuffle | `[V]` no lane under `coop/world` carries them; `coop/interactables/garbage_sync` names the mounds |
+| Several rolls are still per peer: the rare gamemode rolls (the fake crash, the chaser pawn and the screaming corpse, by design: see "The gamemode's one-off events"), the server break-minigame variant, the underground loot mounds, the signal scramble and the radio-tower shuffle | `[V]` no lane under `coop/world` carries them; `coop/interactables/garbage_sync` names the mounds |
 | The deer, hexahive, walking-tree, dirt-hole, beehive, flora and mannequin spawners are not refused on a client, so each peer rolls its own; the host's walking mannequin still crosses to clients as a prop, and the client's copy grows a brain of its own | `[V]` no row of `coop/world/spawn_authority` names them; the table in `docs/npcs-and-kerfur.md`, "Which spawners a client refuses"; the walker's crossing was measured on the rig: one key on both peers, `pawn=1` on both |
 | Rain falls inside the base for a player standing indoors, the host included: the game's own effect, the same in single player. The rain emitter follows the player's camera and spawns its drops around it, below the roof's rain-collision mesh, which stops only drops falling onto it from above | `[V]` `coop/world/weather_rain` never moves the emitter or the camera; `[RD]` the decompiled day-night cycle's emitter move |
 | Trigger-volume fires (a bed event, a scare a player walks into) run per peer, as the single-player design intends | `[V]` by design, not a gap |
