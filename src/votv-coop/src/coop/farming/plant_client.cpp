@@ -157,6 +157,13 @@ void* FindLocal(const W::Row& row, bool& byPlace) {
     return nullptr;
 }
 
+// Drop a dead binding's address entry only while it still names `key`: the address may already belong to a newer
+// plant bound under another key.
+void UnbindAddress(void* raw, const std::string& key) {
+    auto b = g_byActor.find(raw);
+    if (b != g_byActor.end() && b->second == key) g_byActor.erase(b);
+}
+
 // A key the host minted is the game's own key field; a level identity ("mv_") is ours and never written into the game.
 bool IsGameKey(const std::string& key) { return key.rfind("mv_", 0) != 0; }
 
@@ -255,7 +262,7 @@ bool ApplyRow(const W::Row& row) {
         return true;
     }
     if (it != g_bound.end()) {
-        g_byActor.erase(it->second.actor.Raw());
+        UnbindAddress(it->second.actor.Raw(), row.key);
         g_bound.erase(it);
     }
     bool byPlace = false, parked = false;
@@ -287,7 +294,7 @@ void ApplyGone(const W::State& m) {
         coop::prop_echo_suppress::MarkIncomingDestroy(a);
         E::DestroyActor(a);   // its destroy body is refused here: the host's drops arrive as props
     }
-    g_byActor.erase(it->second.actor.Raw());
+    UnbindAddress(it->second.actor.Raw(), m.key);
     g_bound.erase(it);
     ++g_goneApplied;
     UE_LOGI("farm: client gone key=%s harvested=%d", m.key.c_str(), (m.flags & W::kGoneHarvested) ? 1 : 0);
