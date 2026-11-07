@@ -273,25 +273,13 @@ bool EnsureHeldItemBroadcast(void* heldActor, coop::net::Session* s) {
         return false;
     }
 
-    // Express if unknown. "Has a key" is not "the peer has it": a prop that materialised in the
-    // load's late tail is keyed yet unknown to the wire (never expressed, never bound), and the
-    // player carrying one was invisible to the host. The skip test is tracker-known: a prop with a
-    // live Element is genuinely shared and the pose stream alone mirrors it; an untracked one is
-    // expressed here, key and all, the moment a player first touches it. A MIRROR counts: it is a
-    // prop another peer expressed, so the registry reverse is asked rather than the tracker's
-    // locals-only accessor. Read as untracked, a mirror went out as a spawn with no eid, which its
-    // owner refuses, followed by this peer's copy of its save record, which the owner applied.
+    // Host re-expresses tracked keyed props on pickup: tracker membership does not prove
+    // that every client received or retained the actor. Clients must not re-author mirrors.
     std::wstring keyStr = ue_wrap::prop::GetInteractableKeyString(heldActor);
     const coop::element::ElementId trackedEid = coop::element::Registry::Get().EidForActor(heldActor);
-    if (!keyStr.empty() && keyStr != L"None" && trackedEid != coop::element::kInvalidId) {
-        // Logged with key and eid: "the pose stream suffices" holds only while the prop is actively
-        // held and streamed, so a repro can tell a tracker-known decline from a never-received
-        // spawn.
-        UE_LOGI("[ROCK-DROP] EnsureHeldItemBroadcast DECLINE (tracker-known): cls='%ls' key='%ls' eid=%u "
-                "-- 'pose stream suffices' assumes an active stream; false if the prop is no longer held",
-                R::ClassNameOf(heldActor).c_str(), keyStr.c_str(), static_cast<unsigned>(trackedEid));
-        return false;  // keyed AND tracker-known: the peer has it; pose stream suffices
-    }
+    const bool tracked = !keyStr.empty() && keyStr != L"None" && trackedEid != coop::element::kInvalidId;
+    if (tracked && (s->role() != coop::net::Role::Host || !ue_wrap::prop::IsDescendantOfProp(heldActor)))
+        return false;
 
     const std::wstring cls = R::ClassNameOf(heldActor);
     // Aprop_C items get a force-minted Key (their construction script holds it). The non-Aprop_C
@@ -318,12 +306,12 @@ bool EnsureHeldItemBroadcast(void* heldActor, coop::net::Session* s) {
     }
     // The Prop Element shadow and the dedupe latch, so the item's eventual destroy unwinds through
     // the normal path.
-    PT::MarkProcessedInit(heldActor);
+    if (!tracked) PT::MarkProcessedInit(heldActor);
     // A data drive expressed here, keyed and untracked, has its row only in this copy: noted before its enrolment,
     // which sends it to the host. The game's drops spawn a new actor, which the drop-intent drain carries instead.
-    if (ue_wrap::drive_chain::IsDriveClass(ue_wrap::reflection::ClassOf(heldActor)))
+    if (!tracked && ue_wrap::drive_chain::IsDriveClass(ue_wrap::reflection::ClassOf(heldActor)))
         coop::drive_payload_sync::NoteOwnDrive(heldActor);
-    PT::MarkPropElement(heldActor, keyStr, cls, PT::EnrollSource::kExpressSeam);
+    if (!tracked) PT::MarkPropElement(heldActor, keyStr, cls, PT::EnrollSource::kExpressSeam);
 
     coop::net::PropSpawnPayload p{};
     p.className.len = 0;
@@ -359,10 +347,10 @@ bool EnsureHeldItemBroadcast(void* heldActor, coop::net::Session* s) {
     p.initLinVelX = p.initLinVelY = p.initLinVelZ = 0.f;
     p.initAngVelX = p.initAngVelY = p.initAngVelZ = 0.f;
     {
-        const coop::element::ElementId eid = PT::GetPropElementIdForActor(heldActor);
+        const coop::element::ElementId eid = tracked ? trackedEid : PT::GetPropElementIdForActor(heldActor);
         p.elementId = (eid == coop::element::kInvalidId) ? 0u : eid;
     }
-    UE_LOGI("trash_collect: BROADCAST held untracked item cls='%ls' key='%ls' loc=(%.1f,%.1f,%.1f) "
+    UE_LOGI("trash_collect: BROADCAST held item cls='%ls' key='%ls' loc=(%.1f,%.1f,%.1f) "
             "-- held-pose stream now mirrors it into the collector's hands",
             cls.c_str(), keyStr.c_str(), p.locX, p.locY, p.locZ);
     s->SendPropSpawn(p);
