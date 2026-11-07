@@ -1049,6 +1049,12 @@ inline constexpr const wchar_t* MainPlayerForceWakeupFn = L"forceWakeup";
 inline constexpr const wchar_t* PlayerRagdollClass     = L"playerRagdoll_C";
 inline constexpr const wchar_t* RagdollBaseClass       = L"ragdoll_C";
 inline constexpr const wchar_t* RagdollChestBone       = L"chest";
+inline constexpr const wchar_t* MainPlayerRagdollActorProp = L"ragdollActor";   // mainPlayer_C -> its live playerRagdoll_C
+
+// The desk computer's console log: comp_writehecer(line) prepends a line break and the line to the text property
+// comp_hecertext, keeps its last 1500 characters and paints the console widget (coop/interactables/comp_sync).
+inline constexpr const wchar_t* DeskCompHecerTextProp = L"comp_hecertext";
+inline constexpr const wchar_t* DeskCompWriteHecerFn  = L"comp_writehecer";
 
 // The primary player-damage entry: addDamage and punch end in it on the owning peer's own possessed
 // mainPlayer_C, so a delivered hit runs through that peer's armour and inventory BP and drops its

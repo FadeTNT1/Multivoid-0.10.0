@@ -6,6 +6,7 @@
 #include "ue_wrap/core/component_calls.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 #include "ue_wrap/desk/console_desk.h"
 
 #include <chrono>
@@ -16,6 +17,7 @@ namespace ue_wrap::comp_pane {
 namespace {
 
 namespace R = ue_wrap::reflection;
+namespace P = ue_wrap::profile;
 
 void* g_deskCls = nullptr;
 
@@ -63,8 +65,8 @@ void ResolvePass() {
     if (g_offCueDone < 0) g_offCueDone = R::FindPropertyOffset(g_deskCls, L"Done");
     if (!g_updCompFn) g_updCompFn = R::FindFunction(g_deskCls, L"updComp");
     if (!g_compStartFn) g_compStartFn = R::FindFunction(g_deskCls, kCompStart);
-    if (g_offHecerText < 0) g_offHecerText = R::FindPropertyOffset(g_deskCls, L"comp_hecertext");
-    if (!g_writeHecerFn) g_writeHecerFn = R::FindFunction(g_deskCls, L"comp_writehecer");
+    if (g_offHecerText < 0) g_offHecerText = R::FindPropertyOffset(g_deskCls, P::name::DeskCompHecerTextProp);
+    if (!g_writeHecerFn) g_writeHecerFn = R::FindFunction(g_deskCls, P::name::DeskCompWriteHecerFn);
     // The cue ASSETS share the component property's leaf name -- class-filter
     // the lookup so we never grab the component instance by mistake.
     if (!g_sndWorking) {

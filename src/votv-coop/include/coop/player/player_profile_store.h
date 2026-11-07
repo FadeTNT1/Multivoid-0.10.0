@@ -100,6 +100,11 @@ std::string WriteRollback(const std::string& nickJson, const std::vector<uint8_t
 // path and never a profile's name. Written atomically. False when the world has no directory yet, the name is refused
 // or the write failed; the read is false when there is no such file. Game thread.
 bool WriteWorldSidecar(const std::wstring& fileName, const std::string& bytes);
+// The same write in two steps, for a caller that may have to write from another thread (a quit): `PrepareWorldSidecar`
+// (game thread) resolves the file's full path in the set's directory; `WritePreparedSidecar` (any thread) writes
+// `bytes` there atomically and reads no state of the store.
+bool PrepareWorldSidecar(const std::wstring& fileName, std::wstring& pathOut);
+bool WritePreparedSidecar(const std::wstring& path, const std::string& bytes);
 bool ReadWorldSidecar(const std::wstring& fileName, std::string& out);
 
 }  // namespace coop::player_profile_store

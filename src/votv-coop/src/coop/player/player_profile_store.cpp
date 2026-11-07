@@ -609,22 +609,35 @@ bool SafeSidecarName(const std::wstring& name) {
 
 }  // namespace
 
-bool WriteWorldSidecar(const std::wstring& fileName, const std::string& bytes) {
+bool PrepareWorldSidecar(const std::wstring& fileName, std::wstring& pathOut) {
+    pathOut.clear();
     DropHeldOfAnotherWorld();
     if (!SafeSidecarName(fileName)) return false;
     const fs::path dir = SlotDir(g_setSlot);
     if (dir.empty()) return false;
+    pathOut = (dir / fileName).wstring();
+    return true;
+}
+
+bool WritePreparedSidecar(const std::wstring& path, const std::string& bytes) {
+    if (path.empty()) return false;
+    const fs::path file(path);
     std::error_code ec;
-    fs::create_directories(dir, ec);
+    fs::create_directories(file.parent_path(), ec);
     if (ec) return false;
     const atomic_file::Result r =
-        atomic_file::Write(dir / fileName, bytes, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
+        atomic_file::Write(file, bytes, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
     if (!r.ok()) {
-        UE_LOGW("player_profile: the sidecar '%ls' beside the profiles could not be written (%s)", fileName.c_str(),
-                atomic_file::Describe(r).c_str());
+        UE_LOGW("player_profile: the sidecar '%ls' beside the profiles could not be written (%s)",
+                file.filename().c_str(), atomic_file::Describe(r).c_str());
         return false;
     }
     return true;
+}
+
+bool WriteWorldSidecar(const std::wstring& fileName, const std::string& bytes) {
+    std::wstring path;
+    return PrepareWorldSidecar(fileName, path) && WritePreparedSidecar(path, bytes);
 }
 
 bool ReadWorldSidecar(const std::wstring& fileName, std::string& out) {

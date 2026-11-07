@@ -85,7 +85,7 @@ std::vector<SpentTool> g_spent;
 // A press is spent by the HOST's word and not by the press: the host may refuse it (no row, out of
 // reach, queue full, a carry open), and a bag the host did not make costs the sender nothing. So a
 // press waits here, keyed by its request number, until the host's PackTrashGrant names it; a press
-// the host never answers is dropped after kPendingTtlMs.
+// the host never answers stops waiting after kPendingTtlMs (its late grant is still honoured, see g_late).
 struct PendingPress {
     uint16_t req = 0;
     void*    actor = nullptr;
@@ -95,6 +95,13 @@ struct PendingPress {
 };
 constexpr uint64_t kPendingTtlMs = 15000;
 std::vector<PendingPress> g_pending;
+// A press that outlived kPendingTtlMs leaves g_pending but is not forgotten at once: a host whose queue for this
+// sender ran behind (or whose link stalled) still makes the bag and sends the grant, and that grant must spend the
+// tool. A late grant is matched here by request id and tool kind, within kLateGraceMs of the press expiring; the entry's
+// `atMs` is its expiry time. Not counted as in flight, so a refused press never holds its tool for longer than before.
+constexpr uint64_t kLateGraceMs = 60000;
+constexpr size_t   kMaxLate     = 16;
+std::vector<PendingPress> g_late;
 uint16_t g_reqCounter = 0;
 uint64_t g_sent = 0, g_refusedGhost = 0, g_granted = 0, g_expired = 0;
 
@@ -370,13 +377,20 @@ void ConsumeSpentTools() {
     g_spent.clear();
 }
 
-// Presses the host never answered (a refusal sends nothing) stop waiting.
+// Presses the host never answered (a refusal sends nothing) stop waiting, and keep a place for a late grant for
+// kLateGraceMs more.
 void ExpirePending() {
-    if (g_pending.empty()) return;
+    if (g_pending.empty() && g_late.empty()) return;
     const uint64_t now = coop::active_drive::NowMs();
+    for (auto it = g_late.begin(); it != g_late.end();)
+        it = (now - it->atMs >= kLateGraceMs) ? g_late.erase(it) : std::next(it);
     for (auto it = g_pending.begin(); it != g_pending.end();) {
         if (now - it->atMs >= kPendingTtlMs) {
             ++g_expired;
+            if (g_late.size() >= kMaxLate) g_late.erase(g_late.begin());
+            PendingPress gone = *it;
+            gone.atMs = now;
+            g_late.push_back(gone);
             it = g_pending.erase(it);
         } else {
             ++it;
@@ -434,6 +448,16 @@ void OnPackTrashGrant(const coop::net::PackTrashGrantPayload& payload) {
         ++g_granted;
         return;
     }
+    for (auto it = g_late.begin(); it != g_late.end(); ++it) {
+        if (it->req != payload.reqId) continue;
+        if (it->roll != (payload.toolKind == 1)) break;
+        g_spent.push_back(SpentTool{it->actor, it->idx, it->roll, it->req});
+        g_late.erase(it);
+        ++g_granted;
+        UE_LOGI("[PACK] late grant for req %u spends its tool (the press had timed out)",
+                static_cast<unsigned>(payload.reqId));
+        return;
+    }
     UE_LOGI("[PACK] grant for req %u matches no waiting press (expired or already spent)",
             static_cast<unsigned>(payload.reqId));
 }
@@ -465,6 +489,7 @@ void OnDisconnect() {
                 static_cast<unsigned long long>(g_refusedGhost));
     g_spent.clear();
     g_pending.clear();
+    g_late.clear();
     g_remedyAtMs.clear();
     g_sent = g_packed = g_denied = g_refusedGhost = g_granted = g_expired = 0;
 }
