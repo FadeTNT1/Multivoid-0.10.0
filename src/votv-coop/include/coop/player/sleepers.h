@@ -52,13 +52,18 @@ void OnSessionEnding(const char* why);
 
 // ---- online sleepers ----
 // An online player at rest (coop/player/sleep_sync: resting in a bed or a sleeping bag, or dreaming) is shown as a
-// sleeper on every other peer: their puppet laid flat on the floor -- or the bed -- under where they rest, by the same
-// measured pose as an offline sleeper, held over the pose stream each tick, and stood up the tick they wake (or
-// ragdoll). Called for each live puppet after its own tick (coop/player/puppet_drive). Looting an online sleeper is
+// sleeper on every other peer: their puppet laid flat on the bed surface -- or the floor under a sleeping bag -- where
+// they rest, by the same measured pose as an offline sleeper, settled once per rest. While it lies the puppet's normal
+// drive is suspended (RemotePlayer::SetDrivesSuspended), so the lying pose is the only writer; a pose watch every 2 s
+// puts it back only if it drifted. They stand up when an awake read holds for 1 s (shorter flips are ignored) or at once
+// on a ragdoll. Called for each live puppet after its own tick (coop/player/puppet_drive). Looting an online sleeper is
 // not in this build: `sleepers.loot_online` is off and reserved for it.
 void DriveOnline(int slot, coop::RemotePlayer& puppet);
 // Whether the puppet of `slot` lies as an online sleeper on this peer.
 bool IsLyingOnline(int slot);
+// The fixed point a lying online sleeper's nameplate floats at (the body's centre, lifted), not the animated head bone,
+// which swings with the head. False when the slot is not lying.
+bool OnlinePlateAnchor(int slot, ue_wrap::FVector& out);
 
 // ---- host edges ----
 

@@ -350,6 +350,13 @@ SleepPeerState PeerState(int slot) {
                                                                          : SleepPeerState::Awake;
 }
 
+std::string BedOf(int slot) {
+    if (slot < 0 || slot >= static_cast<int>(coop::net::kMaxPeers)) return {};
+    const WireKey& b = g_bed[slot];
+    if (b.len > sizeof(b.data)) return {};
+    return std::string(b.data, b.data + b.len);
+}
+
 bool HostAsleepNow() {
     auto* s = g_session.load(std::memory_order_acquire);
     if (s && !IsHost(s)) return g_hostSleeping;

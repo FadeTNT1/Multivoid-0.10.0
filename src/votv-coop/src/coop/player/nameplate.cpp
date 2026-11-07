@@ -170,7 +170,8 @@ void Update() {
         }
 
         ue_wrap::FVector head{};
-        if (!p->TryGetHeadPosition(head)) continue;   // no anchor: no plate this pass
+        // A lying online sleeper's plate floats at a fixed point over the body; the animated head bone would swing it.
+        if (!coop::sleepers::OnlinePlateAnchor(slot, head) && !p->TryGetHeadPosition(head)) continue;   // no anchor: no plate this pass
         ue_wrap::FVector2D screen{};
         const bool inFront = E::ProjectWorldToScreen(pc, head, screen, false);
 

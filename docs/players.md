@@ -276,7 +276,17 @@ laid out on the crate's grid. Its volume is unbounded, so a put is never refused
 
 **Looting.** E on the body (within 2.5 m, aiming at it, with nothing in between) opens the crate in the game's own
 container screen through the gamemode's `openPropInv`; that press, its second dispatch and its release are kept from
-the game's own use, so nothing behind the body is grabbed. A plate shows "[E] Loot" while you can.
+the game's own use, so nothing behind the body is grabbed. A plate shows "[E] Loot" while you can. The open is judged
+over the next ticks, not on the press: if the screen does not show the crate within 0.4 s, the crate's own
+`openContainer` is tried, then `openPropInv` on the crate made visible with collision for the moment; a failure after
+1.8 s logs what the screen read (held, `inventoryActive`, `isInContainer`, what it shows, the crate's distance).
+
+**Lying height.** A body on its side lies with its centre 25 cm over the surface the host traced under it, corrected
+by the drawn mesh's box only when that box is the lying body's: a parked puppet's skeleton never ticks, so right after
+the roll the box can still be the standing one (half height ~90), which once put the lowest point 70 cm under the floor
+and the body 96 cm above it. A box taller than 50 cm is ignored, a correction past 30 cm is ignored, and the centre is
+held within 45 cm of the surface. The log says `sleeper: <name> floor traced at z=.., mesh box read|still the
+standing one -- ignored, settled by .. cm`.
 
 **Write-back.** The host reads the crate's rows once a second and, when they changed, rebuilds the player's profile
 items from the ones the crate was filled from (`storage_inventory::RebuildProfileItems`): an item they held or wore
@@ -318,9 +328,16 @@ head; with a wall in between there is no plate at all. Online players' plates ar
 
 **Online sleepers.** A player who is still connected but at rest -- in a bed, a sleeping bag, or dreaming, the
 state `sleep_sync` already carries -- is shown the same way on every other peer: their puppet is laid flat under
-where they rest (onto the floor, or onto the bed the trace meets) by the same measured pose, held over their pose
-stream each tick, and stood back up the tick they wake or ragdoll. Their plate follows the sleeper's rule: "z Z Z",
-no plate through a wall, the name only near. One who disconnects while lying becomes an offline sleeper in the very
+where they rest (onto the bed surface the trace meets, or the floor under a sleeping bag) by the same measured pose.
+The pose is settled once per rest, after the streamed spot has held still for 0.3 s (1.5 s at most), and is the only
+writer while they lie: the puppet's normal drive (position, body yaw, head and flashlight pitch from the sleeper's
+camera, locomotion inputs, footsteps) is suspended, the head is pinned once, and a check every 2 s puts the body back
+only if something moved it. Without that, the head look kept turning with the sleeper's camera and the plate, which
+followed the head bone, bobbed with it. The plate floats at a fixed point 40 cm over the body's centre. They stand
+back up when an awake read holds for 1 s (shorter flips are ignored and counted) or at once on a ragdoll. The log
+says `sleeper: <name> pose settled at (x, y, z) on <floor|bed> z=..`, `sleeper: drives suspended for slot N`,
+`sleeper: drives restored for slot N` and, on waking, the count of debounced flips. Their plate follows the
+sleeper's rule: "z Z Z", no plate through a wall, the name only near. One who disconnects while lying becomes an offline sleeper in the very
 pose every peer saw; on a client the puppet goes with the roster row and the offline body comes with the host's Add,
 a round trip later. Looting an online sleeper is not in this build: their inventory is live on their own machine, and
 the round trip it needs (the looter asks the host, the host asks the owner's machine, which takes or adds the item

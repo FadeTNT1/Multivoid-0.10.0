@@ -505,6 +505,7 @@ void RemotePlayer::Destroy() {
     hasPose_ = false;
     window_.Close();
     dirty_ = false;
+    drivesSuspended_ = false;
     bodyYaw_.Reset(0.f);    // clears the latch + dt clock; re-seeded at the next Spawn
     appliedSkin_.clear();        // the next Spawn re-applies from SkinForSlot
     UE_LOGI("RemotePlayer::Destroy: puppet + nameplate gone");
@@ -531,6 +532,15 @@ void RemotePlayer::ApplySkin(const std::string& skinName) {
     }
 }
 
+void RemotePlayer::SetDrivesSuspended(bool suspended) {
+    if (drivesSuspended_ == suspended) return;
+    drivesSuspended_ = suspended;
+    if (!suspended) {
+        bodyYaw_.Reset(curYaw_);   // the turn-in-place presentation starts from the facing, not from before the rest
+        dirty_ = true;
+    }
+}
+
 void RemotePlayer::ApplyToEngine() {
     // While ragdolled the puppet is pelvis-attached to the visible flop body (its own meshes
     // hidden), so the engine syncs its transform and a SetActorLocation would fight the attachment;
@@ -546,6 +556,9 @@ void RemotePlayer::ApplyToEngine() {
     case RagdollDisplay::Drive::Inactive:
         break;
     }
+    // A lying online sleeper is posed by coop/player/sleepers alone: the standing pose, the camera-pitch head look and
+    // the locomotion inputs below would fight it. dirty_ stays set, so the first apply after the release stands it up.
+    if (drivesSuspended_) return;
 
     // The wire carries the source's actor Z (the capsule centre, MTA's vPos shape, unaffected by BP
     // init transients), and the puppet's actor is the wire pose unchanged: both ends are
