@@ -543,6 +543,13 @@ twice. A receiver stops after 600 ms without a keep, on the firer's death and on
 picks a firing washer up from the next keep (`[WASHER-FX]` lines, a once-a-minute summary). `[?]` until a two-peer
 run reads those lines.
 
+A bleeding player's blood-loss effect (`effect_bloodLoss_C`) lives on that player's own peer: its `dropTimer` hands
+each drop to the gamemode's `bloodDecalMaster_C.addParticle`, whose falling particle leaves a `grime_blood2` decal on
+the floor, so the blood showed on the bleeder's screen alone. `coop/player/blood_drop_fx` watches `addParticle` while
+`dropTimer` runs and sends each drop (start point, velocity, size, type) as `BloodDropFx`; every other peer runs the
+game's own `addParticle` with them, so the drop falls and stains there too. Only the bleeding drops travel
+(`[BLOOD-DROP]` lines, a once-a-minute summary). `[?]` until a two-peer run reads those lines.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -571,6 +578,7 @@ run reads those lines.
 | `HandItem`, `ItemActivate` | each peer, relayed | the held item's class, its actor's name and its hold slot's item name (the key of the game's item tables); the flashlight beam: on or off, mode, intensity, cones, reach, colour, profile |
 | `MeleeFxRequest`, `MeleeFx` | a client to the host; the host to every client but the maker | one effect: its kind (swing, hit, contact, break), the maker, an id, the point and surface normal, the volume and pitch, and the sound's and particle system's asset paths |
 | `WasherFx` | each peer, relayed | a firing pressure washer: the firer, the hold, firing or stopped, up to four shot landings |
+| `BloodDropFx` | each peer, relayed | a bleeding player's blood drops: the bleeder, up to four drops (start point, velocity, size, type) |
 | `PlayerHit` | host to the hit peer | a parked creature's hit on the peer's puppet: the verb (addDamage or punch) to run on its own player |
 | `SleepState` | a client to the host; the host to all | a rest state with its bed (awake, resting, dreaming); the host's sleeping flag; one peer's rest state relayed |
 | `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |

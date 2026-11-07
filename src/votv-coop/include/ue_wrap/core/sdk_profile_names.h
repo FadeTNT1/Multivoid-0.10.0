@@ -2104,6 +2104,16 @@ inline constexpr const wchar_t* IrrigationHoseDetachFn = L"detachSprinkler";
 inline constexpr const wchar_t* IrrigationUpdFn = L"upd";
 inline constexpr int IrrigationFaucetActionTake = 7;
 inline constexpr int IrrigationHoseActionPickup = 4;
+// Floor blood (ue_wrap/actors/blood_drops). mainGamemode_C.masteBloodDecals is the one bloodDecalMaster_C; its
+// addParticle(location, velocity, size, type) adds a falling drop whose landing its tick turns into a grime_blood2
+// decal (type 0 grime_blood2_drip_C, 1 grime_blood2_C). A player's bleeding calls it from effect_bloodLoss_C.dropTimer
+// on that player's own peer. [RD] blooddecalmaster_c.addparticle / receivetick, effect_bloodloss_c.droptimer.
+inline constexpr const wchar_t* GamemodeBloodDecalsProp = L"masteBloodDecals";
+inline constexpr const wchar_t* BloodAddParticleFn = L"addParticle";
+inline constexpr const wchar_t* BloodAddParticleLocationParam = L"location";
+inline constexpr const wchar_t* BloodAddParticleVelocityParam = L"velocity";
+inline constexpr const wchar_t* BloodAddParticleSizeParam = L"size";
+inline constexpr const wchar_t* BloodAddParticleTypeParam = L"type";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

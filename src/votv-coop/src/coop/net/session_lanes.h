@@ -149,6 +149,7 @@ constexpr bool IsClientRelayableReliableKind(ReliableKind k) {
     case ReliableKind::WindowCleanState:  // symmetric
     case ReliableKind::WindowStroke:      // presser-authored
     case ReliableKind::WasherFx:          // the firing player's own washer, shown by every other peer
+    case ReliableKind::BloodDropFx:       // the bleeding player's own drops, fallen on every other peer
     case ReliableKind::GrimeState:        // symmetric
     case ReliableKind::SurfaceCleanState: // symmetric
     case ReliableKind::TrashPileState:    // symmetric

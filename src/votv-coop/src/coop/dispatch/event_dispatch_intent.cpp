@@ -39,6 +39,7 @@
 #include "coop/props/pack_trash_intent.h"  // CLIENT->HOST bagging of a pile or clump
 #include "coop/player/melee_fx.h"  // a melee swing's, a hit's and a held item's sound and particles on every peer
 #include "coop/player/washer_fx.h"  // a firing pressure washer's jet, hiss and splashes on every other peer
+#include "coop/player/blood_drop_fx.h"  // a bleeding player's blood drops, fallen on every other peer
 #include "coop/props/prop_impact_fx.h"  // HOST->CLIENT a world container's hit, damage or break cue
 #include "coop/props/prop_food_state.h"  // HOST->CLIENT a world food's state; CLIENT->HOST a bite of one
 #include "coop/props/water_fill_sync.h"  // HOST->CLIENT a world bucket's water level
@@ -749,6 +750,19 @@ bool HandleIntentEvent(net::Session& session,
             break;
         }
         coop::washer_fx::OnReliable(p, static_cast<int>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::BloodDropFx: {
+        // ANY->ALL: blood drops a bleeding player's peer made, dropped again here (coop::blood_drop_fx). The host
+        // relays a client's to the other clients; the handler checks a client's names its own player.
+        net::BloodDropFxPayload p{};
+        std::memcpy(&p, msg.payload, msg.payloadLen < sizeof(p) ? msg.payloadLen : sizeof(p));
+        if (!coop::blood_drop_fx::WellFormed(p, static_cast<int>(msg.payloadLen))) {
+            UE_LOGW("event_feed: BloodDropFx from slot %d is malformed (%zu bytes) -- dropping", msg.senderPeerSlot,
+                    static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        coop::blood_drop_fx::OnReliable(p, static_cast<int>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::ProjectileFired: {
