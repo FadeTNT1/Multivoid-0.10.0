@@ -23,4 +23,8 @@ bool CallBreak(void* piece) {
     return IsPiece(piece) && component_calls::CallParamlessNamed(piece, N::AsologoPieceBreakFn);
 }
 
+bool CallBreakingSequence(void* piece) {
+    return IsPiece(piece) && component_calls::CallParamlessNamed(piece, N::AsologoPieceBreakingSequenceFn);
+}
+
 }  // namespace ue_wrap::asologo_piece

@@ -6,6 +6,7 @@
 #include "coop/props/prop_wire_parity.h"
 
 #include "coop/element/registry.h"   // EidForActor, the release's log line
+#include "coop/interactables/piece_break_fx.h"  // OnStaticReleased: a freed asologo piece breaks its constraints
 #include "coop/net/protocol.h"
 #include "coop/player/players_registry.h"  // the local player, for the hold check of a Static set
 #include "coop/props/prop_stick_sync.h"  // IsWallAttachable
@@ -180,6 +181,8 @@ bool ConvergeStaticRelease(void* actor, uint8_t physFlags, bool hostAuthored, bo
     }
     UE_LOGI("prop_wire_parity: static released for eid %u class %ls actor %p (frozen=%d sleep=%d)",
             static_cast<unsigned>(eid), cls.c_str(), actor, wantFrozen ? 1 : 0, wantSleep ? 1 : 0);
+    // An asologo piece the host freed from Static is a broken one: its world constraints still hold this copy.
+    coop::piece_break_fx::OnStaticReleased(actor);
     if (restorePhysics) {
         RestoreSpParityPhysicsAfterConverge(actor, physFlags);
         UE_LOGI("prop_wire_parity: eid %u class %ls physics restored: %s", static_cast<unsigned>(eid), cls.c_str(),
