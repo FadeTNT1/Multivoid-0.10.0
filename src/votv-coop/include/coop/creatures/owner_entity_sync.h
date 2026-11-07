@@ -28,9 +28,10 @@ struct OwnerEntityDestroyPayload;
 namespace coop::owner_entity_sync {
 
 // Cache the session, resolve the member classes' names (the observer judges a spawn by its class's
-// name, so it arms before a member class loads), and register the BeginDeferred POST observer that
-// catches a local native spawn of a member class and broadcasts OwnerEntitySpawn. ScopedMirrorSpawn
-// excludes our own mirror spawns from it. Net-pump ensure.
+// name, so it arms before a member class loads), and install the BeginDeferred Func-thunk hook (every
+// route, the EX_CallMath births of ticker_eyers and blackFog_C::spawnghost included) that catches a local
+// native spawn of a member class; the tick driver then reads its pose once the spawn has finished and
+// broadcasts OwnerEntitySpawn. ScopedMirrorSpawn excludes our own mirror spawns from it. Net-pump ensure.
 void Install(coop::net::Session* session);
 
 // 4 Hz driver (TickGameplay), the OWNER side of the lane: stream OwnerEntityPose while the entity

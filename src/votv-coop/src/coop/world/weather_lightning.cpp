@@ -12,10 +12,14 @@
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
+#include "ue_wrap/core/ufunction_hook.h"
+#include "ue_wrap/engine/engine.h"
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
+#include <vector>
 
 namespace coop::weather_lightning {
 namespace {
@@ -24,7 +28,7 @@ namespace P = ue_wrap::profile;
 namespace R = ue_wrap::reflection;
 namespace GT = ue_wrap::game_thread;
 
-// Atomic session pointer -- the POST observer is registered once but fires for the session
+// Atomic session pointer -- the Func-thunk hook is installed once but fires for the session
 // lifetime; on Stop/Start the harness re-stores the new pointer via SetSession so the observer's
 // role/connected checks read the current session. Acquire/release matches weather_sync's g_session
 // pattern.
@@ -46,49 +50,29 @@ bool g_observerRegistered = false;
 bool g_observerRefused = false;  // the observer table was full this session: a capacity fault, said once
 bool g_spawnPathRefused = false; // GameplayStatics lacks a part of the spawn path: a fact of the build
 
-// HOST POST observer on BeginDeferredActorSpawnFromClass. Fires for EVERY deferred spawn (it also
-// carries NPC and prop spawns); filtered by ActorClass == lightningStrike_C. The strike's actor
-// location IS the SpawnTransform translation.
-void OnSpawnPostLightning(void* /*self*/, void* /*function*/, void* params) {
-    if (!GT::IsGameThread()) return;       // defensive
-    if (!params) return;
-    if (g_spawnActorClassParamOff < 0 || g_spawnTransformParamOff < 0) return;
-    if (!g_lightningStrikeClass) return;
+// A strike seen at the deferred spawn, queued for the next pump tick: the catch fires before the finish, and the
+// strike's root is placed only when FinishSpawning runs its construction, so its location is read after.
+struct PendingStrike { void* actor; int32_t internalIdx; };
+std::mutex g_pendingMx;
+std::vector<PendingStrike> g_pending;
+constexpr size_t kMaxPendingStrikes = 16;   // a storm rolls one strike at a time; a stalled drain cannot grow this
 
-    // ActorClass filter -- exact pointer match; lightningStrike_C has no subclasses in VOTV. A
-    // pointer compare, not a string walk, so this is safe to run on every spawn.
-    void* actorClass = *reinterpret_cast<void**>(
-        reinterpret_cast<uint8_t*>(params) + g_spawnActorClassParamOff);
-    if (actorClass != g_lightningStrikeClass) return;
-
+// HOST Func-thunk post hook on BeginDeferredActorSpawnFromClass. The natural strike is minted by
+// lightningHeightAnalyzer_C's ubergraph, an EX_CallMath call that never reaches the ProcessEvent detour (the
+// observer this replaces registered and never fired for it), so it is caught on the native's Func, where every
+// route to BeginDeferred runs, visible or bytecode-internal, the dev spawn included. It fires for EVERY deferred
+// spawn of the game, so it stays cheap: the role gate, then the spawned actor's class against the strike's
+// (a pointer compare, lightningStrike_C has no subclasses in VOTV).
+void OnSpawnPostLightning(void* /*context*/, void* /*sourceObject*/, void* spawned) {
+    if (!spawned || !g_lightningStrikeClass) return;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
     if (s->role() != coop::net::Role::Host) return;  // host-only sender
-
-    // Read SpawnTransform.Translation (16-byte FQuat first, then 12-byte
-    // FVector translation -- same layout as npc_sync uses).
-    const uint8_t* xform = reinterpret_cast<const uint8_t*>(params) + g_spawnTransformParamOff;
-    coop::net::LightningStrikePayload p{};
-    // The host stamps its own local Player Element id.
-    {
-        const coop::element::ElementId selfEid =
-            coop::players::Registry::Get().LocalPlayerElementId();
-        p.senderElementId =
-            (selfEid == coop::element::kInvalidId) ? 0u : selfEid;
-    }
-    p.locX = *reinterpret_cast<const float*>(xform + 0x10);
-    p.locY = *reinterpret_cast<const float*>(xform + 0x14);
-    p.locZ = *reinterpret_cast<const float*>(xform + 0x18);
-
-    const bool sent = s->SendReliable(
-        coop::net::ReliableKind::LightningStrike, &p, sizeof(p));
-    if (!sent) {
-        UE_LOGW("weather: lightning SendReliable failed (channel busy) -- "
-                "strike at (%.0f, %.0f, %.0f) NOT broadcast", p.locX, p.locY, p.locZ);
-        return;
-    }
-    UE_LOGI("weather: host broadcast LightningStrike at (%.0f, %.0f, %.0f)",
-            p.locX, p.locY, p.locZ);
+    if (R::ClassOf(spawned) != g_lightningStrikeClass) return;
+    const int32_t idx = R::InternalIndexOf(spawned);
+    std::lock_guard<std::mutex> lk(g_pendingMx);
+    if (g_pending.size() >= kMaxPendingStrikes) return;
+    g_pending.push_back({spawned, idx});
 }
 
 }  // namespace
@@ -135,28 +119,70 @@ bool TryResolve() {
 bool RegisterHostObserver() {
     if (g_observerRegistered || g_observerRefused) return true;
     if (!TryResolve()) return false;
-    if (!GT::RegisterPostObserver(g_beginDeferredSpawn, &OnSpawnPostLightning)) {
+    // Idempotent per (function, callback): a reconnect as host finds the hook installed and arms it again.
+    if (!ue_wrap::ufunction_hook::InstallPostHook(g_beginDeferredSpawn, &OnSpawnPostLightning, /*armed=*/true)) {
         g_observerRefused = true;
-        UE_LOGE("weather: lightning POST observer registration FAILED "
-                "(observer table full? bump kMaxObservers) -- no strike is sent this session");
+        UE_LOGE("weather: lightning Func-thunk hook install FAILED "
+                "(hook table full or the Func slot unreadable) -- no strike is sent this session");
         return true;
     }
+    ue_wrap::ufunction_hook::SetArmed(g_beginDeferredSpawnFn, &OnSpawnPostLightning, true);
     g_observerRegistered = true;
-    UE_LOGI("weather: HOST lightning POST observer registered on %ls @ %p "
-            "(ActorClass@%d, SpawnTransform@%d, lightningStrike_C=%p)",
-            P::name::BeginDeferredSpawnFn, g_beginDeferredSpawnFn,
-            g_spawnActorClassParamOff, g_spawnTransformParamOff,
-            g_lightningStrikeClass);
+    UE_LOGI("weather: HOST lightning Func-thunk hook armed on %ls @ %p "
+            "(every route to BeginDeferred; lightningStrike_C=%p, location read after the finish)",
+            P::name::BeginDeferredSpawnFn, g_beginDeferredSpawnFn, g_lightningStrikeClass);
     return true;
+}
+
+void Tick() {
+    if (!GT::IsGameThread()) return;
+    std::vector<PendingStrike> pending;
+    {
+        std::lock_guard<std::mutex> lk(g_pendingMx);
+        if (g_pending.empty()) return;
+        pending.swap(g_pending);
+    }
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
+    for (const PendingStrike& e : pending) {
+        // Index-paired liveness: a strike reaped before this tick reads dead rather than a recycled slot.
+        if (!e.actor || !R::IsLiveByIndex(e.actor, e.internalIdx)) continue;
+        ue_wrap::FVector loc{};
+        if (!ue_wrap::engine::TryGetActorLocation(e.actor, loc)) {
+            UE_LOGW("weather: lightning strike %p location could not be read -- NOT broadcast", e.actor);
+            continue;
+        }
+        coop::net::LightningStrikePayload p{};
+        // The host stamps its own local Player Element id.
+        const coop::element::ElementId selfEid =
+            coop::players::Registry::Get().LocalPlayerElementId();
+        p.senderElementId = (selfEid == coop::element::kInvalidId) ? 0u : selfEid;
+        p.locX = loc.X;
+        p.locY = loc.Y;
+        p.locZ = loc.Z;
+        if (!s->SendReliable(coop::net::ReliableKind::LightningStrike, &p, sizeof(p))) {
+            UE_LOGW("weather: lightning SendReliable failed (channel busy) -- "
+                    "strike at (%.0f, %.0f, %.0f) NOT broadcast", p.locX, p.locY, p.locZ);
+            continue;
+        }
+        UE_LOGI("weather: host broadcast LightningStrike at (%.0f, %.0f, %.0f)", p.locX, p.locY, p.locZ);
+    }
 }
 
 void OnDisconnect() {
     if (g_observerRegistered && g_beginDeferredSpawnFn) {
-        GT::UnregisterObservers(g_beginDeferredSpawnFn, &OnSpawnPostLightning);
+        // The hook stays patched for the process (there is no unpatch); disarmed, it pays one load and a branch.
+        ue_wrap::ufunction_hook::SetArmed(g_beginDeferredSpawnFn, &OnSpawnPostLightning, false);
         g_observerRegistered = false;
-        UE_LOGI("weather: lightning OnDisconnect unregistered POST observer");
+        UE_LOGI("weather: lightning OnDisconnect disarmed the Func-thunk hook");
     }
     g_observerRefused = false;
+    {
+        // A strike queued in the disconnecting tick must not survive into the next session: a stale address
+        // could recycle into an unrelated live actor.
+        std::lock_guard<std::mutex> lk(g_pendingMx);
+        g_pending.clear();
+    }
     // Clear cached session pointer so a stale Session* can't leak into the
     // next session's observer fires before SetSession is re-called.
     g_session.store(nullptr, std::memory_order_release);

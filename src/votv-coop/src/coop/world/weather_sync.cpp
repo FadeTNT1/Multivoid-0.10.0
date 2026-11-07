@@ -333,8 +333,8 @@ void Install(coop::net::Session* session) {
         }
     }
 
-    // Lightning sits above the early-outs too, and the latch does not wait on it: the host observes
-    // BeginDeferredActorSpawnFromClass (a POST observer; nothing to cancel, the client never spawns
+    // Lightning sits above the early-outs too, and the latch does not wait on it: the host patches
+    // BeginDeferredActorSpawnFromClass's Func (a post hook; nothing to cancel, the client never spawns
     // lightning locally since timerLightning is suppressed) and broadcasts the strike, and a client
     // resolves the spawn path its Apply uses. Either happens whenever the strike class is listed:
     // one index lookup until then, O(1) once settled.
@@ -495,6 +495,8 @@ void TickConnect() {
     coop::dev::weather_probe::Tick(g_session.load(std::memory_order_acquire));
     // The Bad Sun lane's watches say once whether they are live.
     coop::weather_badsun::Tick();
+    // The host's natural strikes, queued at the Func-thunk catch and sent once the spawn has finished.
+    coop::weather_lightning::Tick();
     // The deferred apply drains once the cycle is live (a state defer, not a channel retry).
     if (g_pendingApply && g_installed) {
         void* cycle = ResolveCycle();

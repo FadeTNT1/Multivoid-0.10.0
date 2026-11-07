@@ -171,6 +171,12 @@ constexpr const wchar_t* kEventerOutputs[] = {L"ventCrawler_C", L"superEgger_C",
 // so its source is narrowed to the two outputs of the night roll (mainGamemode_C::CustomEvent_5, an Octa or a
 // night egg), whose client roll the spawn authority refuses.
 constexpr const wchar_t* kGeomOctaNpcOutputs[] = {L"geomOcta_C", L"eg_C", nullptr};
+// The gamemode's other natural birth: tickerFunguy (a timer body that rolls a Funguy at a random absolute map
+// point at night). A row of its own beside the Octa's, so the two output lists stay separate.
+constexpr const wchar_t* kGamemodeFunguyOutputs[] = {P::name::NpcClass_Funguy, nullptr};
+// The war event (event_fossilboarwar_C, minted by the host's midnight rollover): its BeginPlay throws up to 32
+// fossil hounds under EX_CallMath, and its grayboar_C props ride the prop lane.
+constexpr const wchar_t* kFossilWarOutputs[] = {P::name::NpcClass_Fossilhound, nullptr};
 constexpr const wchar_t* kUfoKnobOutputs[] = {P::name::UfoKnobClass, nullptr};
 constexpr const wchar_t* kUfoUkOutputs[] = {P::name::UfoUkClass, P::name::UfoUkEnemyClass, nullptr};
 constexpr const wchar_t* kSuperFogOutputs[] = {P::name::HoelUfoClass, nullptr};
@@ -189,10 +195,18 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {L"piramidSpawner_C",        nullptr},          // the piramid event chain
     {L"ticker_wispSpawner_C",    nullptr},          // the ambient sky wisps
     {L"ticker_egSpawner_C",      nullptr},          // the ambient night eggs, one eg_C per roll
+    // The hostile tickers (0.10.0): each rolls inside its ReceiveTick, a client's tick refused in spawn_authority, so
+    // the host's birth is the only one and rides the npc lane. insomniac mints insomniac_child_C (a child class of
+    // insomniac_C, so the allowlist's super-chain walk takes it) or insomniac_C; yellowWisp a killerwisp_C.
+    {L"ticker_fossilhoundSpawner_C", nullptr},      // the fossil hound
+    {L"ticker_insomniacSpawner_C",   nullptr},      // the insomniac and its child form
+    {L"ticker_yellowWispSpawner_C",  nullptr},      // the killer wisp
+    {L"event_fossilboarwar_C",       kFossilWarOutputs},  // the war's hounds (the host's rollover mints the event)
     {L"prop_coingun_C",          nullptr},          // the sell gun's coin mint
     {L"jellyfishPath_C",         nullptr},          // the space jellyfish's seven (world-actor lane)
     {L"trigger_eventer_C",       kEventerOutputs},  // the scheduler's dispatcher
     {L"mainGamemode_C",          kGeomOctaNpcOutputs}, // the night roll's Octa or egg, and the spawn menu's Octa
+    {L"mainGamemode_C",          kGamemodeFunguyOutputs}, // tickerFunguy's Funguy (a second row: any row of the class may pass)
     {L"grayEventController_C",   nullptr},          // graysforest: spawn() mints the grayTest_C pack
     {L"superEgger_C",            nullptr},          // eggvasion: spwn() mints the eg_C children
     {L"tentacleBallsFollower_C", nullptr},          // tentacleBalls: runTrigger() mints the pack
@@ -266,18 +280,25 @@ void OnBeginDeferredExSpawn(void* /*context*/, void* srcObj, void* spawned) {
     if (!srcCls) return;
     // One render of the source's name, then plain compares: every host deferred spawn reaches here.
     const std::wstring srcName = R::ToString(R::NameOf(srcCls));
-    const ExSpawnSource* source = nullptr;
+    // A class may own several rows (the gamemode's night roll and its Funguy), each with its own outputs.
+    bool sourceKnown = false;
     for (const ExSpawnSource& e : kExSpawnSources)
-        if (_wcsicmp(srcName.c_str(), e.cls) == 0) { source = &e; break; }
-    if (!source) return;
+        if (_wcsicmp(srcName.c_str(), e.cls) == 0) { sourceKnown = true; break; }
+    if (!sourceKnown) return;
     // [dev] octa_red=no_source, the Octa drill's red arm: the gamemode's row is left out of the catch.
     static const bool s_noGamemodeSource =
         coop::config::ResolveEnum(::coop::config_registry::rows::octa_red) == "no_source";
     if (s_noGamemodeSource && _wcsicmp(srcName.c_str(), L"mainGamemode_C") == 0) return;
     void* cls = R::ClassOf(spawned);
     if (!cls) return;
-    // A scoped source's outputs first: one render, before the world-actor list's per-entry renders.
-    if (source->outputs && !NamesOneOf(cls, source->outputs)) return;
+    // A scoped source's outputs first: one render per row, before the world-actor list's per-entry renders. The
+    // spawn passes when any row of the source class lets this output through.
+    bool outputPermitted = false;
+    for (const ExSpawnSource& e : kExSpawnSources) {
+        if (_wcsicmp(srcName.c_str(), e.cls) != 0) continue;
+        if (!e.outputs || NamesOneOf(cls, e.outputs)) { outputPermitted = true; break; }
+    }
+    if (!outputPermitted) return;
     if (!coop::npc_sync::IsAllowlistedClass(cls) && !IsWaAllowlistedClass(cls)) return;
     const int32_t idx = R::InternalIndexOf(spawned);
     std::lock_guard<std::mutex> lk(g_pendingMx);
@@ -313,7 +334,10 @@ void InstallExSpawnCatch() {
                 "trigger_spawnFollowingArir_C -> npc_arirFollower_C, boarInvasion_C -> npc_ariral_shooter_C + "
                 "firetank_C, "
                 "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
-                "mainGamemode_C -> geomOcta_C + eg_C, "
+                "mainGamemode_C -> geomOcta_C + eg_C + npc_funguy_C, "
+                "ticker_fossilhoundSpawner_C + event_fossilboarwar_C -> fossilhound_C, "
+                "ticker_insomniacSpawner_C -> insomniac_C + insomniac_child_C, "
+                "ticker_yellowWispSpawner_C -> killerwisp_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
                 "ufo_UK_enemy_C, superFog_C -> HoelUfo_C; EX_CallMath spawns now enroll)");
     } else {

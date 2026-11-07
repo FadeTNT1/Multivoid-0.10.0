@@ -5,8 +5,11 @@
 // suppressed at the scheduler by weather_sync's timerLightning interceptor. Only the spawn LOCATION
 // crosses the wire.
 //
-// The host observes UGameplayStatics::BeginDeferredActorSpawnFromClass POST, filters by
-// ActorClass == lightningStrike_C and broadcasts the SpawnTransform translation. The host's receive
+// The host patches the native Func of UGameplayStatics::BeginDeferredActorSpawnFromClass (the Func-thunk
+// post hook, ue_wrap/core/ufunction_hook.h), because the natural strike is minted by
+// lightningHeightAnalyzer_C's ubergraph under EX_CallMath, a route the ProcessEvent detour never sees. A
+// spawn whose result is a lightningStrike_C is queued, and Tick, a pump tick later (the strike's root is
+// placed only once the spawn finishes), broadcasts the strike's actor location. The host's receive
 // edge refuses a client's copy; on a client the world event dispatcher posts Apply() to the game
 // thread, which re-spawns the actor at the received location through the BeginDeferred +
 // FinishSpawn pair.
@@ -32,9 +35,9 @@ void SetSession(coop::net::Session* session);
 // the engine's spawn path that does not resolve refuses the lane for the process, said once.
 bool TryResolve();
 
-// HOST-only: register the POST observer on BeginDeferredActorSpawnFromClass if not already
-// registered AND TryResolve() succeeded. Returns true once settled for the session: the observer is
-// active, or the observer table refused it (said once). False while TryResolve is false, asked
+// HOST-only: install (once per process) and arm the Func-thunk post hook on
+// BeginDeferredActorSpawnFromClass if not already armed AND TryResolve() succeeded. Returns true once
+// settled for the session: the hook is armed, or the hook table refused it (said once). False while TryResolve is false, asked
 // again at no cost. Safe to call every net-pump tick.
 bool RegisterHostObserver();
 
@@ -44,7 +47,11 @@ bool RegisterHostObserver();
 // not succeeded.
 void Apply(const coop::net::LightningStrikePayload& payload);
 
-// Disconnect hook: unregister the POST observer if it was registered.
+// HOST-only, game thread, every pump tick: send the strikes the hook queued, each at its actor's location
+// once the spawn has finished. A strike reaped before the tick, or one on a client, sends nothing.
+void Tick();
+
+// Disconnect hook: disarm the Func-thunk hook if it was armed, and drop the queue.
 // Mirrors weather_sync::OnDisconnect's role-scoped observer cleanup --
 // a reconnect under a different role would otherwise fire the host-only
 // observer on the wrong peer. Called from weather_sync::OnDisconnect.
