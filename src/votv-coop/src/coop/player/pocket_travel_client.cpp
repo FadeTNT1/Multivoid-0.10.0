@@ -177,7 +177,16 @@ void ReleaseWorldObjects() {
     ue_wrap::GcPin::ReportWorldScopedPins("pocket trip: the main world's co-op state released");
 }
 
-bool ReadDeparture(float out[6]) {
+// The departure. The trigger's own effects run before the decision -- the puddle sinks the pawn and
+// stops its movement, the shaker ragdolls it -- so the live pose would put the way home inside them:
+// the last grounded standing pose the profile stream sampled is taken instead, when it is recent and
+// near the pawn. One far from it is from before a teleport the trip itself made (the well's to the
+// spawn), which stands as natively, and then the live pawn is the departure. `sampled` says which.
+constexpr int64_t kDepartureSampleMaxAgeMs = 10'000;
+constexpr double  kDepartureSampleNearCm   = 1000.0;
+
+bool ReadDeparture(float out[6], bool& sampled) {
+    sampled = false;
     for (int i = 0; i < 6; ++i) out[i] = 0.f;
     void* const pawn = coop::players::Registry::Get().Local();
     ue_wrap::FVector at{};
@@ -186,6 +195,15 @@ bool ReadDeparture(float out[6]) {
     ue_wrap::engine::TryGetActorRotation(pawn, rot);
     out[0] = at.X; out[1] = at.Y; out[2] = at.Z;
     out[3] = rot.Pitch; out[4] = rot.Yaw; out[5] = rot.Roll;
+    float sx = 0.f, sy = 0.f, sz = 0.f, syaw = 0.f;
+    if (PIS::ClientRecentStandingPose(kDepartureSampleMaxAgeMs, sx, sy, sz, syaw)) {
+        const double dx = double(sx) - double(at.X), dy = double(sy) - double(at.Y), dz = double(sz) - double(at.Z);
+        if (dx * dx + dy * dy + dz * dz <= kDepartureSampleNearCm * kDepartureSampleNearCm) {
+            out[0] = sx; out[1] = sy; out[2] = sz;
+            out[3] = 0.f; out[4] = syaw; out[5] = 0.f;
+            sampled = true;
+        }
+    }
     return true;
 }
 
@@ -195,7 +213,8 @@ void EnterWork(uint32_t trip) {
     if (trip != g_tripSeq || g_state.load() != State::Entering) return;  // a newer decision took over
     g_enterSent = true;
     const PT::Pocket pocket = g_pocket.load();
-    const bool placed = ReadDeparture(g_departure);
+    bool sampled = false;
+    const bool placed = ReadDeparture(g_departure, sampled);
     g_carriedCount = PIS::ClientCaptureCarried("at the trip's start");
     const bool flushed = PIS::ClientFlushCarried(g_departure);
     SendTravel(PT::Phase::Enter, pocket, PT::Reason::Trip, g_departure);
@@ -203,10 +222,11 @@ void EnterWork(uint32_t trip) {
     coop::world_load_episode::RaiseReconcileForReload();
     ReleaseWorldObjects();
     PIS::ClientArmCarriedApply();
-    UE_LOGI("[POCKET] client: entering %s (trip %u) -- departure (%.0f, %.0f, %.0f), carried state "
-            "captured (%d items) -- slot %u, reason %s, profile %s",
+    UE_LOGI("[POCKET] client: entering %s (trip %u) -- departure (%.0f, %.0f, %.0f) from %s, carried "
+            "state captured (%d items) -- slot %u, reason %s, profile %s",
             PT::LevelTag(pocket), trip, double(g_departure[0]), double(g_departure[1]),
-            double(g_departure[2]), g_carriedCount, LocalSlot(), PT::ReasonTag(PT::Reason::Trip),
+            double(g_departure[2]), sampled ? "the last standing pose" : "the live pawn", g_carriedCount,
+            LocalSlot(), PT::ReasonTag(PT::Reason::Trip),
             flushed ? "flushed to the host" : "NOT flushed (the host keeps its copy)");
     if (!placed)
         UE_LOGW("[POCKET] client: no local pawn to read the departure from (trip %u) -- the way home "

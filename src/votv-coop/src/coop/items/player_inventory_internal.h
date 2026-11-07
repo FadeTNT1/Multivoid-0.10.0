@@ -30,8 +30,10 @@ extern std::atomic<coop::net::Session*> g_session;  // any thread
 extern std::array<bool, coop::net::kMaxPeers> g_applySentToSlot;
 // Client: this world was built from a host profile (the stream's gate).
 extern bool g_profileApplied;
-// Client: the last place the local player was standing.
+// Client: the last place the local player was standing, and when the sampler took it (a flush that
+// writes the departure there leaves the time alone).
 extern coop::player_profile::Pose g_standingPose;
+extern Clock::time_point g_standingPoseAt;
 // Client: the host's apply blob, held for the next join's save object.
 extern coop::blob_chunks::Assembler g_clientAssembler;
 extern coop::player_profile::Profile g_pendingApply;

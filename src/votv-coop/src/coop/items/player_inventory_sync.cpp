@@ -143,6 +143,7 @@ std::array<bool, coop::net::kMaxPeers> g_applySentToSlot{};
 // Client: the last place the local player was standing (see player_profile::Pose). Sampled at
 // the poll, kept while the player drives, falls or lies ragdolled.
 coop::player_profile::Pose g_standingPose;
+Clock::time_point g_standingPoseAt{};  // when SampleStandingPose last took it
 
 void SampleStandingPose() {
     void* pawn = coop::players::Registry::Get().Local();
@@ -152,10 +153,12 @@ void SampleStandingPose() {
     if (!ue_wrap::engine::ReadMainPlayerRagdollState(pawn, ragdoll, dead) || ragdoll || dead) return;
     if (!ue_wrap::engine::ReadMainPlayerSittingOn(pawn, seat) || seat) return;
     if (ue_wrap::puppet::ReadCharacterIsFalling(pawn)) return;
+    if (ue_wrap::puppet::ReadCharacterMovementIsNone(pawn)) return;  // held by a script (the goop's sink)
     ue_wrap::FVector at{};
     ue_wrap::FRotator rot{};   // unread: the last standing pose stays
     if (!ue_wrap::engine::TryGetActorLocation(pawn, at) || !ue_wrap::engine::TryGetActorRotation(pawn, rot)) return;
     g_standingPose = {at.X, at.Y, at.Z, rot.Yaw, true};
+    g_standingPoseAt = Clock::now();
 }
 
 // Client: send one built profile -- the items blob plus the vitals and the pose -- to the host.
@@ -763,6 +766,7 @@ void OnDisconnect() {
     g_joinPose = {};
     g_joinPlacement = JoinPlacement::StartPoint;
     g_standingPose = {};
+    g_standingPoseAt = {};
     g_lastSentPose = {};
     g_pawnVitalsPending = false;
     g_oversizeHash = 0;

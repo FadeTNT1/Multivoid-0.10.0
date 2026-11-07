@@ -175,6 +175,17 @@ void ClientRearmForReturn(const float departure[6]) {
             double(g_returnPose.x), double(g_returnPose.y), double(g_returnPose.z));
 }
 
+bool ClientRecentStandingPose(int64_t maxAgeMs, float& x, float& y, float& z, float& yaw) {
+    if (!g_standingPose.valid || g_standingPoseAt == Clock::time_point{}) return false;
+    const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - g_standingPoseAt);
+    if (age.count() < 0 || age.count() > maxAgeMs) return false;
+    x = g_standingPose.x;
+    y = g_standingPose.y;
+    z = g_standingPose.z;
+    yaw = g_standingPose.yaw;
+    return true;
+}
+
 void ClientForgetCarried() {
     g_carried = Carried{};
     g_carriedApply = CarriedApply::Idle;

@@ -198,8 +198,10 @@ without the way home, dropped N world message(s) while standing down, the sessio
 
 Known limits: hook-driven producers (a pickup, a drop, a hit in the pocket) still fire and rely on
 the host refusing an away slot's world kinds; an away player's hand-item mirror on other peers is
-not hidden; the departure is the pawn's place at the decision (the puddle's +200 z, the well's
-spawn teleport), as natively; status effects are not part of the carried state.
+not hidden; status effects are not part of the carried state. The departure is the last grounded
+standing pose the profile stream sampled (not falling, ragdolled, seated or held at `MOVE_None` by
+the puddle's sink) when it is at most 10 s old and within 10 m of the pawn, else the pawn's place at
+the decision: a trip's own teleport (the well's to the spawn) stands, as natively.
 
 ### The way home (client)
 

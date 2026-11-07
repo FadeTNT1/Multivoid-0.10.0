@@ -132,6 +132,11 @@ void ClientRearmForReturn(const float departure[6]);
 // CLIENT: forget the trip's carried state and any return arm (a finished trip, a session start).
 void ClientForgetCarried();
 
+// CLIENT: the last standing pose the profile stream sampled (not falling, ragdolled, dead, seated or
+// held by a script), when it was taken at most `maxAgeMs` ago: x, y, z cm and yaw deg. False when none
+// is that recent. Game thread.
+bool ClientRecentStandingPose(int64_t maxAgeMs, float& x, float& y, float& z, float& yaw);
+
 // Per-tick: the client's outbound inventory stream, or the host's on-join push, by role. It
 // also carries a one-shot read-verify self-test (ini inventory_selftest=1) that reads the local
 // saveSlot inventory a few seconds after world-up and logs what it found; that part is a no-op
