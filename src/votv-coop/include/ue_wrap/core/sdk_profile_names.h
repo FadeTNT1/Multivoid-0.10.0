@@ -950,6 +950,10 @@ inline constexpr const wchar_t* WidgetSetIsEnabledFn = L"SetIsEnabled";       //
 inline constexpr const wchar_t* WidgetSetRenderOpacityFn = L"SetRenderOpacity";  // UWidget::SetRenderOpacity(float InOpacity) -- brush-independent visual dim
 inline constexpr const wchar_t* WidgetGetIsEnabledFn = L"GetIsEnabled";       // UWidget::GetIsEnabled()->bool ReturnValue (read-back diagnostic)
 inline constexpr const wchar_t* UiMenuClass = L"ui_menu_C";                   // VOTV unified main+pause menu widget (GameInstance-owned, one live instance)
+// The in-game HUD widget. Its Blueprint Tick is a UMG tick: once per frame on the game thread, inside the
+// Slate tick, so after the world tick's camera update and before the frame's present is queued. The
+// nameplates project there, with the camera of the frame being drawn.
+inline constexpr const wchar_t* HudWidgetClass = L"ui_ui_C";
 inline constexpr const wchar_t* UiMenuButtonSaveProp = L"button_Save";        // UButton* @ ui_menu_C+0x2D0 (the "Save Game" button)
 inline constexpr const wchar_t* UiMenuIsPauseProp = L"isPause";               // bool @ ui_menu_C+0x4C0 (true => the in-game pause menu, not the main menu)
 

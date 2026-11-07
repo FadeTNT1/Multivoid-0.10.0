@@ -238,6 +238,9 @@ CFG_STRING(nick_color, "nick_color", "player", "unset", nullptr, false,
 // this row's range and default, a single source.
 CFG_FLOAT(ui_scale, "ui.scale", "ui", 1.25f, 0.75, 1.75, nullptr,
     "Scale multiplier for the mod's UI panels.")
+CFG_FLAG(ui_nameplate_frame_sync, "ui.nameplate.frame_sync", "ui", true, "VOTVCOOP_NAMEPLATE_FRAME_SYNC",
+    "Place nameplates with the camera of the exact frame being drawn, so they stay locked to the player while you "
+    "turn. Off: the older placement, refreshed about 60 times a second, which can shake on fast camera turns.")
 CFG_FLAG(ui_netstats, "ui.netstats", "ui", false, nullptr,
     "Show the network statistics overlay.")
 CFG_FLAG(ui_chat_peer_actions, "ui.chat.peer_actions", "ui", true, nullptr,

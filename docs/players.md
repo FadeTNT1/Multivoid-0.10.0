@@ -121,6 +121,12 @@ them cannot draw the name.
 
 The nameplate is drawn by the mod's own overlay as a screen-space projection of the puppet's
 head: nickname, ping and a health bar, faded with distance (`coop/player/nameplate`, `ui/hud`).
+The pump decides which plates exist and what they say; where they sit is projected once per frame
+in the HUD widget's own tick (`ui_ui_C::Tick`), after the camera has moved for that frame, and the
+overlay pairs each present with the capture of its own frame. A plate projected on the ~60 Hz pump
+instead held one screen point over several rendered frames and shook against the body on a fast
+turn. `ui.nameplate.frame_sync=0` goes back to the pump's projection; the log line
+`nameplate: projection path -> ...` says which one is drawing.
 A per-player preference hides your own plate from others, and a nickname colour is a per-player
 preference that every surface (plate, chat, scoreboard) reads from one store
 (`coop/player/nick_color`). The scoreboard renders a game-thread snapshot of the roster
