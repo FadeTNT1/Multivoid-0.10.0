@@ -18,6 +18,12 @@ bool AttachActorToComponentSocket(void* actor, void* component, const wchar_t* s
 
 bool DetachActorFromParent(void* actor);
 
+// USceneComponent::K2_DetachFromComponent on `component`: off its attach parent, with each rule an EDetachmentRule
+// (0 KeepRelative, 1 KeepWorld). The defaults are the engine's own (KeepRelative, bCallModify true). False on a dead
+// component or an unresolved function. Game thread.
+bool DetachComponentFromParent(void* component, uint8_t locationRule = 0, uint8_t rotationRule = 0,
+                               uint8_t scaleRule = 0, bool callModify = true);
+
 // AActor::GetAttachParentActor: the actor `actor`'s root is attached to, or null in `parent` when it is attached to
 // none. False when the read did not run (`parent` is null then too). Game thread.
 bool GetAttachParentActor(void* actor, void*& parent);
