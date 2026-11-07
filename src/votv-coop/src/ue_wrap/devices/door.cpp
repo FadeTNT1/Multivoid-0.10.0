@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <unordered_map>
 
 namespace ue_wrap::door {
@@ -111,9 +112,13 @@ struct VerifyEntry {
     bool landed = false;
     std::chrono::steady_clock::time_point holdUntil{};
     int corrections = 0;        // drift corrections made in the hold; capped so a loop cannot run forever
+    std::chrono::steady_clock::time_point nextBody{};  // the next leaf check of the hold (a field read each, paced)
 };
 constexpr auto kVerifyHold = std::chrono::seconds(8);
 constexpr int  kMaxDriftCorrections = 3;
+constexpr auto kBodyCheckEvery = std::chrono::milliseconds(250);
+// A leaf root this far along its path stands at the open place (an additive open on a cracked door goes past one).
+constexpr float kLeafOpenFrac = 0.9f;
 std::unordered_map<void*, VerifyEntry> g_verify;
 
 // Whether the door's move timeline -- its swing, not the jam shake's -- is playing: the flag its
@@ -542,7 +547,54 @@ static const char* BlockingGuard(void* door, bool open) {
 static bool LeavesAtOpen(void* door) {
     LeafPose pose;
     if (!TryReadLeafPose(door, pose)) return true;
-    return pose.left >= 0.9f && pose.right >= 0.9f;
+    return pose.left >= kLeafOpenFrac && pose.right >= kLeafOpenFrac;
+}
+
+// Whether a SETTLED door's leaf roots stand where its state puts them. Open: both at the open place. Shut: not both
+// at the open place -- a crack a hit left (or the one the host carries as a seed) is a legitimate resting place
+// short of it, so only leaves standing open under a shut flag disagree. Unknown when the pose cannot be read (the
+// crack lane unresolved), which never reads as a failure.
+enum class Body { Ok, Wrong, Unknown };
+static Body BodyAtRest(void* door, bool open) {
+    LeafPose pose;
+    if (!TryReadLeafPose(door, pose)) return Body::Unknown;
+    const bool bothOpen = pose.left >= kLeafOpenFrac && pose.right >= kLeafOpenFrac;
+    if (open) return bothOpen ? Body::Ok : Body::Wrong;
+    return bothOpen ? Body::Wrong : Body::Ok;
+}
+
+// Put a settled door's leaf roots at the rest place of `open` (fully travelled, or zero) through the same root
+// write the crack lane uses, and the timeline's value and direction to that end so a later verb starts from it.
+// Never runs the additive doorOpen again, which on an open door drives the leaves into the wall, and never the
+// finished function, which would play the open or close sound and fire the opened delegate a second time. True when
+// the roots took the write.
+static bool ConvergeLeaves(void* door, bool open) {
+    const float f = open ? 1.f : 0.f;
+    if (!WriteLeafPose(door, LeafPose{f, f})) return false;
+    if (g_moveAlphaOff >= 0 && g_moveDirOff >= 0) {
+        *reinterpret_cast<float*>(reinterpret_cast<char*>(door) + g_moveAlphaOff) = f;
+        *reinterpret_cast<uint8_t*>(reinterpret_cast<char*>(door) + g_moveDirOff) = open ? 0 : 1;
+    }
+    return true;
+}
+
+// One diagnostic line per apply, before it returns or acts: the target, the door's flags, its leaves and what the
+// apply did with them. The first few per key in full, then one line in a hundred with the running count, so a
+// door that keeps being applied cannot flood the log.
+static void LogApply(void* door, bool open, const char* action) {
+    static std::unordered_map<std::wstring, int> counts;
+    constexpr int kFull = 3, kEvery = 100;
+    const std::wstring key = GetKeyString(door);
+    const int n = ++counts[key];
+    if (n > kFull && n % kEvery != 0) return;
+    bool isOpened = false, moving = false;
+    TryReadOpen(door, isOpened);
+    TryReadMoving(door, moving);
+    LeafPose pose;
+    char leaves[48] = "r=? l=?";
+    if (TryReadLeafPose(door, pose)) std::snprintf(leaves, sizeof leaves, "r=%.2f l=%.2f", pose.right, pose.left);
+    UE_LOGI("door: apply key=%ls target=%s isOpened=%d isMoving=%d leaves %s -> %s (apply #%d for this key)",
+            key.c_str(), open ? "ON" : "OFF", isOpened ? 1 : 0, moving ? 1 : 0, leaves, action, n);
 }
 
 // Snap a door fully to a state, mesh and flag, proximity-independent: set the timeline alpha
@@ -558,9 +610,23 @@ static bool ForceTo(void* door, bool open, bool seedLerpa = false) {
     // double-sounds; two callers can reach the same open door in adjacent ticks (the keypad
     // accept's force open and the door's own native chain from the replayed digit), and this
     // guard makes both safe.
+    //
+    // The flag agreeing is not the body agreeing: a settled door whose leaves stand elsewhere (a save load that set
+    // the flag and not the roots) has its roots put at the state's rest place, with neither verb nor finished
+    // function replayed, so there is no second sound and no additive swing.
     if (g_isOpenedOff >= 0 &&
-        *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open)
+        *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open) {
+        const bool moving = g_isMovingOff >= 0 &&
+            *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isMovingOff);
+        if (!moving && BodyAtRest(door, open) == Body::Wrong) {
+            char desc[160] = "";
+            DescribeSwing(door, desc, sizeof desc);
+            const bool ok = ConvergeLeaves(door, open);
+            UE_LOGW("door: key='%ls' forced %s with its flag already there and the leaves elsewhere [%s] -- leaves "
+                    "%s", GetKeyString(door).c_str(), open ? "OPEN" : "SHUT", desc, ok ? "converged" : "NOT written");
+        }
         return true;
+    }
     if (g_moveAlphaOff < 0 || g_moveDirOff < 0) return false;
     if (seedLerpa && open && g_lerpaROff >= 0 && g_lerpaLOff >= 0) {
         void* const r = RootAt(door, g_rRootOff);
@@ -594,7 +660,10 @@ void SmartApply(void* door, bool open) {
     const bool moving = g_isMovingOff >= 0 &&
         *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isMovingOff);
     bool heading = false;
-    if (moving && TryReadOpenIntent(door, heading) && heading == open) return;
+    if (moving && TryReadOpenIntent(door, heading) && heading == open) {
+        LogApply(door, open, "noop");
+        return;
+    }
     // Idempotent: a settled door already at the target is left alone. Re-running the blueprint
     // chain on a matching door is destructive, not just wasteful: the open swing is additive
     // (the target is the current pose plus a delta), so re-opening an already-open door drives
@@ -602,9 +671,30 @@ void SmartApply(void* door, bool open) {
     // produced on saved-open doors. The mid-swing case stays non-idempotent on purpose: the
     // opened flag lags the animation, so a match while moving the wrong way means the authority
     // wants the swing reversed; fall through and re-command it.
+    //
+    // The flag agreeing is not the body agreeing, though: a joiner's own save load can leave the flag at the host's
+    // state with the leaves elsewhere (open and standing shut), and the swing is never replayed for it. So a
+    // settled match checks the leaf roots against the state's rest place and, when they disagree, puts them there
+    // with the root write (no verb, no finished function: no second sound, no additive swing). The post-apply watch
+    // is registered either way, so a rewrite that lands after this apply is put back too.
     if (!moving && g_isOpenedOff >= 0 &&
-        *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open)
+        *reinterpret_cast<const bool*>(reinterpret_cast<const char*>(door) + g_isOpenedOff) == open) {
+        if (BodyAtRest(door, open) == Body::Wrong) {
+            LogApply(door, open, "leaf-converge");
+            const bool ok = ConvergeLeaves(door, open);
+            UE_LOGW("door: key='%ls' stood %s with its leaves %s -- leaves %s", GetKeyString(door).c_str(),
+                    open ? "OPEN" : "SHUT", open ? "shut" : "open", ok ? "converged" : "NOT written");
+        } else {
+            LogApply(door, open, "noop");
+        }
+        const auto now = std::chrono::steady_clock::now();
+        VerifyEntry watch{ open, now + std::chrono::milliseconds(1500), {} };
+        watch.ref.Set(door);
+        watch.landed = true;
+        watch.holdUntil = now + kVerifyHold;
+        g_verify[door] = watch;
         return;
+    }
     // A door the authority moved has no flag that stops the move there, so one this copy still holds is stale: a
     // joiner loads `jammed` from the save and runs its own unjam timer from its own load, and a jammed copy's
     // doorOpen would play the jam shake instead of opening; `superclosed` (open) and `cantclose` (close) make the
@@ -618,6 +708,7 @@ void SmartApply(void* door, bool open) {
             ClearBit(door, g_cantCloseOff, g_cantCloseMask);
         }
     }
+    LogApply(door, open, "verb");
     // Play the native animated swing (smooth wherever the door ticks, no magic radius).
     const bool ran = open ? CallDoorOpen(door, true) : CallDoorClose(door, true);
     // The verb is synchronous: a body that took the command has set isMoving (the swing) or, on a door that
@@ -635,6 +726,7 @@ void SmartApply(void* door, bool open) {
     } else {
         char desc[160] = "";
         DescribeSwing(door, desc, sizeof desc);
+        LogApply(door, open, "force");
         const bool snapped = ForceTo(door, open, true);
         UE_LOGW("door: applied %s key='%ls' via fallback(%s) -- %s returned without moving the door%s%s [%s]; "
                 "force-snap %s", open ? "ON" : "OFF", key.c_str(), ran ? "unknown" : "verb-not-dispatched",
@@ -648,6 +740,18 @@ void SmartApply(void* door, bool open) {
     VerifyEntry ve{ open, std::chrono::steady_clock::now() + std::chrono::milliseconds(1500), {} };
     ve.ref.Set(door);  // fresh at the apply seam
     g_verify[door] = ve;
+}
+
+bool AtState(void* door, bool open) {
+    if (!door || !g_resolved.load(std::memory_order_acquire) || g_isOpenedOff < 0) return false;
+    bool moving = false;
+    TryReadMoving(door, moving);
+    if (moving) {
+        bool heading = false;
+        return TryReadOpenIntent(door, heading) && heading == open;
+    }
+    bool cur = false;
+    return TryReadOpen(door, cur) && cur == open && BodyAtRest(door, open) != Body::Wrong;
 }
 
 void TickSmartApply() {
@@ -712,6 +816,24 @@ void TickSmartApply() {
             ForceTo(door, e.target, e.target);
             UE_LOGW("door: key='%ls' drifted off %s after its apply landed [%s] -- converged again (correction %d)",
                     GetKeyString(door).c_str(), e.target ? "OPEN" : "SHUT", desc, e.corrections);
+        }
+        // Landed with the flag right: the leaves too. A settled door whose roots stand off the state's rest place
+        // was rewritten behind the apply (a late load), and is put back with the root write.
+        if (!moving && cur == e.target && now >= e.nextBody) {
+            e.nextBody = now + kBodyCheckEvery;
+            if (BodyAtRest(door, e.target) == Body::Wrong) {
+                if (e.corrections >= kMaxDriftCorrections) {
+                    UE_LOGW("door: key='%ls' keeps leaving its %s leaves after %d corrections -- the watch gives up",
+                            GetKeyString(door).c_str(), e.target ? "OPEN" : "SHUT", e.corrections);
+                    it = g_verify.erase(it);
+                    continue;
+                }
+                ++e.corrections;
+                const bool ok = ConvergeLeaves(door, e.target);
+                UE_LOGW("door: key='%ls' leaves drifted off the %s place after its apply landed -- %s (correction %d)",
+                        GetKeyString(door).c_str(), e.target ? "OPEN" : "SHUT", ok ? "converged again" : "NOT written",
+                        e.corrections);
+            }
         }
         if (now >= e.holdUntil) it = g_verify.erase(it); else ++it;
     }

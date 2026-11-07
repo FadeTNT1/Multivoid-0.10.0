@@ -167,8 +167,17 @@ void ForceClose(void* door);
 // within tick range) the native animated swing; far, the force-snap, invisible anyway, where
 // the native animation would freeze out of tick range. Near peers animate and far peers snap,
 // so doors are smooth where seen and correct everywhere. Skips re-triggering a door already
-// animating toward the same target. Game thread.
+// animating toward the same target. A settled door whose flag already reads the target is not swung again (the
+// additive open would drive its leaves into the wall), but its leaf roots are checked and put at the state's rest
+// place when they disagree, and the post-apply watch is registered in that case too. ForceOpen and ForceClose do the
+// same body check on a matching flag. Game thread.
 void SmartApply(void* door, bool open);
+
+// Whether the door stands at, or is swinging toward, the state `open`, body and all: a swing heading there, or a
+// settled door whose flag reads it AND whose leaf roots stand at that state's rest place (open: fully travelled; shut:
+// not both open, so a crack is allowed). The truth behind an apply's success: the flag alone is not it. False on a
+// null door or unresolved fields. Game thread.
+bool AtState(void* door, bool open);
 
 // Drain the smart apply's verify list: doors whose native swing completed are dropped, and
 // doors whose swing froze beyond tick range past their deadline are force-snapped, so their

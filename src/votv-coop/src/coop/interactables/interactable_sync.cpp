@@ -61,7 +61,8 @@ const Adapter g_doorAdapter = {
     [](void* a, bool on) -> bool {
         ApplyMark mark(g_applyingDoor, a);
         ue_wrap::door::SmartApply(a, on);
-        return true;
+        // The truth, not "the verb ran": the flag and the leaves at the state, or a swing heading there.
+        return ue_wrap::door::AtState(a, on);
     },
     // The apply is a swing that needs finishing.
     &ue_wrap::door::TickSmartApply,

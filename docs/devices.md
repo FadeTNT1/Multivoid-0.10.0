@@ -118,6 +118,8 @@ own five-second autoclose delay) and puts back a settled door found off the host
 off ..`), at most three times. A state that never landed because the client's index does not hold the key is said
 as `door: deferred ON for '..' expired`.
 
+A door the client already holds at the host's flag is not swung again (the additive open would drive its leaves into the wall), but it is not skipped either: the apply checks the leaf roots against the state's rest place (open: both fully travelled; shut: not both open, so a crack stays) and, when they disagree, writes them there with the crack lane's root write (`door: apply .. -> leaf-converge`). The eight-second watch is registered in that case too and repeats the leaf check, so a late save-load rewrite is put back. The channel's `applied .. ok=` now reports the flag AND the leaves (`ue_wrap::door::AtState`). Each apply logs `door: apply key=.. target=ON|OFF isOpened=.. isMoving=.. leaves r=.. l=.. -> noop|leaf-converge|verb|force`, the first three per key, then one in a hundred.
+
 A hit that does not open a door still moves it: `addDamage` nudges the two leaf roots (`door_r_root`, `door_l_root`)
 toward their open places and begins the swing only past a threshold, so the open bool alone left a client's copy shut
 while the host's showed the crack. The host watches `addDamage` after its body and the door adapter carries the roots'
