@@ -1480,6 +1480,17 @@ enum class ReliableKind : uint8_t {
     // stand. Display only; the task itself rides TaskNewState. Never relayed; a client's copy is refused at the
     // host's receive edge. TaskSaleHintPayload.
     TaskSaleHint = 251,
+    // CLIENT->HOST: the irrigation set (coop::irrigation_sync). One chunked blob per verb under an op byte: a faucet
+    // or a ground hose this player placed, as the actor's own getData record (its links rewritten to the live ones);
+    // a faucet taken up (its action 7, cancelled here); a hose picked up or resumed (action 4, run here too); a hose's
+    // sprinkler detached. The host judges life, reach and the named keys and runs each on its own copy. Never relayed:
+    // the host's IrrigationState is what the other peers get. BlobChunkPayload.
+    IrrigationCommit = 252,
+
+    // HOST->ALL: a placed faucet or ground hose exists (its record, links as the live ones) or is gone (its key);
+    // HOST->JOINER: the same, bracketed by a snapshot's begin and end, after which a joiner destroys the ones the host
+    // did not name. Never relayed; a client's copy is refused at the host's receive edge. BlobChunkPayload.
+    IrrigationState = 253,
 };
 
 #pragma pack(push, 1)

@@ -4,7 +4,8 @@ Installs the Multivoid co-op mod into **Voices of the Void 0.10.0**. No UE4SS, n
 small loader file (`dwmapi.dll`) goes next to the game's exe and starts the mod by itself.
 
 Friend-facing step-by-step guides: **[INSTALL-WINDOWS.md](INSTALL-WINDOWS.md)** and
-**[INSTALL-LINUX.md](INSTALL-LINUX.md)** (Proton / Wine, via `install-multivoid.sh`).
+**[INSTALL-LINUX.md](INSTALL-LINUX.md)** (Proton / Wine, via `install-multivoid.sh`) and
+**[INSTALL-MAC.md](INSTALL-MAC.md)** (CrossOver / Wine wrappers, via `install-multivoid.sh` or `Install-Multivoid-Mac.command`; untested).
 
 ## Install (Windows)
 
@@ -46,12 +47,23 @@ It does not edit Steam's binary `shortcuts.vdf`. Unattended:
 | `--game-path <path>` | The game folder, `WindowsNoEditor`, `VotV/Binaries/Win64`, or the exe. |
 | `--yes` | Never ask a question; every question takes its safe default. |
 | `--skip-version-check` | Go on although the exe is not the 0.10.0 build. |
+| `--no-dll-override` | Do not edit the Wine prefix's `user.reg` (Linux and macOS). |
 | `--ue4ss ask\|keep\|replace` | What to do about an existing UE4SS (unattended `ask` means `keep`). |
 | `--remove-logs` / `--remove-user-data` | Uninstall only: also delete logs and reports / settings, saves and identity key. |
 | `--payload-dir <path>` | Use a payload folder somewhere else. |
 
 It refuses to run while `VotV-Win64-Shipping.exe` is running (`pgrep`). Not covered yet: a run on a real Proton prefix
 (tested only against a fake game tree).
+
+## Install (macOS, CrossOver / Wine wrappers)
+
+VOTV has no Mac build; Mac players run the Windows build in CrossOver, Whisky, Sikarugir/Kegworks or plain Wine.
+Double-click **`Install-Multivoid-Mac.command`** (first time: right-click, Open) or run `bash install-multivoid.sh`;
+the same script serves Linux and macOS (bash 3.2 and BSD tools are fine). It also looks inside CrossOver, Whisky and
+Sikarugir/Kegworks/Wineskin bottles. When the game sits inside a Wine prefix (a folder with `drive_c` and `user.reg`)
+it offers to add `"dwmapi"="native,builtin"` to that prefix's `user.reg` (backup: `user.reg.multivoid-backup`; quit
+Wine first; uninstall removes it again; skip with `--no-dll-override`). Details and manual steps: INSTALL-MAC.md.
+Mac support is community-made and untested on real hardware.
 
 ## The menu (both installers)
 
@@ -111,6 +123,7 @@ identity key, and **`loader.log`**, which records how the loader started the mod
 - Nothing happens in game / no Multiplayer entry: open `Mods\Multivoid\loader.log`. It says whether the loader ran,
   whether it stood aside for UE4SS, whether `main.dll` loaded, and whether the mod started or refused.
   Then try **3) Repair**.
+- Mac: the DLL override must be set in the bottle (see INSTALL-MAC.md).
 - Linux / Steam Proton: set the launch option `WINEDLLOVERRIDES="dwmapi=n,b" %command%` so Wine uses the
   `dwmapi.dll` beside the game instead of its built-in one (see INSTALL-LINUX.md).
 - The mod's own log is `multivoid.log` beside the game exe; the F1 menu has a bug-report button.

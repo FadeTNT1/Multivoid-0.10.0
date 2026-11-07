@@ -115,6 +115,7 @@
 #include "coop/world/event_fire_sync.h"
 #include "coop/world/firefly_sync.h"
 #include "coop/items/inventory_pickup_sync.h"
+#include "coop/items/irrigation_sync.h"
 #include "coop/comms/chat_sync.h"
 #include "coop/commands/command_sync.h"
 #include "coop/interactables/upgrade_sync.h"
@@ -446,6 +447,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::voice_chat::OnDisconnectSlot(slot);  // drop the leaver's voice channel + icon state
     coop::sleep_sync::OnDisconnectForSlot(slot);  // the leaver's rest state back to awake, told to every client
     coop::owner_entity_sync::OnPeerLeftSlot(slot);  // destroy the leaver's owner-entity mirrors (its eyer dies with it)
+    coop::irrigation_sync::OnPeerLeftSlot(slot);  // a leaver's half-sent irrigation verb
     coop::hook_sync::OnPeerLeftSlot(slot);  // the leaver's OWNER-PHASE hook mirrors; anchored ones are the host's and stay
     coop::player_inventory_sync::OnDisconnectForSlot(slot);  // re-arm the on-join push; the leaver's profile stays held
     coop::inventory_restore::OnSlotLeft(slot);  // a restore it never answered, or its rejoin is told "still waiting" for a minute

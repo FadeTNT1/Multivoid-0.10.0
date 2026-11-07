@@ -1,3 +1,4 @@
 # Hook scripts run under sh; a CRLF shebang breaks them on a checkout with core.autocrlf=true.
 .github/ci/hooks/* text eol=lf
 *.sh text eol=lf
+*.command text eol=lf
