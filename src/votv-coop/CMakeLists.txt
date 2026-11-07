@@ -284,6 +284,8 @@ target_sources(votv-coop PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated/version.r
 # scan follows #include and not a data file, so the edge is stated: editing a name rebuilds the embed.
 set_source_files_properties(resources/thanks.rc PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/thanks/thanks.txt)
+set_source_files_properties(resources/snore.rc PROPERTIES
+    OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/snore/snore.wav)
 # The language packs: every locale/<ll_CC>.po embedded as the RCDATA resource L10N_<LL_CC>, which
 # l10n::Init finds by name. The .rc is written here from the folder's files and rewritten only when the
 # list changes; each .po is a stated dependency edge, since the resource compiler scans no data file.

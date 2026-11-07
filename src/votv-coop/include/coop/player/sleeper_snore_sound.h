@@ -1,6 +1,7 @@
 // coop/player/sleeper_snore_sound.h -- the snore's samples: a `snore.wav` beside main.dll when there is one,
-// otherwise a few short snores synthesized at first use (no snore asset ships in the game, and a SoundWave cannot
-// be cooked without the 4.27 editor). Mono s16, lo-fi on purpose. Game thread.
+// otherwise the recorded breath embedded in the DLL (resources/snore.rc, assets/snore/snore.wav), and only if that
+// cannot be read a few short snores synthesized at first use (no snore asset ships in the game, and a SoundWave
+// cannot be cooked without the 4.27 editor). Mono s16. Game thread.
 
 #pragma once
 

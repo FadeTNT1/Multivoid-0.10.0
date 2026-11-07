@@ -473,6 +473,7 @@ set(VOTVCOOP_SOURCES
     src/coop/player/sleepers.cpp
     src/coop/player/sleeper_snore.cpp
     src/coop/player/sleeper_snore_sound.cpp
+    resources/snore.rc
     src/coop/creatures/wisp_attack_sync.cpp
     src/coop/creatures/wisp_grab_hold.cpp
     src/coop/creatures/wisp_tear_mirror.cpp
