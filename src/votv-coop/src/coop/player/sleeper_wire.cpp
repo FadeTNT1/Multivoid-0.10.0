@@ -53,6 +53,7 @@ std::vector<uint8_t> Pack(const Message& m) {
     const std::string skin = m.skin.size() > kMaxSkinBytes ? std::string() : m.skin;
     U8(o, static_cast<uint8_t>(skin.size()));
     o.insert(o.end(), skin.begin(), skin.end());
+    U8(o, m.joinSlot);
     return o;
 }
 
@@ -82,7 +83,9 @@ bool Parse(const std::vector<uint8_t>& b, Message& out) {
         out.skin.push_back(c);
     }
     r.o += m;
-    return r.ok && r.o == b.size();
+    out.joinSlot = r.U8();
+    if (!r.ok || (out.joinSlot != kNoJoinSlot && out.joinSlot > kMaxJoinSlot)) return false;
+    return r.o == b.size();
 }
 
 }  // namespace coop::sleeper_wire

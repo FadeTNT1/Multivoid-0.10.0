@@ -122,6 +122,13 @@ struct Sleeper {
     bool poseFixedSaid = false;
     bool closing = false;      // host: the owner is coming back; no new loot, the held ones settle
     bool closingSaid = false;
+    // A joining body: the player of `joinSlot` is connecting (admitted, loading the world). No crate and no loot; it
+    // goes when their puppet stands on this peer (on the host, once their world is up as well). A client whose slot
+    // left keeps the body with `joinSlot` -1 until the host says what it becomes.
+    bool joining = false;
+    int joinSlot = -1;
+    Clock::time_point joinSince{};
+    const char* joinWhy = "";
 };
 
 // Host: a woken sleeper's record, to be put on its owner once their world is up (the restore lane), replacing
@@ -419,7 +426,7 @@ bool Build(Sleeper& s) {
             coop::client_model::ApplySkinToBody(body, s.skin, mesh);
     }
     Lay(s, /*measure=*/!s.poseFinal);
-    if (!Live(s.crate, s.crateIdx)) {
+    if (!s.joining && !Live(s.crate, s.crateIdx)) {
         void* const crate = SpawnCrate(s);
         if (!crate) {
             UE_LOGW("sleeper: %s -- the loot crate did not spawn (class %ls not loaded?); retried",
@@ -451,6 +458,7 @@ std::vector<uint8_t> AddBlob(const Sleeper& s) {
     m.pitch = s.lieRot.Pitch; m.yaw = s.lieRot.Yaw; m.roll = s.lieRot.Roll;
     m.nick = s.nick;
     m.skin = s.skin;
+    m.joinSlot = (s.joining && s.joinSlot >= 0) ? static_cast<uint8_t>(s.joinSlot) : W::kNoJoinSlot;
     return W::Pack(m);
 }
 
@@ -533,24 +541,30 @@ Sleeper* FindByGuid(const std::string& guid) {
     return nullptr;
 }
 
-void RemoveSleeper(uint32_t id, const char* why, bool wake = false) {
+// Host: what the owner wakes with -- the profile as the crate left it, the same bytes the join hands them -- held to be
+// put on them once their world is up (Tick), and until then their streams are dropped (HoldsProfileOf).
+void RecordWake(const Sleeper& s) {
+    coop::player_profile::Profile p;
+    Wake w;
+    w.nick = s.nick;
+    w.since = Clock::now();
+    if (ReadProfile(s.guid, p) && p.hasItems) {
+        w.items = p.items;
+        std::vector<std::vector<uint8_t>> canvas, slots;
+        if (SI::ProfileRows(w.items, canvas, slots)) w.count = canvas.size() + slots.size();
+    }
+    if (!w.items.empty()) g_wakes[s.guid] = std::move(w);
+}
+
+long long MsSince(Clock::time_point t) {
+    return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - t).count());
+}
+
+void RemoveSleeper(uint32_t id, const char* why) {
     const auto it = g_sleepers.find(id);
     if (it == g_sleepers.end()) return;
     Sleeper& s = it->second;
     if (IsHost()) Writeback(s, why);
-    if (IsHost() && wake) {
-        // What the owner wakes with: the profile as the crate left it, the same bytes the join hands them.
-        coop::player_profile::Profile p;
-        Wake w;
-        w.nick = s.nick;
-        w.since = Clock::now();
-        if (ReadProfile(s.guid, p) && p.hasItems) {
-            w.items = p.items;
-            std::vector<std::vector<uint8_t>> canvas, slots;
-            if (SI::ProfileRows(w.items, canvas, slots)) w.count = canvas.size() + slots.size();
-        }
-        if (!w.items.empty()) g_wakes[s.guid] = std::move(w);
-    }
     UE_LOGI("sleeper: %s (id %u) removed -- %s", Utf8(s.nick).c_str(), id, why);
     DestroyActors(s);
     const bool tell = IsHost() && s.announced;
@@ -660,7 +674,10 @@ std::vector<Saved> CollectOnline(bool full) {
         if (!coop::roster_ledger::Occupied(k)) continue;
         const coop::roster_ledger::Row& row = coop::roster_ledger::Get(k);
         const std::string guid = row.guid.empty() ? coop::player_handshake::GuidForSlot(k) : row.guid;
-        if (!coop::player_handshake::IsValidGuid(guid) || g_noSleeper.count(guid) || FindByGuid(guid)) continue;
+        if (!coop::player_handshake::IsValidGuid(guid) || g_noSleeper.count(guid)) continue;
+        // A sleeper already lying is written as one; a joining body is this connected player's, at its pose.
+        const Sleeper* const body = FindByGuid(guid);
+        if (body && !body->joining) continue;
         if (full) {
             coop::player_profile::Profile prof;
             if (!ReadProfile(guid, prof) || !prof.hasItems || prof.items.empty()) continue;
@@ -670,7 +687,12 @@ std::vector<Saved> CollectOnline(bool full) {
         v.nick = row.nick;
         v.skin = row.skin;
         const OnlineRest& rest = g_online[k];
-        if (rest.lying) {
+        if (body && body->poseFinal) {
+            v.stand = body->stand;
+            v.standYaw = body->standYaw;
+            v.lie = body->lie;
+            v.rot = body->lieRot;
+        } else if (rest.lying) {
             v.stand = rest.anchor;
             v.standYaw = rest.standYaw;
             v.lie = rest.lie;
@@ -696,7 +718,8 @@ std::vector<Saved> CollectOnline(bool full) {
 std::vector<Saved> CurrentList(bool withOnline, size_t* onlineOut = nullptr) {
     std::vector<Saved> out;
     for (const auto& [id, s] : g_sleepers)
-        if (s.poseFinal) out.push_back(Saved{s.guid, s.nick, s.skin, s.stand, s.standYaw, s.lie, s.lieRot});
+        if (s.poseFinal && !s.joining)   // a joining body is its connected player's: CollectOnline writes it
+            out.push_back(Saved{s.guid, s.nick, s.skin, s.stand, s.standYaw, s.lie, s.lieRot});
     size_t n = 0;
     if (withOnline) {
         for (Saved& v : CollectOnline(/*full=*/true)) { out.push_back(std::move(v)); ++n; }
@@ -937,6 +960,116 @@ void InstallPress() {
     UE_LOGI("sleeper: the loot press stands on InpActEvt_use");
 }
 
+// ---- joining bodies ----
+
+// The body turns into the joining body of the player of `slot`: its crate goes (nothing can be looted from it any more)
+// and it lies on until their puppet stands. The host has written its loot back first.
+void BecomeJoining(Sleeper& s, int slot, const char* why) {
+    if (g_open.active && g_open.id == s.id) EndOpen();
+    if (Live(s.crate, s.crateIdx)) {
+        coop::prop_echo_suppress::MarkIncomingDestroy(s.crate);
+        E::DestroyActor(s.crate);
+    }
+    s.crate = nullptr;
+    s.crateIdx = -1;
+    s.lootTrusted = false;
+    s.joining = true;
+    s.joinSlot = slot;
+    s.joinSince = Clock::now();
+    s.joinWhy = why;
+    UE_LOGI("sleeper: joining body laid for %s (slot %d, id %u) at (%.0f, %.0f, %.0f) -- %s; no loot from here on",
+            Utf8(s.nick).c_str(), slot, s.id, s.lie.X, s.lie.Y, s.lie.Z, why);
+}
+
+// Host: a player with no sleeper is connecting: a joining body for them, at the spot they will appear -- their
+// profile's standing spot, else the start point -- with their name and skin and no loot. Built (and announced) by
+// TickBuilds.
+void LayJoining(const std::string& guid, int slot) {
+    if (!Enabled()) return;
+    Sleeper s;
+    s.id = g_nextId++;
+    s.guid = guid;
+    s.nick = coop::player_handshake::NicknameForSlot(slot);
+    s.skin = coop::player_handshake::SkinForSlot(slot);
+    coop::player_profile::Profile p;
+    const bool profiled = ReadProfile(guid, p);
+    const char* where = "the start point";
+    if (profiled && p.pose.valid) {
+        s.stand = FVector{p.pose.x, p.pose.y, p.pose.z};
+        s.standYaw = p.pose.yaw;
+        where = "their profile's standing spot";
+    } else {
+        s.stand = FVector{N::kKPPSpawnX, N::kKPPSpawnY, N::kKPPSpawnZ};
+        s.standYaw = 0.f;
+    }
+    s.lie = s.stand;
+    s.lieRot = FRotator{0.f, s.standYaw, 0.f};
+    s.joining = true;
+    s.joinSlot = slot;
+    s.joinSince = Clock::now();
+    s.joinWhy = profiled ? "a returning player with no sleeper" : "a first join";
+    UE_LOGI("sleeper: joining body laid for %s (slot %d, id %u, %.8s...) at (%.0f, %.0f, %.0f), %s -- %s; no loot",
+            Utf8(s.nick).c_str(), slot, s.id, guid.c_str(), s.stand.X, s.stand.Y, s.stand.Z, where, s.joinWhy);
+    g_sleepers.emplace(s.id, std::move(s));
+}
+
+// Host: the player of a joining body left before their world was up. With a profile that holds items the body lies
+// on as their sleeper, in the very pose it has, and its crate is filled again from the profile (which holds the loot
+// written back when the join began, or what they streamed since); with none, it goes.
+void EndJoiningLeft(Sleeper& s, const char* why) {
+    coop::player_profile::Profile p;
+    const long long ms = MsSince(s.joinSince);
+    if (Enabled() && ReadProfile(s.guid, p) && p.hasItems && !p.items.empty()) {
+        UE_LOGI("sleeper: %s (slot %d) %s %lld ms into the join -- their joining body lies on as a sleeper (id %u)",
+                Utf8(s.nick).c_str(), s.joinSlot, why, ms, s.id);
+        g_wakes.erase(s.guid);   // the sleeper holds the record again
+        s.joining = false;
+        s.joinSlot = -1;
+        s.closing = false;
+        s.closingSaid = false;
+        s.items = p.items;
+        s.writtenHash = 0;
+        s.built = false;      // Build keeps the body and spawns the crate
+        s.tries = 0;
+        s.nextTry = Clock::time_point{};
+        s.announced = false;  // the Add again, now as a sleeper: every peer gives the body its crate
+        return;
+    }
+    UE_LOGI("sleeper: %s (slot %d) %s %lld ms into the join with no profile items -- their joining body goes",
+            Utf8(s.nick).c_str(), s.joinSlot, why, ms);
+    RemoveSleeper(s.id, "the joining player left");
+}
+
+// Each tick, every role: a joining body whose puppet now stands on this peer -- on the host, once that player's world
+// is up as well, since a pre-world pose can spawn a puppet early -- is replaced by it. The puppet appears where the
+// body lay: the joiner is placed at the spot the body was laid over. The host also says Remove, for a peer whose own
+// puppet is late. A host's joining body whose player is no longer on its slot (a drop the roster edge did not carry)
+// ends as a leave.
+void TickJoining() {
+    auto* const sess = Session();
+    for (auto it = g_sleepers.begin(); it != g_sleepers.end();) {
+        Sleeper& s = it->second;
+        ++it;   // RemoveSleeper erases s
+        if (!s.joining || s.joinSlot < 0) continue;
+        const int slot = s.joinSlot;
+        if (IsHost() &&
+            (!sess || !sess->IsSlotConnected(slot) || coop::player_handshake::GuidForSlot(slot) != s.guid)) {
+            EndJoiningLeft(s, "is no longer connected");
+            continue;
+        }
+        RemotePlayer* const p = coop::players::Registry::Get().Puppet(static_cast<uint8_t>(slot));
+        if (!p || !p->valid()) continue;
+        if (IsHost() && !sess->IsSlotWorldReady(slot)) continue;
+        FVector at{};
+        const bool haveAt = E::TryGetActorLocation(p->actor(), at);
+        UE_LOGI("sleeper: joining body replaced by puppet -- %s (slot %d, id %u) stands up %lld ms after the body was "
+                "laid (%s); puppet at (%.0f, %.0f, %.0f), the body lay at (%.0f, %.0f, %.0f), %.0f cm apart",
+                Utf8(s.nick).c_str(), slot, s.id, MsSince(s.joinSince), s.joinWhy, at.X, at.Y, at.Z, s.lie.X, s.lie.Y,
+                s.lie.Z, haveAt ? Len(Sub(at, s.lie)) : -1.f);
+        RemoveSleeper(s.id, IsHost() ? "their puppet stands (world up)" : "their puppet stands on this peer");
+    }
+}
+
 // ---- per tick ----
 
 void PoseWatch(Sleeper& s, Clock::time_point now) {
@@ -956,7 +1089,7 @@ void PoseWatch(Sleeper& s, Clock::time_point now) {
 
 void TickBuilds(Clock::time_point now) {
     for (auto& [id, s] : g_sleepers) {
-        if (s.built && (!Live(s.body, s.bodyIdx) || !Live(s.crate, s.crateIdx))) {
+        if (s.built && (!Live(s.body, s.bodyIdx) || (!s.joining && !Live(s.crate, s.crateIdx)))) {
             UE_LOGW("sleeper: %s's %s is gone -- rebuilt", Utf8(s.nick).c_str(),
                     Live(s.body, s.bodyIdx) ? "crate" : "body");
             if (IsHost()) Writeback(s, "before a rebuild");
@@ -972,11 +1105,15 @@ void TickBuilds(Clock::time_point now) {
         if (++s.tries == kMaxBuildTries)
             UE_LOGE("sleeper: %s could not be built in %d tries -- given up", Utf8(s.nick).c_str(), kMaxBuildTries);
         if (!Build(s)) continue;
+        if (s.joining)
+            UE_LOGI("sleeper: joining body of %s (slot %d, id %u) is down, %lld ms after it was laid",
+                    Utf8(s.nick).c_str(), s.joinSlot, s.id, MsSince(s.joinSince));
         if (IsHost() && !s.announced) {
             if (SendAll(AddBlob(s))) s.announced = true;
-            // Its pose is now the rejoin spot; the items are as they were.
+            // Its pose is now the rejoin spot; the items are as they were. A joining body's player holds their profile
+            // already: it is not touched.
             coop::player_profile::Profile p;
-            if (ReadProfile(s.guid, p)) PutProfile(s, std::move(p));
+            if (!s.joining && ReadProfile(s.guid, p)) PutProfile(s, std::move(p));
         }
     }
 }
@@ -1153,7 +1290,10 @@ void Tick() {
         g_nextOnlineScan = now + kOnlineScanEvery;
         RefreshPrebuiltEnd();
     }
-    if (!g_sleepers.empty()) TickBuilds(now);
+    if (!g_sleepers.empty()) {
+        TickBuilds(now);
+        TickJoining();
+    }
     coop::sleeper_snore::Tick();
     if (IsHost() && !g_wakes.empty()) {
         auto* sess = Session();
@@ -1257,11 +1397,22 @@ void OnPlayerLeaving(int slot, const coop::roster_ledger::Row& outgoing) {
     // The slot's rest pose goes with its occupant on every peer.
     const OnlineRest rest = g_online[slot];
     g_online[slot] = OnlineRest{};
-    if (!IsHost()) return;
+    // A joining body of this slot is no longer the slot's: a later occupant's puppet must not take it. On a client it
+    // waits for the host to say what it becomes (a sleeper again, or gone).
+    if (!IsHost()) {
+        for (auto& [id, s] : g_sleepers)
+            if (s.joining && s.joinSlot == slot) s.joinSlot = -1;
+        return;
+    }
     const std::string guid = outgoing.guid;
     if (!coop::player_handshake::IsValidGuid(guid)) return;
     if (g_noSleeper.erase(guid)) {
         UE_LOGI("sleeper: %s was kicked or banned -- no sleeper", Utf8(outgoing.nick).c_str());
+        return;
+    }
+    // Left mid-join: the joining body lies on as their sleeper, or goes.
+    if (Sleeper* const j = FindByGuid(guid); j && j->joining) {
+        EndJoiningLeft(*j, "left");
         return;
     }
     if (!Enabled()) return;
@@ -1292,11 +1443,19 @@ void NoteRemovedByHost(const std::string& guid) {
     if (Sleeper* s = FindByGuid(guid)) RemoveSleeper(s->id, "the player was kicked or banned");
 }
 
-bool OnOwnerJoining(const std::string& guid) {
+bool OnOwnerJoining(const std::string& guid, int slot) {
     if (!IsHost()) return true;
     g_noSleeper.erase(guid);
     Sleeper* const s = FindByGuid(guid);
-    if (!s) return true;
+    if (!s) {
+        // No sleeper: a body of their own lies there while they load, with no loot.
+        LayJoining(guid, slot);
+        return true;
+    }
+    if (s->joining) {   // a hand-over asked again (the send was refused): the body is theirs already
+        s->joinSlot = slot;
+        return true;
+    }
     // A loot transaction in flight settles first, committed or aborted, so the item is in exactly one place when
     // the crate is read for the last time; no new one starts meanwhile.
     s->closing = true;
@@ -1310,7 +1469,13 @@ bool OnOwnerJoining(const std::string& guid) {
         }
         return false;
     }
-    RemoveSleeper(s->id, "the player is back", /*wake=*/true);
+    // The last write-back, then the record they wake with; the crate goes with it, so nothing can be taken in the join
+    // window. `closing` stays set: storage_act refuses the id anything new. The body lies on until their puppet stands.
+    Writeback(*s, "the player is back");
+    RecordWake(*s);
+    BecomeJoining(*s, slot, "their sleeper stays down through the join");
+    if (s->announced && !SendAll(AddBlob(*s)))
+        UE_LOGW("sleeper: the joining Add of %s (id %u) was refused by the lane", Utf8(s->nick).c_str(), s->id);
     return true;
 }
 
@@ -1346,6 +1511,7 @@ void QueueConnectBroadcastForSlot(int slot) {
     size_t sent = 0;
     for (const auto& [id, v] : g_sleepers) {
         if (!v.built || !v.announced) continue;
+        if (v.joining && v.joinSlot == slot) continue;   // the joiner's own body: they are the one standing up
         if (coop::blob_chunks::SendBlobToSlot(s, slot, coop::net::ReliableKind::SleeperState, g_sendSeq++, AddBlob(v)))
             ++sent;
     }
@@ -1385,7 +1551,33 @@ void OnStateChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot) {
         RemoveSleeper(m.id, "the host says so");
         return;
     }
-    if (g_sleepers.count(m.id)) return;   // a repeat of one this peer has
+    const int joinSlot = m.joinSlot == W::kNoJoinSlot ? -1 : static_cast<int>(m.joinSlot);
+    if (joinSlot >= static_cast<int>(coop::players::kMaxPeers)) {
+        UE_LOGW("sleeper: an Add of id %u names slot %d, past this session's slots -- dropped", m.id, joinSlot);
+        return;
+    }
+    if (joinSlot >= 0 && joinSlot == static_cast<int>(coop::players::Registry::Get().LocalPeerId())) {
+        RemoveSleeper(m.id, "it is this player's own joining body");
+        return;
+    }
+    if (const auto it = g_sleepers.find(m.id); it != g_sleepers.end()) {
+        // One this peer has: a sleeper whose owner is now joining, or a joining body whose player left and lies on.
+        Sleeper& had = it->second;
+        if (joinSlot >= 0 && !had.joining) {
+            BecomeJoining(had, joinSlot, "the host says its player is joining");
+        } else if (joinSlot >= 0) {
+            had.joinSlot = joinSlot;
+        } else if (had.joining) {
+            UE_LOGI("sleeper: %s (id %u) lies on as a sleeper -- the joining player left, %lld ms into the join",
+                    Utf8(had.nick).c_str(), m.id, MsSince(had.joinSince));
+            had.joining = false;
+            had.joinSlot = -1;
+            had.built = false;   // Build keeps the body and spawns the crate
+            had.tries = 0;
+            had.nextTry = Clock::time_point{};
+        }
+        return;
+    }
     Sleeper s;
     s.id = m.id;
     s.nick = m.nick;
@@ -1394,7 +1586,17 @@ void OnStateChunk(const coop::net::BlobChunkPayload& p, uint8_t senderSlot) {
     s.lieRot = FRotator{m.pitch, m.yaw, m.roll};
     s.stand = s.lie;
     s.poseFinal = true;
-    UE_LOGI("sleeper: the host lays %s (id %u) down at (%.0f, %.0f, %.0f)", Utf8(s.nick).c_str(), s.id, m.x, m.y, m.z);
+    if (joinSlot >= 0) {
+        s.joining = true;
+        s.joinSlot = joinSlot;
+        s.joinSince = Clock::now();
+        s.joinWhy = "the host lays it for a joining player";
+        UE_LOGI("sleeper: joining body laid for %s (slot %d, id %u) at (%.0f, %.0f, %.0f) -- the host's",
+                Utf8(s.nick).c_str(), joinSlot, s.id, m.x, m.y, m.z);
+    } else {
+        UE_LOGI("sleeper: the host lays %s (id %u) down at (%.0f, %.0f, %.0f)", Utf8(s.nick).c_str(), s.id, m.x, m.y,
+                m.z);
+    }
     g_sleepers.emplace(s.id, std::move(s));
 }
 
@@ -1430,7 +1632,8 @@ size_t PlateAnchors(PlateAnchor* out, size_t max) {
         PlateAnchor& a = out[n++];
         a.head = Add(Add(loc, Mul(E::GetActorUpVector(s.body), 60.f)), FVector{0.f, 0.f, 20.f});
         coop::text::CopyUtf8ToBuffer(a.nick, s.nick);
-        a.lootable = aimed == &s;
+        a.joining = s.joining;
+        a.lootable = !s.joining && aimed == &s;
     }
     return n;
 }

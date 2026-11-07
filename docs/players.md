@@ -305,9 +305,9 @@ the next world save.
 sleeper holds, never their older, fuller inventory:
 - The moment the host is about to hand them their profile (pre-world), any loot transaction on the sleeper that is
   still held (granted, not yet committed or aborted) settles first -- the join waits, a tick at a time, at most the
-  30 s hold -- and the sleeper takes no new one meanwhile; then its loot is written back one last time and it goes,
-  on every peer. The item of a settled take is with the looter, an aborted one back in the crate, so it is in exactly
-  one place when the crate is read.
+  30 s hold -- and the sleeper takes no new one meanwhile; then its loot is written back one last time and its crate
+  goes, on every peer. The item of a settled take is with the looter, an aborted one back in the crate, so it is in
+  exactly one place when the crate is read. The body stays down as the player's joining body (below).
 - Every write-back is checked before it is kept: per item kind, the rebuilt profile must hold exactly the crate's
   total (`storage_inventory::ItemsMatchRows`, the plan's own invariant in `ue_wrap/actors/sleeper_rebuild_plan`, which
   a CI test drives with loot-then-rejoin cases). A rebuild with worn items kept in their slots that does not check
@@ -320,6 +320,13 @@ sleeper holds, never their older, fuller inventory:
   it. The log says `sleeper: <name> woke with N item(s) from the sleeper record (local had M; replaced)`, M being the
   item arrays' entries the client held just before.
 - The player appears where the sleeper lay, with what is left.
+
+**Joining.** While a player connects, every other peer sees them asleep on the floor, not nothing: a rejoiner's sleeper
+stays down (its crate gone at the profile hand-over, so nothing is looted meanwhile); anyone else gets a crate-less body
+at the spot they will appear (profile, else start point), plate "(joining...)". It reaches later joiners too. Each peer
+swaps it for the puppet the moment that exists there (host: once the player's world is ready too); the puppet stands
+where it lay, no get-up animation. A mid-join leaver lies on as a sleeper if their profile holds items, else it goes.
+Log: `sleeper: joining body laid for ..`, `.. is down, N ms after ..`, `sleeper: joining body replaced by puppet -- ..`.
 
 An online sleeper cannot be looted in this build (below), so nothing is taken from a live inventory while its owner
 sleeps.
@@ -537,7 +544,7 @@ run reads those lines.
 | `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |
 | `TeleportClient` | host to one peer | a placement; the administration action, not the join |
 | `InventoryRestoreBlob`, `InventoryRestoreAck` | host to one client; that client to the host | a backed-up inventory's bytes, chunked, to put back on that player; the answer with the item counts before and after |
-| `SleeperState` | host to all | a sleeper laid down (its id, its lying transform, its name and skin) or removed (its id); its loot rides `ContainerContents` and `ContainerAct*` as a storage of address kind Sleeper |
+| `SleeperState` | host to all | a sleeper laid down (its id, its lying transform, its name and skin, and the slot of a player whose joining body it is, or none) or removed (its id); an Add for an id a peer holds turns that body into a joining one or back; its loot rides `ContainerContents` and `ContainerAct*` as a storage of address kind Sleeper |
 
 ## Late join
 
@@ -548,7 +555,7 @@ at its ready edge. A joiner is sent the host's sleeping flag and the rest state 
 that is not awake. A joiner that rests before the host holds its world ready has that report refused, and repeats
 it each time the host's sleeping flag reaches it, which the host sends once it holds the joiner ready. The inventory is seeded before the world. A peer's death state is not seeded; a joiner sees a
 dead peer through the ragdoll bit of its next pose. Every sleeper is sent to a joiner at its ready edge, just before
-the world storages' rows, its loot's among them.
+the world storages' rows, its loot's among them, and every other player's joining body (Sleepers, Joining).
 
 ## Known limits
 

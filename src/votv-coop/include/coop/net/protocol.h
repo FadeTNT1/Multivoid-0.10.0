@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 308;
+inline constexpr uint16_t kProtocolVersion = 313;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1428,8 +1428,10 @@ enum class ReliableKind : uint8_t {
 
     // HOST->ALL: the sleepers, offline players lying where they left (coop::sleepers). A chunked blob of one op: Add
     // (the sleeper's host-session id, its lying transform as the host traced it onto the floor, its display name and
-    // skin) or Remove (the id). The host sends an Add when a sleeper is laid down and to a joiner at its ready edge
-    // for every sleeper, before the world storages' seed, and a Remove when the owner rejoins or is kicked. Its loot is
+    // skin, and the slot of a player whose joining body it is, or none) or Remove (the id). The host sends an Add when
+    // a sleeper is laid down, again when a body turns into a joining one (its owner is connecting: no loot) or back,
+    // and to a joiner at its ready edge for every body but its own, before the world storages' seed, and a Remove when
+    // a joining body's owner stands up as their puppet, or the owner is kicked. Its loot is
     // a world storage of address kind Sleeper on the ContainerContents and ContainerAct lanes. Never relayed; a
     // client's copy is refused at the host's receive edge; not pre-world. BlobChunkPayload.
     SleeperState = 240,

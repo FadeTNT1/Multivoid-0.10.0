@@ -647,9 +647,10 @@ bool SendInventoryToSlot(int peerSlot) {
                 peerSlot);
         return false;  // not sent -> caller does not latch; retries when the GUID lands
     }
-    // A sleeper of this player writes its loot back into the profile and goes, before the profile is read: the
-    // sleeper's record IS what the player gets. Not yet while a loot transaction on it is held; asked again next tick.
-    if (!coop::sleepers::OnOwnerJoining(guid)) return false;
+    // A sleeper of this player writes its loot back into the profile and loses its crate, before the profile is read:
+    // the sleeper's record IS what the player gets. Not yet while a loot transaction on it is held; asked again next
+    // tick. Its body (or a new one) lies on as the player's joining body until their puppet stands up.
+    if (!coop::sleepers::OnOwnerJoining(guid, peerSlot)) return false;
     std::vector<uint8_t> blob;
     namespace PS = coop::player_profile_store;
     const PS::Found found = PS::Get(guid, blob);
