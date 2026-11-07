@@ -500,7 +500,7 @@ void Reset() {
     g_lastRememberedMs = 0;
     for (BirthStamp& b : g_births) b = BirthStamp{};
     g_birthNext = 0;
-    for (uint64_t& t : g_destroyTokens) t = 0;
+    for (DestroyStamp& d : g_destroyTokens) d = DestroyStamp{};
     g_destroyNext = 0;
     for (FnSlot& s : g_fnKinds) s = FnSlot{};
     g_classCount = 0;
