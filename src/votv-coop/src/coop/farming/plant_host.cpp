@@ -156,10 +156,22 @@ void SendGone(const std::string& key, bool harvested) {
     UE_LOGI("farm: host gone key=%s harvested=%d (%zu live)", key.c_str(), harvested ? 1 : 0, g_rows.size());
 }
 
+// Whether `plant` is the live actor its g_byActor entry names. An entry left by an earlier plant at the same address
+// that died unseen (no destroy hook ran) is dropped here, so the newcomer is named; that dead row's Gone goes at the
+// next census.
+bool Named(void* plant) {
+    auto it = g_byActor.find(plant);
+    if (it == g_byActor.end()) return false;
+    auto r = g_rows.find(it->second);
+    if (r != g_rows.end() && r->second.actor.Is(plant)) return true;
+    g_byActor.erase(it);
+    return false;
+}
+
 // Name a plant whose data has landed. False when it does not read yet (asked again at the next census). A plant with no
 // row is scenery the game never grows or harvests: it is not named, and a client keeps its own.
 bool Register(void* plant) {
-    if (g_byActor.count(plant)) return true;
+    if (Named(plant)) return true;
     if (g_rows.size() >= kMaxRows) {
         if (!g_fullSaid) {
             g_fullSaid = true;
@@ -242,7 +254,9 @@ void Census(uint64_t now, bool forceFresh) {
         void* a = r.actor.Get();
         if (!a) {
             const std::string key = it->first;
-            g_byActor.erase(r.actor.Raw());
+            // The address may already name a newer plant (Named dropped this row's entry): erase only our own.
+            auto b = g_byActor.find(r.actor.Raw());
+            if (b != g_byActor.end() && b->second == key) g_byActor.erase(b);
             it = g_rows.erase(it);
             SendGone(key, false);
             continue;
@@ -464,7 +478,7 @@ void HostTick(coop::net::Session& s) {
 }
 
 void HostOnBeginPlay(void* plant) {
-    if (g_byActor.count(plant)) return;
+    if (Named(plant)) return;
     Fresh f;
     f.actor.Set(plant);
     f.dueMs = NowMs() + kFirstRowDelayMs;
