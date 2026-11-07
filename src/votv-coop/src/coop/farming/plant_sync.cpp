@@ -13,6 +13,7 @@
 #include "coop/world/spawn_authority.h"
 
 #include "ue_wrap/actors/growing_plant.h"
+#include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/reflection_props.h"
@@ -24,6 +25,7 @@
 #include <chrono>
 #include <deque>
 #include <iterator>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -76,10 +78,24 @@ void DrainOut(coop::net::Session& s) {
     }
 }
 
-// ---- the host's own action-4 runs: whether a destroy inside one is a harvest ----
+// ---- the host's own action-4 runs: whether a destroy inside one is a harvest, and what the harvest yielded ----
 
 R::ParamOffset g_actionParam{L"action"};
-std::vector<uint8_t> g_hostAction;   // one entry per action-4 body running on the host: 1 a harvest, 0 a discard
+
+// One entry per action-4 body running on the host. A crop's yield is not the action's: the action destroys the plant
+// and ReceiveDestroyed -> dropFruits_grass rolls randomIntegerInRange(amount_range) afresh at every loop step and spawns
+// one prop per step that passes, so a row whose range starts at 0 (the wild cane's is 0..1) yields nothing about half
+// the time in the unmodded game. The entry carries what the roll started from and counts the props born inside the
+// action, so the log says "range 0..1, 0 born" instead of leaving a silent no-drop to look like a lost item.
+struct HostAction {
+    bool         harvest = false;   // a harvest (not a discard)
+    int          born = 0;          // props that finished init inside the action
+    uint8_t      type = 0;          // the row's plantType
+    int32_t      rangeMin = 0, rangeMax = 0;
+    float        grow = 0.f;
+    std::wstring row;
+};
+std::vector<HostAction> g_hostAction;
 
 uint8_t ActionOf(const sg::Call& c) {
     const int32_t off = g_actionParam.Of(c.function);
@@ -89,15 +105,38 @@ uint8_t ActionOf(const sg::Call& c) {
 sg::Verdict OnActionPreAll(const sg::Call& c) {
     if (!IsHost()) return OnActionPre(c);
     if (ActionOf(c) == 4) {
+        HostAction a;
         bool discard = false;
         GP::ReadDiscard(c.object, discard);
-        g_hostAction.push_back(discard ? 0 : 1);
+        a.harvest = !discard;
+        GP::State st;
+        if (a.harvest && GP::ReadState(c.object, st)) {
+            a.type = st.plantType;
+            a.rangeMin = st.amountMin;
+            a.rangeMax = st.amountMax;
+            a.grow = st.grow;
+            a.row = st.plant;
+        }
+        g_hostAction.push_back(std::move(a));
     }
     return sg::Verdict::Run;
 }
 
 void OnActionPost(const sg::Call& c) {
-    if (IsHost() && ActionOf(c) == 4 && !g_hostAction.empty()) g_hostAction.pop_back();
+    if (!IsHost() || ActionOf(c) != 4 || g_hostAction.empty()) return;
+    const HostAction a = std::move(g_hostAction.back());
+    g_hostAction.pop_back();
+    if (a.harvest && a.type == 0)
+        UE_LOGI("farm: host harvest of %ls (grow %.3f): yield range %d..%d, %d prop(s) born%s", a.row.c_str(),
+                static_cast<double>(a.grow), a.rangeMin, a.rangeMax, a.born,
+                (a.rangeMin <= 0 && a.born == 0) ? " -- the game rolled 0 (its range starts at 0), not a lost item" : "");
+}
+
+// HOST: a prop finished init inside a harvest's action body -- the crop's drop, spawned by the destroyed plant.
+void OnPropInitPost(const sg::Call& c) {
+    if (g_hostAction.empty() || !g_hostAction.back().harvest || !c.object || !IsHost()) return;
+    if (!ue_wrap::prop::IsDescendantOfProp(c.object)) return;
+    ++g_hostAction.back().born;
 }
 
 // HOST: a plant began play (a save load, a spawner, a pot, a burial); its first row waits for its loaded data.
@@ -114,7 +153,7 @@ sg::Verdict OnDestroyedPre(const sg::Call& c) {
         NoteRefusal(kRefusalReceiveDestroyed);
         return sg::Verdict::Cancel;
     }
-    if (IsHost() && c.object) HostOnDestroyed(c.object, !g_hostAction.empty() && g_hostAction.back() == 1);
+    if (IsHost() && c.object) HostOnDestroyed(c.object, !g_hostAction.empty() && g_hostAction.back().harvest);
     return sg::Verdict::Run;
 }
 
@@ -134,6 +173,7 @@ sg::Verdict OnRetargetPre(const sg::Call& c) {
 UE_FACT_FN(kRowBeginPlay, "plant_sync", L"growingPlant_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowDestroyed, "plant_sync", L"growingPlant_C", L"ReceiveDestroyed", Declared);
 UE_FACT_FN(kRowAction, "plant_sync", L"growingPlant_C", L"actionOptionIndex", Declared);
+UE_FACT_FN(kRowPropInit, "plant_sync", nullptr, L"init", AnyClass);
 UE_FACT_FN(kRowMedicine, "plant_sync", L"growingPlant_C", L"addMedicine", Declared);
 UE_FACT_FN(kRowRetarget, "plant_sync", L"mainPlayer_C", L"retarget add object to inventory", Declared);
 UE_FACT_FN(kRowPotUse, "plant_sync", L"prop_farmPot_C", L"playerUsedOn", Declared);
@@ -158,6 +198,7 @@ const Watch kWatches[] = {
     {&kRowBeginPlay, "growingPlant_C::ReceiveBeginPlay", nullptr, &OnBeginPlayPost},
     {&kRowDestroyed, "growingPlant_C::ReceiveDestroyed", &OnDestroyedPre, nullptr},
     {&kRowAction, "growingPlant_C::actionOptionIndex", &OnActionPreAll, &OnActionPost},
+    {&kRowPropInit, "prop init (harvest yield count)", nullptr, &OnPropInitPost},
     {&kRowMedicine, "growingPlant_C::addMedicine", &OnMedicinePre, nullptr},
     {&kRowRetarget, "mainPlayer_C::retarget add object to inventory", &OnRetargetPre, nullptr},
     {&kRowPotUse, "prop_farmPot_C::playerUsedOn", &OnPotUsePre, nullptr},
