@@ -33,9 +33,10 @@ namespace coop::spawn_authority {
 //
 // A class is added to the table only once its product has a mirror: refusing a spawner whose output
 // nothing replaces just deletes the content. A spawner that reaches its work through Delay or
-// SetTimerDelegate needs a finer row than a class and a function: the first such family (beehive,
-// mannequin) brings it, and mannequinSpawner also carries K2_DestroyActor reap duty, so it will need
-// a (class, latent-UUID) grain. Discovery of new classes stays with the ini-gated rng_roll_census,
+// SetTimerDelegate needs a finer row than a class and a function: the first such family (beehive)
+// brings it. The mannequin spawner did not: its Delay chain and its K2_DestroyActor reap run only
+// from its own tick, and every product (the walker, the broken prop, the reap) is the host's on the
+// prop lanes, so refusing the tick whole is the row. Discovery of new classes stays with the ini-gated rng_roll_census,
 // not this module.
 void Install(coop::net::Session* session);
 

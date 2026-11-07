@@ -112,6 +112,12 @@ UE_FACT_FN(kRowDropUfoDropper, "spawn_authority", L"ufoDropper_C", L"Timeline_0_
 // arirShip's level-placed apparition (0.10.0): the finish of its fade timeline, whose reversed run (the ship
 // faded out) mails sixteen scrambled emails after 10 s.
 UE_FACT_FN(kRowFadeFinishedArirShipAppear, "spawn_authority", L"arirShipAppear_C", L"A__FinishedFunc", Declared);
+// The walking mannequin (0.10.0): its spawner's tick and the spawn point's spawn, and the walker's own brain --
+// its tick (the look check and the walk along its nav path) and its jump timer.
+UE_FACT_FN(kRowReceiveTickTickerMannequinSpawner, "spawn_authority", L"ticker_mannequinSpawner_C", L"ReceiveTick", Declared);
+UE_FACT_FN(kRowSpawnWMannequinSpawn, "spawn_authority", L"wMannequinSpawn_C", L"spawn", Declared);
+UE_FACT_FN(kRowReceiveTickWMannequin, "spawn_authority", L"prop_wMannequin_C", L"ReceiveTick", Declared);
+UE_FACT_FN(kRowTimerJumpWMannequin, "spawn_authority", L"prop_wMannequin_C", L"timer_jump", Declared);
 
 // One row: the facts row a client must not run, and the tag its refusal log carries.
 struct Row {
@@ -305,6 +311,26 @@ constexpr Row kRows[] = {
     // has seen it, a per-viewer sighting. The emails its fade-out mails are the host's, and reach a client
     // on the email feed; a client's own would stay in its inbox alone, as a client never sends an append.
     {&kRowFadeFinishedArirShipAppear,     "arirShipAppear.fadeFinished"},
+    // The walking mannequin. The spawner's tick rolls everything inside its own graph: it swaps a random
+    // standing mannequin (allManns) for a broken prop, shows the spawn points, and after its Delay(0.5) asks
+    // each wMannequinSpawn_C.spawn until one off screen mints a prop_wMannequin_C; then it reaps the oldest
+    // walker above four (ticker_mannequinSpawner_C UG:5-92). Every product is a host prop that crosses on the
+    // prop lanes, so a client that ran the tick grew a walker of its own and sent it to the host as a client
+    // prop (rig log: "remote_prop::OnSpawn: cls='prop_wMannequin_C' ... name='mann_w'", ownerSlot=2). With
+    // the tick refused no Delay is ever armed, so its continuation cannot run either; the spawn row covers a
+    // direct call.
+    {&kRowReceiveTickTickerMannequinSpawner, "mannequinSpawner.ReceiveTick"},
+    {&kRowSpawnWMannequinSpawn,           "wMannequinSpawn.spawn"},
+    // The walker itself: on a client every walker is the host's, a prop mirror the host streams through
+    // prop_motion_scan's coast (it moves as a simulating prop). Its tick is its whole brain: it tests the
+    // LOCAL camera (IsBoxInFrustum on player controller 0, WasRecentlyRendered) and, while unseen, walks
+    // itself along its own nav path with K2_AddActorWorldOffset and torque (prop_wMannequin_C tick UG:37-89).
+    // Run on the mirror, that walk fought the host's stream and carried the copy off on its own whenever the
+    // client looked away, so the mannequins moved differently on each peer. The jump timer sets the body's
+    // velocity toward a higher path point (timer_jump UG:6). The host's walker freezes for the host's camera
+    // only: the scare stays the host's view, as one shared walker must have one brain.
+    {&kRowReceiveTickWMannequin,          "wMannequin.ReceiveTick"},
+    {&kRowTimerJumpWMannequin,            "wMannequin.timer_jump"},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x53410000;   // 'SA', then the row

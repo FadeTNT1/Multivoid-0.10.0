@@ -82,7 +82,8 @@ leaving one leaves nothing to restore.
 | firefly, pinecone | left running | anchored on the local player's camera: each peer owns its roll and the others render a mirror |
 | eyer | left running | it stalks its own peer's player: each peer owns its eyer and the others render a mirror (`coop/creatures/owner_entity_sync`) |
 | underground garbage | left running | per-peer loot mounds; refusing one would delete a client's loot with no host replacement |
-| deer, bp7, hexahive, walking tree, sus hole, beehive, bush, tick, mannequin | left running | the product has no mirror of its own for these, and refusing a spawner whose output nothing replaces would just remove the content. The walking mannequin is the exception in the making: the host's walker already crosses as a plain prop mirror that runs a second brain on the client (measured on the rig), so the client's spawner stays running only until that mirror is parked and the host's walker is the one walker |
+| deer, bp7, hexahive, walking tree, sus hole, beehive, bush, tick | left running | the product has no mirror of its own for these, and refusing a spawner whose output nothing replaces would just remove the content |
+| walking mannequin | the spawner's tick and the spawn point's spawn refused; the walker's own tick and jump timer refused | the host's walker crosses as a prop mirror and its walk streams on the prop lanes (`coop/props/prop_motion_scan`); a client's own spawner minted a second walker that crossed back as a client prop, and the mirror's tick walked it off whenever the client looked away. The walker freezes for the host's camera only: one shared walker has one brain |
 
 ### The killer wisp
 
@@ -206,7 +207,7 @@ wisp in flight is transient and owes nothing.
 | The insomniac, Funguy and killer wisp mirrors are not brain-parked: only the zombie family, the hound and the Octa are (`coop/creatures/npc_mirror_brain_table`), so a mirror of the others runs its own BeginPlay on the client (the insomniac's own walk toward the client's player and its distance self-destroy, the Funguy's own AI), over a pose-driven body with its movement tick off. The host's natural births of all three now reach clients | `[V]` the table's class list; the births' crossing and the mirrors' looks are `[?]` until a session shows them |
 | Only one stalker class is owned per peer so far | `[V]` `coop/creatures/owner_entity_sync`, the member table |
 | The conversion is detected by a poll, five times a second, not at the verb | `[V]` `coop/creatures/kerfur_convert`; the lane reads the result rather than the call, because a peer's own conversion has already happened by the time any watch of ours runs |
-| Nine ambient spawner families are neither mirrored nor refused, so each peer grows its own deer, hexahives, walking trees and the rest | `[V]` they appear in no lane under `coop/creatures` and in no row of `coop/world/spawn_authority` |
+| Eight ambient spawner families are neither mirrored nor refused, so each peer grows its own deer, hexahives, walking trees and the rest | `[V]` they appear in no lane under `coop/creatures` and in no row of `coop/world/spawn_authority` |
 
 ## Code map
 
