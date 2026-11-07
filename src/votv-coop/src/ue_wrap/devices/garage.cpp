@@ -328,6 +328,9 @@ void SetClosedNavArea(void* g) {
     void* const nav = ComponentAt(g, g_navOff);
     if (!nav) return;
     static void* s_areaCls = nullptr;
+    // A Blueprint class can be collected with the world that loaded it: the cached pointer is
+    // re-checked before it is handed to the engine, and looked up again when it went.
+    if (s_areaCls && !R::IsLive(s_areaCls)) s_areaCls = nullptr;
     if (!s_areaCls) s_areaCls = R::FindClass(N::GarageClosedNavAreaClass);
     void* cls = R::ClassOf(nav);
     void* const fn = cls ? R::FindDispatchFunctionCached(cls, N::NavModifierSetAreaClassFn) : nullptr;
