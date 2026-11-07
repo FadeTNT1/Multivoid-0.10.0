@@ -135,6 +135,9 @@ std::string DescribeReelCase(void* rc) {
 //     change travels in the record without re-attaching the picture.
 //   bbq: record coal count and lid; setlid() ends in updlid(), which loadData calls too; addcoal()
 //     changes the count.
+//   discbox (the USB stick box): record `discs` (getData's ints[0]); taking a stick (action 7) and
+//     putting one in (playerUsedOn) both end in gen(), and loadData sets `discs` and calls gen(). Without
+//     it a guest's take left the stick in the box on every other peer, to be taken a second time.
 // Not added: minioven, cookingpad and woodchipper keep their on / off state (`active`) out of the
 // record (the first two carry only the cord base, the chipper only `fuel`) and their loadData does
 // not run their refresh, so a republished record would change nothing on the far side.
@@ -148,6 +151,7 @@ UE_FACT_FN(kRowUpdTableclock,  "prop_record_refresh", L"prop_tableclock_C",    L
 UE_FACT_FN(kRowUpdPropsTv2,    "prop_record_refresh", L"prop_tv2_C",           L"updproperties", Dispatch);
 UE_FACT_FN(kRowUpdlidBbq,      "prop_record_refresh", L"prop_bbq_C",           L"updlid",      Dispatch);
 UE_FACT_FN(kRowAddcoalBbq,     "prop_record_refresh", L"prop_bbq_C",           L"addcoal",     Dispatch);
+UE_FACT_FN(kRowGenDiscbox,     "prop_record_refresh", L"prop_discbox_C",       L"gen",         Dispatch);
 
 struct Watched {
     const ue_wrap::facts::Function* row;
@@ -166,6 +170,7 @@ constexpr Watched kWatched[] = {
     { &kRowUpdPropsTv2,   0x54563250, false, nullptr },            // 'TV2P'
     { &kRowUpdlidBbq,     0x42425130, false, nullptr },            // 'BBQ0'
     { &kRowAddcoalBbq,    0x42425131, false, nullptr },            // 'BBQ1'
+    { &kRowGenDiscbox,    0x44534358, false, nullptr },            // 'DSCX'
 };
 // The UFunction each watch was armed on, so a re-armed one can be recognised. A world change can
 // re-create a Blueprint class and its functions (127 were in a same-process rejoin; these two kept
