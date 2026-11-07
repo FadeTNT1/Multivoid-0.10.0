@@ -122,6 +122,10 @@ void* Sky() {
     if (now - s_lastScan < std::chrono::seconds(1)) return nullptr;
     s_lastScan = now;
     if (!EnsureResolved()) return nullptr;
+    // The cached sky died (a world change): the next newsky is a new actor even when the allocator
+    // hands it the old one's address, so its moon-phase timer is owed a clear again. Keyed on the
+    // pointer alone, a reused address left the new world's timer running on a client.
+    g_timerClearedFor = nullptr;
     g_skyCache.Set(R::FindObjectByClass(L"newsky_C"));
     return g_skyCache.Raw();  // fresh from the walk (null on miss)
 }
