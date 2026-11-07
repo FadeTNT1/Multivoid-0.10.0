@@ -202,12 +202,14 @@ install are taken back, and taken back again at its end (`coop/world/creature_ev
 fossilhound, the antibreather and the egg compute their event from the local camera, render state or player 0 and keep
 their own per peer. `[RD]`
 
-**A parked creature's brain.** A mirror of the zombie family or the fossilhound runs none of its Blueprint's event
-graph. It is marked when it is born (between the two halves of its spawn, or at the bind of a client's own
+**A parked creature's brain.** A mirror of the zombie family, the fossilhound or the gore slither family (with the
+blue brain cheese's hatchling below it) runs none of its Blueprint's event graph. It is marked when it is born (between the two halves of its spawn, or at the bind of a client's own
 save-loaded twin), and the graph watches (`coop/creatures/npc_mirror_brain`) refuse every entry of a marked mirror
 but the few a table names: the footstep notify, and the fossilhound's per-viewer loop. What its BeginPlay set up
 for the eye is done by our code after the install: the zombie's animation instance and walk blend, the fossilhound's
-mesh parent, animation instance and owner. Lost on a mirror: the attack animation and sounds, the fossilhound's hit
+mesh parent, animation instance and owner, the slither's mesh parent and animation phase. The slither's bite is the
+host's alone (its sense timer, jump and damage-sphere overlap are refused on a mirror): its bite on a client's puppet
+is delivered to that client as a PlayerHit. Lost on a mirror: the attack animation and sounds, the slither's jump montage, the fossilhound's hit
 sound and its hidden-then-dig-out. A client's own creature of these classes is never marked and runs whole. The mark
 is the actor's slot and the slot's serial, so a recycled address is never a mirror, and it ends with the mirror.
 `[RD]`; the refusals `[?]` until a run reads them.
