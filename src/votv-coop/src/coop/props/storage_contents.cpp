@@ -52,13 +52,19 @@ bool g_watchesRegistered = false;
 std::set<W::Address> g_dirty;
 struct Sent { uint32_t revision = 0; uint64_t hash = 0; bool known = false; };
 std::map<W::Address, Sent> g_sent;
-Clock::time_point g_nextDrain{}, g_nextDronePoll{};
+Clock::time_point g_nextDrain{}, g_nextDronePoll{}, g_nextKept{};
 uint32_t g_nextSeq = 1;
 
 // Client: the revision last applied per storage, the pages of a set being assembled, the sets waiting for an actor.
 std::map<W::Address, uint32_t> g_applied;
 struct Assembly { uint32_t revision = 0; uint8_t pages = 0; uint8_t next = 0; std::vector<std::vector<uint8_t>> rows; };
 std::map<W::Address, Assembly> g_assembling;
+// Client: the newest set of each sleeper's loot with the storage it went into. The sleeper's crate is this peer's own,
+// built and rebuilt by coop/player/sleepers, and a rebuilt crate is an empty one: g_applied alone would call the same
+// revision Stale for it, and the host publishes only on a change, so the loot would stay empty. A set kept here is
+// applied again to whatever storage the address resolves to now (comp null: it never went into one).
+struct Kept { uint32_t revision = 0; void* comp = nullptr; std::vector<std::vector<uint8_t>> rows; Clock::time_point since; };
+std::map<W::Address, Kept> g_kept;
 struct Waiting { uint32_t revision = 0; std::vector<std::vector<uint8_t>> rows; Clock::time_point since; };
 std::map<W::Address, Waiting> g_waiting;
 coop::blob_chunks::Assembler g_asm;
@@ -174,11 +180,7 @@ void Drain() {
 
 // Client: a whole set, applied when it is newer than the last, or held until the storage's actor is here.
 enum class Applied : uint8_t { Done, Stale, NotHere, Failed };
-Applied ApplySet(const W::Address& a, uint32_t revision, const std::vector<std::vector<uint8_t>>& rows) {
-    const auto it = g_applied.find(a);
-    if (it != g_applied.end() && revision <= it->second) return Applied::Stale;
-    void* const comp = Resolve(a);
-    if (!comp) return Applied::NotHere;
+Applied ApplyTo(const W::Address& a, void* comp, uint32_t revision, const std::vector<std::vector<uint8_t>>& rows) {
     const bool shown = SI::ShownStorage() == comp;
     g_inApply = true;
     const SI::ApplyResult r = SI::ApplyRows(comp, rows);
@@ -192,6 +194,49 @@ Applied ApplySet(const W::Address& a, uint32_t revision, const std::vector<std::
     UE_LOGI("storage_contents[client]: %s rev %u applied (%zu rows)%s", Describe(a), revision, rows.size(),
             shown ? ", the open screen redrawn" : "");
     return Applied::Done;
+}
+
+Applied ApplySet(const W::Address& a, uint32_t revision, const std::vector<std::vector<uint8_t>>& rows) {
+    const auto it = g_applied.find(a);
+    if (it != g_applied.end() && revision <= it->second) return Applied::Stale;
+    void* const comp = Resolve(a);
+    if (a.kind == W::AddressKind::Sleeper) {
+        Kept& k = g_kept[a];
+        if (k.revision == 0) k.since = Clock::now();
+        if (revision >= k.revision) {
+            k.revision = revision;
+            k.rows = rows;
+            k.comp = nullptr;   // not applied to anything yet
+        }
+    }
+    if (!comp) return Applied::NotHere;
+    const Applied r = ApplyTo(a, comp, revision, rows);
+    if (r == Applied::Done && a.kind == W::AddressKind::Sleeper) g_kept[a].comp = comp;
+    return r;
+}
+
+// A sleeper's crate that is not the storage the kept set went into (the set came before the crate, or the crate was
+// rebuilt empty): the kept set goes in.
+void TickKept() {
+    const auto now = Clock::now();
+    for (auto it = g_kept.begin(); it != g_kept.end();) {
+        void* const comp = Resolve(it->first);
+        if (!comp) {
+            // No crate for ten minutes (a removed sleeper, or one that never built): the set is dropped.
+            if (now - it->second.since > std::chrono::minutes(10)) { it = g_kept.erase(it); continue; }
+            ++it;
+            continue;
+        }
+        it->second.since = now;
+        if (comp != it->second.comp) {
+            if (ApplyTo(it->first, comp, it->second.revision, it->second.rows) == Applied::Done) {
+                UE_LOGI("storage_contents[client]: %s -- its crate is a new one; the kept contents (rev %u, %zu rows) "
+                        "went into it", Describe(it->first), it->second.revision, it->second.rows.size());
+                it->second.comp = comp;
+            }
+        }
+        ++it;
+    }
 }
 
 void OnPage(W::ContentsPage&& page) {
@@ -265,6 +310,10 @@ void Tick() {
         }
     } else if (IsClient()) {
         if (!g_waiting.empty()) TickWaiting();
+        if (!g_kept.empty() && now >= g_nextKept) {
+            g_nextKept = now + std::chrono::milliseconds(500);
+            TickKept();
+        }
         if (!g_asm.Idle()) g_asm.Sweep(now, std::chrono::seconds(30));
     }
 }
@@ -275,6 +324,7 @@ void OnDisconnect() {
     g_applied.clear();
     g_assembling.clear();
     g_waiting.clear();
+    g_kept.clear();
     g_asm.Clear();
     g_inApply = false;
 }
