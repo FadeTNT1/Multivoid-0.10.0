@@ -87,4 +87,34 @@ struct HostLast {
 // A request id is valid on the wire: non-zero.
 inline bool ValidRequestId(uint16_t id) { return id != 0; }
 
+// CLIENT: what an accepted put does once the game's own put() has run on the held poster. The wall poster put()
+// spawned is found by a scan of the object index, which trails the engine by a drain, so a scan in the same call can
+// miss it: the client then looks again on later ticks and never gives back a put whose poster put() consumed.
+enum class AfterPut : uint8_t {
+    Adopt,        // the wall poster put() placed is found and no canonical one stands here: it takes the host's key
+    DropOwn,      // found, and the host's canonical poster already stands here: ours goes, the canonical stays
+    Retry,        // put() consumed the held poster but its wall poster is not seen yet: look again next tick
+    MirrorOnly,   // looked long enough: the host's placed state stands for it (still no give-back: it is consumed)
+    GiveBack,     // put() consumed nothing and placed nothing: the poster is still in the hand, the host takes its back
+};
+
+// `heldConsumed`: the held poster died in put(). `found`: a new wall poster near the placement, not the host's own.
+// `canonStands`: the host's canonical poster (by its key) already stands here and is not the one found.
+inline AfterPut AfterPutStep(bool heldConsumed, bool found, bool canonStands, bool pastDeadline) {
+    if (found) return canonStands ? AfterPut::DropOwn : AfterPut::Adopt;
+    if (!heldConsumed) return AfterPut::GiveBack;
+    return pastDeadline ? AfterPut::MirrorOnly : AfterPut::Retry;
+}
+
+inline const char* AfterPutName(AfterPut s) {
+    switch (s) {
+        case AfterPut::Adopt: return "adopt";
+        case AfterPut::DropOwn: return "drop-own";
+        case AfterPut::Retry: return "retry";
+        case AfterPut::MirrorOnly: return "mirror-only";
+        case AfterPut::GiveBack: return "give-back";
+    }
+    return "?";
+}
+
 }  // namespace coop::poster_put

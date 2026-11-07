@@ -84,6 +84,33 @@ int main() {
         if (!check(!h.TakeBack(8), "an abort of an older request does not undo the newer put")) return 1;
         if (!check(h.TakeBack(9), "the newer put is given back")) return 1;
     }
+    // The client's finish of an accepted put: a consumed poster is never given back, whatever the scan saw.
+    {
+        using coop::poster_put::AfterPut;
+        using coop::poster_put::AfterPutStep;
+        // The 0.10.0 two-peer run: put() placed and consumed, the same-call scan missed the new poster (the object
+        // index trails a drain). That used to give the put back; now it looks again.
+        if (!check(AfterPutStep(true, false, false, false) == AfterPut::Retry,
+                   "a consumed poster whose wall poster is not seen yet is looked for again")) return 1;
+        if (!check(AfterPutStep(true, false, true, false) == AfterPut::Retry,
+                   "a canonical poster already here does not turn a missed scan into a give-back")) return 1;
+        if (!check(AfterPutStep(true, false, false, true) == AfterPut::MirrorOnly,
+                   "past the deadline the host's state stands for it, no give-back")) return 1;
+        if (!check(AfterPutStep(true, true, false, false) == AfterPut::Adopt, "found and no canonical: adopted")) return 1;
+        if (!check(AfterPutStep(true, true, true, false) == AfterPut::DropOwn,
+                   "found and the canonical stands: ours goes, one poster stays")) return 1;
+        if (!check(AfterPutStep(true, true, false, true) == AfterPut::Adopt, "found at the deadline is still adopted"))
+            return 1;
+        if (!check(AfterPutStep(false, false, false, false) == AfterPut::GiveBack,
+                   "put() that placed and consumed nothing gives the put back")) return 1;
+        if (!check(AfterPutStep(false, true, false, false) == AfterPut::Adopt,
+                   "a wall poster found is adopted even if the held one still reads live")) return 1;
+        for (int i = 0; i < 16; ++i) {
+            const bool consumed = (i & 1) != 0, found = (i & 2) != 0, canon = (i & 4) != 0, late = (i & 8) != 0;
+            if (!check(!(consumed && AfterPutStep(consumed, found, canon, late) == AfterPut::GiveBack),
+                       "a consumed poster is never given back")) return 1;
+        }
+    }
     std::printf("poster_put_ledger: ALL PASS (%d checks)\n", checks);
     return 0;
 }

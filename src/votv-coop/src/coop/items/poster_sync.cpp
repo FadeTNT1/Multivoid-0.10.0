@@ -656,8 +656,9 @@ void SendPutAbort(coop::net::Session* s, uint16_t requestId, const std::wstring&
     p.op = OP::kPutAbort;
     p.requestId = requestId;
     if (KeyFits(key)) coop::net::WireKeyFromString(key, p.key);
-    s->SendReliable(coop::net::ReliableKind::PosterIntent, &p, sizeof(p));
-    UE_LOGI("[POSTER] client: gave put #%u back to the host", static_cast<unsigned>(requestId));
+    const bool sent = s->SendReliable(coop::net::ReliableKind::PosterIntent, &p, sizeof(p));
+    UE_LOGI("[POSTER] client: gave put #%u back to the host (key='%ls')%s", static_cast<unsigned>(requestId),
+            key.c_str(), sent ? "" : " -- the send FAILED");
 }
 
 // Whether a rolled poster is the LOCAL player's in-hand poster. Two independent signals, either one is enough: the
@@ -754,8 +755,13 @@ sg::Verdict OnPutPre(const sg::Call& c) {
     return sg::Verdict::Cancel;
 }
 
-// The poster the client's own put() just placed: the new placed poster nearest `at`, one not in `before`.
-void* NewPlacedNear(const std::vector<void*>& before, const ue_wrap::FVector& at) {
+// The wall poster the client's own put() just placed: the new placed poster nearest `at`, one not in `before`, not
+// one the mirror holds under a host key, and within kAdoptReachUU. The object index trails the engine by a drain, so
+// the caller drains it first: a poster put() spawned a moment ago is otherwise not listed yet.
+constexpr double   kAdoptReachUU = 300.0;
+constexpr uint64_t kAdoptLookMs = 3000;
+
+void* NewPlacedNear(const std::vector<void*>& before, const ue_wrap::FVector& at, double* distOut) {
     void* best = nullptr;
     double bestD = 0;
     for (void* w : PO::AllPlaced()) {
@@ -765,20 +771,138 @@ void* NewPlacedNear(const std::vector<void*>& before, const ue_wrap::FVector& at
                 old = true;
                 break;
             }
-        if (old) continue;
+        if (old || detail::MirrorOwns(w)) continue;
         PO::Placement t;
         if (!PO::ReadTransform(w, t)) continue;
         const double dx = t.location.X - at.X, dy = t.location.Y - at.Y, dz = t.location.Z - at.Z;
         const double d = dx * dx + dy * dy + dz * dz;
+        if (d > kAdoptReachUU * kAdoptReachUU) continue;
         if (!best || d < bestD) {
             best = w;
             bestD = d;
         }
     }
+    if (distOut) *distOut = best ? std::sqrt(bestD) : -1.0;
     return best;
 }
 
-// The host's verdict on this client's put. Taken once: a stale or repeated answer finds nothing waiting.
+// An accepted put whose wall poster put() placed but the index had not listed yet: looked for again each tick.
+struct AdoptPending {
+    bool               open = false;
+    uint16_t           requestId = 0;
+    std::wstring       key;
+    ue_wrap::FVector   at{};
+    std::vector<void*> before;   // compared by pointer only, never read through
+    uint64_t           untilMs = 0;
+    int                tries = 0;
+};
+AdoptPending g_adopt;
+
+// One look for the wall poster an accepted put placed, and the step it leads to. True when the put is settled.
+bool SettlePut(coop::net::Session* s, uint16_t requestId, const std::wstring& key, bool heldConsumed,
+               const std::vector<void*>& before, const ue_wrap::FVector& at, bool pastDeadline, int tries) {
+    // The first look drains the index itself (put() spawned its poster inside this call); a later one is a tick on,
+    // after the dispatcher's own drain.
+    const size_t drained = tries <= 1 ? ue_wrap::object_index::DrainAll() : 0;
+    double dist = -1.0;
+    void* mine = NewPlacedNear(before, at, &dist);
+    void* canon = detail::MirrorPlaced(key);
+    const bool canonStands = canon && canon != mine;
+    const coop::poster_put::AfterPut step =
+        coop::poster_put::AfterPutStep(heldConsumed, mine != nullptr, canonStands, pastDeadline);
+    const std::wstring mineKey = mine ? PO::KeyOf(mine) : std::wstring();
+    if (tries <= 1 || step != coop::poster_put::AfterPut::Retry || tries % 30 == 0)
+        UE_LOGI("[POSTER] client: put #%u look %d -- drained=%lld consumed=%d found=%p key='%ls' dist=%.0f canon=%p -> "
+                "%s",
+                static_cast<unsigned>(requestId), tries, drained == SIZE_MAX ? -1LL : static_cast<long long>(drained),
+                heldConsumed ? 1 : 0, mine, mineKey.c_str(), dist, canon, coop::poster_put::AfterPutName(step));
+    switch (step) {
+        case coop::poster_put::AfterPut::Adopt:
+            if (!detail::MirrorAdopt(key, mine)) {
+                // The key write failed: the host's own copy is the one to keep, ours goes so no orphan stays.
+                UE_LOGW("[POSTER] client: put #%u's wall poster '%ls' could not take key='%ls' -- destroyed here, the "
+                        "host's placed state stands for it",
+                        static_cast<unsigned>(requestId), mineKey.c_str(), key.c_str());
+                E::DestroyActor(mine);
+                return true;
+            }
+            UE_LOGI("[POSTER] client: put #%u finished here -- the wall poster '%ls' is now key='%ls'",
+                    static_cast<unsigned>(requestId), mineKey.c_str(), key.c_str());
+            return true;
+        case coop::poster_put::AfterPut::DropOwn:
+            UE_LOGI("[POSTER] client: put #%u -- the host's key='%ls' already stands here; our own wall poster '%ls' "
+                    "is destroyed so one stays",
+                    static_cast<unsigned>(requestId), key.c_str(), mineKey.c_str());
+            E::DestroyActor(mine);
+            return true;
+        case coop::poster_put::AfterPut::Retry: return false;
+        case coop::poster_put::AfterPut::MirrorOnly:
+            UE_LOGW("[POSTER] client: put #%u -- no wall poster of put() seen in %llu ms; key='%ls' stands by the "
+                    "host's state alone (no give-back: the poster was consumed)",
+                    static_cast<unsigned>(requestId), static_cast<unsigned long long>(kAdoptLookMs), key.c_str());
+            return true;
+        case coop::poster_put::AfterPut::GiveBack:
+            UE_LOGW("[POSTER] client: put #%u -- put() placed nothing and the poster is still in the hand (the aim "
+                    "likely left the wall while the host answered); giving it back",
+                    static_cast<unsigned>(requestId));
+            SendPutAbort(s, requestId, key);
+            return true;
+    }
+    return true;
+}
+
+void PumpAdopt(coop::net::Session* s) {
+    if (!g_adopt.open) return;
+    const bool late = NowMs() >= g_adopt.untilMs;
+    ++g_adopt.tries;
+    if (SettlePut(s, g_adopt.requestId, g_adopt.key, true, g_adopt.before, g_adopt.at, late, g_adopt.tries))
+        g_adopt = AdoptPending{};
+}
+
+// The held poster an accepted put finishes: the one the click named, or, when the hand lane respawned the hand actor
+// meanwhile (updateHold), the local hand actor if it is a rolled poster of the same look. Null with `why` when the
+// poster has left this hand.
+void* ResolveHeld(const HeldPut& put, const char*& why) {
+    void* held = put.held.Get();
+    if (!held) {
+        void* hand = coop::hand_item::LocalHandActor();
+        PO::Look look;
+        if (hand && PO::IsRolled(hand) && PO::ReadLook(hand, look) && look == put.look) {
+            UE_LOGI("[POSTER] client: the held poster was respawned in the hand (%p) -- the put finishes on it", hand);
+            return hand;
+        }
+        why = "the held poster is gone and the hand holds no poster of its look";
+        return nullptr;
+    }
+    if (!PO::IsRolled(held)) {
+        why = "the held poster is no rolled poster any more";
+        return nullptr;
+    }
+    const LocalPoster who = ClassifyPoster(held);
+    if (who.holderIsPuppet) {
+        why = "another player's body holds the poster now";
+        return nullptr;
+    }
+    // The click's own rule (OnPutPre): a poster neither signal names is still ours. Only a look change disqualifies.
+    PO::Look now;
+    if (!PO::ReadLook(held, now)) {
+        why = "the held poster's look did not read";
+        return nullptr;
+    }
+    if (now != put.look) {
+        why = "the held poster's look changed";
+        return nullptr;
+    }
+    if (!who.mine())
+        UE_LOGI("[POSTER] client: held poster %p is named by neither signal (holder=%p local=%p) -- finished as ours, "
+                "as the click was",
+                held, who.holder, who.local);
+    return held;
+}
+
+// The host's verdict on this client's put. Taken once: a stale or repeated answer finds nothing waiting. An accept is
+// finished by the game's own put() (which places the wall poster and consumes the held one), and the wall poster it
+// placed takes the host's canonical key -- found now or on a later tick, never given back once consumed.
 void OnPutResult(coop::net::Session* s, const coop::net::PosterStatePayload& r) {
     UE_LOGI("[POSTER] client: the host %s put #%u key='%ls'", r.op == SO::kPutAccepted ? "ACCEPTED" : "refused",
             static_cast<unsigned>(r.requestId), coop::net::StringFromWireKey(r.key).c_str());
@@ -799,34 +923,39 @@ void OnPutResult(coop::net::Session* s, const coop::net::PosterStatePayload& r) 
                 key.c_str());
         return;
     }
-    // Still the same poster in the same hand, with the look the host placed?
-    void* held = put.held.Get();
-    PO::Look now;
-    if (!held || !PO::IsRolled(held) || !ClassifyPoster(held).mine() || !PO::ReadLook(held, now) || now != put.look) {
-        UE_LOGW("[POSTER] client: the held poster changed while put #%u waited -- giving it back",
-                static_cast<unsigned>(r.requestId));
+    if (g_adopt.open) {   // an older put still looking: the host's state stands for it from here
+        UE_LOGW("[POSTER] client: put #%u stops looking for its wall poster (put #%u was accepted) -- key='%ls' "
+                "stands by the host's state",
+                static_cast<unsigned>(g_adopt.requestId), static_cast<unsigned>(r.requestId), g_adopt.key.c_str());
+        g_adopt = AdoptPending{};
+    }
+    const char* why = nullptr;
+    void* held = ResolveHeld(put, why);
+    if (!held) {
+        // The poster left this hand (dropped, stowed, swapped) while the host answered: the host's wall poster would
+        // be a second copy, so it goes back. The only give-back of an accepted put before put() runs.
+        UE_LOGW("[POSTER] client: put #%u accepted but %s -- giving it back", static_cast<unsigned>(r.requestId),
+                why ? why : "?");
         SendPutAbort(s, r.requestId, key);
         return;
     }
+    ue_wrap::object_index::DrainAll();   // `before` must list every wall poster that stood before put()
     const std::vector<void*> before = PO::AllPlaced();
     g_replaying = true;
     const bool ran = PO::CallPut(held);
     g_replaying = false;
-    void* mine = ran ? NewPlacedNear(before, put.at.location) : nullptr;
-    if (!mine) {
-        UE_LOGW("[POSTER] client: the put could not finish here -- giving put #%u back", static_cast<unsigned>(r.requestId));
-        SendPutAbort(s, r.requestId, key);
-        return;
-    }
-    if (void* canon = detail::MirrorPlaced(key); canon && canon != mine) {
-        E::DestroyActor(mine);   // the host's state got here first and stands already
-    } else if (!detail::MirrorAdopt(key, mine)) {
-        UE_LOGW("[POSTER] client: put #%u's wall poster could not take key='%ls'", static_cast<unsigned>(r.requestId),
-                key.c_str());
-        return;
-    }
-    UE_LOGI("[POSTER] client: put #%u finished here -- the wall poster is key='%ls'", static_cast<unsigned>(r.requestId),
-            key.c_str());
+    const bool consumed = !PO::IsRolled(held);
+    UE_LOGI("[POSTER] client: put #%u ran the game's put() on %p -- call=%s, held poster %s; %zu wall poster(s) before",
+            static_cast<unsigned>(r.requestId), held, ran ? "ok" : "FAILED",
+            consumed ? "consumed" : "still in the hand", before.size());
+    if (SettlePut(s, r.requestId, key, consumed, before, put.at.location, false, 1)) return;
+    g_adopt.open = true;
+    g_adopt.requestId = r.requestId;
+    g_adopt.key = key;
+    g_adopt.at = put.at.location;
+    g_adopt.before = before;
+    g_adopt.untilMs = NowMs() + kAdoptLookMs;
+    g_adopt.tries = 1;
 }
 
 void ExpirePut() {
@@ -864,6 +993,13 @@ sg::Verdict OnPlacedActionPre(const sg::Call& c) {
         UE_LOGW("[POSTER] client: a placed poster with no key was taken down -- it runs here alone");
         return sg::Verdict::Run;
     }
+    // Every wall poster here should be one the host named; one it did not is an orphan the host will deny.
+    if (detail::MirrorKnowsKey(key))
+        UE_LOGI("[POSTER] client: take-down of key='%ls' -- a key the host named; asking the host", key.c_str());
+    else
+        UE_LOGW("[POSTER] client: take-down of key='%ls' -- the host never named this key here (an orphan wall "
+                "poster); asking anyway, the host is likely to deny it",
+                key.c_str());
     coop::net::PosterIntentPayload p{};
     p.op = OP::kTakeDown;
     coop::net::WireKeyFromString(key, p.key);
@@ -1003,6 +1139,7 @@ void Tick(coop::net::Session& session) {
     } else {
         detail::MirrorTick();
         ExpirePut();
+        PumpAdopt(&session);
     }
 }
 
@@ -1129,6 +1266,7 @@ void OnDisconnect() {
     g_scanned = false;
     g_putPending.Reset();
     g_putHeld = HeldPut{};
+    g_adopt = AdoptPending{};
     detail::MirrorReset();
     g_sent = g_ran = g_denied = g_dropped = g_published = g_removed = 0;
     g_fellBack = g_records = 0;

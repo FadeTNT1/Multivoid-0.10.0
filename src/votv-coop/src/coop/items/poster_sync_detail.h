@@ -29,6 +29,10 @@ void MirrorTick();
 // put placed, under the host's canonical `key`: its key is written and the mirror then updates it in place.
 void* MirrorPlaced(const std::wstring& key);
 bool MirrorAdopt(const std::wstring& key, void* w);
+// CLIENT: whether `w` is a placed poster the mirror holds under a host key (one the host spawned here or one adopted).
+bool MirrorOwns(void* w);
+// CLIENT: whether the mirror holds a live placed poster under `key`, i.e. the host named that key.
+bool MirrorKnowsKey(const std::wstring& key);
 struct MirrorCounts {
     uint64_t applied = 0, spawned = 0, destroyed = 0, dropped = 0;
 };
