@@ -432,6 +432,15 @@ float MasterVolume() { return g_playback.MasterVolume(); }
 uint32_t Reopens() { return g_reopens.load(); }
 void SetMasterVolume(float v) { g_playback.SetMasterVolume(v); }
 
+bool WorldAudioReady() { return g_enabled && g_started && g_playback.running(); }
+uint32_t PlayWorldSound(const int16_t* pcm, uint32_t frames, uint32_t rate, float pitch, float x, float y,
+                        float z, float gain, float fullCm, float silentCm) {
+    return WorldAudioReady() ? g_playback.PlayWorldSound(pcm, frames, rate, pitch, x, y, z, gain, fullCm, silentCm) : 0;
+}
+void StopWorldSound(uint32_t handle) { g_playback.StopWorldSound(handle); }
+bool WorldSoundPlaying(uint32_t handle) { return g_playback.WorldSoundPlaying(handle); }
+void SetWorldListener(float x, float y, float z, float yawDeg) { g_playback.SetWorldListener(x, y, z, yawDeg); }
+
 void GetUiSnapshot(UiSnapshot& out) {
     std::lock_guard<std::mutex> lk(g_uiMutex);
     out = g_uiSnap;

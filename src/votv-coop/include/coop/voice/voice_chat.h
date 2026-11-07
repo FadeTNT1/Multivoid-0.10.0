@@ -73,6 +73,17 @@ uint32_t Reopens();
 // PREVIEW of the voice panel's drag: it shows the value live; the row's subscriber is the apply.
 void  SetMasterVolume(float v);
 
+// ---- world sounds (game thread) ----
+// Short positioned one-shots that are not a peer's voice, through the voice output's device and mixer (the
+// sleepers' snore). All are no-ops, or return 0, while voice is off or its output device did not open. The
+// samples are borrowed and must live for the process. See coop/voice/voice_playback.h.
+bool WorldAudioReady();
+uint32_t PlayWorldSound(const int16_t* pcm, uint32_t frames, uint32_t rate, float pitch, float x, float y,
+                        float z, float gain, float fullCm, float silentCm);
+void StopWorldSound(uint32_t handle);
+bool WorldSoundPlaying(uint32_t handle);
+void SetWorldListener(float x, float y, float z, float yawDeg);
+
 // ---- render-thread surface (scoreboard column / voice panel / HUD) ----
 // A POD snapshot rebuilt each game tick under a small mutex (the roster
 // snapshot pattern); the volume/gain/threshold/mute setters write atomics and

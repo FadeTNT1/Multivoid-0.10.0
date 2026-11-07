@@ -214,6 +214,12 @@ CFG_FLAG(sleepers_loot_online, "sleepers.loot_online", "player", false, "VOTVCOO
 CFG_FLOAT(sleepers_name_distance_m, "sleepers.name_distance_m", "player", 6.0f, 0, 100,
     "VOTVCOOP_SLEEPERS_NAME_DISTANCE_M",
     "How close, in metres, you must be to a sleeping player, with nothing in between, to read their name.")
+CFG_FLAG(sleepers_snore, "sleepers.snore", "player", true, "VOTVCOOP_SLEEPERS_SNORE",
+    "Hear a soft snore from sleeping players near you: offline sleepers lying in the world, and players asleep in a bed "
+    "or sleeping bag. Played on your machine only, through the voice output device, so it is silent when voice is off.")
+CFG_FLOAT(sleepers_snore_volume, "sleepers.snore_volume", "player", 0.7f, 0, 2,
+    "VOTVCOOP_SLEEPERS_SNORE_VOLUME",
+    "How loud a sleeper's snore is (1 = the sound as made). Full within a metre, fading to silence by six.")
 CFG_FLOAT(local_push_scale,"local_push_scale", "player", 0.25f, 0.0, 1.0, "VOTVCOOP_LOCAL_PUSH_SCALE",
     "While you are in a session, how hard your own body shoves the physics props it walks into, as a fraction of the "
     "game's own (1 = unchanged, 0 = you slide past them). The game's values come back when the session ends. Takes "
