@@ -181,6 +181,31 @@ bool AgravCloak(void* actor, bool forward) {
     return ok;
 }
 
+bool AgravPlayerLight(void* actor, bool on) {
+    void* light = MemberObject(actor, P::name::AgravPlayerLightProp);
+    if (!light) return !on;   // already destroyed (the game's own end) or never built: nothing to take back
+    if (!on) return E::DestroyComponent(light, actor);   // runTrigger's own end: k2_DestroyComponent(pointlight)
+    // runTrigger: pointlight.K2_AttachToComponent(playerCameraManager.RootComponent, None, KeepRelative x3, true),
+    // then SetVisibility(true, false).
+    void* camMgr = world_singleton::Find(P::name::PlayerCameraManagerClass);
+    void* root = camMgr ? E::RootComponentOf(camMgr) : nullptr;
+    void* fn = root ? R::FindDispatchFunctionCached(R::ClassOf(light), P::name::AttachToComponentFn) : nullptr;
+    if (!fn) return false;
+    ParamFrame f(fn);
+    if (!f.valid()) return false;
+    const R::FName none{};
+    f.Set<void*>(L"Parent", root);
+    f.SetRaw(L"SocketName", &none, sizeof(none));
+    f.Set<uint8_t>(L"LocationRule", uint8_t{0});   // EAttachmentRule::KeepRelative
+    f.Set<uint8_t>(L"RotationRule", uint8_t{0});
+    f.Set<uint8_t>(L"ScaleRule", uint8_t{0});
+    f.Set<bool>(L"bWeldSimulatedBodies", true);
+    bool ok = Call(light, f);
+    // SetComponentVisible also clears hidden-in-game: the host's census read this light as hidden mid-event.
+    ok &= E::SetComponentVisible(light, true, false);
+    return ok;
+}
+
 bool MidasProgress(void* actor, float& out) {
     if (!actor || !R::IsLive(actor)) return false;
     const int32_t off = R::FindPropertyOffset(R::ClassOf(actor), P::name::MidasUfoProgressProp);
