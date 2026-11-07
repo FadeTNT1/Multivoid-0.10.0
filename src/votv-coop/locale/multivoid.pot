@@ -1040,6 +1040,14 @@ msgstr ""
 msgid "Rescan devices"
 msgstr ""
 
+#: src/ui/loading_screen.cpp
+msgid "Returning from the poop dimension"
+msgstr ""
+
+#: src/ui/loading_screen.cpp
+msgid "Returning to the main world"
+msgstr ""
+
 #: src/ui/config_review_panel.cpp
 #, c-format
 msgid ""

@@ -827,6 +827,12 @@ msgstr "[[Report a bug]]"
 msgid "Rescan devices"
 msgstr "[[Rescan devices]]"
 
+msgid "Returning from the poop dimension"
+msgstr "[[Returning from the poop dimension]]"
+
+msgid "Returning to the main world"
+msgstr "[[Returning to the main world]]"
+
 #, c-format
 msgid ""
 "Rewrites multivoid.ini in the standard layout: [net] first, [dev]\n"

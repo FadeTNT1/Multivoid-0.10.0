@@ -30,6 +30,15 @@ namespace coop::world_load_episode {
 // the handoff window cannot leak an early announce. Idempotent. Any thread, atomics only.
 void Arm();
 
+// The pocket return's arm (coop/player/pocket_return_client): Arm for a join-shaped world load made
+// in place, from a world this connection is standing in. The episode and the load-kind reconcile
+// window are raised (restamped, so the window's ceiling counts from this load, not from the trip),
+// any request or failure of the world being left is replaced by a join request, and the replay of
+// `leavingWorld` -- a pocket level's own loadObjects, or the stale main world's -- never satisfies it:
+// only the next world's replay opens the probe session. Re-armable; a second call restamps and keeps
+// the latest `leavingWorld`. Game thread (it holds `leavingWorld` as a weak identity).
+void ArmForReturn(void* leavingWorld);
+
 // Open a quiescence-probe session without arming the episode: the post-snapshot sweep gate.
 // Refused, logged once, while a request still awaits its world's save replay: that request's own
 // session answers. Resets the latch. `reason` is logged. Game thread.
