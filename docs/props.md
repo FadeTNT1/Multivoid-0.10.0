@@ -743,9 +743,18 @@ poster's own placed class, and answers that client alone with `PosterState` op 4
 placed poster's canonical key) or op 5 (refused), under the same request id; a repeated request is
 answered again, not run again. On an accept the client runs the game's own put() once, which places its
 wall poster and consumes the held one, then gives that poster the canonical key, so the host's state
-updates it in place and does not add a second. A hand that changed in the meantime, or a put() that places
-nothing now, is given back (`PosterIntent` op 4) and the host takes the placed poster off the wall. A
-refusal leaves the poster in the hand. `coop/items/poster_put_ledger` holds the request bookkeeping.
+updates it in place and does not add a second. The object index trails the engine by a drain, so the
+poster put() spawned is not listed in the same call: the client drains the index before it looks, and a
+poster still not seen is looked for again each tick for 3 s. A put() that consumed the held poster is
+never given back: the poster found takes the key (or goes, if the host's canonical poster already stands
+here), and one never found leaves the host's placed state to stand for it. Only a poster that left the
+hand before put() ran (dropped, stowed, another's), or a put() that placed and consumed nothing (the aim
+left the wall), is given back (`PosterIntent` op 4) and the host takes the placed poster off the wall.
+An adopted poster's key is re-read for 5 s and written back if anything replaced it. A refusal leaves
+the poster in the hand. `coop/items/poster_put_ledger` holds the request bookkeeping and the decision
+after put() (`AfterPutStep`). Before this, every client put was given back: the same-call scan never saw
+the poster put() had just placed, so it stood on the client's wall alone under the game's own key, which
+no host knew, and nobody could take it down.
 
 A poster is the local player's if its `holdingPlayer` is the registry's local pawn **or** the hand lane's
 `IsLocalHandViewActor` names it; once it is, the client's native put never runs. A failed read, a put the
@@ -754,6 +763,9 @@ host's own judge (`IntentWhy`, one helper for both ends) would drop, or a failed
 file name goes as a preset. The host says a malformed intent (`[POSTER] host: slot N's put req R is malformed
 -- <why>`, rate-limited) and answers a put it can decode with a refusal (op 5) so the client does not wait out
 its 15 s timeout. Every put() on a client logs `[POSTER] client: put() seen (holder=.. local=.. handView=..)`.
+An accepted put logs `put #N ran the game's put() ... held poster consumed|still in the hand`, then
+`put #N look K -- drained=.. consumed=.. found=.. key=.. dist=.. canon=.. -> adopt|drop-own|retry|mirror-only|give-back`.
+A client's take-down logs whether the host ever named that key.
 
 A custom picture is a file name: the image is a file in each player's own posters folder and does
 not cross. A peer without the file draws the poster's preset picture instead (`custom` is cleared

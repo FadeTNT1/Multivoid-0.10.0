@@ -18,6 +18,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace coop::poster_sync::detail {
 namespace {
@@ -41,6 +42,38 @@ struct Parked {
 };
 std::unordered_map<std::wstring, Parked> g_parked;   // a state whose class is not loaded here yet
 std::unordered_set<std::wstring> g_snapSeen;
+
+// An adopted wall poster's key is re-read for a while: the game's own put() spawned it, and anything of the game that
+// wrote the actor_save key after our write would leave it under a key the host never named (its take-down denied).
+struct AdoptWatch {
+    std::wstring           key;
+    ue_wrap::CachedObjRef  actor;
+    uint64_t               untilMs;
+};
+std::vector<AdoptWatch> g_adoptWatch;
+constexpr uint64_t kAdoptWatchMs = 5000;
+
+void CheckAdopted() {
+    if (g_adoptWatch.empty()) return;
+    const uint64_t now = NowMs();
+    for (size_t i = 0; i < g_adoptWatch.size();) {
+        AdoptWatch& a = g_adoptWatch[i];
+        void* w = a.actor.Get();
+        if (!w || now >= a.untilMs) {
+            if (w) UE_LOGI("[POSTER] client: adopted key='%ls' held its key for %llu s -- watch ends", a.key.c_str(),
+                           static_cast<unsigned long long>(kAdoptWatchMs / 1000));
+            g_adoptWatch.erase(g_adoptWatch.begin() + static_cast<std::ptrdiff_t>(i));
+            continue;
+        }
+        const std::wstring keyNow = PO::KeyOf(w);
+        if (keyNow != a.key) {
+            UE_LOGW("[POSTER] client: adopted wall poster %p lost key='%ls' (now '%ls') -- written back", w,
+                    a.key.c_str(), keyNow.c_str());
+            PO::SetKey(w, a.key);
+        }
+        ++i;
+    }
+}
 
 void* ClientPlaced(const std::wstring& key) {
     auto it = g_client.find(key);
@@ -187,14 +220,34 @@ void MirrorState(const coop::net::PosterStatePayload& p) {
     g_parked[key] = Parked{p, NowMs()};
 }
 
-void MirrorTick() { RetryParked(); }
+void MirrorTick() {
+    RetryParked();
+    CheckAdopted();
+}
 
 void* MirrorPlaced(const std::wstring& key) { return ClientPlaced(key); }
 
 bool MirrorAdopt(const std::wstring& key, void* w) {
     if (!PO::IsPlaced(w) || !PO::SetKey(w, key)) return false;
     g_client[key].Set(w);
+    AdoptWatch a;
+    a.key = key;
+    a.actor.Set(w);
+    a.untilMs = NowMs() + kAdoptWatchMs;
+    g_adoptWatch.push_back(std::move(a));
     return true;
+}
+
+bool MirrorOwns(void* w) {
+    if (!w) return false;
+    for (const auto& kv : g_client)
+        if (kv.second.Is(w)) return true;
+    return false;
+}
+
+bool MirrorKnowsKey(const std::wstring& key) {
+    auto it = g_client.find(key);
+    return it != g_client.end() && it->second.Get() != nullptr;
 }
 
 MirrorCounts Counts() { return g_counts; }
@@ -203,6 +256,7 @@ void MirrorReset() {
     g_client.clear();
     g_parked.clear();
     g_snapSeen.clear();
+    g_adoptWatch.clear();
     g_counts = MirrorCounts{};
 }
 
