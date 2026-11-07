@@ -26,6 +26,9 @@ std::atomic<void*>    g_currentWorld{nullptr};
 std::atomic<uint32_t> g_generation{1};   // 0 is reserved for "never stamped"
 std::atomic<bool>     g_degraded{false};
 std::atomic<WorldKind> g_worldKind{WorldKind::Unknown};
+// The current world's FName (ComparisonIndex in the low half, Number in the high), captured with the
+// kind; 0 while the kind is Unknown. Names a pocket level apart from the menu (CurrentWorldName).
+std::atomic<uint64_t> g_worldName{0};
 
 // The gameplay map's name as a substring, a deliberate widening: NameContains is
 // case-insensitive already, so the exact name would match, but the substring is what the
@@ -169,11 +172,15 @@ void RefreshOnGameThread_() {
     // Classified here, where the world is a pointer the engine handed over microseconds ago, not
     // a cached one: naming a world requires dereferencing it, and every consumer is forbidden to.
     WorldKind kind = WorldKind::Unknown;
+    uint64_t name = 0;
     if (world && R::IsLive(world)) {
-        kind = R::NameContains(R::NameOf(world), kGameplayWorldSubstr) ? WorldKind::Gameplay
-                                                                      : WorldKind::Other;
+        const R::FName& fn = R::NameOf(world);
+        kind = R::NameContains(fn, kGameplayWorldSubstr) ? WorldKind::Gameplay : WorldKind::Other;
+        name = static_cast<uint32_t>(fn.ComparisonIndex) |
+               (static_cast<uint64_t>(static_cast<uint32_t>(fn.Number)) << 32);
     }
     g_worldKind.store(kind, std::memory_order_relaxed);
+    g_worldName.store(name, std::memory_order_relaxed);
 
     void* prev = g_currentWorld.exchange(world, std::memory_order_relaxed);
     if (prev != world) {
@@ -256,6 +263,16 @@ WorldKind CurrentWorldKind() {
     // publish, so a consumer that only asks for the kind still keeps the memo warm.
     if (ue_wrap::game_thread::IsGameThread()) RefreshOnGameThread_();
     return g_worldKind.load(std::memory_order_relaxed);
+}
+
+std::wstring CurrentWorldName() {
+    if (ue_wrap::game_thread::IsGameThread()) RefreshOnGameThread_();
+    const uint64_t packed = g_worldName.load(std::memory_order_relaxed);
+    if (packed == 0) return {};
+    R::FName fn{};
+    fn.ComparisonIndex = static_cast<int32_t>(static_cast<uint32_t>(packed & 0xFFFFFFFFull));
+    fn.Number = static_cast<int32_t>(static_cast<uint32_t>(packed >> 32));
+    return R::ToString(fn);  // the name pool only; the world itself is not touched
 }
 
 bool Degraded() { return g_degraded.load(std::memory_order_relaxed); }

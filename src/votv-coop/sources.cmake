@@ -188,6 +188,10 @@ set(VOTVCOOP_SOURCES
     src/coop/player/death_revive.cpp
     src/coop/player/revive_protection.cpp
     src/coop/player/run_end_travel.cpp
+    src/coop/player/pocket_travel.cpp
+    src/coop/player/pocket_travel_host.cpp
+    src/coop/player/pocket_travel_client.cpp
+    src/coop/player/pocket_return_client.cpp
     src/coop/player/skin_preview.cpp
     src/coop/player/flashlight_click_sound.cpp
     src/coop/props/prop_sound.cpp
@@ -378,6 +382,7 @@ set(VOTVCOOP_SOURCES
     src/coop/net/master_slots.cpp
     src/coop/save/join_window_baseline.cpp
     src/coop/save/save_transfer.cpp
+    src/coop/save/save_transfer_return.cpp
     src/coop/save/slot_file_read.cpp
     src/coop/save/save_indicator_suppress.cpp
     src/coop/session/session_join.cpp
@@ -465,6 +470,7 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/wisp_grab_hold.cpp
     src/coop/creatures/wisp_tear_mirror.cpp
     src/coop/items/player_inventory_sync.cpp
+    src/coop/items/player_inventory_pocket.cpp
     src/coop/player/player_profile_store.cpp
     src/coop/player/stat_orders.cpp
     src/coop/player/stat_orders_wire.cpp

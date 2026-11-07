@@ -10,6 +10,7 @@
 // only.
 
 #include "coop/net/session.h"
+#include "coop/player/pocket_travel.h"  // the pocket rule: voice stays inside one level
 
 #include "ue_wrap/core/log.h"
 
@@ -35,6 +36,10 @@ bool Session::SendVoiceFrame(const VoiceFramePayload& frame) {
         const uint32_t hConn = peerConns_[i].load();
         if (hConn == 0) continue;
         if (!IsSlotWorldReady(i)) continue;  // a menu-mode joiner has no listener yet
+        // The pocket rule: this machine's player speaks to the players in its own level. A slot
+        // away in a pocket is never world-ready, so the gate above holds it already; asked by name
+        // so the rule does not rest on that.
+        if (!coop::player::pocket_travel::SameLocation(0, static_cast<uint8_t>(i))) continue;
         SteamNetworkingMessage_t* msg = utils->AllocateMessage(total);
         if (!msg) continue;
         auto* buf = static_cast<uint8_t*>(msg->m_pData);
@@ -72,7 +77,12 @@ void Session::StoreVoiceFrame(int routeSlot, int peerSlot, const void* data, int
     if (vm.frame.opusLen > kVoiceMaxOpusBytes ||
         kVoiceFrameHeadBytes + vm.frame.opusLen > bodyLen)
         return;  // truncated/poisoned datagram
-    {
+    // The pocket rule (coop/player/pocket_travel): the host stands in the main world and hears only
+    // the players there; a client's voice from a pocket is still relayed to a client in the same
+    // pocket (RelayUnreliableToOtherClients judges the location). Net thread: the table's atomics.
+    const bool hostHears = cfg_.role != Role::Host || routeSlot == 0 ||
+        coop::player::pocket_travel::SameLocation(static_cast<uint8_t>(routeSlot), 0);
+    if (hostHears) {
         std::lock_guard<std::mutex> lk(voiceInboxMutex_);
         VoiceSlotRing& r = voiceRings_[routeSlot];
         if (r.tail - r.head >= static_cast<uint32_t>(kVoiceRingPerSlot))

@@ -37,4 +37,9 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced);
 // disconnect edge logs on true, the session-end teardown calls silently. Game thread.
 bool DestroySlot(int slot);
 
+// Is `slot`'s puppet hidden because its player is in another level than this machine's player (a
+// pocket trip, coop/player/pocket_travel)? Such a puppet stands where it last stood, hidden, without
+// collision, its drive suspended; the nameplate skips it. Any thread.
+bool HiddenByLocation(int slot);
+
 }  // namespace coop::puppet_drive
