@@ -283,6 +283,31 @@ bool DetachActorFromParent(void* actor) {
     return Call(actor, f);
 }
 
+bool DetachComponentFromParent(void* component, uint8_t locationRule, uint8_t rotationRule, uint8_t scaleRule,
+                               bool callModify) {
+    static void* s_fn = nullptr;  // SceneComponent::K2_DetachFromComponent
+    if (!component || !R::IsLive(component)) return false;
+    if (!s_fn) {
+        if (void* sc = R::FindClass(P::name::SceneComponentClass))
+            s_fn = R::FindFunction(sc, P::name::DetachFromComponentFn);
+    }
+    if (!s_fn) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGW("engine: K2_DetachFromComponent unresolved -- cannot detach a component");
+        }
+        return false;
+    }
+    ParamFrame f(s_fn);
+    if (!f.valid()) return false;
+    f.Set<uint8_t>(L"LocationRule", locationRule);
+    f.Set<uint8_t>(L"RotationRule", rotationRule);
+    f.Set<uint8_t>(L"ScaleRule",    scaleRule);
+    f.Set<bool>(L"bCallModify", callModify);
+    return Call(component, f);
+}
+
 bool GetAttachParentActor(void* actor, void*& parent) {
     parent = nullptr;
     if (!actor || !R::IsLive(actor)) return false;

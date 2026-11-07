@@ -14,8 +14,8 @@
 //   loc/rot = the stick's actor pose at the edge
 //   linVel  = on a hang, the hook point (`loc`, the impact point); on a release, the velocity it leaves with
 //   angVel  = on a release, the angular velocity
-// A peer that does not know the flag drops the message as one for a prop with no wall-attach component, so the
-// protocol version stays. A stick on a prop that simulates (stickstatic false) needs the hit component and is not
+// The layout is unchanged, but the flag's new meaning took protocol 308: a peer from before it would drop the hang as a
+// message for a prop with no wall-attach component, so it does not connect. A stick on a prop that simulates (stickstatic false) needs the hit component and is not
 // mirrored; the sender says so once. A joiner is sent every hung stick at its ready edge, after the snapshot's end.
 
 #pragma once
@@ -34,7 +34,8 @@ namespace coop::glowstick_hang_sync {
 void Install(coop::net::Session* session);
 
 // Drain the stick and release edges recorded since the last pass, verify them against the stick's members, and
-// broadcast. MUST run in the pump pass before local_streams' release edge. Game thread.
+// broadcast. Also the receiver's side: the releases that waited out a hang's hookdelay, and each applied hang's
+// height check ~1 s on. MUST run in the pump pass before local_streams' release edge. Game thread.
 void Tick();
 
 // prop_stick_sync's receiver hands every resolved prop here first: a glowstick's hang or release is replayed and
@@ -43,7 +44,8 @@ bool OnStickState(const coop::net::PropStickStatePayload& payload, void* prop, c
                   uint8_t senderPeerSlot);
 
 // The hold of a glowstick began on another peer: its own grab verbs release the stick first, which a copy hung here
-// takes. A no-op on a copy that hangs nowhere. Not mirrored back. Game thread.
+// takes. A no-op on a copy that hangs nowhere. Not mirrored back. Within a few passes of a hang applied here it waits,
+// as a received release does, until that hang's hookdelay has fired (it would rebuild the constraint). Game thread.
 void ReplayRelease(void* actor);
 
 // HOST: every hung stick to the joiner in `slot`, at its ready edge.

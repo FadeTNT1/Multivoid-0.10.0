@@ -8,7 +8,8 @@
 #include "coop/items/player_inventory_sync.h"  // JoinPlacement, CarriedApply
 #include "coop/items/player_profile.h"
 #include "coop/net/blob_chunks.h"
-#include "coop/net/protocol.h"  // kMaxPeers
+#include "coop/net/protocol.h"
+#include "coop/net/session.h"   // coop::net::kMaxPeers (= coop::players::kMaxPeers)
 #include "ue_wrap/actors/vitals.h"
 
 #include <array>

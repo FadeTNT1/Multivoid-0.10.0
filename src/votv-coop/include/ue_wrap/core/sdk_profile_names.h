@@ -911,6 +911,10 @@ inline constexpr const wchar_t* SetRelativeLocationParam = L"NewLocation";
 inline constexpr const wchar_t* SetRelativeRotationParam = L"NewRotation";
 inline constexpr const wchar_t* SetWorldLocationFn = L"K2_SetWorldLocation";
 inline constexpr const wchar_t* SetWorldLocationParam = L"NewLocation";
+// K2_DetachFromComponent(LocationRule, RotationRule, ScaleRule, bCallModify): a scene component taken off its attach
+// parent. prop_glowstick_C detaches its `hook` this way (all three rules KeepRelative, bCallModify true) before every
+// move of it.
+inline constexpr const wchar_t* DetachFromComponentFn = L"K2_DetachFromComponent";
 inline constexpr const wchar_t* SetHiddenInGameFn = L"SetHiddenInGame";
 inline constexpr const wchar_t* GetComponentLocationFn = L"K2_GetComponentLocation";
 inline constexpr const wchar_t* GetComponentForwardFn = L"GetForwardVector";
@@ -1469,8 +1473,10 @@ inline constexpr const wchar_t* VentCrawlerVentProp                  = L"vent";
 // `sticked`, `loc` (the impact point), `stickstatic` (the hit component does not simulate), `stickcomp`, moves the
 // `hook` scene component to `loc`, and runs `hookdelay`, whose body (after a zero delay) constrains `hook` to the
 // stick's mesh through the `physicsconstraint` component and sets the constraint frames (`setframe`). It sets
-// neither the base prop's frozen nor its Static. `releaseglowstick` breaks the constraint and clears `sticked`; every
-// grab verb of the stick runs it first. Members are read from the pak's bytecode.
+// neither the base prop's frozen nor its Static. `releaseglowstick` breaks the constraint, detaches `hook` from its
+// parent and clears `sticked`; every grab verb of the stick runs it first, so the sticking peer's `hook` is already
+// free when stickto moves it. Every other move of `hook` (processkeys, fuckyou) detaches it first itself.
+// Members are read from the pak's bytecode.
 inline constexpr const wchar_t* GlowstickClass                       = L"prop_glowstick_C";
 inline constexpr const wchar_t* GlowstickStickedProp                 = L"sticked";
 inline constexpr const wchar_t* GlowstickStickStaticProp             = L"stickstatic";

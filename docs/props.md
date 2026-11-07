@@ -379,11 +379,20 @@ read `HOST release eid=3317 -> (-459.2,2348.1,6049.1)`, the ceiling, then the co
 `stickto` (post) and `releaseglowstick` (pre) records the edge, and the next pump pass, before the hold's release edge,
 broadcasts: flags bit 2 for a hang, with the hook point in the message's `linVel`; flags 0 for the release, with the
 pose and velocities as the component's unstick sends them. A receiver closes the sender's hold, stops any drive on the
-copy, poses and simulates it, and replays the tail of `stickto` on its own copy: the members, the hook at the impact
-point, the stick's own `hookdelay`. A release runs the stick's own `releaseglowstick` and lets the copy go from the
-sender's pose. A peer's grab of a stick hung here releases it too (the stick's grab verbs run `releaseglowstick` first,
+copy, poses and simulates it, and replays the tail of `stickto` on its own copy: the hook detached from the stick's mesh
+(`K2_DetachFromComponent`, KeepRelative, as `processkeys`, `fuckyou` and `releaseglowstick` do before they move it; the
+sticking peer's grab verb already ran `releaseglowstick`, a receiver's copy never did, and a constraint from the mesh to
+its own child holds nothing), the members, the hook at the impact point, the stick's own `hookdelay`. A copy the host's
+driven-prop stream still has parked is not simulated: the stream's End gives its physics back. A release runs the
+stick's own `releaseglowstick` and lets the copy go from the sender's pose. `hookdelay` rebuilds the constraint after a
+zero delay whenever `stickstatic` is set, and `releaseglowstick` does not clear it, so a release (or a peer's grab) that
+lands within three pump passes and 100 ms of a hang applied here waits until that delay has fired. Clearing
+`stickstatic` instead would send the delay down its other branch, which constrains the mesh to `stickcomp`, null on a
+copy, and so to the world. About a second after each hang it applies, a receiver logs the stick's z against its
+hook's (`HANG check +1s ... STAYS UP` or `FELL below its hook`). A peer's grab of a stick hung here releases it too (the stick's grab verbs run `releaseglowstick` first,
 the base prelude the hold replays does not). A joiner is sent every hung stick at its ready edge, after the snapshot's
-end. The version is unchanged: a peer that does not know the bit drops the message as one for a prop with no component.
+end. The layout is unchanged, but the bit's new meaning took protocol 308: a peer from before it would drop the hang as
+a message for a prop with no component, so it does not connect.
 `[V]` the `prop_glowstick_C` bytecode in the fingerprint capture (`stickto`, `hookdelay`, `releaseglowstick`,
 `receivetick`, `getData`). `[?]` all of it in play: the constraint holding a copy the host's motion scan and a thrower's
 rows have also moved, and whether the game restores a hung stick from a save (`loadData` writes the members only; the

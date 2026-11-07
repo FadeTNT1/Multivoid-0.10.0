@@ -6,6 +6,7 @@
 #include "coop/net/session.h"
 #include "coop/player/local_streams.h"  // LastHeldActor, CurrentHoldGen: the hold a hang ends
 #include "coop/props/prop_drive_host.h"  // OverrideClientSyncer
+#include "coop/props/prop_drive_stream.h"  // IsParked: a copy the host's driven-prop stream still drives
 #include "coop/props/prop_stick_sync.h"  // FillStickIdentityAndPose
 #include "coop/props/remote_prop.h"
 #include "ue_wrap/actors/glowstick.h"
@@ -21,9 +22,12 @@
 #include "ue_wrap/facts/function_row.h"
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 namespace coop::glowstick_hang_sync {
@@ -59,6 +63,118 @@ constexpr int kMaxPending = 8;
 std::mutex g_pendingMutex;
 Pending    g_pending[kMaxPending];
 int        g_pendingCount = 0;
+
+// ---- Receiver state, game thread only ----
+// hookdelay's body runs after a zero delay, a frame or so after the hang that called it, and rebuilds the constraint
+// whenever `stickstatic` is set then. A release replayed before it fires is undone by it (releaseglowstick clears
+// `sticked`, not `stickstatic`), so a release that arrives while a hang applied here may still have that delay pending
+// waits until it cannot. Clearing `stickstatic` instead is no fix: the delay's other branch constrains the mesh to
+// `stickcomp`, which on a copy is null, and a null component pins the mesh to the world.
+uint32_t g_pass = 0;  // Tick passes since load
+
+using Clock = std::chrono::steady_clock;
+constexpr uint32_t kHookDelayPasses = 3;                               // the delay has fired after this many passes
+constexpr auto     kHookDelayTime   = std::chrono::milliseconds(100);  // and this long, whichever is later
+constexpr auto     kHangCheckAfter  = std::chrono::milliseconds(1000);
+constexpr float    kFellBelowHookCm = 100.f;  // a stick this far below its hook point is not hanging from it
+constexpr size_t   kMaxTracked      = 16;
+
+struct RecentHang {
+    void*             prop = nullptr;
+    int32_t           internalIdx = -1;
+    uint32_t          pass = 0;
+    Clock::time_point at{};
+};
+std::vector<RecentHang> g_recentHangs;
+
+struct DeferredRelease {
+    void*                            prop = nullptr;
+    int32_t                          internalIdx = -1;
+    bool                             fromHold = false;  // ReplayRelease's: no pose of a sender's to place
+    coop::net::PropStickStatePayload payload{};
+    std::wstring                     keyW;
+    uint8_t                          slot = 0;
+};
+std::vector<DeferredRelease> g_deferredReleases;
+
+// A receiver's proof the hang holds: ~1 s after HANG applied, the stick's height against its hook's.
+struct HangCheck {
+    void*             prop = nullptr;
+    int32_t           internalIdx = -1;
+    uint32_t          eid = 0;
+    std::wstring      keyW;
+    ue_wrap::FVector  hookPoint{};
+    Clock::time_point due{};
+};
+std::vector<HangCheck> g_hangChecks;
+
+bool HookDelayMayBePending(void* prop) {
+    const auto now = Clock::now();
+    for (const RecentHang& h : g_recentHangs)
+        if (h.prop == prop && R::IsLiveByIndex(prop, h.internalIdx) &&
+            (g_pass - h.pass < kHookDelayPasses || now - h.at < kHookDelayTime))
+            return true;
+    return false;
+}
+
+void NoteHangApplied(void* prop) {
+    const RecentHang fresh{prop, R::InternalIndexOf(prop), g_pass, Clock::now()};
+    for (RecentHang& h : g_recentHangs)
+        if (h.prop == prop) {
+            h = fresh;
+            return;
+        }
+    if (g_recentHangs.size() >= kMaxTracked) g_recentHangs.erase(g_recentHangs.begin());
+    g_recentHangs.push_back(fresh);
+}
+
+void ScheduleHangCheck(void* prop, uint32_t eid, const std::wstring& keyW, const ue_wrap::FVector& hookPoint) {
+    for (auto it = g_hangChecks.begin(); it != g_hangChecks.end(); ++it)
+        if (it->prop == prop) {
+            g_hangChecks.erase(it);
+            break;
+        }
+    if (g_hangChecks.size() >= kMaxTracked) g_hangChecks.erase(g_hangChecks.begin());
+    HangCheck c;
+    c.prop = prop;
+    c.internalIdx = R::InternalIndexOf(prop);
+    c.eid = eid;
+    c.keyW = keyW;
+    c.hookPoint = hookPoint;
+    c.due = Clock::now() + kHangCheckAfter;
+    g_hangChecks.push_back(std::move(c));
+}
+
+void RunDueHangChecks() {
+    if (g_hangChecks.empty()) return;
+    const auto now = Clock::now();
+    for (size_t i = 0; i < g_hangChecks.size();) {
+        if (now < g_hangChecks[i].due) {
+            ++i;
+            continue;
+        }
+        const HangCheck c = g_hangChecks[i];
+        g_hangChecks.erase(g_hangChecks.begin() + static_cast<std::ptrdiff_t>(i));
+        if (!c.prop || !R::IsLiveByIndex(c.prop, c.internalIdx)) continue;
+        bool sticked = false;
+        const bool stickedRead = G::ReadSticked(c.prop, sticked);
+        ue_wrap::FVector stick{};
+        ue_wrap::FVector hook{};
+        const bool stickRead = E::TryGetActorLocation(c.prop, stick);
+        const bool hookRead = G::ReadHookWorldLocation(c.prop, hook);
+        if (!stickRead || !hookRead) {
+            UE_LOGW("glowstick_hang: HANG check +1s key='%ls' eid=%u -- the stick (%d) or hook (%d) location did "
+                    "not read", c.keyW.c_str(), c.eid, stickRead ? 1 : 0, hookRead ? 1 : 0);
+            continue;
+        }
+        const bool up = stick.Z >= hook.Z - kFellBelowHookCm;
+        UE_LOGI("glowstick_hang: HANG check +1s key='%ls' eid=%u stick z=%.0f hook z=%.0f (sent hook z=%.0f) "
+                "dz=%.0f sticked=%s simulating=%d parked=%d -- %s", c.keyW.c_str(), c.eid, stick.Z, hook.Z,
+                c.hookPoint.Z, stick.Z - hook.Z, stickedRead ? (sticked ? "1" : "0") : "?",
+                E::IsActorRootSimulatingPhysics(c.prop) ? 1 : 0, coop::prop_drive_stream::IsParked(c.prop) ? 1 : 0,
+                up ? "STAYS UP" : "FELL below its hook");
+    }
+}
 
 void Record(void* prop, bool release) {
     Pending p{};
@@ -163,19 +279,65 @@ void BroadcastRelease(coop::net::Session* s, void* prop) {
             keyW.c_str(), p.elementId, p.locX, p.locY, p.locZ, p.linVelX, p.linVelY, p.linVelZ);
 }
 
+void ApplyReleaseNow(void* prop, const coop::net::PropStickStatePayload& p, const std::wstring& keyW, uint8_t slot);
+
+void ReplayReleaseNow(void* actor) {
+    bool sticked = false;
+    if (!G::ReadSticked(actor, sticked) || !sticked) return;
+    ++g_replayDepth;
+    const bool ok = G::CallRelease(actor);
+    --g_replayDepth;
+    UE_LOGI("glowstick_hang: a peer's hold began on a stick hung here -- releaseglowstick %s", ok ? "ran" : "did NOT run");
+}
+
+// A release of this stick that waits on an earlier hang's hookdelay runs now: ahead of a newer hang, in arrival
+// order, or once the delay can no longer be pending. A no-op when none waits.
+void FlushDeferredReleaseFor(void* prop) {
+    for (size_t i = 0; i < g_deferredReleases.size(); ++i) {
+        if (g_deferredReleases[i].prop != prop) continue;
+        const DeferredRelease d = g_deferredReleases[i];
+        g_deferredReleases.erase(g_deferredReleases.begin() + static_cast<std::ptrdiff_t>(i));
+        if (!R::IsLiveByIndex(d.prop, d.internalIdx)) return;
+        if (d.fromHold) ReplayReleaseNow(d.prop);
+        else            ApplyReleaseNow(d.prop, d.payload, d.keyW, d.slot);
+        return;
+    }
+}
+
+// Keep `d` until its stick's hookdelay has fired; a later release of the same stick replaces it.
+void DeferRelease(DeferredRelease d) {
+    for (DeferredRelease& q : g_deferredReleases)
+        if (q.prop == d.prop) {
+            q = std::move(d);
+            return;
+        }
+    if (g_deferredReleases.size() >= kMaxTracked) {
+        UE_LOGW("glowstick_hang: deferred releases full -- the oldest is applied now");
+        FlushDeferredReleaseFor(g_deferredReleases.front().prop);
+    }
+    g_deferredReleases.push_back(std::move(d));
+}
+
 void ApplyHang(void* prop, const coop::net::PropStickStatePayload& p, const std::wstring& keyW, uint8_t slot) {
+    FlushDeferredReleaseFor(prop);
     // The sticking peer was holding it, so its pose stream was driving this copy: stop the drive (a cache clear, no
     // physics change), pose the copy where the stick hit, and simulate it, since a constraint holds only a body
-    // that moves.
+    // that moves. A copy the host's driven-prop stream still has parked stays kinematic: the park re-latches a copy
+    // switched to simulating, and the stream's End gives the physics back.
     coop::remote_prop::ClearAnyDriveFor(prop);
     E::SetActorLocation(prop, ue_wrap::FVector{p.locX, p.locY, p.locZ});
     E::SetActorRotation(prop, ue_wrap::FRotator{p.rotPitch, p.rotYaw, p.rotRoll});
-    E::SetActorSimulatePhysics(prop, true);
-    const bool ok = G::CallHang(prop, ue_wrap::FVector{p.linVelX, p.linVelY, p.linVelZ});
+    const bool parked = coop::prop_drive_stream::IsParked(prop);
+    if (!parked) E::SetActorSimulatePhysics(prop, true);
+    const ue_wrap::FVector hookPoint{p.linVelX, p.linVelY, p.linVelZ};
+    const bool ok = G::CallHang(prop, hookPoint);
     if (ok) {
+        NoteHangApplied(prop);
+        ScheduleHangCheck(prop, p.elementId, keyW, hookPoint);
         UE_LOGI("glowstick_hang: HANG applied key='%ls' eid=%u hook=(%.0f,%.0f,%.0f) (stickto's tail replayed: "
-                "hook placed, hookdelay ran; slot %u)", keyW.c_str(), p.elementId, p.linVelX, p.linVelY,
-                p.linVelZ, slot);
+                "hook detached and placed, hookdelay ran; %s; slot %u)", keyW.c_str(), p.elementId, p.linVelX,
+                p.linVelY, p.linVelZ,
+                parked ? "parked by the driven-prop stream, its End gives the physics back" : "simulating", slot);
     } else {
         UE_LOGW("glowstick_hang: HANG key='%ls' eid=%u -- the stick's members or hookdelay did not resolve here; the "
                 "copy stays free", keyW.c_str(), p.elementId);
@@ -183,6 +345,23 @@ void ApplyHang(void* prop, const coop::net::PropStickStatePayload& p, const std:
 }
 
 void ApplyRelease(void* prop, const coop::net::PropStickStatePayload& p, const std::wstring& keyW, uint8_t slot) {
+    if (HookDelayMayBePending(prop)) {
+        DeferredRelease d;
+        d.prop = prop;
+        d.internalIdx = R::InternalIndexOf(prop);
+        d.payload = p;
+        d.keyW = keyW;
+        d.slot = slot;
+        DeferRelease(std::move(d));
+        UE_LOGI("glowstick_hang: RELEASE key='%ls' eid=%u deferred -- the hang applied here just now still has "
+                "hookdelay pending, which would rebuild the constraint after it (slot %u)", keyW.c_str(),
+                p.elementId, slot);
+        return;
+    }
+    ApplyReleaseNow(prop, p, keyW, slot);
+}
+
+void ApplyReleaseNow(void* prop, const coop::net::PropStickStatePayload& p, const std::wstring& keyW, uint8_t slot) {
     bool sticked = false;
     const bool wasHung = G::ReadSticked(prop, sticked) && sticked;
     if (wasHung) {
@@ -243,6 +422,24 @@ void SendIfHung(void* ctx, void* obj, int32_t /*index*/) {
     }
 }
 
+// The releases that waited out a hang's hookdelay, then the hang checks that are due. Game thread.
+void TickReceiver() {
+    ++g_pass;
+    for (size_t i = 0; i < g_deferredReleases.size();) {
+        void* prop = g_deferredReleases[i].prop;
+        if (!R::IsLiveByIndex(prop, g_deferredReleases[i].internalIdx)) {
+            g_deferredReleases.erase(g_deferredReleases.begin() + static_cast<std::ptrdiff_t>(i));
+            continue;
+        }
+        if (HookDelayMayBePending(prop)) {
+            ++i;
+            continue;
+        }
+        FlushDeferredReleaseFor(prop);  // erases entry i; the next one moves into it
+    }
+    RunDueHangChecks();
+}
+
 }  // namespace
 
 void Install(coop::net::Session* session) {
@@ -257,6 +454,7 @@ void Install(coop::net::Session* session) {
 }
 
 void Tick() {
+    TickReceiver();
     Pending ready[kMaxPending];
     int nReady = 0;
     {
@@ -300,12 +498,19 @@ bool OnStickState(const coop::net::PropStickStatePayload& payload, void* prop, c
 }
 
 void ReplayRelease(void* actor) {
-    bool sticked = false;
-    if (!G::ReadSticked(actor, sticked) || !sticked) return;
-    ++g_replayDepth;
-    const bool ok = G::CallRelease(actor);
-    --g_replayDepth;
-    UE_LOGI("glowstick_hang: a peer's hold began on a stick hung here -- releaseglowstick %s", ok ? "ran" : "did NOT run");
+    if (HookDelayMayBePending(actor)) {
+        bool sticked = false;
+        if (!G::ReadSticked(actor, sticked) || !sticked) return;
+        DeferredRelease d;
+        d.prop = actor;
+        d.internalIdx = R::InternalIndexOf(actor);
+        d.fromHold = true;
+        DeferRelease(std::move(d));
+        UE_LOGI("glowstick_hang: a peer's hold began on a stick hung here just now -- releaseglowstick deferred "
+                "until the hang's hookdelay has fired");
+        return;
+    }
+    ReplayReleaseNow(actor);
 }
 
 void ConnectReplayForSlot(int slot) {
@@ -324,8 +529,14 @@ void ConnectReplayForSlot(int slot) {
 }
 
 void OnDisconnect() {
-    std::lock_guard<std::mutex> lk(g_pendingMutex);
-    g_pendingCount = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_pendingMutex);
+        g_pendingCount = 0;
+    }
+    // Game thread (DisconnectAll): the receiver's waits go with the session.
+    g_recentHangs.clear();
+    g_deferredReleases.clear();
+    g_hangChecks.clear();
 }
 
 }  // namespace coop::glowstick_hang_sync
