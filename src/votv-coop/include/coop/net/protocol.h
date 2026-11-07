@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 304;
+inline constexpr uint16_t kProtocolVersion = 305;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -3716,6 +3716,8 @@ struct WorldActorSpawnPayload {
     uint8_t       _pad[3];                     // 3  -- explicit; the struct is 4-aligned for the floats
     // The payload uses 172 of the 228 usable bytes. A class whose birth content does not
     // fit length-prefixed in 64 bytes needs the blob sized first.
+    // ufo_ballfo_C (protocol 305) carries 32 bytes: eight floats, the heading, the two endpoints and the ball's
+    // place (coop/world/ufo_ball_sync.h). A 304 peer ignores them and flies its own random course.
 };
 static_assert(sizeof(WorldActorSpawnPayload) == 172,
               "WorldActorSpawnPayload must be 172 bytes");

@@ -374,6 +374,11 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     L"holeBottom_C",               // rozitalHole's room under the far hole (event_bottomHoleController_C)
     L"HoelUfo_C",                  // the super fog's UFO (superFog_C::spawnUfo; the source row in npc_world_enum,
                                    // the client's spawnUfo refused in coop/world/weather_fog)
+    // The gamemode's ball UFO (mainGamemode_C::ufo_ball mints it above the host's camera; the source row in
+    // npc_world_enum, the client's own roll refused in coop/world/spawn_authority). A transform alone cannot
+    // mirror it: its `set` randomizes the heading and the endpoints, which the birth blob carries
+    // (coop/world/ufo_ball_sync).
+    L"ufo_ballfo_C",
     // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
     // base classes are unverified -- a prop-derived wreck would ride the prop lane as well.
 };
@@ -488,11 +493,24 @@ inline constexpr const wchar_t* kWorldActorSaveCarriedClasses[] = {
 // (EX_CallMath), so the npc lane sees it only through a source row.
 inline constexpr const wchar_t* TriggerSpawnFollowingArirClass = L"trigger_spawnFollowingArir_C";
 
+// ufo_ballfo_C (0.10.0 bytecode capture): the gamemode's ball UFO. Its components: `center` (turned to a random yaw
+// by `set`), `a` and `b` (the endpoints, placed relative to `center` by `set`: x = -/+size and a random y), `balls`
+// (the visible ball; the tick slides it toward `b` at `speed` and the actor destroys itself on arrival) and `lift`
+// (the descent, derived from the ball's progress). Only the five values `set` randomizes plus the ball's current
+// place need to cross; the rest is the class's own deterministic tick.
+inline constexpr const wchar_t* UfoBallClass           = L"ufo_ballfo_C";
+inline constexpr const wchar_t* UfoBallCenterProp      = L"center";
+inline constexpr const wchar_t* UfoBallAProp           = L"a";
+inline constexpr const wchar_t* UfoBallBProp           = L"b";
+inline constexpr const wchar_t* UfoBallBallsProp       = L"balls";
+
 // World-actor mirrors whose whole presentation is their own deterministic tick on a component, not
 // the root the pose drive moves: the client mirror keeps its actor tick (world_actor_mirror). Every
 // entry's tick must write no shared state.
 inline constexpr const wchar_t* kWorldActorTickDrivenClasses[] = {
     RozitBorgClass,  // the tick lerps `ships` by its alpha, shakes the local camera, destroys itself at alpha 1
+    UfoBallClass,    // the tick spins and slides `balls` from a to b at a constant speed and destroys the actor on
+                     // arrival; the birth blob seeds its endpoints and position (coop/world/ufo_ball_sync)
 };
 
 // The transient physics props the host's ambient spawners materialise through
@@ -741,6 +759,11 @@ inline constexpr const wchar_t* SetRelativeRotationFn = L"K2_SetRelativeRotation
 // in its hit, and the door lane puts a client's copy at the host's crack with it.
 inline constexpr const wchar_t* SetRelativeLocationFn = L"K2_SetRelativeLocation";
 inline constexpr const wchar_t* SetRelativeLocationParam = L"NewLocation";
+// K2_SetRelativeRotation's rotation parameter, and K2_SetWorldLocation(NewLocation, bSweep, SweepHitResult,
+// bTeleport) for a component placed in world space (the ball UFO's `balls`).
+inline constexpr const wchar_t* SetRelativeRotationParam = L"NewRotation";
+inline constexpr const wchar_t* SetWorldLocationFn = L"K2_SetWorldLocation";
+inline constexpr const wchar_t* SetWorldLocationParam = L"NewLocation";
 inline constexpr const wchar_t* SetHiddenInGameFn = L"SetHiddenInGame";
 inline constexpr const wchar_t* GetComponentLocationFn = L"K2_GetComponentLocation";
 inline constexpr const wchar_t* GetComponentForwardFn = L"GetForwardVector";

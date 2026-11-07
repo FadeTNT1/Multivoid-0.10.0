@@ -123,6 +123,9 @@ const LaneOwned kLaneOwnedClasses[] = {
     { "newsky_C", "sky_sync" },             // earthTp's tp: the black-hole sky rides SkyState (its seed included)
     { "noiser_C", "event_fire" },           // alienSounds: a per-viewer replay of the special; a joiner misses the cue
     { "outsideChurch_C", "church_sync" },   // 0.10.0: level-placed, host-run; its state rides ChurchState
+    // The gamemode's ball UFO: the mirror's own BeginPlay registers its setEvent on a client, and a joiner's
+    // mirror comes from the world-actor connect snapshot, so a replay here would only be a second begin.
+    { "ufo_ballfo_C", "world_actor_sync" },
 };
 const char* LaneFor(const std::string& className) {
     for (const auto& e : kLaneOwnedClasses)

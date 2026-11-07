@@ -73,6 +73,7 @@ UE_FACT_FN(kRowReceiveTickTentacleBallsFollower, "spawn_authority", L"tentacleBa
 UE_FACT_FN(kRowReceiveBeginPlaySuperEgger, "spawn_authority", L"superEgger_C", L"ReceiveBeginPlay", Declared);
 UE_FACT_FN(kRowSpwnSuperEgger, "spawn_authority", L"superEgger_C", L"spwn", Declared);
 UE_FACT_FN(kRowCustomEvent5Gamemode, "spawn_authority", L"mainGamemode_C", L"CustomEvent_5", Declared);
+UE_FACT_FN(kRowUfoBallGamemode, "spawn_authority", L"mainGamemode_C", L"ufo_ball", Declared);
 // The 0.10.0 UFO encounters (untitled_1): the bodies the controllers' and the ships' ubergraphs own.
 UE_FACT_FN(kRowStartEventKnobController, "spawn_authority", L"ufo_knob_controller_C", L"startEvent", Declared);
 UE_FACT_FN(kRowStopEventKnobController, "spawn_authority", L"ufo_knob_controller_C", L"stopEvent", Declared);
@@ -208,6 +209,11 @@ constexpr Row kRows[] = {
     // 120-300 s timer), so a client's timer simply ends here. The host rolls and the source-gated catch mirrors the
     // Octa and the egg; the level-placed egg roller is already a row above.
     {&kRowCustomEvent5Gamemode,           "gamemode.CustomEvent_5"},
+    // The ball UFO roll: ufo_ball is a timer body that rolls a 20 % chance, mints ufo_ballfo_C above the local
+    // camera and re-arms its own 2400-4500 s timer, so a client's timer simply ends here. The host's ball reaches a
+    // client through the source-gated catch onto the world-actor lane, with its heading and endpoints in the birth
+    // blob (coop/world/ufo_ball_sync); a client's own would be a second, differently-randomized ball over its head.
+    {&kRowUfoBallGamemode,                "gamemode.ufo_ball"},
 
     // The 0.10.0 UFO encounters. The knob controller starts its flock 0.2 s after its BeginPlay and
     // re-rolls it from its tick; the UK controller starts 5 s after BeginPlay when beginSpawn is set,

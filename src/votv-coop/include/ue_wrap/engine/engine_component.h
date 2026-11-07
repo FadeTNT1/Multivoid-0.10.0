@@ -63,6 +63,14 @@ FVector GetComponentRelativeLocation(void* component);
 // write of the field skips. False on a null component or an unresolved function. Game thread.
 bool SetComponentRelativeLocation(void* component, const FVector& location);
 
+// USceneComponent::K2_SetRelativeRotation(NewRotation, bSweep=false, bTeleport=false), the same propagation for a
+// component's relative rotation. False on a null component or an unresolved function. Game thread.
+bool SetComponentRelativeRotation(void* component, const FRotator& rotation);
+
+// USceneComponent::K2_SetWorldLocation(NewLocation, bSweep=false, bTeleport=false): the component placed in world
+// space through the engine's setter. False on a null component or an unresolved function. Game thread.
+bool SetComponentWorldLocation(void* component, const FVector& location);
+
 // A UParticleSystemComponent's `Template`, read raw at a reflection-resolved offset; the cue sync
 // matches a live PSC to its cue by it, because the EX_CallMath spawn that created it is invisible
 // to the detour. nullptr if unresolved.

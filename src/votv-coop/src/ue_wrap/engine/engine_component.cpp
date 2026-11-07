@@ -348,6 +348,44 @@ bool SetComponentRelativeLocation(void* component, const FVector& location) {
     return Call(component, f);
 }
 
+bool SetComponentRelativeRotation(void* component, const FRotator& rotation) {
+    static void* s_fn = nullptr;
+    if (!component) return false;
+    if (!s_fn && SceneCompClass()) s_fn = R::FindFunction(g_sceneCompClass, P::name::SetRelativeRotationFn);
+    if (!s_fn) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGE("engine: SetComponentRelativeRotation unresolved (K2_SetRelativeRotation not found)");
+        }
+        return false;
+    }
+    ParamFrame f(s_fn);
+    if (!f.valid() || !f.Set<FRotator>(P::name::SetRelativeRotationParam, rotation)) return false;
+    f.Set<bool>(L"bSweep", false);
+    f.Set<bool>(L"bTeleport", false);
+    return Call(component, f);
+}
+
+bool SetComponentWorldLocation(void* component, const FVector& location) {
+    static void* s_fn = nullptr;
+    if (!component) return false;
+    if (!s_fn && SceneCompClass()) s_fn = R::FindFunction(g_sceneCompClass, P::name::SetWorldLocationFn);
+    if (!s_fn) {
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            UE_LOGE("engine: SetComponentWorldLocation unresolved (K2_SetWorldLocation not found)");
+        }
+        return false;
+    }
+    ParamFrame f(s_fn);
+    if (!f.valid() || !f.Set<FVector>(P::name::SetWorldLocationParam, location)) return false;
+    f.Set<bool>(L"bSweep", false);
+    f.Set<bool>(L"bTeleport", false);
+    return Call(component, f);
+}
+
 bool SetComponentMobility(void* component, uint8_t mobility) {
     // USceneComponent::SetMobility(NewMobility). Movable (2) re-registers the render state so a
     // runtime SetStaticMesh + SetActorLocation actually apply (a Static component no-ops both).

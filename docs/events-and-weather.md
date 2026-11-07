@@ -115,6 +115,21 @@ egg. A client's body of it is refused at the script gate, which also ends its ow
 either; the host's roll is a spawn source of the character lane, and the Octa or the egg reaches every client as
 a mirror `[V]` (`octa_drill` births). The Octa's attack on a player is relayed from the host (`docs/npcs-and-kerfur.md`).
 
+The gamemode's ball UFO is the host's too. `mainGamemode_C::ufo_ball` is a timer body, re-armed every 40 to 75
+minutes, that rolls a one-in-five chance and mints `ufo_ballfo_C` 500 m above the local camera. It is not the eventer's,
+so the event-fire lane never sees it; a client's body is refused at the script gate (tag `gamemode.ufo_ball`), which
+also ends its re-arm, and the host's ball is a world-actor-lane output of the gamemode's source row. The actor's
+root never moves: its `set` (the construction script's and BeginPlay's) turns the `center` component to a random yaw
+and puts the endpoints `a` and `b` at random offsets from it, and its tick slides the `balls` component from the ball's
+place to `b` at a constant speed, then destroys the actor. The mirror therefore keeps its own tick
+(`kWorldActorTickDrivenClasses`), and the spawn's birth blob carries the yaw, both endpoints and the ball's place now
+(`coop/world/ufo_ball_sync`, protocol 305), laid over the mirror's own random `set` in the frame it finishes
+spawning; both balls then fly one course. A joiner mid-flight gets the ball's place at the join edge from the connect
+snapshot, the host's destroy (or the ball's arrival) retires the mirror, and `event_active_sync` leaves the class to
+the world-actor lane at the join edge, so its `setEvent` is not replayed a second time. Host log: `ufo_ball[host]:
+eid=... yaw=... a=... b=... balls=...` at the enroll; client log: `ufo_ball[client]: eid=... seeded ...`. `[RD]`
+until two peers have run it.
+
 ### Story and scheduled events
 
 The scheduler is the save's own time step: it walks the event table and runs each due row

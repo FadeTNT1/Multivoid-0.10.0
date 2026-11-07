@@ -207,6 +207,7 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/roach_sync.cpp
     src/coop/creatures/owner_entity_sync.cpp
     src/coop/world/world_actor_sync.cpp
+    src/coop/world/ufo_ball_sync.cpp
     src/coop/world/world_actor_mirror.cpp
     src/coop/world/event_scene_sync.cpp
     src/coop/world/event_scene_refuse.cpp

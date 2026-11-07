@@ -9,6 +9,7 @@
 
 #include "coop/creatures/piramid_sync.h"  // the heading, look and wisp-target consumers
 #include "coop/world/event_scene_sync.h"     // a story scene's phase that arrived before its mirror
+#include "coop/world/ufo_ball_sync.h"        // the ball UFO's birth setup
 
 #include "coop/element/identity_create.h"  // the single WorldActor mirror create funnel
 #include "coop/items/coingun_sync.h"
@@ -252,6 +253,11 @@ void OnWorldActorSpawn(const coop::net::WorldActorSpawnPayload& payload) {
             break;
         }
     }
+    // The ball UFO's mirror: its own BeginPlay rolled a random heading and endpoints, so lay the host's over them
+    // before its first tick (the same frame as the finish) and place the ball where the host's is now. Its tick then
+    // flies the same course; a joiner mid-flight starts from the host's place, not from the start.
+    if (_wcsicmp(classW.c_str(), ue_wrap::profile::name::UfoBallClass) == 0)
+        coop::ufo_ball_sync::SeedMirror(spawned, payload.elementId, payload.birth, payload.birthLen);
     // A pose-driven mirror must not also simulate: the two fight and the mirror drifts off the
     // host's transform. The coin simulates with its sphere and the jellyfish with its capsule, each its
     // root; whatever component a mirrored class simulates with is stopped, found from its members.
