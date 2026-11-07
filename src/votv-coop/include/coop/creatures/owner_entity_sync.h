@@ -8,8 +8,8 @@
 //
 // The first member is eyer_C, from ticker_eyers: the night stalker that watches you, angers when
 // stared at and dashes to kill. Its roll is world-anchored, but its behaviour loop reads the LOCAL
-// player, so per-peer ownership is the only shape that preserves the encounter for everyone.
-//
+// player, so per-peer ownership is the only shape that preserves the encounter for everyone. The
+// second is the wasp swarm, rolled by a nest near the local player and chasing it.
 // Identity is (transport senderPeerSlot, owner-local seq). The lane is deliberately NOT the
 // host-authoritative element registry: peer-owned identity is a different axis, and npc_mirror
 // hard-asserts host-range eids. Wired through subsystems; dispatch in event_dispatch_entity.

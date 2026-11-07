@@ -202,6 +202,7 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/npc_sync.cpp
     src/coop/creatures/npc_sync_install.cpp
     src/coop/creatures/npc_world_enum.cpp
+    src/coop/creatures/host_born_spawn.cpp
     src/coop/creatures/piramid_sync.cpp
     src/coop/creatures/geom_octa_sync.cpp
     src/coop/creatures/geom_octa_relay.cpp

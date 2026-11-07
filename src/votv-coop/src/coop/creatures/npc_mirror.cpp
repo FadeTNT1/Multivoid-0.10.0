@@ -91,6 +91,10 @@ constexpr MirrorTickRow kMirrorTicks[] = {
     // The figure keeps its tick for the turn of its mesh toward this machine's own camera and its footstep sound: the
     // tick moves nothing (it writes the mesh's rotation and the AnimBP's variables). Its flight is the pose stream's.
     {ue_wrap::profile::name::NpcClass_Figura,   true, nullptr},
+    // The angry flesh keeps its tick for its kill: the tick's sphere test against this machine's own player (a
+    // puppet is dropped from it, coop/player/puppet_identity_scan) is the victim's own. Its walk is movement input,
+    // inert with the movement tick off; its tendrils and blood are this machine's presentation.
+    {ue_wrap::profile::name::NpcClass_AngryErieFlesh, true, nullptr},
 };
 
 constexpr size_t kMirrorTickCount = sizeof(kMirrorTicks) / sizeof(kMirrorTicks[0]);

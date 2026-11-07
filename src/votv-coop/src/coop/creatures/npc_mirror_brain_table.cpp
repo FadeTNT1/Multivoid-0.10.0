@@ -98,6 +98,13 @@ constexpr EntryTable kTables[] = {
     {L"npc_zombie_skerfuro_C", nullptr, 0},
     {P::name::NpcClass_Fossilhound, kFossilhound, sizeof(kFossilhound) / sizeof(kFossilhound[0])},
     {P::name::NpcClass_GeomOcta, kGeomOcta, sizeof(kGeomOcta) / sizeof(kGeomOcta[0])},
+    // The living Erie (and its _good and _evil children, each with a graph of its own) and the rufus allow none of
+    // their graphs on a mirror: their entries throw, chop, steal and burn props, turn the Erie good or evil (a new
+    // creature and the old one's destroy) and, for the rufus, leave a corpse and a prop on damage; all the host's.
+    {P::name::NpcClass_EriePlushLive, nullptr, 0},
+    {L"eriePlushLive_good_C", nullptr, 0},
+    {L"eriePlushLive_evil_C", nullptr, 0},
+    {P::name::NpcClass_Rufus, nullptr, 0},
 };
 
 constexpr size_t kTableCount = sizeof(kTables) / sizeof(kTables[0]);

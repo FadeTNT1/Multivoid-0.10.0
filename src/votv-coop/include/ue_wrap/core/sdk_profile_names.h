@@ -300,6 +300,13 @@ inline constexpr const wchar_t* NpcClass_Kavotia      = L"kavotia_C";
 // its mesh toward the local camera from its tick, and its 0.1 s timer destroys it once the local camera is within 175
 // units of it, so a mirror keeps its actor tick and has that timer refused (coop/world/spawn_authority).
 inline constexpr const wchar_t* NpcClass_Figura       = L"figura_C";
+// The Erie creatures, each a Character (the graphs read character.charactermovement): eriePlushLive_C, the living
+// plush prop_eriePlush_C::fuck mints (its _good and _evil children are its reducerep's), and npc_angryErieFlesh_C,
+// which prop_eriePlush_C::anger and cremator_C::timerbang mint. rufus_C, the Character prop_goose_C::broken mints.
+// Each is minted under EX_CallMath, so it crosses through the class catch (coop/creatures/host_born_spawn).
+inline constexpr const wchar_t* NpcClass_EriePlushLive  = L"eriePlushLive_C";
+inline constexpr const wchar_t* NpcClass_AngryErieFlesh = L"npc_angryErieFlesh_C";
+inline constexpr const wchar_t* NpcClass_Rufus          = L"rufus_C";
 
 // The allowlist array: resolved through R::FindClass and cached per entry. The classes load on the
 // first gameplay-level transition, not at the menu: the install waits for the first one to load,
@@ -335,6 +342,9 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_GeomOcta,          // the Geom Octahedron; host-authored ACharacter, pose rides EntityPose
     NpcClass_Kavotia,           // rozitalHole's patrollers; host-authored ACharacter, brain refused on a mirror
     NpcClass_Figura,            // the gamemode's CustomEvent_3 figure; host-authored ACharacter, self-destroy timer refused on a mirror
+    NpcClass_EriePlushLive,     // the living Erie and its _good/_evil children; a mirror's graph is refused whole
+    NpcClass_AngryErieFlesh,    // the angry flesh; a mirror keeps its tick (its kill of this machine's player)
+    NpcClass_Rufus,             // the goose's rufus; a mirror's graph is refused whole
 };
 inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcAllowlist[0]);
 
@@ -390,11 +400,26 @@ inline constexpr const wchar_t* kWorldActorAllowlist[] = {
     L"ufo_boofo_spawn1_C",         // the boofo fly-by (a ufo_boofo_C child; ufo_boo)
     L"ufo_joel_C",                 // the radio tower's UFO (ufo_joel)
     L"ufo_pillfo_C",               // the lake glow's UFO (ufo_pill)
+    // The alien dropper (an actor_save_C) npc_zombie_alienSummoner_C mints on its landing; its graph is refused on a
+    // client (coop/world/spawn_authority), so a mirror is the saucer the host's killer wisp, aliens and ship leave.
+    L"ufoAlienDropper_C",
     // Not listed yet: a crashed ship's wreck (UKufoStuck_C) and crater (heavyDebrisCrater_C), whose
     // base classes are unverified -- a prop-derived wreck would ride the prop lane as well.
 };
 inline constexpr size_t kWorldActorAllowlistSize =
     sizeof(kWorldActorAllowlist) / sizeof(kWorldActorAllowlist[0]);
+
+// The births the class catch owns whatever made them (coop/creatures/host_born_spawn): the alien dropper and the
+// ariral ship its BeginPlay mints, and the strike the stolas protection volume's tick throws at the pawns inside
+// it (the host's strike reaches a client through coop/world/weather_lightning).
+inline constexpr const wchar_t* UfoAlienDropperClass        = L"ufoAlienDropper_C";
+inline constexpr const wchar_t* ArirShipClass               = L"arirShip_C";
+inline constexpr const wchar_t* StolasProtectionVolumeClass = L"stolasProtectionVolume_C";
+// The wasp swarm (an Actor): prop_waspNest_C's BeginPlay loop mints one while this machine's player 0 is within
+// 5000 units, its hit and its break mint one, and prop_beebox_C's playerUsedOn mints one; the swarm's tick chases
+// player 0 and its BeginPlay stings the pawns within 300 units. Owned by the peer that rolled it
+// (coop/creatures/owner_entity_sync).
+inline constexpr const wchar_t* WaspSwarmClass              = L"waspSwarm_C";
 
 // The eventer's world-actor outputs (trigger_eventer_C::runEvent, each minted under EX_CallMath, so
 // they cross only through the eventer's source row in npc_world_enum): ventKnocker's knocker (knocks

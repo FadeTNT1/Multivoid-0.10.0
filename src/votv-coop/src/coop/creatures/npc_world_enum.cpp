@@ -18,6 +18,7 @@
 #include "coop/net/session.h"
 #include "coop/creatures/kerfur_entity.h"  // reserve the stable kerfur id when a kerfur NPC is registered
 #include "coop/creatures/geom_octa_sync.h"  // OnNpcSpawnSent: the Octa's events follow its spawn's send
+#include "coop/creatures/host_born_spawn.h"  // the class catch beside the source rows
 #include "coop/creatures/npc_sync.h"
 #include "coop/world/world_actor_sync.h"  // HostEnrollExSpawn -- the WA branch of the EX-catch drain
 #include "ue_wrap/engine/engine.h"   // TryGetActorLocation / TryGetActorRotation
@@ -273,6 +274,9 @@ constexpr size_t kMaxPendingExSpawns = 256;           // sanity cap (a swarm is 
 // catches, and the joiner saw an empty world mid-event.
 void OnBeginDeferredExSpawn(void* /*context*/, void* srcObj, void* spawned) {
     if (!spawned || !srcObj) return;
+    // A client's half of the class catch: a Blueprint's birth of a host-born class is dissolved. A no-op off a
+    // client session.
+    coop::host_born_spawn::OnClientBirth(srcObj, spawned);
     auto* s = coop::npc_sync::GetSession();
     if (!s || s->role() != coop::net::Role::Host) return;
     // IsInstalled is the lifecycle-armed proxy for both lanes (they install together at session
@@ -281,27 +285,29 @@ void OnBeginDeferredExSpawn(void* /*context*/, void* srcObj, void* spawned) {
     if (!coop::npc_sync::IsInstalled()) return;
     void* srcCls = R::ClassOf(srcObj);
     if (!srcCls) return;
+    void* cls = R::ClassOf(spawned);
+    if (!cls) return;
     // One render of the source's name, then plain compares: every host deferred spawn reaches here.
     const std::wstring srcName = R::ToString(R::NameOf(srcCls));
     // A class may own several rows (the gamemode's night roll and its Funguy), each with its own outputs.
     bool sourceKnown = false;
     for (const ExSpawnSource& e : kExSpawnSources)
         if (_wcsicmp(srcName.c_str(), e.cls) == 0) { sourceKnown = true; break; }
-    if (!sourceKnown) return;
-    // [dev] octa_red=no_source, the Octa drill's red arm: the gamemode's row is left out of the catch.
-    static const bool s_noGamemodeSource =
-        coop::config::ResolveEnum(::coop::config_registry::rows::octa_red) == "no_source";
-    if (s_noGamemodeSource && _wcsicmp(srcName.c_str(), L"mainGamemode_C") == 0) return;
-    void* cls = R::ClassOf(spawned);
-    if (!cls) return;
-    // A scoped source's outputs first: one render per row, before the world-actor list's per-entry renders. The
-    // spawn passes when any row of the source class lets this output through.
     bool outputPermitted = false;
-    for (const ExSpawnSource& e : kExSpawnSources) {
-        if (_wcsicmp(srcName.c_str(), e.cls) != 0) continue;
-        if (!e.outputs || NamesOneOf(cls, e.outputs)) { outputPermitted = true; break; }
+    if (sourceKnown) {
+        // [dev] octa_red=no_source, the Octa drill's red arm: the gamemode's row is left out of the catch.
+        static const bool s_noGamemodeSource =
+            coop::config::ResolveEnum(::coop::config_registry::rows::octa_red) == "no_source";
+        if (s_noGamemodeSource && _wcsicmp(srcName.c_str(), L"mainGamemode_C") == 0) return;
+        // A scoped source's outputs first: one render per row, before the world-actor list's per-entry renders. The
+        // spawn passes when any row of the source class lets this output through.
+        for (const ExSpawnSource& e : kExSpawnSources) {
+            if (_wcsicmp(srcName.c_str(), e.cls) != 0) continue;
+            if (!e.outputs || NamesOneOf(cls, e.outputs)) { outputPermitted = true; break; }
+        }
     }
-    if (!outputPermitted) return;
+    // A class whose every birth is the host's (coop/creatures/host_born_spawn) passes whatever minted it.
+    if (!outputPermitted && !coop::host_born_spawn::HostCatches(srcObj, spawned)) return;
     if (!coop::npc_sync::IsAllowlistedClass(cls) && !IsWaAllowlistedClass(cls)) return;
     const int32_t idx = R::InternalIndexOf(spawned);
     std::lock_guard<std::mutex> lk(g_pendingMx);
@@ -342,7 +348,8 @@ void InstallExSpawnCatch() {
                 "ticker_insomniacSpawner_C -> insomniac_C + insomniac_child_C, "
                 "ticker_yellowWispSpawner_C -> killerwisp_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
-                "ufo_UK_enemy_C, superFog_C -> HoelUfo_C; EX_CallMath spawns now enroll)");
+                "ufo_UK_enemy_C, superFog_C -> HoelUfo_C; and the host-born classes whatever mints them; "
+                "EX_CallMath spawns now enroll)");
     } else {
         UE_LOGW("npc-sync[ex-spawn]: InstallPostHook FAILED -- EX_CallMath creature spawns will "
                 "NOT mirror this session (event-swarm wisps host-only)");
@@ -388,7 +395,7 @@ void DrainPendingExSpawns() {
             EnrollUntrackedNpcActor(obj, clsName, /*savePersisted=*/false, "ex-spawn", /*skipSlot=*/-1, &loc);
         if (eid != coop::element::kInvalidId) {
             UE_LOGI("npc-sync[ex-spawn]: enrolled '%ls' eid=%u at (%.0f, %.0f, %.0f) "
-                    "(EX_CallMath BeginDeferred, source-gated catch)",
+                    "(EX_CallMath BeginDeferred, source- or class-gated catch)",
                     clsName.c_str(), eid, loc.X, loc.Y, loc.Z);
         }
     }
