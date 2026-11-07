@@ -142,7 +142,22 @@ void DestroySeamBody(void* self, HandView handView) {
     // an actor with neither a key nor an eid is dropped.
     const bool keyless = (keyStr.empty() || keyStr == L"None");
     const bool hasEid  = (destroyEid != coop::element::kInvalidId);
-    if (keyless && !hasEid) return;
+    if (keyless && !hasEid) {
+        // A dispenser pile with neither: no message can name it, so its death reaches no peer and each
+        // other peer keeps its copy. Said, rate-limited, so a log shows whether a world holds any.
+        if (ue_wrap::prop::IsTrashBitsPile(self)) {
+            static uint32_t sKeylessPileDeaths = 0;
+            if (++sKeylessPileDeaths <= 5 || sKeylessPileDeaths % 50 == 0) {
+                ue_wrap::FVector at{};
+                const bool read = ue_wrap::engine::TryGetActorLocation(self, at);
+                UE_LOGW("grab_hook[destroy-seam]: %s KEYLESS dispenser pile %p died at (%.1f,%.1f,%.1f)%s -- no key "
+                        "and no eid, so no peer is told (#%u)",
+                        s->role() == coop::net::Role::Host ? "HOST" : "CLIENT", self, at.X, at.Y, at.Z,
+                        read ? "" : " (unread)", sKeylessPileDeaths);
+            }
+        }
+        return;
+    }
     // The world-load episode gate. While a joining client is inside its own world load, the game
     // destroys and recreates every keyed prop as local net-zero rebuild churn, which the client
     // re-binds by key. The destroy patch catches those destroys and would broadcast them, and the

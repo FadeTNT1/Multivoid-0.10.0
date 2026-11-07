@@ -149,6 +149,18 @@ anywhere in the world; widening the camera test to every player's body instead w
 stream-out beside a remote player as a depletion. The dispensed item is born keyless and grabbed the same frame; the held-edge broadcast mints it a
 key and spawns the mirror on every peer (`coop/props/trash_collect_sync`).
 
+Which dispenser piles exist is the host's. A client records every key the host names -- its connect
+snapshot's rows (one per live pile), its live collects, and any pile it spawned on the wire (a mirror
+row) -- and once the snapshot burst has gone quiet (5 s) in a settled index after the join's load tail,
+it dissolves every indexed pile the host did not name, locally and echo-suppressed, under a valve (the
+host must name at least half the client's piles and the doom list stays under a quarter of them or 8,
+else nothing is dissolved). After that reconcile a pile indexed later that the host never names within
+5 s is dissolved the same way: a client's own birth, or a copy the host lost. A world change voids the
+judgement until the next snapshot. The host's half: a client collect on a key this world has no pile for
+is parked like any other, and when it expires unresolved the host sends that client the keyed destroy.
+A dispenser pile with no key and no element row cannot be named by any message; each full index pass
+counts them and the destroy seam logs one's death, so a log shows whether a world holds any.
+
 The vacuum and the broom put their items on the floor: each pop spawns a real actor at a rolled
 transform, one per vacuum call and up to three per broom stroke, and the pile is destroyed once
 both counters reach zero. A client's broom authors none of that, since the host runs every stroke
@@ -299,7 +311,8 @@ second bracket) is claimed for the sweep and converged to the row's pose.
 |---|---|
 | A clump has its collision off for its whole life -- carried and in flight -- so a player walks through the ball someone else is holding or has thrown. The pile it lands as has the game's own collision | `[V]` `coop/props/trash_mirror` |
 | Trash dropped into a garbage container updates the container on the host only: every client's container has its brain cancelled, so none of them -- not even the one whose player dropped the trash -- ever learns what is inside it, and the two pickup flags the game writes from those contents stay frozen | `[V]` `coop/interactables/garbage_sync`, and the cancelled Blueprint body read from the cook |
-| Dispenser piles born by an event carry per-process keys and never resolve across peers | `[V]` `coop/props/trash_pile_sync` |
+| Dispenser piles born by an event carry per-process keys and never resolve across peers; a client dissolves its copy as one the host never named, so such a pile shows on the host alone | `[V]` `coop/props/trash_pile_sync` |
+| A keyless dispenser pile (no key, no element row) cannot be named on the wire: its counters and its death stay on the peer that changed them. Logged (`KEYLESS dispenser pile`), not fixed | `[V]` code: `coop/props/trash_pile_sync`, `coop/props/prop_destroy_seam` |
 | A client's vacuum pops a dispenser pile a round trip late on that client: its own `vacuumed` is refused and the item, the counter drop and the depletion arrive with the host's messages. The vacuum's pull on loose props and what it gathers into itself are each peer's own | `[?]` code: `coop/items/vacuum_pile_intent` refuses the pile's `vacuumed` alone; not run in game |
 | A client's bag is spent whatever the host answers: the tool and the roll's count are per-peer state with no lane, so the client spends its own on the press and a host refusal -- out of reach, a target of another type -- costs it that bag | `[V]` code: `coop/props/pack_trash_intent` sends and spends in the same press, and the host's deny paths answer no one |
 | A bagged pile makes its bag on the host, so a client sees it a round trip late, and the game's own pack sound and hint play on the packing client alone | `[V]` code: `coop/props/pack_trash_intent` refuses the client's body and the bag rides `PropSpawn` |

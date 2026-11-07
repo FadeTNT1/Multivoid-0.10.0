@@ -10,8 +10,12 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/props/join_membership_sweep.h"   // HasLoadTailQuiesced: the reconcile waits out the join
 #include "coop/props/prop_element_tracker.h"
+#include "coop/props/prop_lifecycle.h"          // DestroyLocalProp: the echo-suppressed dissolve
+#include "coop/props/remote_prop.h"             // ResolveMirrorEidByActor: a host-expressed pile
 #include "coop/props/trash_pile_pending.h"
+#include "coop/element/element.h"               // kInvalidId
 #include "coop/session/net_pump.h"             // TickSerial: the authored-death window's clock
 
 #include "ue_wrap/engine/engine.h"
@@ -66,6 +70,39 @@ std::unordered_set<std::wstring> g_depletedKeys;       // depleted THIS session 
 std::unordered_map<std::wstring, uint64_t> g_authoredDeaths;
 constexpr uint64_t kAuthoredDeathTicks = 180;
 bool g_installed = false;
+
+// HOST AUTHORITY over which dispenser piles exist, on a client. The host's world is the only one
+// whose piles are real: a client's pile the host never had (a save-loaded copy the join sweep let
+// through, or a pile the client's own Blueprint made) shows "Trash pile: N" to that client alone,
+// takes no counter traffic and dies on no message, because every message names the host's key.
+// The client learns the host's set from what the host already sends -- its connect snapshot rows
+// (one TrashPileState per live pile, adopt=1), its live collects, and the piles it spawned on the
+// wire (a mirror row) -- and dissolves the rest, locally and echo-suppressed: the host never had
+// them, so there is nothing to tell it.
+std::unordered_set<std::wstring> g_hostKeys;           // client: every key the host has named
+Clock::time_point g_lastHostSnapshotAt{};               // client: the newest adopt=1 row's arrival
+bool     g_reconcilePending = false;                    // client: a snapshot arrived and is not yet reconciled
+bool     g_reconcileDone    = false;                    // client: the steady dissolve is live for g_reconcileGen
+uint32_t g_reconcileGen     = 0;                        // the world gen the reconcile judged
+// A pile first indexed after the reconcile that the host has not named: when it was first seen, so the
+// host's spawn (its mirror row) and its first packets get a moment to land before it is dissolved.
+std::unordered_map<std::wstring, Clock::time_point> g_unnamedSince;
+// The snapshot is one burst on one ordered lane, so this long without a row means it has all landed.
+constexpr auto kSnapshotQuiet   = std::chrono::seconds(5);
+constexpr auto kUnnamedGrace    = std::chrono::seconds(5);
+// The valve: a legitimate divergence is a handful of piles. A host set under half the client's index,
+// or a doom list over a quarter of it, is an incomplete snapshot, and nothing is dissolved.
+constexpr size_t kDoomFloor = 8;
+
+// HOST: the client slot that reported a collect on a key this host has no pile for. When the parked
+// report expires unresolved, the host answers that slot with the keyed destroy -- the pile the client
+// is pulling trash from is one the host's world does not have.
+std::unordered_map<std::wstring, uint8_t> g_unknownReportSlot;
+
+// Keyless dispenser piles: no key and no element row, so no message can name one, and a host
+// depletion of one reaches no peer. Counted per pass so the log says whether this world has any.
+size_t g_keylessSeen = 0;
+size_t g_keylessLogged = static_cast<size_t>(-1);
 Clock::time_point g_nextPoll{};
 Clock::time_point g_nextRebuild{};
 
@@ -147,13 +184,16 @@ bool IndexCurrent() { return g_indexGen == ue_wrap::world_identity::Generation()
 struct ScanFound { std::wstring key; void* obj; int32_t idx; ue_wrap::FVector loc; };
 std::vector<ScanFound> g_scanFound;  // pass scratch (GT-only)
 
-void HubPassBegin(void*, bool) { g_scanFound.clear(); }
+size_t g_passKeyless = 0;  // keyless piles this pass matched (pass scratch)
+bool   g_passFull = false;
+
+void HubPassBegin(void*, bool isFull) { g_scanFound.clear(); g_passKeyless = 0; g_passFull = isFull; }
 
 void HubMatch(void*, void* obj) {
     if (!R::IsLive(obj)) return;
     if (R::NameStartsWith(R::NameOf(obj), L"Default__")) return;
     std::wstring key = UP::GetInteractableKeyString(obj);
-    if (key.empty() || key == L"None") return;
+    if (key.empty() || key == L"None") { ++g_passKeyless; return; }
     ue_wrap::FVector loc{};
     if (!ue_wrap::engine::TryGetActorLocation(obj, loc)) return;   // no read, no last position
     g_scanFound.push_back({ std::move(key), obj, R::InternalIndexOf(obj), loc });
@@ -175,6 +215,16 @@ size_t HubPassComplete(void*, bool /*isFull*/, uint32_t worldGen) {
     }
     g_indexGen = worldGen;
     g_scanFound.clear();
+    // Only a full pass sees the whole population; a tail pass's count is a slice of it.
+    if (g_passFull) {
+        g_keylessSeen = g_passKeyless;
+        if (g_keylessSeen != g_keylessLogged) {
+            g_keylessLogged = g_keylessSeen;
+            if (g_keylessSeen > 0)
+                UE_LOGW("trash_pile: %zu KEYLESS dispenser pile(s) live -- no key and no element row, so "
+                        "no peer can be told of their counters or their death", g_keylessSeen);
+        }
+    }
     if (g_index.size() != before) {
         UE_LOGI("trash_pile: indexed %zu pile(s), keysHash=0x%llX", g_index.size(),
                 static_cast<unsigned long long>(KeysHash(g_index)));
@@ -243,6 +293,66 @@ void ApplyToLive(Entry& e, const std::wstring& key, int16_t wa, int16_t wb, bool
             na, nb, key.c_str(), la, lb, fromSlot, adopt ? ", adopt" : "");
 }
 
+coop::net::PropDestroyPayload KeyedDestroy(const std::wstring& key) {
+    coop::net::PropDestroyPayload dp{};
+    dp.key.len = 0;
+    for (size_t i = 0; i < key.size() && i < 31; ++i)
+        dp.key.data[dp.key.len++] = static_cast<char>(key[i]);
+    dp.elementId = 0;  // by key: a save actor's key is its cross-peer identity
+    return dp;
+}
+
+// A pile the host has spawned on the wire is bound to a mirror row on this client: the host named it,
+// whether or not a counter packet ever did.
+bool IsHostMirror(void* actor) {
+    return coop::remote_prop::ResolveMirrorEidByActor(actor, /*wireMirrorOnly=*/true) !=
+           coop::element::kInvalidId;
+}
+
+// Client: drop a pile the host's world does not have. Unwatched first (the death-watch must not call
+// it a depletion and broadcast it), then destroyed echo-suppressed: the host never had it, so there is
+// nothing to tell anyone. `why` names the path for the log.
+void DissolveLocalPile(std::unordered_map<std::wstring, Entry>::iterator it, const char* why) {
+    const std::wstring key = it->first;
+    void* actor = it->second.actor;
+    int32_t a = -1, b = -1;
+    UP::ReadTrashPileAmounts(actor, a, b);
+    UE_LOGW("trash_pile: CLIENT dissolved pile key='%ls' at (%.1f,%.1f,%.1f) A=%d B=%d -- %s; the host's "
+            "world has no pile by this key (host authority: a client pile the host never named is not real)",
+            key.c_str(), it->second.x, it->second.y, it->second.z, a, b, why);
+    g_pending.Erase(key);
+    g_unnamedSince.erase(key);
+    g_index.erase(it);
+    coop::prop_lifecycle::DestroyLocalProp(actor, /*deferred=*/false);
+}
+
+// Client: once the host's connect snapshot has landed in full, every indexed pile it did not name is
+// a divergence. Runs once per snapshot, under the valve; a pile the host spawned on the wire (a
+// mirror row) is named by that spawn and joins the set instead.
+bool ReconcileAgainstHost() {
+    std::vector<std::unordered_map<std::wstring, Entry>::iterator> foreign;
+    size_t live = 0;
+    for (auto it = g_index.begin(); it != g_index.end(); ++it) {
+        if (!R::IsLiveByIndex(it->second.actor, it->second.idx)) continue;  // the death-watch owns it
+        ++live;
+        if (g_hostKeys.count(it->first)) continue;
+        if (IsHostMirror(it->second.actor)) { g_hostKeys.insert(it->first); continue; }
+        foreign.push_back(it);
+    }
+    const size_t cap = (live / 4 > kDoomFloor) ? live / 4 : kDoomFloor;
+    if (g_hostKeys.size() * 2 < live || foreign.size() > cap) {
+        UE_LOGW("trash_pile: CLIENT reconcile ABORTED -- the host named %zu pile(s) against %zu live here, "
+                "%zu unnamed (cap %zu): an incomplete snapshot, not a divergence; nothing dissolved",
+                g_hostKeys.size(), live, foreign.size(), cap);
+        return false;
+    }
+    for (auto it : foreign) DissolveLocalPile(it, "absent from the host's connect snapshot");
+    UE_LOGI("trash_pile: CLIENT reconcile vs host snapshot -- %zu live here, host named %zu, %zu dissolved; "
+            "a pile indexed later that the host never names is dissolved too",
+            live, g_hostKeys.size(), foreign.size());
+    return true;
+}
+
 }  // namespace
 
 void Install(coop::net::Session* session) {
@@ -268,6 +378,18 @@ void OnReliable(const coop::net::TrashPileStatePayload& payload, uint8_t senderP
     if (VerboseLog())
         UE_LOGI("trash_pile: recv key='%ls' A=%d B=%d %s from slot %u", key.c_str(), payload.amountA,
                 payload.amountB, adopt ? "snapshot(adopt)" : "collect", senderPeerSlot);
+    auto* s = g_session.load(std::memory_order_acquire);
+    const bool isClient = s && s->role() == coop::net::Role::Client;
+    if (isClient && senderPeerSlot == 0) {
+        // The host named this pile, so it exists in the host's world. A snapshot row also re-arms the
+        // reconcile: it runs once the burst has gone quiet.
+        g_hostKeys.insert(key);
+        g_unnamedSince.erase(key);
+        if (adopt) {
+            g_lastHostSnapshotAt = Clock::now();
+            g_reconcilePending = true;
+        }
+    }
     // A stale-gen index holds another world's piles, so treat it as a miss: the apply then PARKS
     // in g_pending and lands after the hub's next pass, never on a dead-world actor.
     auto it = IndexCurrent() ? g_index.find(key) : g_index.end();
@@ -279,6 +401,9 @@ void OnReliable(const coop::net::TrashPileStatePayload& payload, uint8_t senderP
     // into it by component-wise minimum whether or not a snapshot is parked (the entry stays adopt), so
     // the pile lands at the newest counts when it appears.
     g_pending.Offer(key, payload.amountA, payload.amountB, adopt, Clock::now() + kPendingTtl);
+    // A client collecting from a pile this host has not indexed: remembered, so the expiry can answer it.
+    if (!isClient && s && senderPeerSlot != 0 && senderPeerSlot < coop::net::kMaxPeers)
+        g_unknownReportSlot[key] = senderPeerSlot;
     if (VerboseLog()) {
         const PendingEntry* p = g_pending.Find(key);
         UE_LOGI("trash_pile: parked key='%ls' -> A=%d B=%d%s (pile not resolved yet)", key.c_str(),
@@ -303,6 +428,8 @@ void NotifyWireDestroy(const std::wstring& key) {
         UE_LOGI("trash_pile: wire destroy for key='%ls' -- unwatched (no re-broadcast)", key.c_str());
     }
     g_pending.Erase(key);
+    g_unknownReportSlot.erase(key);
+    g_unnamedSince.erase(key);
 }
 
 void QueueConnectBroadcastForSlot(int peerSlot) {
@@ -370,9 +497,28 @@ void Tick(bool inTransition) {
             auto idx = g_index.find(key);
             if (idx != g_index.end() && R::IsLiveByIndex(idx->second.actor, idx->second.idx)) {
                 ApplyToLive(idx->second, key, p.a, p.b, p.adopt, 0);
+                g_unknownReportSlot.erase(key);
                 return true;
             }
             if (now < p.deadline) return false;
+            // HOST: a client has been collecting from a pile this world has never had. Its copy is the
+            // divergence, so it is told to drop it, by the key it reported -- the same keyed destroy a
+            // depletion sends, to that slot alone.
+            if (s->role() == coop::net::Role::Host && idx == g_index.end() && !inTransition) {
+                auto rep = g_unknownReportSlot.find(key);
+                if (rep != g_unknownReportSlot.end()) {
+                    const int slot = rep->second;
+                    g_unknownReportSlot.erase(rep);
+                    if (s->IsSlotConnected(slot)) {
+                        coop::net::PropDestroyPayload dp = KeyedDestroy(key);
+                        s->SendReliableToSlot(slot, coop::net::ReliableKind::PropDestroy, &dp, sizeof(dp));
+                        UE_LOGW("trash_pile: HOST slot %d collected from pile key='%ls' that this world has no "
+                                "pile for -- sent it the keyed destroy (host authority)", slot, key.c_str());
+                        return true;
+                    }
+                }
+            }
+            g_unknownReportSlot.erase(key);
             // An event-cluster pile with a peer-local key, or a pile whose sublevel never streamed in. The
             // entry holds no actor, so the key and the counts are all there is to report.
             uint32_t held = 0;
@@ -386,6 +532,28 @@ void Tick(bool inTransition) {
             return true;
         });
     }
+    // CLIENT: the host's set of piles is the truth. A world change voids the judgement (its piles are
+    // another world's, and the host's next snapshot names them); a snapshot that has gone quiet, in a
+    // settled index, after the join's load tail, is reconciled once.
+    const bool isClient = s->role() == coop::net::Role::Client;
+    if (isClient) {
+        if (g_reconcileDone && g_reconcileGen != g_indexGen) {
+            g_reconcileDone = false;
+            g_hostKeys.clear();
+            g_unnamedSince.clear();
+        }
+        if (g_reconcilePending && !inTransition && g_summaryDone &&
+            now - g_lastHostSnapshotAt >= kSnapshotQuiet &&
+            coop::join_membership_sweep::HasLoadTailQuiesced()) {
+            g_reconcilePending = false;
+            // An aborted reconcile leaves the steady dissolve off too: it would otherwise take, a pile at a
+            // time, exactly the piles the valve just refused to judge.
+            g_reconcileDone = ReconcileAgainstHost();
+            g_reconcileGen = g_indexGen;
+            g_unnamedSince.clear();
+        }
+    }
+
     if (now < g_nextPoll) return;
     g_nextPoll = now + kPollEvery;
 
@@ -417,8 +585,25 @@ void Tick(bool inTransition) {
                         authored ? "a verb this peer ran" : "near this peer's camera");
             }
             g_pending.Erase(it->first);
+            g_unnamedSince.erase(it->first);
             it = g_index.erase(it);
             continue;
+        }
+        // CLIENT, after the reconcile: a pile indexed since that the host has never named -- no snapshot
+        // row, no packet, no wire spawn -- is this client's own birth, or a copy the host lost. Given a
+        // moment for the host's spawn row to bind it, it is dissolved.
+        if (isClient && g_reconcileDone && !inTransition && !g_hostKeys.count(it->first)) {
+            if (IsHostMirror(e.actor)) {
+                g_hostKeys.insert(it->first);
+                g_unnamedSince.erase(it->first);
+            } else {
+                auto [u, fresh] = g_unnamedSince.try_emplace(it->first, now);
+                if (!fresh && now - u->second >= kUnnamedGrace) {
+                    auto doomed = it++;
+                    DissolveLocalPile(doomed, "indexed after the reconcile and never named by the host");
+                    continue;
+                }
+            }
         }
         int32_t a = 0, b = 0;
         if (UP::ReadTrashPileAmounts(e.actor, a, b)) {
@@ -452,6 +637,12 @@ void OnDisconnect() {
     g_pending.Clear();
     g_depletedKeys.clear();
     g_authoredDeaths.clear();
+    g_hostKeys.clear();
+    g_unnamedSince.clear();
+    g_unknownReportSlot.clear();
+    g_reconcilePending = false;
+    g_reconcileDone = false;
+    g_lastHostSnapshotAt = {};
     g_installed = false;
     g_summaryGen = 0xFFFFFFFFu;
     g_summaryDone = true;
