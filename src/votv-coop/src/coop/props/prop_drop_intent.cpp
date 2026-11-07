@@ -268,8 +268,7 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
     }
     if (coop::dev::container_route_census::IsEnabled()) g_lastPlace.Set(actor);   // the census drill's read, armed by its row only
     g_pending.push_back(PendingPlace{actor, R::InternalIndexOf(actor), 0, fromContainerExtract,
-                                     playerAuthored, unpackAuthored});
-                                     playerAuthored, breakGib});
+                                     playerAuthored, unpackAuthored, breakGib});
     if (breakGib)
         UE_LOGI("[PROP-DROP] CLIENT enqueued BREAK-GIB birth actor=%p cls='%ls' (a gib of this client's own break of "
                 "'%ls'; admitted at drain)", actor, R::ClassNameOf(actor).c_str(),
@@ -568,8 +567,7 @@ void Tick(coop::net::Session* session) {
         // else, so these foods exist nowhere but here unless they go as intents -- and a keyed food
         // the host lacks refuses every bite. An ordinary drop intent: they fall where they were born.
         if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !e.unpackSpawn &&
-            !isNotebookSheet) {
-        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !e.breakGib && !isNotebookSheet) {
+            !e.breakGib && !isNotebookSheet) {
             probe::NoteDrainExit(e.actor, "not-a-place-nor-whitelisted-birth", e.tries, key);
             continue;
         }
