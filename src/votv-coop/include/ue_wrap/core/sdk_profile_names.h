@@ -1824,6 +1824,56 @@ inline constexpr const wchar_t* InsanityPropClass = L"insanityProp_C";
 // this peer has loaded yet (ue_wrap::prop::ResolveOrLoadPropClass).
 inline constexpr const wchar_t* PropsContentDir = L"/Game/objects/";
 inline constexpr const wchar_t* BlueprintGeneratedClassName = L"BlueprintGeneratedClass";
+// The persistent actors a held tool leaves behind (coop/items/save_actor_sync, ue_wrap/actors/save_actor). Each is an
+// actor_save_C, NOT a prop_C, so no prop lane sees it. Read from the 0.10.0 bytecode capture (the producer, then the
+// class): prop_stickers_C lmb -> sticker_C (attaches by `attachto`, resolved in its processKeys); prop_candle_C lmb ->
+// candle_C (its action and its `dest` turn it back into prop_candle_C); prop_xmaslights_C lmb -> xmaslight_C (later
+// clicks run addLight on it, rmb runs finish); prop_welder_C lmb -> weld_C (completed by weld); prop_nailgun_C's
+// nailProjectile_C -> its `nailType` (nail_C, nail_pin_C), nailNail building a physics constraint between two props;
+// prop_ducttape_C -> portal_phys_tapedoor_C; prop_rug_C -> rug_C; prop_snowballRoll_C -> snowman_C;
+// prop_wallbuilder_C -> customwall_unfinished_C, whose buildWall converts itself into customwall_C; prop_jumpercable_C
+// -> jumpercable_C. Every one serializes itself through actor_save_C's getData / loadData and resolves any attach key
+// in its own processKeys.
+//
+// Deliberately absent: poster_C (coop/items/poster_sync owns it), hook_C and its rope (coop/items/hook_sync), the cig
+// family (cig_C attaches itself to the LOCAL player's camera and binds the local input, so a mirror would put a cigarette
+// in every viewer's mouth), fire_C (spread by the host's own breaks and burns), wire_C and printedObject_C (each keeps
+// its own key and save flag, off actor_save_C), ceilingStars_C (no save interface), transmittedSignal_C (the signal
+// sender's own tick calls transmit, so every peer holding the sender mints one), and the world's own actor_save
+// spawners (beehiveBranch_C, hexPillar_C, erieRise_C, ufoAlienDropper_C), which every peer runs for itself.
+inline constexpr const wchar_t* kPlayerDeployedSaveActorClasses[] = {
+    L"sticker_C",
+    L"candle_C",
+    L"xmaslight_C",
+    L"weld_C",
+    L"nail_C",
+    L"nail_pin_C",
+    L"portal_phys_tapedoor_C",
+    L"rug_C",
+    L"snowman_C",
+    L"customwall_unfinished_C",
+    L"customwall_C",
+    L"jumpercable_C",
+};
+// Of those, the classes whose processKeys builds a physics constraint between two props (nail_C's nailNail, reached
+// through processKeys' frameDelay): a mirror never runs processKeys, and a client's own one is replaced by the host's
+// mirror, so the constraint exists on the host alone (docs/deployables.md, the fifth mirror rule).
+inline constexpr const wchar_t* kSaveActorHostConstraintClasses[] = {
+    L"nail_C",
+    L"nail_pin_C",
+};
+// Of those, the classes that destroy THEMSELVES on every peer as a step of their own lifecycle (buildWall spawns the
+// finished wall and destroys the scaffold), so a client's copy going is never a player's verb to forward.
+inline constexpr const wchar_t* kSaveActorSelfRetiringClasses[] = {
+    L"customwall_unfinished_C",
+};
+inline constexpr const wchar_t* ActorSaveClass = L"actor_save_C";
+inline constexpr const wchar_t* ActorSaveSkipSaveProp = L"skipSave";   // ignoreSave returns it; the save walk asks it
+inline constexpr const wchar_t* ActorSaveGetKeyFn = L"getKey";         // lib_C::assignKey mints a None key and files it
+inline constexpr const wchar_t* ActorSaveGetKeyParam = L"key";
+inline constexpr const wchar_t* ActorSaveGetDataFn = L"getData";
+inline constexpr const wchar_t* ActorSaveLoadDataFn = L"loadData";
+inline constexpr const wchar_t* ActorSaveProcessKeysFn = L"processKeys";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

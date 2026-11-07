@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 313;
+inline constexpr uint16_t kProtocolVersion = 319;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1474,6 +1474,22 @@ enum class ReliableKind : uint8_t {
     // native actor at a row's place or spawns one. The underground loot mounds are not in it. Never relayed; a client's
     // copy is refused at the host's receive edge. BlobChunkPayload.
     DigState = 245,
+
+    // CLIENT->HOST: a persistent actor a held tool of this client's player left behind, or what happened to one
+    // (coop::save_actor_sync): op 1 a birth (the actor's own getData record, its key and the client's request id), op 2
+    // a state (the record again, after one of the class's own mutators ran), op 3 a destroy (the key). The classes are
+    // the actor_save_C allowlist of profile::name::kPlayerDeployedSaveActorClasses; the host judges class, reach and
+    // budget and runs the spawn, apply or destroy on its own copy as the sole author. Never relayed; not pre-world.
+    // Late join: nothing to replay. BlobChunkPayload.
+    SaveActorIntent = 246,
+
+    // HOST->ALL: those actors as the host holds them (coop::save_actor_sync): op 1 a birth (owner slot, the request id
+    // it answers or 0, the record under the canonical key), op 2 a state (the record), op 3 a destroy (the key), op 4 a
+    // refusal of one client's birth (to that client alone, by request id). A receiver binds its own copy on the echo of
+    // its own birth, adopts a save-loaded copy by key, or spawns a mirror kept out of the save; a destroy goes by key.
+    // Every birth this session made, and the keys destroyed since, go to a joiner at its ready edge. Never relayed; a
+    // client's copy is refused at the host's receive edge. BlobChunkPayload.
+    SaveActorState = 247,
 };
 
 #pragma pack(push, 1)
