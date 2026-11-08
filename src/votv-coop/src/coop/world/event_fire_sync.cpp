@@ -29,6 +29,7 @@
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/engine/world_identity.h"
 #include "ue_wrap/facts/function_row.h"
+#include "ue_wrap/world/keyed_objects.h"
 #include "ue_wrap/world/world_singleton.h"
 #include "ue_wrap/world/daynightcycle.h"
 
@@ -95,7 +96,14 @@ struct PendingFire {
     bool activeOverride = false;
     bool attempted = false;    // one replay try ran (paces the next)
     std::chrono::steady_clock::time_point lastAttempt{};
+    // The first try that found the row's keyed actor missing (see RequiredKey); zero = not waiting on one.
+    std::chrono::steady_clock::time_point keyWaitSince{};
+    unsigned keyWaitLogs = 0;  // missing-key lines said for this row (bounded)
 };
+// How long a replay waits for the keyed actor its trigger reaches (the level-placed treehouse_C) before the
+// row is dropped, loudly: the trigger would otherwise show the game's own "Invalid actor and actor with the key
+// does not exist" hint on this peer and change nothing.
+constexpr auto kKeyWaitLimit = std::chrono::seconds(90);
 std::deque<PendingFire> g_pending;    // replays waiting for the eventer (join window)
 // EventFire is pre-world-sendable, so a joiner can queue fires for its whole load window. The
 // cap is the table plus specials plus margin; duplicates are skipped at queue time, so it is
@@ -324,6 +332,15 @@ void OnRunEventPost(const sg::Call& call) {
     ++g_hostFireSeq;
     UE_LOGI("event_fire: host fire #%u runEvent('%s') origin=%s -- broadcasting",
             g_hostFireSeq, name.c_str(), origin);
+    // The host's own copy of a keyed row: said at the fire, because the trigger's hint (if any) shows one
+    // frame later and the log is the only record of whether the keyed actor was there to take it.
+    if (const wchar_t* key = RequiredKey(name)) {
+        const bool present = ue_wrap::keyed_objects::Resolve(key) != nullptr;
+        if (present) UE_LOGI("event_fire: host '%s' -- keyed actor '%ls' present", name.c_str(), key);
+        else UE_LOGW("event_fire: host '%s' -- NO actor under save key '%ls' (key table %s); the trigger will "
+                     "show \"Invalid actor and actor with the key does not exist:%ls\"", name.c_str(), key,
+                     ue_wrap::keyed_objects::Available() ? "readable" : "not readable", key);
+    }
     Broadcast(FireKind::RunEvent, name);
 }
 
@@ -375,7 +392,7 @@ bool DropIfTerminal(ReplayStep step, const PendingFire& pf) {
 }
 
 // The client replay executor, game thread.
-ReplayStep TryReplay(const PendingFire& pf) {
+ReplayStep TryReplay(PendingFire& pf) {
     if (!ResolvePass() || !EventerOf(ue_wrap::world_singleton::Gamemode()))
         return g_resolveFailed ? ReplayStep::PermFailed : ReplayStep::NotReady;
     // A replay dispatches only into the CURRENT gameplay world: while it is Unknown or
@@ -399,6 +416,32 @@ ReplayStep TryReplay(const PendingFire& pf) {
             UE_LOGI("event_fire: '%s' already in local passEvents (save carried it) -- skipping",
                     pf.name.c_str());
             return ReplayStep::Done;
+        }
+    }
+    // A row whose trigger reaches a keyed level actor (the treehouse build stages -> treehouse_C) waits until
+    // that actor is filed in the game's key table: the trigger's own object ref and then getObjectFromKey are
+    // its only ways to the actor, and with neither it shows the red hint and does nothing.
+    if (pf.kind == FireKind::RunEvent) {
+        if (const wchar_t* key = RequiredKey(pf.name)) {
+            if (!ue_wrap::keyed_objects::Resolve(key)) {
+                const auto now = std::chrono::steady_clock::now();
+                if (pf.keyWaitSince == std::chrono::steady_clock::time_point{}) pf.keyWaitSince = now;
+                if (now - pf.keyWaitSince >= kKeyWaitLimit) {
+                    UE_LOGE("event_fire: client replay of '%s' DROPPED -- no actor under save key '%ls' after %lld s "
+                            "(treehouse_C absent from this world, or its key never filed); the game would show "
+                            "\"Invalid actor and actor with the key does not exist:%ls\"",
+                            pf.name.c_str(), key,
+                            static_cast<long long>(std::chrono::duration_cast<std::chrono::seconds>(
+                                now - pf.keyWaitSince).count()), key);
+                    return ReplayStep::Done;
+                }
+                if (pf.keyWaitLogs++ < 3)
+                    UE_LOGW("event_fire: client replay of '%s' waits -- no actor under save key '%ls' yet "
+                            "(key table %s)", pf.name.c_str(), key,
+                            ue_wrap::keyed_objects::Available() ? "readable" : "not readable");
+                return ReplayStep::NotReady;
+            }
+            UE_LOGI("event_fire: client replay of '%s' -- keyed actor '%ls' present", pf.name.c_str(), key);
         }
     }
     const std::wstring w(pf.name.begin(), pf.name.end());

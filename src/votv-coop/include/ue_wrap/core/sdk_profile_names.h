@@ -538,6 +538,12 @@ inline constexpr const wchar_t* MorningUfoFlyProp   = L"fly";
 // npc_world_enum. The firetanks stay out of that row: a firetank_C mirror's BeginPlay arms five AI timers
 // (update, senseupdate, fire, speak, makehealthnoise) that no row refuses yet.
 inline constexpr const wchar_t* BoarInvasionClass = L"boarInvasion_C";
+// The save key of the level-placed treehouse_C. The event_treehouse_0 / event_treehouse_build_N triggers hold the
+// treehouse as an object ref and fall back to mainGamemode_C::getObjectFromKey(this key) when the ref is invalid;
+// with both empty, triggerbase_C::runAll shows the hint "Invalid actor and actor with the key does not exist:treehouse".
+// The 0.10.0 capture: nothing in the game spawns a treehouse_C (it is only ever cast from getObjectFromKey), and its
+// key is filed by actor_save_C's construction script (getKey -> lib_C::assignKey).
+inline constexpr const wchar_t* TreehouseSaveKey = L"treehouse";
 // The blue brain cheese (prop_food_blueBrainCheese_C, a prop_food_C whose ReceiveTick replaces the food tick): every
 // 45 to 75 s it rolls 10 %, and with a pawn inside its sphere (else, at 50 %, another gore slither) it hatches into a
 // cheese gore slither (npc_goreslither_cheese_C, a child of npc_goreSlither_C that only blanks setMesh and preDied)
