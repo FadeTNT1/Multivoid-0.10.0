@@ -7,6 +7,7 @@
 #include "coop/element/prop.h"
 #include "coop/net/session.h"
 #include "coop/props/prop_element_tracker.h"
+#include "coop/props/prop_echo_suppress.h"  // IsMirrorSpawn: a panel prop this peer did not author
 #include "coop/props/prop_lifecycle.h"  // DestroyLocalProp (echo-suppressed)
 #include "coop/props/remote_prop.h"     // IsActorUnderAnyDrive: a panel a remote player carries
 
@@ -23,6 +24,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 namespace coop::physmods_sync {
@@ -69,6 +71,29 @@ constexpr uint8_t kOpDeny      = 3;
 constexpr uint8_t kOpPanelSet       = 4;
 constexpr uint8_t kOpPanelCanonical = 5;
 
+// A panel put back is authored by the one who carries it. Right after a take-off the loose panel prop sits
+// at the desk (it is born there, then the carrier's hand moves it), overlapping the lid triggers on every
+// peer; a put-back inside this window of a take-off is the spawn point talking, not a player.
+constexpr auto kPanelGrace = std::chrono::milliseconds(1500);
+// HOST: when each panel last came off and from whom, for the backstop on a client's PUT BACK op.
+struct TakeOffRec {
+    Clock::time_point at{};
+    uint8_t           slot = 0;
+    bool              valid = false;
+};
+TakeOffRec g_takeOff[4];  // PM::kPanels
+// Each back panel prop this peer's desk has overlapped, and when it first did (game thread). The first
+// overlap is the spawn point's; a prop that overlaps again later was carried back.
+std::unordered_map<void*, Clock::time_point> g_panelFirstSeen;
+Clock::time_point g_lastRefusalLog{};
+
+void LogPutBackRefused(const char* reason) {
+    const auto now = Clock::now();
+    if (now - g_lastRefusalLog < std::chrono::seconds(2)) return;
+    g_lastRefusalLog = now;
+    UE_LOGI("physmods: put-back refused -- %s", reason);
+}
+
 void SendOp(coop::net::Session* s, uint8_t op, int slot, uint8_t byte) {
     // CLIENT-only: the host's organic changes never ride ops -- its live array
     // IS the canonical. A host that self-applied an already-applied op hit the
@@ -111,6 +136,7 @@ void SendLocalPanelEdit(coop::net::Session* s, const bool before[PM::kPanels], c
     for (int i = 0; i < PM::kPanels; ++i) {
         if (before[i] == live[i]) continue;
         changed = true;
+        if (isHost && !live[i]) g_takeOff[i] = {Clock::now(), 0, true};
         UE_LOGI("physmods: local back panel %d %s -- %s", i, live[i] ? "PUT BACK" : "TAKEN OFF",
                 isHost ? "canonical will carry it" : "op to host");
         if (!isHost) {
@@ -263,11 +289,29 @@ sg::Verdict OnDeskOverlapPre(const sg::Call& call) {
         if (g_overlapActorOff >= 0) {
             void* actor = *reinterpret_cast<void* const*>(call.locals + g_overlapActorOff);
             auto* s = g_session.load(std::memory_order_acquire);
-            if (actor && s && s->connected() && coop::remote_prop::IsActorUnderAnyDrive(actor) &&
+            if (actor && s && s->connected() &&
                 R::ClassNameOf(actor).rfind(ue_wrap::profile::name::DeskBackPanelClassPrefix, 0) == 0) {
-                UE_LOGI("physmods: the desk does not take a back panel a remote player carries -- its carrier's "
-                        "world does");
-                return sg::Verdict::Cancel;
+                // The native put-back runs only for a panel this peer's own player carries or released. A
+                // mirror of another peer's prop, a panel a remote player carries, and a panel at the spawn
+                // point of its own take-off are refused: the carrier's world authors the put-back, and
+                // this peer hears of it as the panel canonical and the relayed destroy.
+                const auto now = Clock::now();
+                if (g_panelFirstSeen.size() > 32) {
+                    for (auto it = g_panelFirstSeen.begin(); it != g_panelFirstSeen.end();)
+                        it = (now - it->second > std::chrono::seconds(60)) ? g_panelFirstSeen.erase(it) : std::next(it);
+                }
+                const auto seen = g_panelFirstSeen.emplace(actor, now);
+                const char* why = nullptr;
+                if (coop::prop_echo_suppress::IsMirrorSpawn(actor))
+                    why = "the prop is a mirror of another peer's panel";
+                else if (coop::remote_prop::IsActorUnderAnyDrive(actor))
+                    why = "a remote player carries the panel";
+                else if (now - seen.first->second < kPanelGrace)
+                    why = "the panel is at the spawn point of its take-off";
+                if (why) {
+                    LogPutBackRefused(why);
+                    return sg::Verdict::Cancel;
+                }
             }
         }
     }
@@ -386,6 +430,15 @@ void OnPhysMods(const coop::net::PhysModsStatePayload& p, uint8_t senderSlot) {
         }
         bool on[PM::kPanels];
         if (!PM::ReadPanels(on)) return;
+        TakeOffRec& rec = g_takeOff[p.slot];
+        if (p.byte != 0 && rec.valid && rec.slot != senderSlot && Clock::now() - rec.at < kPanelGrace) {
+            // Backstop: a put-back from a peer that did not take the panel off, just after it came off, is
+            // that peer's desk meeting the spawn point. The author gets the canonical back.
+            LogPutBackRefused("host ignored a put-back from a slot that did not take the panel off");
+            if (senderSlot != 0 && senderSlot < coop::net::kMaxPeers) HostBroadcastPanels(s, senderSlot);
+            return;
+        }
+        if (p.byte == 0) rec = {Clock::now(), senderSlot, true};
         on[p.slot] = p.byte != 0;  // last writer wins; the canonical goes back to everyone, the author too
         if (!AdoptPanels(on)) {
             UE_LOGW("physmods: host panel write failed -- panel %u not applied", p.slot);
@@ -519,6 +572,8 @@ void OnDisconnect() {
     g_havePendingCanon = false;
     g_havePendingPanels = false;
     g_inFlight.clear();
+    g_panelFirstSeen.clear();
+    for (auto& t : g_takeOff) t = TakeOffRec{};
     for (auto& d : g_denies) d = DenyRec{};
     g_nextParkedTry = {};
     PM::ResetCache();
