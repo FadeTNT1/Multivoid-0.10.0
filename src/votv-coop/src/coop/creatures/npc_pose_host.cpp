@@ -208,11 +208,12 @@ void TickPoseStream() {
         // its capture, so a mirror (tick parked) can only replay them: the mesh yaw rides the body-yaw field and the
         // reach rides one entity bit. Class-gated inside; no other class reads it.
         if (!(snap.stateBits & coop::net::kEntityPoseBitHasBodyYaw)) {
-            bool stretching = false; float meshYaw = 0.f;
-            if (ue_wrap::wisp::ReadAttackPose(actor, stretching, meshYaw)) {
+            bool stretching = false, chasing = false; float meshYaw = 0.f;
+            if (ue_wrap::wisp::ReadAttackPose(actor, stretching, chasing, meshYaw)) {
                 snap.bodyYaw = ue_wrap::NormalizeAxis(meshYaw);
                 snap.stateBits |= coop::net::kEntityPoseBitHasBodyYaw;
                 if (stretching) snap.stateBits |= coop::net::kEntityPoseBitWispStretch;
+                if (chasing) snap.stateBits |= coop::net::kEntityPoseBitWispChase;
             }
         }
         // Host-authoritative kerfur cosmetic/command state: the parked mirror runs no AI (actor

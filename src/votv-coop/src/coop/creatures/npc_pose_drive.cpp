@@ -146,6 +146,9 @@ void Npc::Tick() {
         const bool reach = (curStateBits_ & coop::net::kEntityPoseBitWispStretch) != 0;
         if (reach != wispStretch_ && ue_wrap::wisp::DriveStretch(actor, reach)) wispStretch_ = reach;
         ue_wrap::wisp::DriveBeams(actor);
+        // The chase cue on the host's chase edge: the sense pulse its `movetotarg` plays.
+        const bool chase = (curStateBits_ & coop::net::kEntityPoseBitWispChase) != 0;
+        if (chase != wispChase_) { wispChase_ = chase; if (chase) ue_wrap::wisp::DriveChaseCue(actor); }
     }
     // Wisp mirror: replay the native landing edge (landed=true + dir(true) -> the fade-in the wisp
     // gates behind a CMC-tick-computed CurrentFloor read its parked CMC can never produce).

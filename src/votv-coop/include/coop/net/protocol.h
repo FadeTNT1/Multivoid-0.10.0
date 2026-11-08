@@ -1805,7 +1805,7 @@ struct EntityPoseSnapshot {
                                          // NPCs carry it; the rest leave it zero with the bit clear.
     float    bodyYaw;     // 4  -- a kerfur's, a fossil hound's or a killer wisp's visible body yaw, apart from the actor
                           //       root; valid iff kEntityPoseBitHasBodyYaw
-    uint8_t  stateBits;   // 1  -- bit0=inAir, bit1=hasLookAt, bit2=hasBodyYaw, bit3=hasKerfurState, bit4=kerfurSpooky, bit5=wispStretch
+    uint8_t  stateBits;   // 1  -- bit0=inAir, bit1=hasLookAt, bit2=hasBodyYaw, bit3=hasKerfurState, bit4=kerfurSpooky, bit5=wispStretch, bit6=wispChase
     uint8_t  kerfState;   // 1  -- the kerfur's command state; valid iff bit 3. Drives the parked mirror's state machine.
     uint8_t  kerfFace;    // 1  -- the kerfur's face material index; valid iff bit 3.
     uint8_t  _pad;        // 1  -- 4-byte alignment
@@ -1818,6 +1818,7 @@ inline constexpr uint8_t kEntityPoseBitHasBodyYaw = 0x04;  // bodyYaw carries a 
 inline constexpr uint8_t kEntityPoseBitHasKerfurState = 0x08;  // kerfState + kerfFace carry valid kerfur command/face
 inline constexpr uint8_t kEntityPoseBitKerfurSpooky   = 0x10;  // the kerfur is in its spooky/kill state
 inline constexpr uint8_t kEntityPoseBitWispStretch   = 0x20;  // the killer wisp is reaching for its victim (tryGrab or grab): its mirror stretches and fires its beams
+inline constexpr uint8_t kEntityPoseBitWispChase     = 0x40;  // the killer wisp holds a chase target: its mirror plays the chase cue (movetotarg) on the edge
 
 // The header of a pose batch datagram; N entries follow.
 struct EntityPoseBatchHeader {

@@ -132,9 +132,9 @@ bool PlayFatalityMontage(void* wisp);
 // mirror's `playerGrab` socket and beams sit where the host's do.
 
 // The host's copy: whether the wisp is reaching (tryGrab or grab, the graph's own `stretch(true)`
-// window) and its body mesh's world yaw. False when `wisp` is not a killer wisp or its mesh is
+// window), whether it holds a chase target, and its body mesh's world yaw. False when `wisp` is not a killer wisp or its mesh is
 // unresolvable, with `out` untouched. Game thread.
-bool ReadAttackPose(void* wisp, bool& outStretching, float& outMeshYaw);
+bool ReadAttackPose(void* wisp, bool& outStretching, bool& outChasing, float& outMeshYaw);
 
 // The mirror's copy: set the body mesh's world yaw. Call after the actor's own rotation write
 // (which re-bases the mesh). False if not a killer wisp or the mesh is unresolvable. Game thread.
@@ -149,6 +149,23 @@ bool DriveStretch(void* wisp, bool forward);
 // tangent from the body's end components). The tick that calls it is parked on a mirror. A pure
 // presentation write; False if unresolved. Game thread.
 bool DriveBeams(void* wisp);
+
+// Re-issue the graph's own `movetotarg` (the AI move toward `Target`, plus the sense pulse). The
+// graph's scan rewrites `Target` and calls it on its own cadence; a `Target` written from outside
+// moves nothing until the move is re-issued, since the move proxy holds the goal it was made with.
+// False if unresolved. Game thread.
+bool CallMoveToTarget(void* wisp);
+
+// A mirror's own graph must decide nothing: its BeginPlay armed the 1 s `updatesense` timer (a scan
+// that picks THIS machine's nearest player and chases it) and an AI move chain. Clear the timer and
+// detach the AI controller, so no move proxy is ever made there (the graph checks the proxy's
+// validity and skips). The chase cue, `movetotarg` called with no controller, then plays alone
+// (DriveChaseCue). No-op unless a killer wisp. Game thread.
+void NeutralizeMirrorBrain(void* wisp);
+
+// The mirror's copy of the host's chase edge: dispatch `movetotarg` on a controller-less mirror,
+// which plays the sense pulse and the sense component and moves nothing. False if unresolved.
+bool DriveChaseCue(void* wisp);
 
 // The plain wisp landing drive. The swarm wisp (wisp_C, a different class from the killer
 // wisp, and not the coloured siblings) spawns invisible and fades in at its landing edge: its
