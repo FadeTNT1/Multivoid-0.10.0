@@ -116,6 +116,12 @@ constexpr EntryTable kTables[] = {
     {P::name::NpcClass_Rufus, nullptr, 0},
     {P::name::NpcClass_GoreSlither, nullptr, 0},
     {P::name::NpcClass_GoreSlitherCheese, nullptr, 0},
+    // The ariral gun thief allows none of its graph on a mirror: its entries are BeginPlay (the gun lookup, the walk to
+    // the gun or the player, the 0.5 s punch timer), the move callbacks (each ends in a K2_DestroyActor of the gun and
+    // then of the thief), the punch (a damage sphere on the player) and the swing timeline. All the host's: the thief
+    // ends on the host and its destroy reaches the mirror; the host's BeginPlay `true` and ReceiveDestroyed `false` are
+    // carried to the mirror's count by coop/world/creature_event_relay.
+    {P::name::NpcClass_ArirGunStealer, nullptr, 0},
 };
 
 constexpr size_t kTableCount = sizeof(kTables) / sizeof(kTables[0]);

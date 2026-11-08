@@ -272,7 +272,7 @@ that lives outside the actor's rotation streams as an auxiliary yaw. The eventer
 the same way, through its row of the source-gated catch: the vent crawler and the egger, the
 knocker in the vent, the morning UFO, the Rozital mothership and the falling body and car
 droppers and graystank's tank or pig dropper, and the arirFollower event's follower crosses on the
-character lane through its spawner's row `[RD]`. The vent the crawler pulls down is a prop, not part of
+character lane through its spawner's row `[RD]`. The ariral gun thief (`npc_arirGunStealer_C`) is the same shape: its spawner `event_arirStealsGun_C` is level-placed on every peer, so a client's tick is refused and the host's night roll is the only one; the thief crosses on the character lane, its graph is parked on a mirror, and its `setEvent` count reaches the clients through the creature event relay. The host also watches it: with no `prop_arirgun_C` left in the host's world for 15 s (a client took the gun) the thief is destroyed, which ends its count and sends the 0. A BEGIN whose sender no row, lane or enrolled creature carries is logged once per class (`reaches no client`) `[RD]`. The vent the crawler pulls down is a prop, not part of
 the creature: the host streams it on the driven-prop channel while the crawler's break timeline plays, and
 a client's cover takes the final pose and the release from Static at the end edge
 ([props.md](props.md), "The wall vent the crawler pulls down") `[RD]`. boarwar's controller (`boarInvasion_C`) has its own row:

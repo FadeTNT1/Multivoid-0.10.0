@@ -52,6 +52,9 @@ UE_FACT_FN(kRowErieEvil, "npc_mirror_brain", L"eriePlushLive_evil_C", L"ExecuteU
 UE_FACT_FN(kRowRufus, "npc_mirror_brain", L"rufus_C", L"ExecuteUbergraph_rufus", Declared);
 UE_FACT_FN(kRowGoreSlither, "npc_mirror_brain", L"npc_goreSlither_C", L"ExecuteUbergraph_npc_goreSlither",
            Declared);
+// The ariral gun thief: its graph walks to the gun, destroys it and itself, and punches; all the host's.
+UE_FACT_FN(kRowArirGunStealer, "npc_mirror_brain", L"npc_arirGunStealer_C", L"ExecuteUbergraph_npc_arirGunStealer",
+           Declared);
 
 constexpr int kTagZombie   = 0x4D505A30;  // 'MPZ0'
 constexpr int kTagSummoner = 0x4D505A41;  // 'MPZA'
@@ -64,6 +67,7 @@ constexpr int kTagErieGood = 0x4D504547;  // 'MPEG'
 constexpr int kTagErieEvil = 0x4D504556;  // 'MPEV'
 constexpr int kTagRufus    = 0x4D505230;  // 'MPR0'
 constexpr int kTagSlither  = 0x4D505330;  // 'MPS0'
+constexpr int kTagArirGunStealer = 0x4D504130;  // 'MPA0'
 
 // ---- The mark ----
 
@@ -161,6 +165,7 @@ Watch g_watches[] = {
     {&kRowErieEvil, kTagErieEvil, R::ParamOffset{L"EntryPoint"}},
     {&kRowRufus, kTagRufus, R::ParamOffset{L"EntryPoint"}},
     {&kRowGoreSlither, kTagSlither, R::ParamOffset{L"EntryPoint"}},
+    {&kRowArirGunStealer, kTagArirGunStealer, R::ParamOffset{L"EntryPoint"}},
 };
 constexpr size_t kWatches = sizeof(g_watches) / sizeof(g_watches[0]);
 

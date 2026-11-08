@@ -335,6 +335,11 @@ inline constexpr const wchar_t* NpcClass_Orborb       = L"npc_orborb_C";
 inline constexpr const wchar_t* NpcClass_ArirFollower = L"npc_arirFollower_C";
 inline constexpr const wchar_t* NpcClass_AriralShooter   = L"npc_ariral_shooter_C";
 inline constexpr const wchar_t* NpcClass_AriralPigBeater = L"npc_ariral_pigBeater_C";
+// The ariral gun thief (0.10.0 capture): event_arirStealsGun_C's ReceiveTick mints it at night, 90 m from player 0's
+// pawn, while a prop_arirgun_C exists (BeginDeferred under EX_CallMath). A Character (its tick reads charactermovement);
+// its BeginPlay counts a setEvent(true) and its ReceiveDestroyed the false, and it ends only by destroying the gun and
+// then itself, so a gun that left the world leaves the thief walking and the event open (coop/world/event_active_sync).
+inline constexpr const wchar_t* NpcClass_ArirGunStealer = L"npc_arirGunStealer_C";
 // Event and late-game creatures in the same layer (verified against the CXX header dump):
 // killerwisp_C (Akillerwisp_C : ACharacter, the lethal yellow Killer Wisp, not the base wisp_C
 // swarm nor the coloured per-player wisps; AIPerception plus a Target APawn; spawned by
@@ -404,6 +409,7 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
     NpcClass_ArirFollower,
     NpcClass_AriralShooter,
     NpcClass_AriralPigBeater,
+    NpcClass_ArirGunStealer,    // the ariral gun thief; EX_CallMath, npc_world_enum source row, mirror graph refused whole
     NpcClass_KillerWisp,   // yellow Killer Wisp (late-game; AIPerception like the 12)
     NpcClass_VentCrawler,  // the ventCrawler event (its wall crawl is a yaw-only gap)
     NpcClass_GrayTest,
@@ -667,6 +673,11 @@ inline constexpr const wchar_t* kWorldActorSaveCarriedClasses[] = {
 // The arirFollower event's spawner: runTrigger mints npc_arirFollower_C at its own transform
 // (EX_CallMath), so the npc lane sees it only through a source row.
 inline constexpr const wchar_t* TriggerSpawnFollowingArirClass = L"trigger_spawnFollowingArir_C";
+
+// The ariral gun thief's spawner (event_arirStealsGun_C, level-placed on every peer): its ReceiveTick rolls the thief
+// at night while a prop_arirgun_C exists. The gun is the thief's target and the gate that ends it.
+inline constexpr const wchar_t* EventArirStealsGunClass = L"event_arirStealsGun_C";
+inline constexpr const wchar_t* ArirGunClass = L"prop_arirgun_C";
 
 // ufo_ballfo_C (0.10.0 bytecode capture): the gamemode's ball UFO. Its components: `center` (turned to a random yaw
 // by `set`), `a` and `b` (the endpoints, placed relative to `center` by `set`: x = -/+size and a random y), `balls`

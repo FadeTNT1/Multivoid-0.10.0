@@ -198,6 +198,7 @@ constexpr const wchar_t* kKavotiaPatrolOutputs[] = {P::name::NpcClass_Kavotia, P
 // The blue brain cheese's hatch: its ReceiveTick mints one cheese gore slither and destroys the cheese. The cheese is a
 // shared food prop whose tick a client refuses (coop/props/prop_food_state), so the host's hatch is the only one and its
 // slither rides the npc lane; without this row it lived on the host alone and bit only the host's player.
+constexpr const wchar_t* kArirGunStealerOutputs[] = {P::name::NpcClass_ArirGunStealer, nullptr};
 constexpr const wchar_t* kBlueBrainCheeseOutputs[] = {P::name::NpcClass_GoreSlitherCheese, nullptr};
 // A puffball's burst (`broken`, `broken_fire`): its cloud, a world-actor-lane output. The cloud is the host's alone; a
 // client's own burst of one is dissolved while the host's act replay runs (coop/creatures/host_born_spawn).
@@ -213,6 +214,10 @@ constexpr ExSpawnSource kExSpawnSources[] = {
     {L"ticker_fossilhoundSpawner_C", nullptr},      // the fossil hound
     {L"ticker_insomniacSpawner_C",   nullptr},      // the insomniac and its child form
     {L"ticker_yellowWispSpawner_C",  nullptr},      // the killer wisp
+    // The ariral gun thief (event_arirStealsGun_C, level-placed on every peer; a client's tick is refused in
+    // spawn_authority): its night roll mints npc_arirGunStealer_C. Its BeginPlay counts a setEvent(true), which
+    // coop/world/creature_event_relay carries to every client once the thief is enrolled here.
+    {P::name::EventArirStealsGunClass, kArirGunStealerOutputs},
     {L"event_fossilboarwar_C",       kFossilWarOutputs},  // the war's hounds (the host's rollover mints the event)
     {L"prop_coingun_C",          nullptr},          // the sell gun's coin mint
     {L"jellyfishPath_C",         nullptr},          // the space jellyfish's seven (world-actor lane)
@@ -368,6 +373,7 @@ void InstallExSpawnCatch() {
                 "ticker_fossilhoundSpawner_C + event_fossilboarwar_C -> fossilhound_C, "
                 "ticker_insomniacSpawner_C -> insomniac_C + insomniac_child_C, "
                 "ticker_yellowWispSpawner_C -> killerwisp_C, "
+                "event_arirStealsGun_C -> npc_arirGunStealer_C, "
                 "prop_puffballMature_C -> PuffballExplosion_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C, the UFO controllers -> ufo_knob_C + ufo_UK_C + "
                 "ufo_UK_enemy_C, superFog_C -> HoelUfo_C, prop_food_blueBrainCheese_C -> npc_goreslither_cheese_C; and the host-born classes whatever mints them; "

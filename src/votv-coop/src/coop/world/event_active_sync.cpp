@@ -12,6 +12,9 @@
 //   - Around ninety-five classes call setEvent: creature controllers, story events, pranks,
 //     ambience. Several can be active at once, which is why the game keeps a refcount rather
 //     than a bool.
+//   - npc_arirGunStealer_C (0.10.0 capture): BeginPlay calls setEvent(true), ReceiveDestroyed the false. It ends only
+//     by destroying the gun it walks to (getObjectFromKey "arirgun") and then itself; with no gun it re-reads the key
+//     and walks at player 0 forever, so its count never drops (the target watchdog below).
 
 #include "coop/world/event_active_sync.h"
 
@@ -25,6 +28,8 @@
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
+#include "ue_wrap/core/sdk_profile.h"        // P::name, the creature and target classes of the watchdog
+#include "ue_wrap/engine/engine_pawn.h"      // DestroyActor, the watchdog's end of a stranded creature
 #include "ue_wrap/engine/world_identity.h"   // Generation, the world the begin times belong to
 #include "ue_wrap/facts/function_row.h"
 #include "ue_wrap/world/active_events.h"
@@ -33,8 +38,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace coop::event_active_sync {
@@ -44,6 +52,9 @@ namespace R  = ue_wrap::reflection;
 namespace GT = ue_wrap::game_thread;
 namespace AE = ue_wrap::active_events;
 namespace sg = ue_wrap::script_gate;
+namespace OI = ue_wrap::object_index;
+namespace P  = ue_wrap::profile;
+namespace E  = ue_wrap::engine;
 
 std::atomic<coop::net::Session*> g_session{nullptr};
 
@@ -196,6 +207,109 @@ void ForgetOtherWorlds() {
     g_beganGen = gen;
 }
 
+// ---- the reach audit and the target watchdog (host, game thread) -----------------------------
+// A BEGIN whose sender is no mapped row, no lane's and not an enrolled creature reaches no client: their activeEvents
+// stay 0 while the host's is 1, so the pause menu, the quit and the sleep behave differently per peer. The WARN names
+// the class once, so the next such gap is read off the log rather than found by a player.
+struct Audit {
+    void*       sender;
+    int32_t     objIdx;
+    std::string className;
+    long long   dueMs;
+};
+std::vector<Audit> g_audit;
+std::unordered_set<std::string> g_auditSaid;
+constexpr size_t    kMaxAudit = 64;
+constexpr long long kAuditDelayMs = 3000;   // the creature's enrolment is drained on the tick after its BeginPlay
+
+void AuditReach(long long now) {
+    for (size_t i = 0; i < g_audit.size();) {
+        const Audit& a = g_audit[i];
+        if (now < a.dueMs) { ++i; continue; }
+        const auto b = g_began.find(a.sender);
+        // Still counting: began and not ended, in this sender's own slot.
+        const bool counting = b != g_began.end() && b->second.objIdx == a.objIdx && R::IsLiveByIndex(a.sender, a.objIdx);
+        if (counting && !IsCreature(a.sender) && g_auditSaid.insert(a.className).second)
+            UE_LOGW("event_active: BEGIN class=%s reaches no client (no row, lane or npc enrolment) -- clients' "
+                    "activeEvents stay 0", a.className.c_str());
+        g_audit[i] = std::move(g_audit.back());
+        g_audit.pop_back();
+    }
+}
+
+// An enrolled creature that holds an event count and whose target the host's world no longer has is ended. A
+// creature's Blueprint ends its event itself when its target is reached; when a remote peer took or destroyed the
+// target first, the host's copy has nothing left to reach and runs on holding the count, so nothing on any peer can
+// sleep, save or leave. Narrow by design: each row names the creature, its target class and a grace, and the
+// creature is destroyed (its ReceiveDestroyed makes the false, and creature_event_relay sends the 0) only when no live
+// target exists for the whole grace. A class whose target cannot be told from the world alone gets no row.
+struct TargetWatchdog {
+    const wchar_t* creatureClass;
+    const wchar_t* targetClass;
+    long long      graceMs;
+};
+constexpr TargetWatchdog kTargetWatchdogs[] = {
+    // npc_arirGunStealer_C (event_arirStealsGun_C): the target is prop_arirgun_C. A client that picked the gun up
+    // destroyed the host's copy (remote_prop::OnDestroy), and the thief, with no gun, walked at player 0 forever.
+    {P::name::NpcClass_ArirGunStealer, P::name::ArirGunClass, 15000},
+};
+struct GoneSince {
+    int32_t   objIdx;
+    long long sinceMs;
+};
+std::unordered_map<void*, GoneSince> g_targetGone;
+
+struct LiveList {
+    std::vector<std::pair<void*, int32_t>> objs;
+};
+void CollectLive(void* ctx, void* obj, int32_t index) {
+    if (!obj || !R::IsLive(obj) || R::NameStartsWith(R::NameOf(obj), L"Default__")) return;
+    static_cast<LiveList*>(ctx)->objs.emplace_back(obj, index);
+}
+
+void WatchTargets(long long now) {
+    for (auto it = g_targetGone.begin(); it != g_targetGone.end();)
+        it = R::IsLiveByIndex(it->first, it->second.objIdx) ? std::next(it) : g_targetGone.erase(it);
+    std::vector<std::pair<void*, int32_t>> toEnd;
+    for (const TargetWatchdog& w : kTargetWatchdogs) {
+        void* const creatureCls = OI::ClassByName(w.creatureClass);
+        if (!creatureCls) continue;
+        LiveList creatures;
+        OI::ForEachInstance(creatureCls, &CollectLive, &creatures);
+        if (creatures.objs.empty()) continue;
+        void* const targetCls = OI::ClassByName(w.targetClass);
+        if (!targetCls) continue;   // the target's class is not loaded: its absence proves nothing
+        LiveList targets;
+        OI::ForEachInstance(targetCls, &CollectLive, &targets);
+        for (const auto& c : creatures.objs) {
+            if (!targets.objs.empty()) { g_targetGone.erase(c.first); continue; }
+            auto [g, fresh] = g_targetGone.emplace(c.first, GoneSince{c.second, now});
+            if (!fresh && g->second.objIdx != c.second) g->second = GoneSince{c.second, now};
+            if (now - g->second.sinceMs >= w.graceMs) toEnd.emplace_back(c.first, c.second);
+        }
+    }
+    for (const auto& c : toEnd) {
+        g_targetGone.erase(c.first);
+        if (!R::IsLiveByIndex(c.first, c.second)) continue;
+        UE_LOGW("event_active: watchdog -- %ls %p has had no target for the grace; destroyed so its event count ends "
+                "(count now %d, clients get the 0 from creature_event_relay)",
+                R::ClassNameOf(c.first).c_str(), c.first, ReadRefcount());
+        E::DestroyActor(c.first);
+    }
+}
+
+void PumpHost() {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->running() || s->role() != coop::net::Role::Host) return;
+    static long long s_lastMs = 0;
+    const long long now = NowMs();
+    if (now - s_lastMs < 1000) return;   // a once-a-second look
+    s_lastMs = now;
+    ForgetOtherWorlds();
+    AuditReach(now);
+    WatchTargets(now);
+}
+
 // HOST: an event began or ended, after the game's own bookkeeping ran, so the refcount the lines
 // print is the one it left.
 void OnSetEventPost(const sg::Call& call) {
@@ -216,7 +330,14 @@ void OnSetEventPost(const sg::Call& call) {
             it->second = began;
             fresh = true;
         }
-        if (fresh) UE_LOGI("event_active: BEGIN class=%s n=%d", it->second.className.c_str(), ReadRefcount());
+        if (fresh) {
+            UE_LOGI("event_active: BEGIN class=%s n=%d", it->second.className.c_str(), ReadRefcount());
+            // A sender no row, lane or creature enrolment carries reaches no client; the creature's enrolment comes
+            // on a later tick, so the judgement is deferred (AuditReach).
+            const std::string& cn = it->second.className;
+            if (!RowForClass(cn) && !LaneFor(cn) && g_audit.size() < kMaxAudit)
+                g_audit.push_back({sender, it->second.objIdx, cn, now + kAuditDelayMs});
+        }
         return;
     }
     const auto it = g_began.find(sender);
@@ -245,6 +366,7 @@ void Install(coop::net::Session* session) {
             UE_LOGI("event_active: every event's begin and end is seen at lib_C::setEvent (a script-gate watch)");
         }
     }
+    PumpHost();
 }
 
 void SendJoinSnapshotForSlot(int slot) {
@@ -328,6 +450,9 @@ void OnReliable(const coop::net::EventSnapshotPayload& payload) {
 }
 
 void OnDisconnect() {
+    g_audit.clear();
+    g_auditSaid.clear();
+    g_targetGone.clear();
     g_began.clear();
     g_beganGen = 0;
     g_session.store(nullptr, std::memory_order_release);

@@ -47,6 +47,7 @@ UE_FACT_FN(kRowSpawnNestTimerCockroachMaster, "spawn_authority", L"cockroachMast
 UE_FACT_FN(kRowCustomEventCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"CustomEvent", Declared);
 UE_FACT_FN(kRowReceiveTickTickerInsomniacSpawner, "spawn_authority", L"ticker_insomniacSpawner_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveTickTickerFossilhoundSpawner, "spawn_authority", L"ticker_fossilhoundSpawner_C", L"ReceiveTick", Declared);
+UE_FACT_FN(kRowReceiveTickEventArirStealsGun, "spawn_authority", L"event_arirStealsGun_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowEatShrimpEaterMaster, "spawn_authority", L"shrimpeatermaster_C", L"eat", Declared);
 UE_FACT_FN(kRowReceiveTickCockroachMaster, "spawn_authority", L"cockroachMaster_C", L"ReceiveTick", Declared);
 UE_FACT_FN(kRowReceiveTickTickerRoachSummoner, "spawn_authority", L"ticker_roachSummoner_C", L"ReceiveTick", Declared);
@@ -167,6 +168,11 @@ constexpr Row kRows[] = {
     // The ticks.
     {&kRowReceiveTickTickerInsomniacSpawner,   "insomniacSpawner.ReceiveTick"},
     {&kRowReceiveTickTickerFossilhoundSpawner, "fossilhoundSpawner.ReceiveTick"},
+    // The ariral gun thief's spawner (level-placed, so every peer owns a copy): its tick rolls the thief at night, 90 m
+    // from player 0's pawn, while a prop_arirgun_C exists, with no delay chain or reap duty (event_arirStealsGun_C UG:0-29).
+    // A client's own roll minted a thief that counted setEvent on that machine alone, so one client's pause and quit
+    // locked while another's did not; the host's thief is the only one, a mirror on the npc lane (npc_world_enum).
+    {&kRowReceiveTickEventArirStealsGun,       "arirStealsGun.ReceiveTick"},
     {&kRowReceiveTickCockroachMaster,     "cockroachMaster.ReceiveTick"},
     // The shrimp eater: a looping timer delegate runs eat, which rolls on the ariral reputation and
     // an RNG, gates on the LOCAL player 0's distance, the day and the shrimp's temperature, then
