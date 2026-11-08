@@ -8,6 +8,7 @@
 #include "world_actor_detail.h"  // co-located private header (src tree, not include/)
 
 #include "coop/creatures/piramid_sync.h"  // the heading, look and wisp-target consumers
+#include "coop/world/event_count_upkeep.h"  // a destroyed mirror's registration in the event count
 #include "coop/world/event_scene_sync.h"     // a story scene's phase that arrived before its mirror
 #include "coop/world/ufo_event_sync.h"       // the gamemode UFOs' birth setups
 #include "coop/world/fire_sync.h"            // a burning patch's fields, parked
@@ -313,7 +314,11 @@ void OnWorldActorDestroy(const coop::net::EntityDestroyPayload& payload) {
     // plus a destroy call. If its slot was recycled (this can race a world teardown), the plain
     // check passes the foreign occupant and the call runs on the wrong object.
     if (actor && sp.k2DestroyFn && R::IsLiveByIndex(actor, drained->GetInternalIdx())) {
+        // A pillfo or joel mirror ends its event in its timeline's finish and has no ReceiveDestroyed, so the host's
+        // destroy arriving first leaves its registration in the client's event count.
+        const coop::event_count_upkeep::Held held = coop::event_count_upkeep::Snapshot(actor);
         R::CallFunction(actor, sp.k2DestroyFn, nullptr);
+        coop::event_count_upkeep::ReleaseLeft(actor, held, "world-actor mirror destroy");
         UE_LOGI("world-actor[client OnDestroy]: K2_DestroyActor on mirror eid=%u actor=%p",
                 payload.elementId, actor);
     } else if (actor && !R::IsLiveByIndex(actor, drained->GetInternalIdx())) {

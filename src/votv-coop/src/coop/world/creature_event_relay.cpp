@@ -21,6 +21,7 @@
 #include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/facts/function_row.h"
 #include "ue_wrap/world/active_events.h"
+#include "ue_wrap/world/world_singleton.h"
 
 #include <atomic>
 #include <cstdint>
@@ -245,6 +246,15 @@ void OnNpcEnrolled(EL::ElementId eid, void* actor) {
 void OnMirrorBound(EL::ElementId eid, void* actor) {
     UE_ASSERT_GAME_THREAD("creature_event_relay::OnMirrorBound");
     detail::ClientOnMirrorBound(eid, actor);
+}
+
+int ReleaseOnGamemode(int n) {
+    UE_ASSERT_GAME_THREAD("creature_event_relay::ReleaseOnGamemode");
+    void* const gm = ue_wrap::world_singleton::Gamemode();
+    if (!gm || n <= 0) return 0;
+    int done = 0;
+    while (done < n && detail::Call(false, gm)) ++done;
+    return done;
 }
 
 void OnReliable(const coop::net::CreatureEventActivePayload& payload) {
