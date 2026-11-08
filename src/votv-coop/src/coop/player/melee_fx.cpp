@@ -57,6 +57,10 @@ std::atomic<N::Session*> g_session{nullptr};
 // physics storm on a held prop cannot flood the host's lane.
 constexpr N::IntentBudget kMakeBudget{10.0f, 6.0f};
 N::IntentBucket g_makeBucket;
+// A safe's dial makes two or three sounds a notch and a wheel spins ten notches a second: its own, larger bucket, so a
+// spin does not starve a swing's, and a spin faster than it drops the later layers of a notch, not its first click.
+constexpr N::IntentBudget kSafeMakeBudget{16.0f, 24.0f};
+N::IntentBucket g_safeMakeBucket;
 uint32_t        g_nextEventId = 1;
 uint32_t        g_sent = 0;
 uint32_t        g_paced = 0;
@@ -75,6 +79,7 @@ const char* KindName(uint8_t kind) {
     case N::kMeleeFxHit:     return "hit";
     case N::kMeleeFxContact: return "contact";
     case N::kMeleeFxBreak:   return "break";
+    case N::kMeleeFxSafe:    return "safe";
     default:                 return "?";
     }
 }
@@ -84,6 +89,8 @@ const char* KindName(uint8_t kind) {
 constexpr N::IntentBudget kJudgeBudget{12.0f, 6.0f};
 constexpr float kSwingSoundExtraCm = 150.f;   // a sound at the swinger's own place lies behind the swing's reach
 constexpr float kHeldReachCm = 700.f;         // a held prop knocks within the holder's arm and what it carries
+constexpr float kSafeReachCm = 800.f;         // a safe's dial is turned at the safe: the eye is within this of its door
+constexpr N::IntentBudget kSafeJudgeBudget{16.0f, 24.0f};
 constexpr int   kIdRing = 16;
 
 struct Reason {
@@ -94,6 +101,7 @@ constexpr int kMaxReasons = 16;
 
 struct Slot {
     N::IntentBucket bucket;
+    N::IntentBucket safeBucket;
     uint32_t        ids[kIdRing] = {};
     int             nextId = 0;
     Reason          reasons[kMaxReasons];
@@ -152,6 +160,7 @@ const char* PlausibilityRefusal(int slot, const N::MeleeFxPayload& p) {
     FVector eye{};
     if (!(rp.valid() && rp.HasPose() && rp.TryGetEyePosition(eye))) return "no eye";
     const FVector at{p.loc[0], p.loc[1], p.loc[2]};
+    if (p.kind == N::kMeleeFxSafe) return Dist(eye, at) <= kSafeReachCm ? nullptr : "out of reach";
     if (p.kind == N::kMeleeFxSwing || p.kind == N::kMeleeFxHit) {
         ue_wrap::weapon_catalog::Swing swing;
         if (!ue_wrap::weapon_catalog::Lookup(coop::hand_item::HeldItem(static_cast<uint8_t>(slot)), swing))
@@ -175,6 +184,8 @@ const char* PlausibilityRefusal(int slot, const N::MeleeFxPayload& p) {
 
 constexpr N::IntentBudget kPlayBudget{20.0f, 12.0f};
 N::IntentBucket g_playBucket;
+constexpr N::IntentBudget kSafePlayBudget{24.0f, 24.0f};
+N::IntentBucket g_safePlayBucket;
 uint32_t        g_played = 0;
 uint32_t        g_playPaced = 0;
 int             g_playedSaid = 0;
@@ -233,7 +244,8 @@ int g_ownSaid = 0;
 // machine's player's effect, played as it is made (PlayOwn): it has its own log line.
 void Play(const N::MeleeFxPayload& p, bool skipSound, bool own = false) {
     if (!detail::Enabled()) return;
-    if (!g_playBucket.Take(kPlayBudget, N::NowMs())) {
+    const bool safe = p.kind == N::kMeleeFxSafe;
+    if (!(safe ? g_safePlayBucket.Take(kSafePlayBudget, N::NowMs()) : g_playBucket.Take(kPlayBudget, N::NowMs()))) {
         ++g_playPaced;
         return;
     }
@@ -377,7 +389,8 @@ bool Publish(const Effect& e) {
         }
         return false;
     }
-    if (!g_makeBucket.Take(kMakeBudget, N::NowMs())) {
+    const bool safeKind = e.kind == N::kMeleeFxSafe;
+    if (!(safeKind ? g_safeMakeBucket.Take(kSafeMakeBudget, N::NowMs()) : g_makeBucket.Take(kMakeBudget, N::NowMs()))) {
         ++g_paced;
         return false;
     }
@@ -430,12 +443,14 @@ void Install(N::Session* session) {
     if (!session || !detail::Enabled()) return;
     detail::InstallSwing();
     detail::InstallContact();
+    detail::InstallSafe();
 }
 
 void Tick() {
     if (!detail::Enabled()) return;
     detail::TickSwing();
     detail::TickContact();
+    detail::TickSafe();
     N::Session* s = g_session.load(std::memory_order_acquire);
     // The weapon table the host's judge reads is built once the session runs, not on a client's first effect: its build
     // finds the table by walking every object.
@@ -447,6 +462,7 @@ void Tick() {
 bool WellFormed(const N::MeleeFxPayload& p, int len) {
     if (len < N::kMeleeFxHeaderBytes || p.kind >= N::kMeleeFxKindCount || p.eventId == 0) return false;
     if (p.effects == 0 || (p.effects & ~(N::kMeleeFxSound | N::kMeleeFxParticle))) return false;
+    if (p.kind == N::kMeleeFxSafe && p.effects != N::kMeleeFxSound) return false;   // a dial makes sounds only
     if (((p.effects & N::kMeleeFxSound) != 0) != (p.soundLen > 0)) return false;
     if (((p.effects & N::kMeleeFxParticle) != 0) != (p.particleLen > 0)) return false;
     const int text = p.soundLen + p.particleLen;
@@ -466,7 +482,8 @@ void OnRequest(int senderSlot, const N::MeleeFxPayload& req) {
         Refuse(senderSlot, "slot not world-ready");
         return;
     }
-    if (!sl.bucket.Take(kJudgeBudget, N::NowMs())) {
+    const bool safeKind = req.kind == N::kMeleeFxSafe;
+    if (!(safeKind ? sl.safeBucket.Take(kSafeJudgeBudget, N::NowMs()) : sl.bucket.Take(kJudgeBudget, N::NowMs()))) {
         Refuse(senderSlot, "over its pace");
         return;
     }
@@ -514,7 +531,9 @@ void OnDisconnect() {
         UE_LOGI("[MELEE-FX] this session: %u sent (%u held back by the pace), %u judged and published, %u played (%u "
                 "held back by the pace)", g_sent, g_paced, g_judged, g_played, g_playPaced);
     g_makeBucket.Reset();
+    g_safeMakeBucket.Reset();
     g_playBucket.Reset();
+    g_safePlayBucket.Reset();
     g_nextEventId = 1;
     g_sent = g_paced = g_judged = g_played = g_playPaced = 0;
     g_sentSaid = g_judgedSaid = g_playedSaid = g_ownSaid = 0;
@@ -524,6 +543,7 @@ void OnDisconnect() {
     g_unresolved.clear();
     detail::ResetSwing();
     detail::ResetContact();
+    detail::ResetSafe();
 }
 
 }  // namespace coop::melee_fx

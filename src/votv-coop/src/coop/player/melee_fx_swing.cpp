@@ -97,6 +97,7 @@ bool Finite(const FVector& v) { return std::isfinite(v.X) && std::isfinite(v.Y) 
 // ---- the sound observers ---------------------------------------------------------------------------------------
 
 void Capture(void* source, const uint8_t* parms, const Observer& o, bool placeless) {
+    SafeCapture(source, parms, o.sound, o.volume, o.pitch, placeless ? -1 : o.location);
     if (!g_scope.open) return;
     // Only what the player's own graph plays is the swing's; another object's call (a struck creature's cry, a door's
     // own creak) is that object's.
@@ -125,7 +126,11 @@ sg::Verdict OnPlay2DPre(void*, void* source, const uint8_t* parms) {
     return sg::Verdict::Run;
 }
 
-void ArmObservers(bool on) {
+// The observers run while a swing's scope is open or the safe dial's wants them (SafeWantsObservers).
+bool g_safeWants = false;
+
+void Rearm() {
+    const bool on = g_scope.open || g_safeWants;
     if (g_at.hooked) UH::SetArmed(g_at.fn, &OnPlayAtPre, on);
     if (g_2d.hooked) UH::SetArmed(g_2d.fn, &OnPlay2DPre, on);
 }
@@ -156,7 +161,7 @@ sg::Verdict OnAttackPre(const sg::Call& c) {
     g_scope = Scope{};
     g_scope.open = true;
     g_scope.player = c.object;
-    ArmObservers(true);
+    Rearm();
     return sg::Verdict::Run;
 }
 
@@ -255,7 +260,7 @@ void Emit(void* player, bool hit, const ue_wrap::hit_result::Hit& h) {
 void OnAttackPost(const sg::Call& c) {
     if (!g_scope.open || c.object != g_scope.player) return;
     g_scope.open = false;
-    ArmObservers(false);
+    Rearm();
     ++g_swings;
     ue_wrap::hit_result::Hit h;
     const bool hit = ReadHit(c, h);
@@ -273,6 +278,11 @@ void OnAttackPost(const sg::Call& c) {
 
 }  // namespace
 
+void SafeWantsObservers(bool on) {
+    g_safeWants = on;
+    Rearm();
+}
+
 void InstallSwing() {
     if (g_reg == Reg::Pending)
         g_reg = sg::WatchName(kRowAttack, kTag, &OnAttackPre, &OnAttackPost) ? Reg::Registered : Reg::Refused;
@@ -285,7 +295,7 @@ void TickSwing() {
     // Between calls no body is running, so an open scope here is stale.
     if (g_scope.open) {
         g_scope.open = false;
-        ArmObservers(false);
+        Rearm();
     }
     InstallObserver(g_at, kRowPlayAt, &OnPlayAtPre, false);
     InstallObserver(g_2d, kRowPlay2D, &OnPlay2DPre, true);
@@ -306,7 +316,7 @@ void ResetSwing() {
         UE_LOGI("[MELEE-FX] this session: %d swings, %d with no sound of their own, %d hits sent with surface effects",
                 g_swings, g_swingsSilent, g_hitsSent);
     g_scope = Scope{};
-    ArmObservers(false);
+    Rearm();
     g_swings = g_swingsSilent = g_hitsSent = 0;
     g_noHitReadSaid = g_noMaterialSaid = g_noSoundSaid = false;
 }

@@ -588,6 +588,16 @@ swing at a container sends particles only. A hit on a creature the host parks is
 host, whose own zombie feedback already played. `melee_fx=0` switches the lane off; `[dev] melee_fx_log=1` logs every
 effect (`[MELEE-FX]`). `[?]` until a two-peer run reads those lines.
 
+A combination safe's dial is the same shape. The dial is `prop_safeDoor_C` (a child actor of `prop_safe_C`, `prop_safe_maid_C`
+inherits it), whose mouse-wheel handlers `scrollUp` and `scrollDown` are bound only on the machine of the player at the safe
+and play every sound through `PlaySound2D`: the notch's `tick1` and `mechanicalssmaller1`, the right digit's `tick1`, a wrong
+code's `mechanicalssmaller2`, the unlock's `mechanicalssmaller4`, and `rozdoor` from the opening timeline's event. Three name
+watches (`coop/player/melee_fx_safe`) open a scope in which the door's own graph's sounds are captured through the swing's
+observers and sent as `safe` effects at the door, on a pace of their own (a fast spin drops the later layers of a notch, not its
+first click). The host judges the eye within 8 m of the door; the maker does not hear its own twice. The lock
+flag and the loot an opening spawns (`prop_safe_C::opened`, run on the opener's machine) are not this lane's: whether the
+others see the safe open and its loot once is the open "safe double loot" item. `[?]` until a two-peer run reads `[MELEE-FX] ... safe event` lines.
+
 The pressure washer fires from its own tick on the peer that holds it: a water shot a frame, each a peer-local prop
 that cleans where it lands, so its spray was seen and heard only there. `coop/player/washer_fx` sends `WasherFx`: a
 start when the washer starts firing, a keep every 100 ms with up to four of its shots' landing points (read off the

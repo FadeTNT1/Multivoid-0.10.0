@@ -61,4 +61,14 @@ void InstallContact();
 void TickContact();
 void ResetContact();
 
+// The safe dial's seam (melee_fx_safe.cpp): a scope over the dial's three bodies in which the sounds the safe door's own
+// graph plays through the two observers of melee_fx_swing.cpp are captured and sent as kMeleeFxSafe. The observers are
+// the swing file's; the safe asks to have them armed (SafeWantsObservers) and is handed each call (SafeCapture:
+// `source` the calling object, the offsets of the call's parameters, `location` < 0 for the placeless PlaySound2D).
+void InstallSafe();
+void TickSafe();
+void ResetSafe();
+void SafeCapture(void* source, const uint8_t* parms, int32_t sound, int32_t volume, int32_t pitch, int32_t location);
+void SafeWantsObservers(bool on);
+
 }  // namespace coop::melee_fx::detail

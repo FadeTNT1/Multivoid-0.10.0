@@ -191,6 +191,7 @@ set(VOTVCOOP_SOURCES
     src/coop/player/local_push.cpp
     src/coop/player/melee_fx.cpp
     src/coop/player/melee_fx_contact.cpp
+    src/coop/player/melee_fx_safe.cpp
     src/coop/player/melee_fx_swing.cpp
     src/coop/player/hit_judge.cpp
     src/coop/player/ragdoll_gate.cpp
