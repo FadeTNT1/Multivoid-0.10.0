@@ -20,7 +20,7 @@ struct Settings {
     uint16_t    port = 0;                       // 0: net.port keeps its own value
     std::string name = "Multivoid Server";      // the lobby name
     std::string password;                       // empty: an open session
-    int         maxPlayers = 4;                 // the server's own slot included, clamped 2..kMaxPeers
+    int         maxPlayers = 10;                // the server's own slot included, clamped 2..kMaxPeers (10)
     std::string saveSlot = "multivoid_server";  // the world: <slot>, s_<slot>, or a new story save
     bool        listPublic = true;              // announced to the master
     bool        brokered = false;               // false: DIRECT UDP listen on `port`

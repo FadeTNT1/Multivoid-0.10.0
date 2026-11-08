@@ -55,7 +55,7 @@ public:
 namespace coop {
 class RemotePlayer { public: void* GetActor() const { return nullptr; } };
 namespace players {
-inline constexpr uint8_t kMaxPeers = 4;
+inline constexpr uint8_t kMaxPeers = 10;
 class Registry {
 public:
     static Registry& Get() { static Registry r; return r; }

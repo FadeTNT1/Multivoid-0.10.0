@@ -119,7 +119,7 @@ bool     g_parkInstalled = false;
 bool     g_parkRefused   = false;   // the interceptor table refused: NO mirrors, for the session
 uint64_t g_lastDriverMs  = 0;
 bool     g_saidOwnedFull = false;   // one line, not one per driver tick
-uint8_t  g_saidSlotFull  = 0;       // one line per slot, bit-per-slot
+uint32_t g_saidSlotFull  = 0;       // one line per slot, bit-per-slot (slot & 31: a forged slot past 31 shares a bit)
 std::atomic<uint32_t> g_tickOffThread{0};  // tripwire: see OnHookReceiveTickPre
 
 bool Finite3(float a, float b, float c) {
@@ -473,8 +473,8 @@ void OnStateMsg(const coop::net::HookStatePayload& p, int senderPeerSlot) {
     auto it = Mirrors().find(key);
     if (it == Mirrors().end() || !it->second.ref.Alive()) {
         if (MirrorsForSlot(slot) >= kMaxMirrorsPerSlot) {
-            if (!(g_saidSlotFull & (1u << (slot & 7u)))) {
-                g_saidSlotFull |= static_cast<uint8_t>(1u << (slot & 7u));
+            if (!(g_saidSlotFull & (1u << (slot & 31u)))) {
+                g_saidSlotFull |= 1u << (slot & 31u);
                 UE_LOGW("hook_sync: slot %u is at the %zu-mirror ceiling -- refusing to spawn "
                         "another. One peer must not be able to walk its sequence and make every "
                         "other peer spawn actors.", (unsigned)slot, kMaxMirrorsPerSlot);
@@ -597,7 +597,7 @@ void OnPeerLeftSlot(int slot) {
         if (a) E::DestroyActor(a);
         ++dropped;
     }
-    g_saidSlotFull = static_cast<uint8_t>(g_saidSlotFull & ~(1u << (slot & 7u)));
+    g_saidSlotFull &= ~(1u << (slot & 31u));
     coop::hook_anchor::OnPeerLeftSlot(slot);
     if (dropped) UE_LOGI("hook_sync: slot %d left -- %zu owner-phase mirrors dropped", slot, dropped);
 }

@@ -50,4 +50,5 @@ the commit that ships the change.
 5. **Every lane answers the late join.** A peer that joins mid-event, mid-download or mid-drive
    sees the current state; a lane is not done until that answer exists.
 6. **Per-peer things stay per-peer.** Own vitals, own inventory, own view.
-7. **Four players, about a hundred active entities** is the scale everything is sized for.
+7. **Ten players, about a hundred active entities** is the scale everything is sized for (four was
+   the scale until protocol 333; a host may still seat fewer).

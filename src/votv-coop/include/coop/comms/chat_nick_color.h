@@ -19,12 +19,13 @@
 #include <cstdint>
 
 #include "coop/player/nick_color.h"
+#include "coop/player/players_registry.h"  // kMaxPeers
 
 namespace coop::chat_nick_color {
 
-// The per-slot fallback palette (8 entries, wraps). Matches the scoreboard's hue
+// The per-slot fallback palette, one entry a slot (wraps past it). Matches the scoreboard's hue
 // family: distinct, readable on dark AND bright scenes at full alpha.
-inline constexpr uint32_t kSlotCols[8] = {
+inline constexpr uint32_t kSlotCols[] = {
     0xFFFFB340u,  // 0 host: amber
     0xFF6ECDFFu,  // 1 sky
     0xFF96FF96u,  // 2 mint
@@ -33,13 +34,20 @@ inline constexpr uint32_t kSlotCols[8] = {
     0xFFFFF078u,  // 5 lemon
     0xFF78EBDCu,  // 6 teal
     0xFFFFA06Eu,  // 7 coral
+    0xFFB4E66Eu,  // 8 lime
+    0xFFE68CE6u,  // 9 orchid
 };
+inline constexpr uint32_t kSlotColCount = sizeof(kSlotCols) / sizeof(kSlotCols[0]);
+static_assert(kSlotColCount >= coop::players::kMaxPeers, "every peer slot has its own chat colour");
+
+// The fallback entry for a slot.
+inline uint32_t PaletteForSlot(uint8_t slot) { return kSlotCols[slot % kSlotColCount]; }
 
 // The peer's custom nick colour if it has one, else this surface's palette entry.
 // Call at COMPOSE time (game thread); the result is stored on the line.
 inline uint32_t ForSlot(uint8_t slot) {
     const uint32_t custom = coop::nick_color::PackedForSlot(slot);
-    return coop::nick_color::IsCustom(custom) ? custom : kSlotCols[slot % 8u];
+    return coop::nick_color::IsCustom(custom) ? custom : PaletteForSlot(slot);
 }
 
 }  // namespace coop::chat_nick_color

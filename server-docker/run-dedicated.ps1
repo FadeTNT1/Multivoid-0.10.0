@@ -14,7 +14,7 @@ param(
     [int]    $Port = 0,
     [string] $Name = "Multivoid Server",
     [string] $Password = "",
-    [ValidateRange(2, 4)] [int] $MaxPlayers = 4,
+    [ValidateRange(2, 10)] [int] $MaxPlayers = 10,
     [ValidateSet("0", "1")] [string] $ListPublic = "1",
     [ValidateSet("direct", "brokered")] [string] $Reach = "direct",
     [int]    $AutosaveMinutes = 10,

@@ -60,6 +60,10 @@ struct Config {
     // "nobody advertised an identity" by it instead of inferring one from the other.
     bool selfAddressed = false;
 
+    // Host: the players the session seats, the host included; 0 means every slot (kMaxPeers).
+    // Clamped to [2, kMaxPeers] by Session::PlayerCap. A client ignores it.
+    int maxPlayers = 0;
+
     int sendHz = 60;
 };
 

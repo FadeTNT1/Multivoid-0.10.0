@@ -22,7 +22,7 @@
 #include "coop/net/send_rate_control.h"    // what each peer's link measures out at
 #include "coop/net/session_config.h"      // Role, Topology, Config: what a session starts with
 #include "coop/net/stream_refusals.h"      // refused pose packets, said once per streak
-#include "coop/player/players_registry.h"  // kMaxPeers (host + 3 clients = 4)
+#include "coop/player/players_registry.h"  // kMaxPeers (host + 9 clients = 10)
 
 #include <array>
 #include <atomic>
@@ -37,9 +37,15 @@
 
 namespace coop::net {
 
-// kMaxPeers (the host + 3 clients) is coop::players::kMaxPeers; the alias sizes this header's
+// kMaxPeers (the host + 9 clients) is coop::players::kMaxPeers; the alias sizes this header's
 // arrays.
 inline constexpr uint8_t kMaxPeers = coop::players::kMaxPeers;
+// The per-slot wire arrays (protocol.h) are sized by their own copy of the count, so the two must
+// move together.
+static_assert(kPeerSlotsOnWire == static_cast<int>(kMaxPeers),
+              "protocol.h's kPeerSlotsOnWire must equal coop::players::kMaxPeers");
+// Every per-slot bitmask (TakeOrigins' result, the lanes' owed masks) is a uint32_t.
+static_assert(kMaxPeers <= 32, "a per-slot bitmask is one bit a slot in a uint32_t");
 
 enum class ConnState : uint8_t { Disconnected, Handshaking, Connected };
 
@@ -464,8 +470,14 @@ private:
     // the round-trip probe each slot owes. See coop/net/send_rate_control.h.
     void SampleLinkRates(uint64_t nowMs);
     void HandleConnStatusChanged(void* info);
-    // Host: the lowest empty slot in [1..kMaxPeers-1], or -1 when full.
+    // Host: the lowest empty slot in [1..PlayerCap()-1], or -1 when full.
     int FindFreePeerSlotForClient();
+public:
+    // The players this session seats, the host included: the Config's maxPlayers clamped to
+    // [2, kMaxPeers], kMaxPeers when it names none (0). A host seats PlayerCap() - 1 clients; the
+    // slots past it stay empty, so a lowered cap is the same session as before with fewer seats.
+    int PlayerCap() const;
+private:
     // The peer slot that owns hConn, or -1.
     int FindPeerSlotForConn(uint32_t hConn);
     // Per-peer reset, at the slot's disconnect and at session stop; slot 0's covers the host's own
@@ -551,13 +563,15 @@ private:
     // --- Pending (unadmitted) connections ---
     // A connection GNS accepted but that has not yet proved itself holds no player seat: it lives
     // here, its user data `kPendingTag | index`, outside the [1, kMaxPeers) range the drain site
-    // validates. So three silent sockets cannot lock the three seats, and every IsSlotReady
+    // validates. So silent sockets cannot lock the seats, and every IsSlotReady
     // consumer inherits the gate unchanged.
     static constexpr int64_t  kPendingTag   = 0x7000'0000LL;
 
 public:
     // Public: peer_admission.cpp sizes its per-pending exchange rows to it.
-    static constexpr int      kMaxPending   = 8;  // sockets, not seats
+    // Sockets, not seats: enough for every client seat to arrive at once (a server restart, when
+    // the whole lobby rejoins together) with a couple spare.
+    static constexpr int      kMaxPending   = kMaxPeers + 2;
     // How long an unproved socket may sit before SweepPending closes it. Generous: a pending entry
     // costs one socket, and on P2P the whole ICE negotiation runs between the host's park edge and
     // the client's Hello.

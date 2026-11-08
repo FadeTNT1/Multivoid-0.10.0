@@ -83,6 +83,11 @@ int FetchFailures();
 // VOTVCOOP_TEST_HOST_LOBBY probe.
 void HostLobby(const std::string& name, const std::string& world, bool locked, int playersMax);
 
+// The player cap a host announces and seats, the host included: `requested` when it is above 0,
+// else the player's net.max_players row; clamped to [2, kMaxPeers]. HostLobby and HostWithSave
+// pass their `playersMax` through it, so a surface with no cap control passes 0.
+int ResolvePlayersMax(int requested);
+
 // A save selection for the Host-Game picker: an existing slot to load, or a New Game to
 // create; `mode` is the gamemode ordinal (story is 0) for a new save.
 struct SaveChoice {

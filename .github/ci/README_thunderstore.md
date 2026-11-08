@@ -20,7 +20,7 @@ browser marks mismatched lobbies before you click.
 | | |
 |--|--|
 | **Game target** | Voices of the Void Alpha **0.10.0** |
-| **Players** | up to **4** (host + 3) — LAN + Internet, no port forwarding needed |
+| **Players** | up to **10** (host + 9) — LAN + Internet, no port forwarding needed |
 | **Status** | Alpha — dev builds; everyone playing one is a tester |
 | **Website** | [multivoid.dev](https://multivoid.dev) |
 | **Community** | [Discord](https://discord.gg/bA6tGBvGMN) — questions, bug reports, people to play with |

@@ -19,7 +19,7 @@
 
 namespace coop::element {
 
-// 32-bit at rest, 16-bit on the wire; 65536 is ample for a four-peer session with thousands of
+// 32-bit at rest, 16-bit on the wire; 65536 is ample for a ten-peer session with thousands of
 // props.
 using ElementId = uint32_t;
 

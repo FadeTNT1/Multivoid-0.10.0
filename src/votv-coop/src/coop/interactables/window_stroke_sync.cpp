@@ -190,7 +190,7 @@ void ApplyInbound() {
     // costs a canvas open, two scalar writes and a draw -- six engine dispatches -- so draining a
     // full queue in one frame would spend some fifteen hundred of them in that frame. The rest keep
     // their place and their deadline and go out on the next tick, which at this budget is four
-    // times the rate three peers can fill it at.
+    // times the rate three peers can fill it at, and still above what nine can.
     for (int drawn = 0; drawn < kDrainPerTick && !g_inbound.empty(); ++drawn) {
         // The deadline holds on this path as well as on the parked one: a dab that waited out the
         // window is a wipe from a minute ago, and drawing it now paints over what has happened

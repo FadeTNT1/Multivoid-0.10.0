@@ -9,8 +9,8 @@ port=47621
 name=Multivoid Server
 ; Empty: an open server.
 password=
-; 2..4, the server's own parked player included.
-max_players=4
+; 2..10, the server's own parked player included.
+max_players=10
 ; The save to host: <slot>.sav, else s_<slot>.sav, else a new story save named <slot>.
 save_slot=multivoid_server
 ; 1: listed in the Multivoid server browser. 0: unlisted, join by address.

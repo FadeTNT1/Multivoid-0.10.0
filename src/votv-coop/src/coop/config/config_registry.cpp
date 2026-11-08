@@ -11,6 +11,7 @@
 
 #include "coop/net/connect_history.h"  // History::kMaxStamps, the cap row's upper bound
 #include "coop/net/protocol.h"  // kDefaultPort (row defaults ALIAS the one owning constant)
+#include "coop/player/players_registry.h"  // kMaxPeers, net.max_players' default and ceiling
 #include "ue_wrap/core/log.h"
 
 #include <array>

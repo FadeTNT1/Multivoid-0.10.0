@@ -321,6 +321,8 @@ coop::net::Config ReadNetConfig(bool& enabled) {
     // the player did not mean to lock; on a client it is the one to offer, and a host that wants
     // nothing ignores it.
     if (c.role == coop::net::Role::Host) {
+        // The seats an ini-configured host offers, the host included; the row's range is [2, kMaxPeers].
+        c.maxPlayers = static_cast<int>(ResolveInt(config_registry::rows::net_max_players));
         if (ResolveFlag(config_registry::rows::net_lobby_locked)) {
             c.lobbyPassword = ResolveString(config_registry::rows::net_lobby_password);
             // The same downgrade HostWithSave does: a lock with no secret cannot be enforced, and

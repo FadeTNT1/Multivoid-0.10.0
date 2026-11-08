@@ -50,12 +50,12 @@
         },
         {
             "name": "Max players",
-            "description": "2 to 4. The server's own parked player is one of them.",
+            "description": "2 to 10. The server's own parked player is one of them.",
             "env_variable": "MAX_PLAYERS",
-            "default_value": "4",
+            "default_value": "10",
             "user_viewable": true,
             "user_editable": true,
-            "rules": "required|integer|between:2,4",
+            "rules": "required|integer|between:2,10",
             "field_type": "text"
         },
         {
