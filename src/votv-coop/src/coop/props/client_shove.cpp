@@ -72,7 +72,8 @@ std::unordered_set<uint32_t> g_mine;                 // eids this module has cla
 uint64_t g_windowStartMs = 0;
 uint32_t g_sentInWindow = 0;
 size_t   g_claims = 0;
-unsigned g_saidClaim = 0, g_saidHold = 0, g_saidStand = 0;
+unsigned g_saidClaim = 0, g_saidHold = 0, g_saidStand = 0, g_saidSettle = 0;
+size_t   g_settleSkips = 0;
 size_t   g_standClaims = 0;
 uint32_t g_standEid = 0;                             // the prop the local pawn stood on at the last tick, 0 for none
 // A base no candidate has, until the next refresh: the far set is walked once per new base, so standing on the floor
@@ -173,6 +174,24 @@ bool Check(uint32_t eid, const ue_wrap::FVector& pawn, uint64_t now) {
                            coop::prop_drive_stream::IsParked(e.actor) || coop::prop_throw::SeqFor(e.actor) != 0 ||
                            coop::prop_drive_stream::LastEndAgeMs(eid) < kQuietAfterEndMs || (authored && !mine);
     if (!IsShove(simulating, nearPawn, otherLane)) return false;
+
+    // A heap the host's stream is working (its Ends teleport and release bodies, its parks lerp them) jostles the
+    // neighbours here. Their motion is that settling, not this pawn's shove: claimed, each hands its copy to this
+    // peer's physics, whose release then jostles the next, and a workbench's pile never rests. A pawn within
+    // kContactCm may really have touched it, so only a prop out of reach is spared.
+    if (!mine && Dist2(loc, pawn) > kContactCm * kContactCm &&
+        coop::prop_drive_stream::SettlingNear(loc, kSettleRadiusCm, kQuietAfterEndMs, eid)) {
+        ++g_settleSkips;
+        if (Verbose() || g_saidSettle < kMaxSaid) {
+            ++g_saidSettle;
+            UE_LOGI("[CLIENT-SHOVE] eid=%u moved %.1f cm at (%.1f,%.1f,%.1f), %.0f cm from the pawn, beside a prop the "
+                    "host's stream is settling: the pile's motion, not claimed (#%zu skipped)", eid,
+                    static_cast<double>(std::sqrt(Dist2(loc, e.baseLoc))), static_cast<double>(loc.X),
+                    static_cast<double>(loc.Y), static_cast<double>(loc.Z),
+                    static_cast<double>(std::sqrt(Dist2(loc, pawn))), g_settleSkips);
+        }
+        return false;
+    }
 
     // An episode this module opened that goes on: the interaction is refreshed (idempotent, no send, no token).
     if (mine && authored) {
@@ -313,9 +332,9 @@ size_t ClaimsSent() {
 }
 
 void OnDisconnect() {
-    if (g_claims)
-        UE_LOGI("[CLIENT-SHOVE] session end: %zu claim(s) sent for a prop this client's body shoved or stood on (%zu stand)",
-                g_claims, g_standClaims);
+    if (g_claims || g_settleSkips)
+        UE_LOGI("[CLIENT-SHOVE] session end: %zu claim(s) sent for a prop this client's body shoved or stood on (%zu stand), "
+                "%zu move(s) beside a settling pile not claimed", g_claims, g_standClaims, g_settleSkips);
     g_entries.clear();
     g_near.clear();
     g_far.clear();
@@ -327,7 +346,8 @@ void OnDisconnect() {
     g_windowStartMs = 0;
     g_sentInWindow = 0;
     g_claims = 0;
-    g_saidClaim = g_saidHold = g_saidStand = 0;
+    g_saidClaim = g_saidHold = g_saidStand = g_saidSettle = 0;
+    g_settleSkips = 0;
     g_standClaims = 0;
     g_standEid = 0;
     g_missBase = nullptr;

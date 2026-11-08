@@ -276,6 +276,28 @@ uint64_t LastEndAgeMs(uint32_t eid) {
     return it == g_lastEndMs.end() ? UINT64_MAX : ::GetTickCount64() - it->second;
 }
 
+bool SettlingNear(const ue_wrap::FVector& at, float radiusCm, uint64_t quietMs, uint32_t exceptEid) {
+    UE_ASSERT_GAME_THREAD("prop_drive_stream::SettlingNear");
+    const float r2 = radiusCm * radiusCm;
+    const auto within = [&](const ue_wrap::FVector& p) {
+        const float dx = p.X - at.X, dy = p.Y - at.Y, dz = p.Z - at.Z;
+        return dx * dx + dy * dy + dz * dz <= r2;
+    };
+    for (const auto& kv : g_drives) {   // parked now: a few at a time, the live streams of this peer
+        if (kv.first == exceptEid) continue;
+        void* live = kv.second.d.LiveActor();
+        ue_wrap::FVector loc{};
+        if (live && E::TryGetActorLocation(live, loc) && within(loc)) return true;
+    }
+    const uint64_t now = ::GetTickCount64();
+    const size_t have = g_endCount < kRecentEnds ? g_endCount : kRecentEnds;
+    for (size_t i = 0; i < have; ++i) {
+        const AppliedEnd& e = g_ends[i];
+        if (e.eid != exceptEid && now - e.atMs < quietMs && within(e.pose)) return true;
+    }
+    return false;
+}
+
 size_t RecentEnds(AppliedEnd* out, size_t max) {
     const size_t have = g_endCount < kRecentEnds ? g_endCount : kRecentEnds;
     size_t n = 0;

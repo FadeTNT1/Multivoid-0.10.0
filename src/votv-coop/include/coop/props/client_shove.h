@@ -48,6 +48,10 @@ constexpr uint64_t kWindowMs  = 1000;
 constexpr uint64_t kReclaimMs = 3000;
 // A host stream's End applied to a prop this recently is that prop settling, not a shove.
 constexpr uint64_t kQuietAfterEndMs = 2500;
+// A prop that moved while another is being moved by the host's stream, or was a moment ago, within kSettleRadiusCm of
+// it, is that pile settling and no shove -- unless the pawn is within kContactCm of it, close enough to have touched it.
+constexpr float kSettleRadiusCm = 200.0f;
+constexpr float kContactCm      = 150.0f;
 
 // --- the pure rules, constexpr so the .cpp checks them at compile time ---
 

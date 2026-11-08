@@ -81,7 +81,7 @@ void OnDisconnect();
 // The stream ends applied here lately, newest first, at most `max` of the last kRecentEnds: each eid,
 // the host's final pose and the tick it landed (GetTickCount64). Cleared with the session. For the fall
 // drill's verdict, which polls it at 4 Hz: an end pushed out between two polls is lost to it. Game thread.
-inline constexpr size_t kRecentEnds = 8;
+inline constexpr size_t kRecentEnds = 32;   // a pile's worth: a workbench's heap ends a dozen props in one second
 struct AppliedEnd {
     uint32_t eid = 0;
     ue_wrap::FVector pose{};
@@ -92,6 +92,11 @@ size_t RecentEnds(AppliedEnd* out, size_t max);
 // Milliseconds since a host End was last applied to `eid`'s copy here, UINT64_MAX when none was this session. The
 // client shove scan reads it so the settling that follows an End is not taken for a shove. Game thread.
 uint64_t LastEndAgeMs(uint32_t eid);
+
+// True when a prop other than `exceptEid` is being moved by the host's stream within `radiusCm` of `at`: a copy this
+// stream has parked now, or one whose End was applied less than `quietMs` ago. That prop's teleport and release
+// jostle its neighbours, whose motion is the pile settling and no body's shove. Game thread.
+bool SettlingNear(const ue_wrap::FVector& at, float radiusCm, uint64_t quietMs, uint32_t exceptEid);
 
 namespace dev {   // read only by src/coop/dev/ (the prop syncer drill); written only while the drill row is on
 struct DriveView {
