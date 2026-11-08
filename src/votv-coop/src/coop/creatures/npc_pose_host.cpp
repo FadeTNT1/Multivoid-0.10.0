@@ -27,6 +27,7 @@
 #include "ue_wrap/actors/kerfur.h"  // HasSaveKey (savePersisted flag) + ReadKerfurState (mirror fidelity)
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/actors/puppet.h"
+#include "ue_wrap/actors/wisp.h"  // ReadAttackPose -- the killer wisp's reach and mesh yaw
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/types.h"  // NormalizeAxis
 
@@ -201,6 +202,18 @@ void TickPoseStream() {
             if (!s_loggedBody) { s_loggedBody = true;
                 UE_LOGI("npc-bodyfacing: host streaming bodyYaw=%.1f eid=%u (first)",
                         snap.bodyYaw, snap.elementId); }
+        }
+        // The killer wisp's reach: its mesh turns toward player 0 (the host's own `lookat`) and its `stretch` timeline
+        // reaches for the victim, which sets where the grab socket and the beams sit. Both run in the host copy's tick or
+        // its capture, so a mirror (tick parked) can only replay them: the mesh yaw rides the body-yaw field and the
+        // reach rides one entity bit. Class-gated inside; no other class reads it.
+        if (!(snap.stateBits & coop::net::kEntityPoseBitHasBodyYaw)) {
+            bool stretching = false; float meshYaw = 0.f;
+            if (ue_wrap::wisp::ReadAttackPose(actor, stretching, meshYaw)) {
+                snap.bodyYaw = ue_wrap::NormalizeAxis(meshYaw);
+                snap.stateBits |= coop::net::kEntityPoseBitHasBodyYaw;
+                if (stretching) snap.stateBits |= coop::net::kEntityPoseBitWispStretch;
+            }
         }
         // Host-authoritative kerfur cosmetic/command state: the parked mirror runs no AI (actor
         // tick off + timers neutralized) so it cannot pick its own command/face. Stream the host

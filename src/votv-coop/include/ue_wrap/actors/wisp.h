@@ -125,6 +125,31 @@ bool ForceMeshTick(void* wisp);
 // gibs as the degraded tear). Call ForceMeshTick first, so the montage advances. Game thread.
 bool PlayFatalityMontage(void* wisp);
 
+// The killer wisp's attack presentation, which a mirror cannot compute: its tick is parked, and
+// the graph's `lookat` (the mesh turns toward player 0) and `stretch` (the reach timeline, which
+// also sets the grab socket's place and the beam ends) run only inside that tick or the capture
+// the host's copy decided. The host streams the two inputs; the mirror replays them, so the
+// mirror's `playerGrab` socket and beams sit where the host's do.
+
+// The host's copy: whether the wisp is reaching (tryGrab or grab, the graph's own `stretch(true)`
+// window) and its body mesh's world yaw. False when `wisp` is not a killer wisp or its mesh is
+// unresolvable, with `out` untouched. Game thread.
+bool ReadAttackPose(void* wisp, bool& outStretching, float& outMeshYaw);
+
+// The mirror's copy: set the body mesh's world yaw. Call after the actor's own rotation write
+// (which re-bases the mesh). False if not a killer wisp or the mesh is unresolvable. Game thread.
+bool DriveMeshYaw(void* wisp, float yaw);
+
+// The mirror's copy: dispatch the graph's own `stretch(forward)` event (the reach timeline play
+// or reverse) and, on the rising edge, force the parked mesh to pose so it shows. False if the
+// event is unresolved. Game thread.
+bool DriveStretch(void* wisp, bool forward);
+
+// The mirror's copy: dispatch the graph's own `beamsends` function (each beam's end point and
+// tangent from the body's end components). The tick that calls it is parked on a mirror. A pure
+// presentation write; False if unresolved. Game thread.
+bool DriveBeams(void* wisp);
+
 // The plain wisp landing drive. The swarm wisp (wisp_C, a different class from the killer
 // wisp, and not the coloured siblings) spawns invisible and fades in at its landing edge: its
 // tick reads the movement component's floor hit, then sets landed and fires the dir event (the

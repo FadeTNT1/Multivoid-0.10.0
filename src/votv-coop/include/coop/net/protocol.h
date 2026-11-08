@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 333;
+inline constexpr uint16_t kProtocolVersion = 335;
 
 // The peer slots a per-slot wire array holds: the host and nine clients. It equals
 // coop::players::kMaxPeers (static_assert'd in coop/net/session.h); this header stays free of the
@@ -1803,9 +1803,9 @@ struct EntityPoseSnapshot {
     float    lookAtX, lookAtY, lookAtZ;  // 12 -- the kerfur's head look target in world space, valid iff
                                          // stateBits has kEntityPoseBitHasLookAt. Only kerfur-family
                                          // NPCs carry it; the rest leave it zero with the bit clear.
-    float    bodyYaw;     // 4  -- a kerfur's or a fossil hound's visible body yaw, apart from the actor
+    float    bodyYaw;     // 4  -- a kerfur's, a fossil hound's or a killer wisp's visible body yaw, apart from the actor
                           //       root; valid iff kEntityPoseBitHasBodyYaw
-    uint8_t  stateBits;   // 1  -- bit0=inAir, bit1=hasLookAt, bit2=hasBodyYaw, bit3=hasKerfurState, bit4=kerfurSpooky
+    uint8_t  stateBits;   // 1  -- bit0=inAir, bit1=hasLookAt, bit2=hasBodyYaw, bit3=hasKerfurState, bit4=kerfurSpooky, bit5=wispStretch
     uint8_t  kerfState;   // 1  -- the kerfur's command state; valid iff bit 3. Drives the parked mirror's state machine.
     uint8_t  kerfFace;    // 1  -- the kerfur's face material index; valid iff bit 3.
     uint8_t  _pad;        // 1  -- 4-byte alignment
@@ -1817,6 +1817,7 @@ inline constexpr uint8_t kEntityPoseBitHasLookAt = 0x02;  // lookAt{X,Y,Z} carri
 inline constexpr uint8_t kEntityPoseBitHasBodyYaw = 0x04;  // bodyYaw carries a valid visible-body world yaw
 inline constexpr uint8_t kEntityPoseBitHasKerfurState = 0x08;  // kerfState + kerfFace carry valid kerfur command/face
 inline constexpr uint8_t kEntityPoseBitKerfurSpooky   = 0x10;  // the kerfur is in its spooky/kill state
+inline constexpr uint8_t kEntityPoseBitWispStretch   = 0x20;  // the killer wisp is reaching for its victim (tryGrab or grab): its mirror stretches and fires its beams
 
 // The header of a pose batch datagram; N entries follow.
 struct EntityPoseBatchHeader {

@@ -39,6 +39,8 @@ int32_t g_playerDmgOff  = -1;       // playerDamaged (0x0635, bool)
 int32_t g_harmlessOff   = -1;       // harmless      (0x0658, bool)
 int32_t g_targetOff     = -1;       // Target        (APawn*; reflected only, written)
 void*   g_releaseFn     = nullptr;  // releasePlayer() -- the grab-cancel verb
+void*   g_stretchFn     = nullptr;  // stretch(forward) -- the reach timeline's play/reverse event
+void*   g_beamSendsFn   = nullptr;  // beamsends() -- the beams' end points, called by the graph's tick
 
 // Documented Alpha 0.9.0-n fallbacks (CXXHeaderDump/killerwisp.hpp).
 constexpr int32_t kTryGrabFallback   = 0x05D8;
@@ -102,6 +104,14 @@ bool ResolveFromClass(void* cls) {
     void* releaseFn = R::FindFunction(cls, L"releasePlayer");
     if (!releaseFn) UE_LOGW("wisp: releasePlayer UFunction not found -- grab-cancel verb unavailable");
 
+    // The mirror's presentation events (killerwisp.json: stretch is a custom event with a `forward`
+    // bool, beamsends a plain function). Tolerated null: the mirror then keeps its rest pose.
+    g_stretchFn   = R::FindFunction(cls, L"stretch");
+    g_beamSendsFn = R::FindFunction(cls, L"beamsends");
+    if (!g_stretchFn || !g_beamSendsFn)
+        UE_LOGW("wisp: stretch=%p beamsends=%p -- a mirror's reach/beam presentation is unavailable",
+                g_stretchFn, g_beamSendsFn);
+
     g_wispCls      = cls;
     g_tryGrabOff   = tryGrabOff;
     g_grabOff      = grabOff;
@@ -152,6 +162,41 @@ bool ReadState(void* wisp, State& out) {
     out.harmless      = ReadAt<bool>(wisp, g_harmlessOff);
     out.target        = g_targetOff >= 0 ? ReadAt<void*>(wisp, g_targetOff) : nullptr;
     return true;
+}
+
+bool ReadAttackPose(void* wisp, bool& outStretching, float& outMeshYaw) {
+    State st;
+    if (!ReadState(wisp, st)) return false;   // null / unresolved / not a killer wisp
+    void* mesh = BodyMesh(wisp);
+    if (!mesh) return false;
+    ue_wrap::FRotator rot{};
+    if (!ue_wrap::engine::TryGetComponentWorldRotation(mesh, rot)) return false;
+    outStretching = st.tryGrab || st.grab;
+    outMeshYaw = rot.Yaw;
+    return true;
+}
+
+bool DriveMeshYaw(void* wisp, float yaw) {
+    void* mesh = BodyMesh(wisp);
+    if (!mesh) return false;
+    return ue_wrap::engine::SetComponentWorldRotation(mesh, ue_wrap::FRotator{0.f, yaw, 0.f});
+}
+
+bool DriveStretch(void* wisp, bool forward) {
+    if (!wisp || !EnsureResolved() || !IsKillerWisp(wisp) || !g_stretchFn) return false;
+    if (forward) ForceMeshTick(wisp);   // a parked mirror's mesh must pose for the reach to show
+    ue_wrap::ParamFrame f(g_stretchFn);
+    if (!f.valid()) return false;
+    // An unresolved param name would leave `forward` zero, a reverse on the rising edge: refuse then.
+    if (!f.Set<uint8_t>(L"forward", forward ? 1 : 0)) return false;
+    return ue_wrap::Call(wisp, f);
+}
+
+bool DriveBeams(void* wisp) {
+    if (!wisp || !EnsureResolved() || !IsKillerWisp(wisp) || !g_beamSendsFn) return false;
+    ue_wrap::ParamFrame f(g_beamSendsFn);  // zero-arg
+    if (!f.valid()) return false;
+    return ue_wrap::Call(wisp, f);
 }
 
 bool InGrabRange(void* wisp, void* target) {
