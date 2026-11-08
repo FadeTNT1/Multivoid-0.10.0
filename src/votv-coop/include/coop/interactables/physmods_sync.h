@@ -13,6 +13,13 @@
 // first destroys the author's hand ghost, or sweeps its untracked actors of that byte when the module was
 // already dropped. The module props ride the destroy seam and the birth watchers. JOIN: the save transfer
 // seeds the array; the host ships the canonical array in connect-replay, which parks a pre-desk joiner.
+//
+// BACK PANELS. The desk's four removable back panels (panelsState, true = on) cover the module slots; the E press
+// on an unscrewed one clears its flag and spawns the loose panel prop, a panel prop overlapping the desk sets the
+// flag and destroys the prop. The same watchers snapshot panelsState, and an edit is op 4 (panel set, peer to
+// host); the host writes it, runs updPanels and broadcasts op 5, the four flags, which every peer adopts and
+// re-runs updPanels on, idempotent. The loose prop rides the spawn and destroy lanes, so a client's take-off
+// spawns one prop (the host never respawns it). The desk's overlap entry refuses a panel a remote player carries.
 
 #pragma once
 

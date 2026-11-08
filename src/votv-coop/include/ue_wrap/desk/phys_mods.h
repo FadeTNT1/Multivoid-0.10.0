@@ -72,6 +72,13 @@ bool IsModuleAllowed(uint8_t byte);
 // probing ClassForByte over the enum range once (cached). 0 = unknown.
 uint8_t ByteForClass(void* cls);
 
+// The desk's four removable back panels, panelsState (true = the panel is on). The same desk instance and
+// resolve as the module array; updPanels() is a pure function of the flags, so a mirror may call it.
+inline constexpr int kPanels = 4;
+bool ReadPanels(bool out[kPanels]);
+bool WritePanels(const bool in[kPanels]);  // into the existing allocation; false when it holds fewer than kPanels
+bool CallUpdPanels();
+
 // Session-end cache reset (instance pointers only; class-level persists).
 void ResetCache();
 

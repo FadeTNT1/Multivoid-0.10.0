@@ -7,6 +7,7 @@
 #include "ue_wrap/desk/desk_press.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
 
 #include <chrono>
 #include <cstring>
@@ -37,6 +38,7 @@ bool  g_probed[kProbeMax] = {};
 bool  g_allowed[kProbeMax] = {};        // the desk's isModuleAllowed, per byte
 bool  g_allowedAsked[kProbeMax] = {};
 
+R::InstanceOffset g_panelsOff{ue_wrap::profile::name::DeskPanelsStateProp};  // TArray<bool>
 R::InstanceOffset g_slotsOff{L"physModSlots"};  // TArray<UPrimitiveComponent*>
 
 // UE TArray layout: data ptr @0, Num @8, Max @12.
@@ -187,6 +189,38 @@ uint8_t ByteForClass(void* cls) {
         if (ClassForByte(static_cast<uint8_t>(b)) == cls) return static_cast<uint8_t>(b);
     }
     return 0;
+}
+
+bool ReadPanels(bool out[kPanels]) {
+    void* d = ue_wrap::console_desk::Instance();
+    const int32_t off = d ? g_panelsOff.Of(d) : -1;
+    if (off < 0) return false;
+    const uint8_t* base = reinterpret_cast<const uint8_t*>(d) + off;
+    const uint8_t* data = *reinterpret_cast<const uint8_t* const*>(base);
+    const int32_t num = *reinterpret_cast<const int32_t*>(base + 8);
+    if (!data || num < kPanels) return false;
+    for (int i = 0; i < kPanels; ++i) out[i] = data[i] != 0;
+    return true;
+}
+
+bool WritePanels(const bool in[kPanels]) {
+    void* d = ue_wrap::console_desk::Instance();
+    const int32_t off = d ? g_panelsOff.Of(d) : -1;
+    if (off < 0) return false;
+    const uint8_t* base = reinterpret_cast<const uint8_t*>(d) + off;
+    uint8_t* data = *reinterpret_cast<uint8_t* const*>(base);
+    const int32_t num = *reinterpret_cast<const int32_t*>(base + 8);
+    if (!data || num < kPanels) return false;  // never realloc engine memory
+    for (int i = 0; i < kPanels; ++i) data[i] = in[i] ? 1 : 0;
+    return true;
+}
+
+bool CallUpdPanels() {
+    void* d = ue_wrap::console_desk::Instance();
+    void* fn = d ? R::FindDispatchFunctionCached(R::ClassOf(d), ue_wrap::profile::name::DeskUpdPanelsFn) : nullptr;
+    if (!fn) return false;
+    ue_wrap::ParamFrame f(fn);
+    return f.valid() && ue_wrap::Call(d, f);
 }
 
 void ResetCache() {

@@ -2204,6 +2204,14 @@ inline constexpr const wchar_t* CargoLiftAlphaProp = L"alpha";
 inline constexpr const wchar_t* CargoLiftAttachProp = L"attach";
 inline constexpr int CargoLiftActionPress = 4;
 inline constexpr float CargoLiftTravelUU = 500.0f;
+// The base computer desk's removable back panels (analogDScreenTest_C, 0.10.0 bytecode capture). panelsState is a
+// TArray<bool> of four, true = the panel is on (0 top-left, 1 bottom-left, 2 top-right, 3 bottom-right); the E press
+// on an unscrewed panel (actionOptionIndex) clears its flag, spawns the loose panel prop into the hand and runs
+// updPanels, and a panel prop overlapping the desk (ReceiveActorBeginOverlap) sets the flag, runs updPanels and
+// destroys the prop. updPanels is a pure function of panelsState (visibility, collision, screw tilt).
+inline constexpr const wchar_t* DeskPanelsStateProp     = L"panelsState";
+inline constexpr const wchar_t* DeskUpdPanelsFn         = L"updPanels";
+inline constexpr const wchar_t* DeskBackPanelClassPrefix = L"prop_computerBackPanel";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

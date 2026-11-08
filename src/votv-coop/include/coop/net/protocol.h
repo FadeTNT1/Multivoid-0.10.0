@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 331;
+inline constexpr uint16_t kProtocolVersion = 332;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -4524,10 +4524,11 @@ static_assert(sizeof(PlayDeckEventPayload) == 12, "PlayDeckEventPayload must be 
 // The desk modules lane (PhysModsState).
 struct PhysModsStatePayload {
     uint8_t op;         // 1 -- 0=plug 1=unplug (peer->host) 2=canonical 3=deny
-    uint8_t byte;       // 1 -- ops 0/1: the module byte; op 3: the ORIGINAL op
+                        //      4=panel set (peer->host) 5=panel canonical (host->all)
+    uint8_t byte;       // 1 -- ops 0/1: the module byte; op 3: the ORIGINAL op; op 4: 1 panel on, 0 off
     uint8_t byte2;      // 1 -- op 3: the denied module byte; else 0
-    uint8_t slot;       // 1 -- ops 0/1 and 3: the desk slot, 0..11; op 2: 0
-    uint8_t bytes[12];  // 12 -- op 2: the canonical array; else zero
+    uint8_t slot;       // 1 -- ops 0/1 and 3: the desk slot, 0..11; op 4: the back panel, 0..3; op 2/5: 0
+    uint8_t bytes[12];  // 12 -- op 2: the canonical array; op 5: bytes[0..3] the four panels, 1 = on; else zero
 };
 static_assert(sizeof(PhysModsStatePayload) == 16, "PhysModsStatePayload must be 16 bytes");
 
