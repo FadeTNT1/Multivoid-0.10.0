@@ -27,7 +27,7 @@ bool IsDescendantOfProp(void* obj);
 bool IsClassDescendantOfProp(void* cls);
 
 // The prop class named `className` ("prop_x_C"): the loaded one through the object index, else the one
-// a load of profile::name::PropsContentDir + "<stem>.<className>" brings in -- a class no instance on
+// a load of each profile::name::PropsContentDirs entry + "<stem>.<className>" brings in -- a class no instance on
 // this peer has made yet, such as a lit glowstick's. Null for a name that is not a plain identifier
 // ending in _C, a path that loads nothing, or a loaded object that is not a blueprint class deriving
 // from prop_C. A name whose load missed is not tried again (up to 256 names). Game thread: the load
