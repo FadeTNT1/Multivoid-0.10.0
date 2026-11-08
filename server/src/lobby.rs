@@ -23,6 +23,10 @@ pub const LOBBY_TTL: Duration = Duration::from_secs(90);
 pub const LOBBIES_CACHE_TTL: Duration = Duration::from_secs(5);
 
 pub const MAX_LOBBIES_PER_IP: usize = 8;
+// The most players a lobby may announce, the host included: the mod's kMaxPeers (10) with
+// headroom, so a later raise in the mod is shown as announced without a master redeploy. A host
+// that sends no players_max is an older build and is taken at its old 4.
+pub const MAX_PLAYERS: i64 = 16;
 pub const MAX_LOBBIES_GLOBAL: usize = 1000;
 // Hard cap on distinct rate-limit keys, so a source-diverse flood can't grow the `rate`
 // table toward MemoryMax between the 30s sweeps (security audit 2026-07-16, M3). At the cap
