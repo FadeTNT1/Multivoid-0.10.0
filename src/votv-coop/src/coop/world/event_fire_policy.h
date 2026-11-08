@@ -10,4 +10,9 @@ namespace coop::event_fire_sync {
 // unknown -- the default is no replay.
 int ReplayVerdict(const std::string& name, const char** laneOut);
 
+// The save key of the level-placed actor a replayed row's trigger reaches by key, or null when the row has none.
+// The treehouse build stages (treehouse_0..5) cast the keyed treehouse_C; a peer that has not got it yet shows the
+// game's "Invalid actor and actor with the key does not exist" hint, so the replay waits for it.
+const wchar_t* RequiredKey(const std::string& name);
+
 }  // namespace coop::event_fire_sync

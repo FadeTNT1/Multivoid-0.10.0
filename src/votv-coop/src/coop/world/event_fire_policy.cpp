@@ -6,6 +6,8 @@
 #include <cctype>
 #include <string>
 
+#include "ue_wrap/core/sdk_profile_names.h"
+
 namespace coop::event_fire_sync {
 
 // The replay policy, the dupe matrix: every row's concrete output and which lane already
@@ -171,6 +173,11 @@ int ReplayVerdict(const std::string& name, const char** laneOut) {
         if (SameName(name, nr.name)) { *laneOut = nr.lane; return 0; }
     if (IsPrankRow(name)) { *laneOut = "prank special (host-local RNG)"; return 0; }
     return -1;
+}
+
+const wchar_t* RequiredKey(const std::string& name) {
+    if (name.rfind("treehouse_", 0) == 0) return ue_wrap::profile::name::TreehouseSaveKey;
+    return nullptr;
 }
 
 }  // namespace coop::event_fire_sync
