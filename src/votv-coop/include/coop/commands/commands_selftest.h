@@ -20,6 +20,9 @@ struct Checker {
 // The moderation commands over fake ports (commands_cases_moderation.cpp), called by RunSelftest.
 void ModerationCases(Checker& check);
 
+// The timeout and teleport-to commands over fake ports (commands_cases_timeout.cpp), called by RunSelftest.
+void TimeoutCases(Checker& check);
+
 // The settings commands over fake ports (commands_cases_settings.cpp), called by RunSelftest.
 void SettingsCases(Checker& check);
 

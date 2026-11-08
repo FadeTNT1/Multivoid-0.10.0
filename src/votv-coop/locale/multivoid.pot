@@ -1831,6 +1831,11 @@ msgstr ""
 msgid "You can't wake anyone right now"
 msgstr ""
 
+#: src/ui/hud.cpp
+#, c-format
+msgid "You were sent to %1$s -- %2$s"
+msgstr ""
+
 #: src/ui/config_review_panel.cpp
 #, c-format
 msgid "Your body skin (%s) could not be saved to multivoid.ini this launch -- it is temporary for this session. Fix whatever keeps the file from being read or saved (a lock from an editor or antivirus, permissions, or a file saved as UTF-16); nothing is lost once a launch can save again."
@@ -2105,6 +2110,11 @@ msgctxt "f1"
 msgid "Refresh"
 msgstr ""
 
+#: src/ui/admin_panel.cpp
+msgctxt "f1"
+msgid "Release"
+msgstr ""
+
 #: src/ui/server_settings_pane.cpp
 msgctxt "f1"
 msgid "Reset"
@@ -2113,6 +2123,16 @@ msgstr ""
 #: src/ui/admin_panel.cpp
 msgctxt "f1"
 msgid "Teleport"
+msgstr ""
+
+#: src/ui/admin_panel.cpp
+msgctxt "f1"
+msgid "Teleport to"
+msgstr ""
+
+#: src/ui/admin_panel.cpp
+msgctxt "f1"
+msgid "Timeout"
 msgstr ""
 
 #: src/ui/admin_panel.cpp

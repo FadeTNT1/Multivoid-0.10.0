@@ -25,7 +25,9 @@ namespace coop::stat_orders {
 
 using coop::net::kStatRows;
 
-enum class Op : uint8_t { SetStat = 0, AddEffect = 1, RemoveEffect = 2 };
+// Jail holds the player where it stands for `seconds` (a restart when held already), or releases it when
+// `seconds` is not positive (coop/moderation/timeout orders it, coop/player/timeout_hold applies it).
+enum class Op : uint8_t { SetStat = 0, AddEffect = 1, RemoveEffect = 2, Jail = 3 };
 
 // 0-3 travel; Left and Malformed are the host's own (a disconnect; an answer that failed its checks).
 // MTA drops a packet it cannot read (reference/mtasa-blue/ CPacketTranslator.cpp:252); here the

@@ -1459,6 +1459,10 @@ msgid "You can't wake anyone right now"
 msgstr "[[You can't wake anyone right now]]"
 
 #, c-format
+msgid "You were sent to %1$s -- %2$s"
+msgstr "[[You were sent to %1$s -- %2$s]]"
+
+#, c-format
 msgid "Your body skin (%s) could not be saved to multivoid.ini this launch -- it is temporary for this session. Fix whatever keeps the file from being read or saved (a lock from an editor or antivirus, permissions, or a file saved as UTF-16); nothing is lost once a launch can save again."
 msgstr "[[Your body skin (%s) could not be saved to multivoid.ini this launch -- it is temporary for this session. Fix whatever keeps the file from being read or saved (a lock from an editor or antivirus, permissions, or a file saved as UTF-16); nothing is lost once a launch can save again.]]"
 
@@ -1675,12 +1679,24 @@ msgid "Refresh"
 msgstr "[[Refresh]]"
 
 msgctxt "f1"
+msgid "Release"
+msgstr "[[Release]]"
+
+msgctxt "f1"
 msgid "Reset"
 msgstr "[[Reset]]"
 
 msgctxt "f1"
 msgid "Teleport"
 msgstr "[[Teleport]]"
+
+msgctxt "f1"
+msgid "Teleport to"
+msgstr "[[Teleport to]]"
+
+msgctxt "f1"
+msgid "Timeout"
+msgstr "[[Timeout]]"
 
 msgctxt "f1"
 msgid "Unban"

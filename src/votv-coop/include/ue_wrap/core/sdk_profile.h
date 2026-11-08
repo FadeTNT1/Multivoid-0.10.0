@@ -438,6 +438,7 @@ inline constexpr size_t UCharacterMovement_MovementMode = 0x0168;
 inline constexpr size_t UMovementComponent_UpdatedComponent = 0x00B0;
 inline constexpr uint8_t kMOVE_Falling = 3;
 inline constexpr uint8_t kMOVE_None = 0;
+inline constexpr uint8_t kMOVE_Walking = 1;
 
 // USceneComponent::AttachParent @ +0x00C0 (Engine.hpp:17900). The puppet spawn's diagnostic dump
 // checks mesh_playerVisible's parent: a propagating hide on ACharacter::Mesh would cascade to

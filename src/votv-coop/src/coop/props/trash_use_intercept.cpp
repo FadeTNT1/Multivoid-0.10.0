@@ -23,6 +23,7 @@
 #include "coop/props/remote_prop_spawn.h"
 #include "coop/props/save_identity_bind.h"
 #include "coop/props/save_identity_map.h"
+#include "coop/player/timeout_hold.h"  // a held player's press is cancelled by that module, not routed
 #include "coop/props/trash_channel.h"      // ClientCarryEid / SendGrabIntent / SendThrowIntent / ClearClientCarry
 #include "ue_wrap/engine/engine.h"                // ReadMainPlayerLookAtActor / GetCamera{Location,Rotation}
 #include "ue_wrap/core/game_thread.h"           // RegisterInterceptor / RegisterPreObserver
@@ -92,7 +93,7 @@ bool g_cancelPairedUseRelease = false;
 // (the grab press alone sends the intent and plays the cue), with the same recognition
 // (carrying, or aimed at any pile), and on cancel it arms the release latch.
 static bool OnPileUseDenySuppress(void* self, void* /*params*/) {
-    if (!self) return false;
+    if (!self || coop::timeout_hold::Active()) return false;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || s->role() == coop::net::Role::Host) return false;  // client-only; host runs native
     bool cancel = false;
@@ -120,7 +121,7 @@ static bool OnPileUseReleaseSuppress(void* /*self*/, void* /*params*/) {
 }
 
 static bool OnPileUseIntercept(void* self, void* /*params*/) {
-    if (!self) return false;
+    if (!self || coop::timeout_hold::Active()) return false;   // a held player grabs nothing: timeout_hold cancels the press
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return false;  // no coop session -> native use runs normally (SP / disconnected)
 

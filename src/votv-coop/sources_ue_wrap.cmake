@@ -44,6 +44,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_1
     src/ue_wrap/engine/engine_save_return.cpp
     src/ue_wrap/engine/save_restore_watch.cpp
     src/ue_wrap/engine/travel_residue.cpp
+    src/ue_wrap/engine/character_hold.cpp
     src/ue_wrap/engine/data_table.cpp
     src/ue_wrap/actors/inventory_component.cpp
     src/ue_wrap/actors/inventory_item_codec.cpp

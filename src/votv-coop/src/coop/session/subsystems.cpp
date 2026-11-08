@@ -1,11 +1,9 @@
 // coop/session/subsystems.cpp -- see coop/session/subsystems.h. The sync-module fan-out lists;
 // a new sync feature wires in here.
-
 #include "ue_wrap/core/gc_pin.h"
 #include "coop/player/sleepers.h"
 #include "coop/props/trash_mirror.h"
 #include "coop/session/subsystems.h"
-
 #include "coop/element/object_scan_hub.h"  // the shared pass over the object index
 #include "coop/world/balance_sync.h"
 #include "coop/interactables/comp_sync.h"
@@ -75,6 +73,8 @@
 #include "coop/items/inventory_restore.h"      // the host puts a backed-up inventory back on a live player
 #include "coop/player/anti_noclip_rescue.h"   // the anti-noclip check answered with a safe place
 #include "coop/player/stat_orders.h"  // an admin's orders to a player's stats: the kept session, the tokens answered Left
+#include "coop/player/timeout_hold.h"  // a timeout's hold on the local player
+#include "coop/moderation/timeout.h"  // the host's table of players held in a timeout
 #include "coop/voice/voice_chat.h"
 #include "coop/element/bind_wait.h"  // OnSlotLeft / Clear: the messages held for a deferred bind
 #include "coop/props/bracket_position_wait.h"  // Reset: the wait goes with the session
@@ -290,7 +290,7 @@ void Install(coop::net::Session& session) {
     coop::inventory_pickup_sync::Install(&session);  // inventory-collect blip (PlaySound2D observer)
     coop::chat_sync::Install(&session);  // T-chat (the ui/chat_input send path)
     coop::command_sync::Install(&session);  // the chat input's `/` route: the host's own line, a client's request
-    coop::stat_orders::Install(&session);  // an admin's orders and queries of a player's stats: the session they are sent through
+    coop::stat_orders::Install(&session); coop::timeout::Install(&session);  // an admin's orders and queries of a player's stats: the session they are sent through
     coop::local_body::Install(&session);  // skins: local first-person body + SkinChange announce
     coop::local_body::Tick();  // applies the persisted skin to the local pawn + 1 Hz convergence
     coop::nameplate::Install(&session);  // plate-pref announce path (F1 checkbox -> NameplateChange)
@@ -429,7 +429,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     coop::chat_sync::OnSlotDisconnected(slot);
     coop::washer_fx::OnSlotDisconnected(static_cast<uint8_t>(slot));  // that player's washer stops showing
     coop::command_sync::OnSlotDisconnected(slot);  // the leaver's command rate bucket and notice clocks
-    coop::stat_orders::OnSlotDisconnected(static_cast<uint8_t>(slot));  // every order and query still waiting on the leaver is answered Left
+    coop::stat_orders::OnSlotDisconnected(static_cast<uint8_t>(slot)); coop::timeout::OnSlotDisconnected(slot);  // every order and query still waiting on the leaver is answered Left
     // Per-slot cleanup: only subsystems with per-slot state are called here; the global-state ones
     // are handled by DisconnectAll.
     coop::trash_mirror::OnDisconnectForSlot(slot);  // phase 1: retire the leaver's trash mirrors BEFORE the generic mirror drain (else the rooted actor leaks)
@@ -558,7 +558,7 @@ DisconnectStats DisconnectAll() {
     coop::inventory_pickup_sync::OnDisconnect();
     coop::chat_sync::OnDisconnect();
     coop::command_sync::OnDisconnect();  // every command rate bucket and notice clock
-    coop::stat_orders::OnDisconnect();  // every order and query still waiting is answered Left, the kept session stays
+    coop::stat_orders::OnDisconnect(); coop::timeout::OnDisconnect(); coop::timeout_hold::OnDisconnect();  // every order and query still waiting is answered Left, the kept session stays; the jail table and a hold on this player end
     coop::turbine_sync::OnDisconnect();
     coop::upgrade_sync::OnDisconnect();  // and its own upgrade panel buys locally again
     coop::device_occupancy::OnDisconnect();
@@ -788,7 +788,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:wisp_attack"}; coop::wisp_attack_sync::Tick(); }  // host detect wisp-grabs-client -> neutralize + relay (host-only, no-op on client)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:wisp_tear"}; coop::wisp_tear_mirror::Tick(); }  // discharge the victim's scheduled ragdoll death (any peer, no-op until armed)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:player_inventory"}; coop::player_inventory_sync::Tick(); }  // the client's profile stream / the host's on-join push (+ the inventory_selftest=1 read-verify)
-    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:anti_noclip"}; coop::anti_noclip_rescue::Tick(); coop::inventory_death_keep::Tick(); coop::inventory_restore::Tick(); }  // settle the canBackrooms watch + sample the standing place; sample the inventory (1 Hz)
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:anti_noclip"}; coop::anti_noclip_rescue::Tick(); coop::inventory_death_keep::Tick(); coop::inventory_restore::Tick(); coop::timeout::Tick(); coop::timeout_hold::Tick(); }  // settle the canBackrooms watch + sample the standing place; sample the inventory (1 Hz)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:hotbar_icons"}; coop::hotbar_icon_edge::Tick(); }  // the game publishes its prop-icon tables AFTER its own post-load refresh of the quick-slot bar and tells only the equipment panel -- rebuild the bar once per world when they arrive
     coop::dev::dev_lanes::TickInventory(session);  // [dev] the live store readout and the pickup drill, each in its perf bucket
     // The trash pile collect-counter poll and depletion death-watch; a chipPile re-grab fires from

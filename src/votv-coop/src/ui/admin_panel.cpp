@@ -8,6 +8,7 @@
 #include "coop/player/roster.h"
 #include "coop/moderation/ban_list.h"
 #include "coop/moderation/seen_players.h"
+#include "coop/moderation/timeout.h"
 #include "ui/link_format.h"
 #include "ui/scale.h"
 
@@ -120,7 +121,7 @@ void RenderOnlineSection(const coop::roster::Snapshot& rs) {
         ImGui::TableSetupColumn(l10n::Label(l10n::T("Player"), "player"), ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn(l10n::Label(l10n::T("Link"), "link"), ImGuiTableColumnFlags_WidthFixed, S(72.f));
         ImGui::TableSetupColumn(l10n::Label(l10n::T("Ping"), "ping"), ImGuiTableColumnFlags_WidthFixed, S(52.f));
-        ImGui::TableSetupColumn(l10n::Label(l10n::T("Actions"), "actions"), ImGuiTableColumnFlags_WidthFixed, S(220.f));
+        ImGui::TableSetupColumn(l10n::Label(l10n::T("Actions"), "actions"), ImGuiTableColumnFlags_WidthFixed, S(430.f));
         ImGui::TableHeadersRow();
         for (int i = 0; i < rs.count; ++i) {
             const coop::roster::Row& r = rs.rows[i];
@@ -153,6 +154,18 @@ void RenderOnlineSection(const coop::roster::Snapshot& rs) {
             const bool hasId = r.playerId[0] != '\0';
             if (IdButton(l10n::Label(l10n::Tc("f1", "Teleport"), "teleport"), hasId))
                 coop::command_sync::Submit(std::string("tphere ") + r.playerId);
+            ImGui::SameLine();
+            // The reverse of the button above: this admin goes to them (/tpto), and a held player is
+            // let out by the same slot a timeout takes (/timeout, /untimeout).
+            if (IdButton(l10n::Label(l10n::Tc("f1", "Teleport to"), "teleport_to"), hasId))
+                coop::command_sync::Submit(std::string("tpto ") + r.playerId);
+            ImGui::SameLine();
+            if (hasId && coop::timeout::IsJailed(r.playerId)) {
+                if (IdButton(l10n::Label(l10n::Tc("f1", "Release"), "release"), hasId))
+                    coop::command_sync::Submit(std::string("untimeout ") + r.playerId);
+            } else if (IdButton(l10n::Label(l10n::Tc("f1", "Timeout"), "timeout"), hasId)) {
+                coop::command_sync::Submit(std::string("timeout ") + r.playerId);
+            }
             ImGui::SameLine();
             if (IdButton(l10n::Label(l10n::Tc("f1", "Kick"), "kick"), hasId))
                 coop::command_sync::Submit(std::string("kick ") + r.playerId);

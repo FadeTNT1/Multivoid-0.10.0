@@ -550,6 +550,28 @@ teleport. The host can deny itself a command the same way, in a file named by it
 your own row in the player list). A player whose permission file sets `multivoid.kick.exempt` (or
 `.ban.exempt`) cannot be kicked or banned by a friend, only by the host.
 
+### Timeout and teleport to a player
+
+`/timeout <player>` sends a player to the jail (`coop/moderation/timeout.h` `kJailName`, the one place its name
+is written) for two minutes, and everyone's feed says so. The host holds a table keyed by the proved player
+id, never the seat, so a player who leaves and rejoins finds the clock running and is held again from the
+seat they take. The held machine does the holding (`coop/player/timeout_hold`): each tick its pawn is put in
+`MOVE_None` (no walking, no jumping; looking around stays) and the use, drop and fire presses are cancelled,
+so nothing is grabbed, used, dropped or fired. Its screen shows the jail and a live countdown. The order rides
+`StatOrder` as the jail op, carrying the seconds that remain, so no clock has to agree. The hold ends at its
+deadline, on `/untimeout <player>` (the F1 button reads Release for a player the host holds), and with the
+session; a restart is another `/timeout`. The host cannot be held, a held player cannot run `/untimeout` or
+`/tpto`, and the hold is set again every tick, so another system putting the pawn back to walking (a wisp's
+release, a ragdoll's end, a revive) is undone within a tick. A falling pawn is held when it lands. `/untimeout`
+shares the node `multivoid.timeout`; the F1 panel is the host's, a friend granted the node types the commands.
+`[?]` until two peers have run it.
+
+`/tpto <player>` moves the caller beside a player (F1: Teleport to), the reverse of `/tphere`. The host picks the
+place: a ring around the target, behind first, with a clear line from the target, a floor and head room (the
+anti-noclip rescue's own test). A client is moved by the `TeleportClient` message, the host by the same apply; the
+verb rewrites `lastLoc`, so the game's wall check sees an arrival. A target in a pocket dimension, still joining
+or dead, or with no clear place, is answered with a line and nobody moves. Node `multivoid.tpto`. `[?]`
+
 The same files can be edited in game with `/mv`, in LuckPerms' `/lp` shape: `/mv user <who> permission set
 <node> [true|false]`, `/mv user <who> parent add <group>`, `/mv group <name> permission set ...`, `/mv creategroup
 <name>`, `/mv user <who> info`, `/mv listgroups`, and `/mv reload` after editing a file by hand; `/help` lists them

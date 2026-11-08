@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 338;
+inline constexpr uint16_t kProtocolVersion = 339;
 
 // The peer slots a per-slot wire array holds: the host and nine clients. It equals
 // coop::players::kMaxPeers (static_assert'd in coop/net/session.h); this header stays free of the
@@ -995,10 +995,12 @@ enum class ReliableKind : uint8_t {
     // (coop/session/grants_sync); a late joiner gets them at its proof
     PermissionGrants = 168,
 
-    // Host to one client: set one row of that player's stat table, add a status effect or remove one. The owner
-    // applies it and answers with StatOrderReply, after its own fresh profile. Never relayed. Late join: none (the
-    // host sends only to a world-ready slot). Trust: a client takes it only from the host (slot 0); an order it
-    // cannot apply is answered, never dropped. StatOrderPayload.
+    // Host to one client: set one row of that player's stat table, add a status effect or remove one, or (op 3,
+    // jail) hold that player where it stands for `seconds` more, or release it when `seconds` is not positive. The
+    // owner applies it and answers with StatOrderReply, after its own fresh profile. Never relayed. Late join: none
+    // (the host sends only to a world-ready slot); a jail order the host still owes a player is sent again to the
+    // seat that player takes (coop/moderation/timeout). Trust: a client takes it only from the host (slot 0); an
+    // order it cannot apply is answered, never dropped. StatOrderPayload.
     StatOrder = 169,
 
     // Client to host: what became of a StatOrder (its token, a result, the value now in force). Never relayed.

@@ -109,7 +109,7 @@ using UFunctionInterceptor = bool(*)(void* self, void* params);
 // reject, so headroom costs memory (16 bytes a slot), not hot-path time. A static census cannot
 // size this: several call sites register in loops over tables, and a guard that cannot register
 // fails in the direction of a mirror the authority still owns.
-inline constexpr int kMaxInterceptors = 56;
+inline constexpr int kMaxInterceptors = 72;
 
 // Register a pre-dispatch interceptor. False if the table is full or an argument is null.
 // Several interceptors may target one UFunction, consulted in order until one returns true;
