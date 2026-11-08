@@ -6,7 +6,7 @@
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/push_wake_animation.h"
-#include "coop/player/push_wake_internal.h"
+#include "push_wake_internal.h"  // co-located private header (src tree, not include/)
 #include "coop/player/roster_ledger.h"
 #include "coop/player/sleep_sync.h"
 
