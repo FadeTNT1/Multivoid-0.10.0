@@ -89,8 +89,10 @@ const Row kRows[] = {
     // sent a no-op, so a path that moves `opened` without calling `open` is not lost.
     { &kRowActionOptionIndex, 0x44424C41 /*'DBLA'*/, "a locker's action", &ue_wrap::door_box::IsLocker,
       &coop::interactable_sync::OnDoorBoxVerb, true },
+    // Also a door-box row under test: its first edge and its session count are said, so a log shows whether the
+    // console's lid verb reached the lane on each peer (it logged nothing before, which left a silent lid unprovable).
     { &kRowActionOptionIndex, 0x44424149 /*'DBAI'*/, "a drone console's action", &ue_wrap::door_box::IsDroneConsole,
-      &coop::interactable_sync::OnDoorBoxVerb },
+      &coop::interactable_sync::OnDoorBoxVerb, true },
     { &kRowOpen, 0x53574F50 /*'SWOP'*/, "a lid's open", &ue_wrap::swinger::IsSwinger,
       &coop::interactable_sync::OnContainerVerb },
     { &kRowClose, 0x5357434C /*'SWCL'*/, "a lid's close", &ue_wrap::swinger::IsSwinger,
@@ -157,7 +159,7 @@ void OnVerbPost(const sg::Call& call) {
     if (s->role() != coop::net::Role::Host && !coop::net_pump::IsInAnnouncedWorld(call.object)) {
         if (row->lockerLane && g_saidWorldGate[i] < 3) {
             ++g_saidWorldGate[i];
-            UE_LOGW("[TOGGLE-VERB] %s ran on a locker on this client but its world is not the announced one yet -- "
+            UE_LOGW("[TOGGLE-VERB] %s ran on a door box on this client but its world is not the announced one yet -- "
                     "the edge is dropped (said up to 3 times a row; expected only during the client's own world load)",
                     row->what);
         }
@@ -166,7 +168,7 @@ void OnVerbPost(const sg::Call& call) {
     ++g_edges[i];
     if (row->lockerLane && !g_saidFirstEdge[i]) {
         g_saidFirstEdge[i] = true;
-        UE_LOGI("[TOGGLE-VERB] first edge of %s on '%ls' -- handed to the locker lane", row->what,
+        UE_LOGI("[TOGGLE-VERB] first edge of %s on '%ls' -- handed to the door-box lane", row->what,
                 ue_wrap::reflection::ToString(ue_wrap::reflection::NameOf(call.object)).c_str());
     }
     row->Edge(call.object);
@@ -231,7 +233,7 @@ void OnDisconnect() {
             UE_LOGI("[TOGGLE-VERB] session end -- %s ran on a device of its row %llu time(s), the "
                     "lane's own applies among them", kRows[i].what, static_cast<unsigned long long>(g_edges[i]));
         else if (kRows[i].lockerLane)
-            UE_LOGI("[TOGGLE-VERB] session end -- %s: body ran %llu time(s) on any object, 0 on a locker the lane took",
+            UE_LOGI("[TOGGLE-VERB] session end -- %s: body ran %llu time(s) on any object, 0 on a door box the lane took",
                     kRows[i].what, static_cast<unsigned long long>(g_calls[i]));
         g_edges[i] = 0;
         g_calls[i] = 0;
