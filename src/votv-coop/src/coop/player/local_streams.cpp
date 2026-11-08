@@ -18,6 +18,7 @@
 #include "coop/player/hand_item.h"     // the hotbar hand-item axis
 #include "coop/player/players_registry.h"
 #include "coop/player/skin_effects.h"  // own-body step FX at the wire-pose stride
+#include "coop/player/tipsy.h"         // the tipsy bit of the pose
 #include "coop/props/trash_channel.h"   // CtxForEid, the trash sync-time context
 #include "coop/props/prop_element_tracker.h"
 #include "coop/props/prop_drive_host.h"    // Coast: the host's own throw streams to rest
@@ -135,6 +136,9 @@ bool ReadLocalPose(void* local, void* controller, coop::net::PoseSnapshot& out) 
         if (ue_wrap::vitals::Read(ue_wrap::vitals::Field::BurningTime, &burn) && burn > 0.f)
             out.stateBits |= coop::net::kStateBitBurning;
     }
+    // The tipsy bit: this player drank wine or beer in the last minutes (coop/player/tipsy); the other screens animate
+    // the nameplate and nothing more.
+    if (coop::tipsy::LocalTipsy()) out.stateBits |= coop::net::kStateBitTipsy;
     // The vitals (health fraction, food, sleep) in three bytes: ue_wrap::vitals reads this
     // machine's UsaveSlot_C, so each peer packs its own. Full (255) until the save resolves, so a
     // booting peer does not flash an empty bar; the receiver draws them, and the host's hit judge

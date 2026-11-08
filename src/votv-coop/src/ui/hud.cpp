@@ -197,6 +197,19 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
             const ImVec2 hsz = font->CalcTextSizeA(hpx, FLT_MAX, 0.f, hint);
             TextOutlined(dl, font, hpx, ImVec2(ax - hsz.x * 0.5f, bp.y), IM_COL32(230, 230, 200, static_cast<int>(a * 245.f)),
                          outline, hint);
+        } else if (p.wakeHint != 0) {
+            // An online sleeper the viewer may push awake: the press, or the cooldown the host named (dimmer).
+            char cool[48];
+            const bool cooling = p.wakeHint == 2;
+            const char* hint = l10n::T("[RMB x2] Wake");
+            if (cooling && l10n::Fmt(cool, sizeof(cool), l10n::T("Cooldown: %1$d:%2$02d"), p.wakeSecs / 60, p.wakeSecs % 60) >= 0)
+                hint = cool;
+            const float hpx = px * 0.8f;
+            const ImVec2 hsz = font->CalcTextSizeA(hpx, FLT_MAX, 0.f, hint);
+            TextOutlined(dl, font, hpx, ImVec2(ax - hsz.x * 0.5f, bp.y),
+                         cooling ? IM_COL32(170, 170, 178, static_cast<int>(a * 235.f))
+                                 : IM_COL32(230, 230, 200, static_cast<int>(a * 245.f)),
+                         outline, hint);
         }
     } else {
     dl->AddRectFilled(bp, ImVec2(bp.x + barW, bp.y + barH), IM_COL32(0, 0, 0, static_cast<int>(a * 160.f)));
@@ -228,6 +241,31 @@ void DrawNameplate(ImDrawList* dl, const coop::nameplate::Plate& p) {
             TextOutlined(dl, font, zpx, zp,
                          (zCol & 0x00FFFFFFu) | (static_cast<ImU32>(za * 245.f) << 24),
                          IM_COL32(0, 0, 0, static_cast<int>(za * 215.f)), kGlyph[i]);
+        }
+    }
+
+    // Tipsy: a few small bubbles drift up off the plate's left end, wobbling and swelling as they rise, wine-pink with a
+    // bright rim. A pure function of the clock and the flag, like the Zs, so it needs no state; the Zs and the voice
+    // badge sit on the other side. The bubbles ride the plate's alpha (distance fade, occlusion) and its scale.
+    if (p.tipsy) {
+        constexpr int kBubbles = 5;
+        const double now = ImGui::GetTime();
+        const float rise = S(36.f) * s;
+        for (int i = 0; i < kBubbles; ++i) {
+            const float life = 2.3f + 0.37f * static_cast<float>(i);
+            const float u = std::fmod(static_cast<float>(now) + 0.61f * static_cast<float>(i), life) / life;
+            const float fade = std::min(u / 0.2f, 1.f) * (1.f - u);
+            const float ba = a * std::clamp(fade, 0.f, 1.f);
+            if (ba <= 0.01f) continue;
+            const float lane = (static_cast<float>(i % 3) - 1.f) * S(4.f) * s;
+            const float wobble = std::sin(static_cast<float>(now) * 2.7f + static_cast<float>(i) * 1.9f) * S(3.5f) * s * (0.4f + u);
+            const float r = S(2.1f + 0.9f * static_cast<float>((i * 7) % 4)) * s * (0.7f + 0.5f * u);
+            ImVec2 c(boxMin.x - S(7.f) * s + lane + wobble, textPos.y + sz.y * 0.55f - u * rise);
+            c.y = std::max(c.y, r + 1.f);   // never off the top of the screen
+            dl->AddCircleFilled(c, r, IM_COL32(240, 120, 190, static_cast<int>(ba * 70.f)), 14);
+            dl->AddCircle(c, r, IM_COL32(255, 175, 225, static_cast<int>(ba * 225.f)), 14, std::max(1.f, S(1.1f) * s));
+            dl->AddCircleFilled(ImVec2(c.x - r * 0.35f, c.y - r * 0.35f), std::max(0.7f, r * 0.22f),
+                                IM_COL32(255, 255, 255, static_cast<int>(ba * 200.f)), 6);
         }
     }
 

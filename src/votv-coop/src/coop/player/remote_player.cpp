@@ -284,6 +284,7 @@ void RemotePlayer::SetTargetPose(const coop::net::PoseSnapshot& snap) {
     }
 
     ShowBurning((snap.stateBits & coop::net::kStateBitBurning) != 0);
+    tipsy_ = (snap.stateBits & coop::net::kStateBitTipsy) != 0;
 
     const ue_wrap::FVector tgtPos{snap.x, snap.y, snap.z};
 

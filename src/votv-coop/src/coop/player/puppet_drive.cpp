@@ -12,6 +12,7 @@
 #include "coop/player/players_registry.h"
 #include "coop/player/pocket_travel.h"
 #include "coop/player/pocket_travel_client.h"
+#include "coop/player/push_wake_animation.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/sleepers.h"
 #include "coop/session/player_handshake.h"
@@ -101,6 +102,7 @@ coop::RemotePlayer& Puppet(int slot) {
 
 bool DestroySlot(int slot) {
     UE_ASSERT_GAME_THREAD("g_puppets (puppet_drive::DestroySlot)");
+    coop::push_wake_animation::OnSlotGone(slot);  // before the body goes, so what it moved is put back
     // The destroy comes first, so the puppet is still registered through its end of play and the
     // end-overlaps it reports as it dies: the identity consumers that classify by IsPuppet (e.g. the
     // damage and ignite cancels, the travel refusal) must still know the dying body. MTA ends a ped's
@@ -272,6 +274,8 @@ void DriveTick(coop::net::Session& session, bool worldReadyAnnounced) {
     for (int slot = 0; slot < coop::players::kMaxPeers; ++slot)
         if (g_puppets[slot].valid() && !g_hiddenByLocation[slot].load(std::memory_order_relaxed))
             coop::sleepers::DriveOnline(slot, g_puppets[slot]);
+    // After the drives above, so a push to wake reads every body where it stands this frame.
+    coop::push_wake_animation::Tick();
 
     // Killer-wisp grab-window body placement. MUST run AFTER the puppet Tick loop above: a held
     // victim puppet is snapped to the wisp's 'playerGrab' socket, overwriting the streamed pose

@@ -5,6 +5,7 @@
 #include "coop/player/nick_color.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/puppet_drive.h"  // HiddenByLocation: a player in another level has no plate
+#include "coop/player/push_wake.h"     // the wake prompt on a sleeper's plate
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
 #include "coop/player/sleepers.h"
@@ -375,7 +376,11 @@ void Update() {
             pl.sleeper = true;
             pl.showNick = dist <= std::max(0.f, coop::config::ResolveFloat(
                                                ::coop::config_registry::rows::sleepers_name_distance_m)) * 100.f;
+            int cooldownSecs = 0;   // a push to wake, offered to the viewer who aims at this sleeper
+            pl.wakeHint = static_cast<uint8_t>(coop::push_wake::HintFor(slot, &cooldownSecs));
+            pl.wakeSecs = cooldownSecs;
         }
+        pl.tipsy = p->IsTipsy();
         const float h = std::clamp(p->GetHealth(), 0.f, 1.f);
         pl.healthPct = static_cast<int>(std::lround(h * 100.f));
         // The ledger, not a per-tick fan-out through RemotePlayer. The old path pushed

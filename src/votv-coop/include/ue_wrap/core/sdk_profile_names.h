@@ -16,6 +16,8 @@ inline constexpr const wchar_t* GamemodeClass = L"mainGamemode_C";
 // AmainGamemode_C::transition(FName LevelName): the game's own level-travel verb;
 // ReturnToMainMenu calls it with the full path "/Game/menu" (the short name does not resolve).
 inline constexpr const wchar_t* MainGamemodeTransitionFn = L"transition";
+// `wakeup()`: the end of a rest -- isSleep must be set; it re-possesses the player, fires `wokenUp`, restores view and dilation.
+inline constexpr const wchar_t* MainGamemodeWakeupFn = L"wakeup";
 inline constexpr const wchar_t* ActorClass = L"Actor";
 inline constexpr const wchar_t* WorldClass = L"World";
 inline constexpr const wchar_t* SetActorLocationFn = L"K2_SetActorLocation";
@@ -975,6 +977,17 @@ inline constexpr const wchar_t* MainPlayerArmEndParam = L"end";
 // The kerfur AnimBP generated class (the asset AnimBlueprint_kerfurOmega_regular plus the '_C'
 // suffix of BP-generated classes).
 inline constexpr const wchar_t* AnimBPKerfurRegularClass = L"AnimBlueprint_kerfurOmega_regular_C";
+// The bones that AnimBP's ModifyBone nodes name, which a puppet's reach turns (ue_wrap/actors/puppet_gesture).
+inline constexpr const wchar_t* BoneUpperArmR = L"upperarm_R";
+inline constexpr const wchar_t* BoneUpperArmL = L"upperarm_L";
+inline constexpr const wchar_t* BoneBelly     = L"belly";
+// The slap of a push to wake and the game's default attenuation (coop/player/push_wake_animation).
+inline constexpr const wchar_t* PushWakeSlapCuePath     = L"/Game/audio/effects/physics/impact/impact_bodyH_slap_Cue.impact_bodyH_slap_Cue";
+inline constexpr const wchar_t* PushWakeAttenuationPath = L"/Game/audio/misc/att_default.att_default";
+// The drinks that make a player tipsy (coop/player/tipsy): consumed through prop_snack_C::eat, which calls
+// `snackEaten` after addFood took the food and only then (it returns early when the player is full).
+inline constexpr const wchar_t* SnackBeerClass = L"prop_snack_beer_C";
+inline constexpr const wchar_t* SnackWineClass = L"prop_snack_wine_C";
 
 // The dev freecam: a spawned ACameraActor the view is pointed at (SetViewTargetWithBlend), look
 // from the game's own control rotation, moved by WASD per frame.

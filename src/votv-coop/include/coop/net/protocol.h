@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 336;
+inline constexpr uint16_t kProtocolVersion = 337;
 
 // The peer slots a per-slot wire array holds: the host and nine clients. It equals
 // coop::players::kMaxPeers (static_assert'd in coop/net/session.h); this header stays free of the
@@ -419,8 +419,9 @@ enum class ReliableKind : uint8_t {
     DeskLogLine = 65,
 
     // Both directions on one kind, multiplexed by op: a client's rest state to the host, the
-    // host's own sleeping flag to the clients, and one peer's rest state relayed to the clients.
-    // SleepStatePayload.
+    // host's own sleeping flag to the clients, one peer's rest state relayed to the clients, and a
+    // push to wake (a client's request, the host's events). SleepStatePayload, PushWakeRequestPayload,
+    // PushWakeEventPayload.
     SleepState = 66,
 
     // Host to one client: the killer wisp grabbed your puppet; die for real after killDelayMs.
@@ -1664,7 +1665,8 @@ inline uint32_t NowStateTimeMs24() {
 //   stateBits    -- bit 0 in air (the source's movement mode is falling; clears the puppet's foot
 //                   IK), bit 1 ragdolled and not dead (every ragdoll cause; the receiver toggles
 //                   ragdollMode and forceGetUp on the edges), bit 2 burning (the source's burningTime
-//                   runs; the receiver shows the flame and nothing else), bits 3..7 reserved.
+//                   runs; the receiver shows the flame and nothing else), bit 3 tipsy (the source drank; the receiver animates its
+//                   nameplate and nothing else), bits 4..7 reserved.
 struct PoseSnapshot {
     float   x, y, z;
     float   yaw;
@@ -1688,6 +1690,7 @@ namespace match_form { constexpr uint8_t kNone = 0; constexpr uint8_t kPile = 1;
 inline constexpr uint8_t kStateBitInAir   = 0x01;
 inline constexpr uint8_t kStateBitRagdoll = 0x02;  // the source is ragdolled (faint, manual, knock-out), not dead
 inline constexpr uint8_t kStateBitBurning = 0x04;  // the source's body is on fire (its burningTime runs), display only
+inline constexpr uint8_t kStateBitTipsy   = 0x08;  // the source drank wine or beer lately (coop/player/tipsy), display only
 
 // The game's vital scalars (food, sleep, the default max health) top out at 100. health is
 // normalised by the peer's own max health before quantisation; food and sleep by this.
@@ -2587,14 +2590,17 @@ struct DeskLogLinePayload {
 };
 static_assert(sizeof(DeskLogLinePayload) == 124, "DeskLogLinePayload must be 124 bytes");
 
-// SleepState: op-multiplexed, one fixed size. Every peer sleeps
-// natively on its own machine; the wire carries who rests, and the host's sleeping flag.
+// SleepState: op-multiplexed; the first byte of every payload is the op. Every peer sleeps natively on its own
+// machine; the wire carries who rests, the host's sleeping flag and a push to wake. Ops 0..2 carry a
+// SleepStatePayload, ops 3 and 4 their own payload, each checked at its exact size.
 //   ClientRest (client -> host)   state and bed: the sender's own rest state, sent on a change.
 //   HostAsleep (host -> clients)  state 0/1: the host's own isSleep, on a change and at the join.
-//   PeerRest   (host -> clients)  slot, state and bed: one peer's rest state (slot 0 = the host),
-//                                 on a change, at the join for every peer not awake, and with
-//                                 Awake when a peer leaves.
-enum class SleepOp : uint8_t { ClientRest = 0, HostAsleep = 1, PeerRest = 2 };
+//   PeerRest   (host -> clients)  slot, state and bed: one peer's rest state (slot 0 = the host).
+//   PushWakeRequest (client -> host)  the sender, by the transport and never by the payload, asks to wake `targetSlot`.
+//   PushWakeEvent (host -> clients)   the host's word on a push to wake: start, cancel, execute, or a refusal.
+// A new kind was not taken: every free value of the ReliableKind byte is retired or reserved (115 was LaptopBlob,
+// 203 CoffeeDeviceState), and a retired value is never reused.
+enum class SleepOp : uint8_t { ClientRest = 0, HostAsleep = 1, PeerRest = 2, PushWakeRequest = 3, PushWakeEvent = 4 };
 // A peer's sleep state: awake, resting (in a bed, or fainted), dreaming (in a nightmare).
 enum class SleepPeerState : uint8_t { Awake = 0, Resting = 1, Dreaming = 2 };
 struct SleepStatePayload {
@@ -2605,6 +2611,36 @@ struct SleepStatePayload {
     WireKey bed;    // 32 -- ClientRest / PeerRest: the bed's class name (empty: bedless or awake); empty for HostAsleep
 };
 static_assert(sizeof(SleepStatePayload) == 36, "SleepStatePayload must be 36 bytes");
+
+// A push to wake. The waker is the transport's sender slot and is in no payload of a request.
+struct PushWakeRequestPayload {
+    uint8_t op;          // 1 -- SleepOp::PushWakeRequest
+    uint8_t targetSlot;  // 1 -- the resting player to wake
+    uint8_t reserved[2]; // 2 -- zero
+};
+static_assert(sizeof(PushWakeRequestPayload) == 4, "PushWakeRequestPayload must be 4 bytes");
+
+// What the host's PushWakeEvent says. Start: every peer plays the animation (`eventId`, both slots, `durationMs`).
+// Cancel: every peer ends event `eventId`. Execute: to the sleeper only, wake now. Denial: to the requester only.
+enum class PushWakeWhat : uint8_t { Start = 0, Cancel = 1, Execute = 2, Denial = 3 };
+// Why a request was refused (Denial's `reason`), or why an event ended (Cancel's).
+enum class PushWakeReason : uint8_t {
+    None = 0, NotReady = 1, BadTarget = 2, NotAsleep = 3, TooFar = 4, Cooldown = 5, Busy = 6, Dead = 7,
+    RateLimited = 8, Failed = 9, Left = 10, WokeAlone = 11
+};
+inline constexpr uint8_t kPushWakeReasonCount = 12;
+struct PushWakeEventPayload {
+    uint8_t  op;            // 1 -- SleepOp::PushWakeEvent
+    uint8_t  what;          // 1 -- PushWakeWhat
+    uint8_t  wakerSlot;     // 1 -- Start; zero otherwise
+    uint8_t  sleeperSlot;   // 1 -- Start
+    uint32_t eventId;       // 4 -- from 1; Start, Cancel and Execute name an event, a Denial's is 0
+    uint16_t durationMs;    // 2 -- Start: the animation's length
+    uint16_t cooldownSecs;  // 2 -- Denial with Cooldown: seconds left on the sleeper's cooldown
+    uint8_t  reason;        // 1 -- PushWakeReason; Denial and Cancel
+    uint8_t  reserved[3];   // 3 -- zero
+};
+static_assert(sizeof(PushWakeEventPayload) == 16, "PushWakeEventPayload must be 16 bytes");
 
 // An event fire (EventFire), host to all: dispatch 0 runEvent, 1 runSpecialEvent, and the row name.
 // Receivers replay only policy-allowlisted rows. No special-event field: the only special is a

@@ -493,6 +493,11 @@ msgstr ""
 msgid "Continue anyway"
 msgstr ""
 
+#: src/coop/player/push_wake.cpp src/ui/hud.cpp
+#, c-format
+msgid "Cooldown: %1$d:%2$02d"
+msgstr ""
+
 #: src/ui/dev_menu.cpp
 msgid "Cosmetics"
 msgstr ""
@@ -1221,8 +1226,16 @@ msgstr ""
 msgid "Skins come from converter .pak files under Content/Paks/LogicMods (any subfolder). One pak may carry several skins -- the four scientists ship together in scientists.pak."
 msgstr ""
 
+#: src/coop/player/push_wake.cpp
+msgid "Slow down"
+msgstr ""
+
 #: src/coop/props/prop_act_request.cpp
 msgid "Someone else has that item."
+msgstr ""
+
+#: src/coop/player/push_wake.cpp
+msgid "Someone is already waking them"
 msgstr ""
 
 #: src/coop/net/end_reason.cpp
@@ -1492,6 +1505,14 @@ msgstr ""
 msgid "Their identity is not proved yet."
 msgstr ""
 
+#: src/coop/player/push_wake.cpp
+msgid "They are not asleep"
+msgstr ""
+
+#: src/coop/player/push_wake.cpp
+msgid "They would not wake up"
+msgstr ""
+
 #: src/ui/game_build_dialog.cpp
 #, c-format
 msgid "This Multivoid (b%1$s) is made for VOTV %2$s. Your game is VOTV %3$s, a newer version."
@@ -1580,6 +1601,10 @@ msgstr ""
 
 #: src/ui/config_review_panel.cpp
 msgid "Tidy up multivoid.ini"
+msgstr ""
+
+#: src/coop/player/push_wake.cpp
+msgid "Too far away to wake them"
 msgstr ""
 
 #: src/coop/props/container_act_request.cpp src/coop/props/prop_act_request.cpp src/coop/props/storage_act_client.cpp
@@ -1802,6 +1827,10 @@ msgstr ""
 msgid "You can't travel to another dimension while hosting: the shared world runs on your machine. Stop hosting first to take the trip."
 msgstr ""
 
+#: src/coop/player/push_wake.cpp
+msgid "You can't wake anyone right now"
+msgstr ""
+
 #: src/ui/config_review_panel.cpp
 #, c-format
 msgid "Your body skin (%s) could not be saved to multivoid.ini this launch -- it is temporary for this session. Fix whatever keeps the file from being read or saved (a lock from an editor or antivirus, permissions, or a file saved as UTF-16); nothing is lost once a launch can save again."
@@ -1867,6 +1896,10 @@ msgstr ""
 
 #: src/ui/hud.cpp
 msgid "[E] Loot"
+msgstr ""
+
+#: src/ui/hud.cpp
+msgid "[RMB x2] Wake"
 msgstr ""
 
 #: src/ui/admin_panel.cpp

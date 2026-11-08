@@ -43,8 +43,8 @@ channel, so a test shows what the guard ignores and which props it covers.
 ### The pose stream
 
 Each peer streams its own pose per tick as an unreliable, newest-wins message: position, yaw,
-pitch, the head-to-body yaw delta, speed, a byte of state bits, and health, food and sleep as
-fractions (`coop/player/local_streams`). Receivers interpolate in MTA's fixed-window linear form
+pitch, the head-to-body yaw delta, speed, a byte of state bits (in the air, ragdolled, burning, tipsy), and health, food
+and sleep as fractions (`coop/player/local_streams`). Receivers interpolate in MTA's fixed-window linear form
 (`coop/element/lerp_window`): the error is cached once when a packet arrives and applied
 linearly over the window, then the target is snapped so float drift cannot accumulate.
 
@@ -425,6 +425,47 @@ is saved where their body is. The log says `sleeper: saved N online player(s) as
 **Follow-ups, not in v1:** looting an online sleeper; damage to a sleeper, carrying or moving one, a timeout after
 which a sleeper goes.
 
+### Push to wake
+
+A player who walks up to one asleep in a bed or a sleeping bag sees `[RMB x2] Wake` where a sleeper's loot hint would
+sit, and wakes them with two right-clicks within 350 ms on the same body (`coop/player/push_wake`, with the animation
+in `coop/player/push_wake_animation`). The host judges: the sender is the transport's slot, never a payload field; both
+players are in the roster, alive and settled; the sleeper rests in a bed (a sleeping bag is a bed, the unrolled bag
+derives from `bed_C` and its action 4 calls `gosleep`), not dreaming and not fainted; the waker is within 4.5 m
+(the aim itself reaches 2.5 m, as the loot press); nobody else is waking that sleeper or using that waker; the sleeper's
+five-minute cooldown has run out; and the sender has made at most one request a second (burst two; a request over the
+pace is dropped without an answer). It then tells every peer to play the animation (`Start`), and 1.6 s later
+revalidates and tells the sleeper's machine to wake (`Execute`), which calls the game's own `gamemode.wakeup()`: the
+`wokenUp` delegate, the view, the time dilation and `isSleep` come back as after any wake, and `sleep_sync` publishes the
+awake state. The cooldown starts when the host reads that awake state, and is kept by the sleeper's identity (the
+profile guid, else the player number), so a slot given to someone else carries none. A refusal goes to the requester
+only (`Denial`: too far, not asleep, already being woken, cooldown with the seconds left); the plate then shows
+`Cooldown: m:ss` counting down. A leave, a death, the sleeper waking by themselves, or an `Execute` that has not taken
+in 4 s ends the event for every peer (`Cancel`) and starts no cooldown. A host asleep and woken stops the world's
+time skip; a client woken leaves a sleeping host's running (`sleep_sync` already lets the host's sleep alone drive time).
+
+The wire is `ReliableKind::SleepState`, protocol 337, under two new ops, `PushWakeRequest` (client to host, 4 bytes) and
+`PushWakeEvent` (host to clients, 16 bytes), each checked at its exact size with its reserved bytes zero: every free
+value of the kind byte is retired or reserved (115 was `LaptopBlob`, 203 `CoffeeDeviceState`), and a retired value is
+never reused. A joiner sees none of an event (it lasts 1.5 s).
+
+The right-click on foot with empty hands does nothing in the game (`InpActEvt_rotate` only sets `input_rotate`, closes
+the radial wheel, and throws a snowball at snow or winter grass it hits), so the press takes nothing from the game; with
+a hand item the same click uses it (a held beer is drunk), with a grabbed prop it turns it, and inside a device it is
+ignored, so the prompt shows and the press counts only with empty hands, no screen up, the game unpaused and in the
+foreground. The key is polled (`GetAsyncKeyState`), so it never suppresses the game's own click. `[?]` The animation,
+the wake and the prompt are untested in a running game.
+
+### Tipsy
+
+A player who drinks a beer or a wine (`prop_snack_beer_C`, `prop_snack_wine_C`) is tipsy for five minutes, each further
+drink adding five up to fifteen (`coop/player/tipsy`). A watch on `snackEaten`, which `prop_snack_C.eat` reaches only after
+`addFood` took the food, so a drink refused because the player is full counts for nothing. The drink runs on the
+drinker's machine; one the host ran for a client's puppet (an acting-slot scope) is not the host's and is skipped. The state
+is a deadline on the drinker's clock and one bit of their own pose (`PoseSnapshot.stateBits` 0x08), relayed with the
+rest, so a late joiner sees it with the next pose. Every screen draws five small wine-pink bubbles rising and wobbling off
+the left of the plate, on its alpha and scale. The game's own beer also nauseates (`addEffect nausea`); that is unchanged.
+
 ### Inventory
 
 Per player and private: the contents never cross the wire as gameplay. The host stores each
@@ -594,7 +635,7 @@ game's own `addParticle` with them, so the drop falls and stains there too. Only
 | `WasherFx` | each peer, relayed | a firing pressure washer: the firer, the hold, firing or stopped, up to four shot landings |
 | `BloodDropFx` | each peer, relayed | a bleeding player's blood drops: the bleeder, up to four drops (start point, velocity, size, type) |
 | `PlayerHit` | host to the hit peer | a parked creature's hit on the peer's puppet: the verb (addDamage or punch) to run on its own player |
-| `SleepState` | a client to the host; the host to all | a rest state with its bed (awake, resting, dreaming); the host's sleeping flag; one peer's rest state relayed |
+| `SleepState` | a client to the host; the host to all | a rest state with its bed (awake, resting, dreaming); the host's sleeping flag; one peer's rest state relayed; a push to wake (a client's request, the host's start, cancel, execute and denial) |
 | `PlayerInventoryBlob` | both | the per-player profile (the inventory component's bytes, vitals, standing spot), pre-world |
 | `TeleportClient` | host to one peer | a placement; the administration action, not the join |
 | `InventoryRestoreBlob`, `InventoryRestoreAck` | host to one client; that client to the host | a backed-up inventory's bytes, chunked, to put back on that player; the answer with the item counts before and after |

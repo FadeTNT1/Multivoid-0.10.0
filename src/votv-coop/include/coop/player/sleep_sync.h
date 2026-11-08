@@ -35,7 +35,8 @@ void Tick();
 
 // Wire ingest (both roles; see SleepStatePayload). Every field is checked against the sender's role
 // and slot here, and a refusal is one rate-limited warning naming the field. `len` is the message's
-// payload length, which must be exactly the payload's size.
+// payload length, which must be exactly the payload's size. The push-to-wake ops (3 and 4) are handed on to
+// coop/player/push_wake with their own payloads.
 void OnReliable(const uint8_t* payload, size_t len, uint8_t senderSlot);
 
 // HOST, game thread, each event_feed update after the reconcile: a client's rest state owed by its pace
@@ -64,6 +65,10 @@ bool HostAsleepNow();
 // client's rest reports the host applied from `slot`; whether this peer's own polled state is not awake.
 uint32_t ReportsApplied(int slot);
 bool LocalInBed();
+// This peer's own polled rest state and the class name of the bed it rests in (empty: awake, or a bedless rest such as a
+// faint). The state a sleeper's wake is judged on.
+coop::net::SleepPeerState LocalState();
+std::string LocalBed();
 
 // Why a bed was refused at the door: a length past the name's room, a character outside an identifier, a nonzero
 // byte past the length, or an Awake report that carries a bed.

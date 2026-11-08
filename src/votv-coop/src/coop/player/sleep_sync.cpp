@@ -7,6 +7,7 @@
 #include "coop/net/net_clock.h"
 #include "coop/net/session.h"
 #include "coop/net/wire_key_util.h"
+#include "coop/player/push_wake.h"
 #include "coop/player/roster_ledger.h"  // PerSlotState, DisplayName
 #include "coop/text/utf8_codec.h"
 #include "l10n/l10n.h"
@@ -198,9 +199,11 @@ void SendClientRest(coop::net::Session* s) {
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
+    coop::push_wake::Install(session);
 }
 
 void Tick() {
+    coop::push_wake::Tick();  // a push to wake: the local press, and the host's events; each judges its own gates
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running()) return;
     if (!SLP::EnsureResolved()) return;
@@ -260,6 +263,9 @@ void Tick() {
 void OnReliable(const uint8_t* payload, size_t len, uint8_t senderSlot) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s) return;
+    // A push to wake rides this kind under its own ops and payloads (coop/player/push_wake judges them).
+    if (len >= 1 && payload[0] >= static_cast<uint8_t>(SleepOp::PushWakeRequest))
+        return coop::push_wake::OnReliable(payload, len, senderSlot);
     if (len != sizeof(SleepStatePayload)) return Refuse("length", senderSlot);
     SleepStatePayload p{};
     std::memcpy(&p, payload, sizeof(p));
@@ -338,6 +344,7 @@ void OnDisconnectForSlot(int slot) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !IsHost(s)) return;
     if (slot <= 0 || slot >= static_cast<int>(coop::net::kMaxPeers)) return;
+    coop::push_wake::OnSlotGone(slot);  // an event naming the leaver ends, told to every peer
     g_pending[slot].pace.Withdraw();
     if (g_state[slot] == SleepPeerState::Awake) return;  // every client already holds it awake
     g_state[slot] = SleepPeerState::Awake;
@@ -386,7 +393,14 @@ uint32_t BedRefusalsFrom(int slot, BedRefusal why) {
 
 bool LocalInBed() { return g_localState != SleepPeerState::Awake; }
 
+SleepPeerState LocalState() { return g_localState; }
+
+std::string LocalBed() {
+    return std::string(g_localBed.data, g_localBed.data + (g_localBed.len <= sizeof(g_localBed.data) ? g_localBed.len : 0));
+}
+
 void OnDisconnect() {
+    coop::push_wake::OnSessionEnd();
     // Restore the SP nightmare sentinel. A host still asleep keeps sleeping: its timelapse was the game's own
     // all along. A client that loses its session leaves to the menu; its world stays at 1, which is what it ran.
     if (g_dreamProbSuppressed) {

@@ -635,6 +635,7 @@ inline constexpr size_t LookAt_Clamp              = 0x170;  // float degrees (FA
 // FAnimNode_ModifyBone specifics (for direct head-rotation writes):
 inline constexpr size_t ModBone_Rotation          = 0xE4;   // FRotator
 inline constexpr size_t ModBone_RotationMode      = 0xFD;   // EBoneModificationMode (0=Ignore,1=Replace,2=Additive)
+inline constexpr size_t ModBone_RotationSpace     = 0x100;  // EBoneControlSpace (0=World,1=Component,2=ParentBone,3=Bone)
 // AnimGraphNode_* offsets within the kerfurOmega_regular AnimInstance:
 inline constexpr size_t kKerfurLookAt_1           = 0x1730;
 inline constexpr size_t kKerfurLookAt             = 0x18E0;
