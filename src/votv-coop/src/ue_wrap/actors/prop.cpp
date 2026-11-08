@@ -121,24 +121,27 @@ void* ResolveOrLoadPropClass(const std::wstring& className) {
         if (R::IsLiveByIndex(it->second.first, it->second.second)) return it->second.first;
         s_loaded.erase(it);
     }
-    std::wstring path = P::name::PropsContentDir;
-    path.append(className, 0, n - 2);
-    path += L'.';
-    path += className;
-    void* obj = asset_load::LoadObjectByPath(path.c_str());
-    // Only a blueprint class is read as a class: the descent test walks SuperStruct, which another
-    // kind of object does not have.
-    const bool isClass = obj && R::NameEquals(R::NameOf(R::ClassOf(obj)), P::name::BlueprintGeneratedClassName);
-    if (!isClass || !IsClassDescendantOfProp(obj)) {
-        if (s_missed.size() < 256) s_missed.insert(className);
-        UE_LOGW("prop: class '%ls' is not loaded here and '%ls' did not load a prop class -- not tried again",
-                className.c_str(), path.c_str());
-        return nullptr;
+    // Each content dir in turn: a prop class sits in /Game/objects/ or, for a few quest props, the /Game/ root.
+    std::wstring path;
+    for (const wchar_t* dir : P::name::PropsContentDirs) {
+        path = dir;
+        path.append(className, 0, n - 2);
+        path += L'.';
+        path += className;
+        void* obj = asset_load::LoadObjectByPath(path.c_str());
+        // Only a blueprint class is read as a class: the descent test walks SuperStruct, which another
+        // kind of object does not have.
+        const bool isClass = obj && R::NameEquals(R::NameOf(R::ClassOf(obj)), P::name::BlueprintGeneratedClassName);
+        if (!isClass || !IsClassDescendantOfProp(obj)) continue;
+        UE_LOGI("prop: loaded class '%ls' from '%ls' -- no instance on this peer had loaded it", className.c_str(),
+                path.c_str());
+        if (s_loaded.size() < 256) s_loaded[className] = {obj, R::InternalIndexOf(obj)};
+        return obj;
     }
-    UE_LOGI("prop: loaded class '%ls' from '%ls' -- no instance on this peer had loaded it", className.c_str(),
-            path.c_str());
-    if (s_loaded.size() < 256) s_loaded[className] = {obj, R::InternalIndexOf(obj)};
-    return obj;
+    if (s_missed.size() < 256) s_missed.insert(className);
+    UE_LOGW("prop: class '%ls' is not loaded here and no content dir (last '%ls') loaded a prop class -- not tried "
+            "again", className.c_str(), path.c_str());
+    return nullptr;
 }
 
 // IsKeyedInteractable: the non-prop interactable bases (the trash pile, the garbage clump, the

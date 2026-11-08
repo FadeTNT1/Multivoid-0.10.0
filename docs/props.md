@@ -674,8 +674,10 @@ A client's verbs are intents the host runs on its own copies (`DigIntent`, `coop
   does. The mound or plant it made is named and published. The answer is `DigState` op 6; a grant makes the client
   spend the item it held.
 - **Fill.** A dirt ball used on a hole is the same shape (the hole and the ball are spent). A ball thrown in is the
-  host's physics: the hole's box overlap is refused on a client, and the ball the shovel throws crosses as a player's
-  own spawn (`coop/props/prop_spawn_authoring` admits the shovel's ubergraph).
+  hole's own box overlap, which destroys the ball and the hole: refused on a client (the host runs it), where
+  `coop/props/dig_fill` turns it into the same Fill intent, once per ball, and spends the ball when the host answers.
+  A hole already gone answers granted, so a ball the host also saw cannot strand; a ball a peer's own mirror shows is
+  never sent (its owner's overlap fills the hole where it was thrown).
 
 A receiver adopts the native actor of the row's class within a few centimetres of its place, else spawns one with the
 game's own spawn and a deferred window (the hole's `matType`, the mound's `betterData`, the plant's `plant` and its

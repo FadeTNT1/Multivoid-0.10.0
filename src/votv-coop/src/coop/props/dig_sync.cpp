@@ -4,6 +4,9 @@
 
 #include "coop/props/dig_wire.h"
 
+#include "dig_fill.h"
+#include "dig_out.h"
+
 #include "coop/element/intent_authority.h"
 #include "coop/net/blob_chunks.h"
 #include "coop/net/intent_queue.h"
@@ -31,7 +34,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <deque>
 #include <iterator>
 #include <string>
 #include <unordered_map>
@@ -82,7 +84,6 @@ constexpr float    kSameHoleUU = 25.0f;        // a second dig this near a hole 
 constexpr float    kBuryNearUU = 60.0f;        // the hole a burial names, to the one the host has
 constexpr size_t   kMaxRows = 512;
 constexpr size_t   kMaxPendingIntents = 8;
-constexpr size_t   kMaxQueuedOut = 2 * kMaxRows;   // a joiner's whole snapshot (every row and its end) fits
 constexpr uint64_t kCensusMs = 1000;
 constexpr uint64_t kBodyWaitMs = 4000;
 constexpr uint64_t kAckWaitMs = 10000;
@@ -113,48 +114,7 @@ float Dist2(const FVector& a, const FVector& b) {
     return dx * dx + dy * dy + dz * dz;
 }
 
-// ---- the outbound queue: one for the host's state, one for a client's intents; a send the link refuses stays ----
-
-struct Out {
-    int                  slot;   // -1: every client (state); a client's intents go to the host
-    std::vector<uint8_t> bytes;
-};
-std::deque<Out> g_out;
-uint32_t g_sendSeq = 1;
-bool g_fullSaid = false;
-
-void Enqueue(int slot, std::vector<uint8_t>&& bytes) {
-    if (g_out.size() >= kMaxQueuedOut) {
-        if (!g_fullSaid) {
-            g_fullSaid = true;
-            UE_LOGW("[DIG] the outbound queue is full (%zu) -- a message is dropped", g_out.size());
-        }
-        return;
-    }
-    g_out.push_back(Out{slot, std::move(bytes)});
-}
-
-void DrainOut(coop::net::Session& s) {
-    if (!s.running() || !s.connected()) return;
-    const bool host = s.role() == coop::net::Role::Host;
-    const auto kind = host ? coop::net::ReliableKind::DigState : coop::net::ReliableKind::DigIntent;
-    for (int n = 0; n < 16 && !g_out.empty(); ++n) {
-        const Out& o = g_out.front();
-        // HOST: a peer takes the dig lane only once its world is up, and its world-ready snapshot then carries every
-        // row as it stands. A broadcast no ready peer can take, or a row for a slot no longer ready (it left), is
-        // already covered or moot; held at the head it refused every tick and blocked the joiner's snapshot.
-        if (host && (o.slot < 0 ? !s.AnyWorldReadyPeer() : !s.IsSlotWorldReady(o.slot))) {
-            g_out.pop_front();
-            continue;
-        }
-        const bool ok = (host && o.slot >= 0)
-                            ? coop::blob_chunks::SendBlobToSlot(&s, o.slot, kind, g_sendSeq, o.bytes)
-                            : coop::blob_chunks::SendBlob(&s, kind, g_sendSeq, o.bytes);
-        if (!ok) return;   // the blob is all or nothing: the whole of it again next tick, under a fresh number
-        ++g_sendSeq;
-        g_out.pop_front();
-    }
-}
+using coop::dig_out::Enqueue;   // the outbound queue is dig_out's
 
 // ---- state shared by the gate callbacks ----
 
@@ -334,7 +294,7 @@ coop::net::Served Execute(coop::net::Session& s, const QueuedIntent& q, uint8_t 
         case W::IntentOp::Fill: {
             HostRow* row = NearestHole(at, kBuryNearUU);
             void* hole = row ? row->actor.Get() : nullptr;
-            if (!hole) { SendAck(slot, m.reqId, false, "no such hole"); return Served::Done; }
+            if (!hole) { SendAck(slot, m.reqId, true, ""); return Served::Done; }   // filled already (a ball here too): spent
             ++g_fillsRun;
             UE_LOGI("[DIG] host: ran slot %u's fill (request %u) of hole #%u", static_cast<unsigned>(slot), m.reqId, row->id);
             E::DestroyActor(hole);
@@ -557,6 +517,7 @@ void ApplyState(const W::State& m) {
                     g_parked.size());
             return;
         case W::StateOp::Ack: {
+            if (coop::dig_fill::OnAck(m.id, m.ok != 0)) return;   // a thrown dirt ball's fill, not a held item's
             auto it = g_pending.find(m.id);
             if (it == g_pending.end()) return;
             PendingAck p = std::move(it->second);
@@ -600,6 +561,7 @@ void ClientTick(coop::net::Session& s) {
     }
     for (auto it = g_pending.begin(); it != g_pending.end();)
         it = (now > it->second.untilMs) ? g_pending.erase(it) : std::next(it);
+    coop::dig_fill::Tick(now);
     if (now >= g_nextRetry && !g_parked.empty()) {
         g_nextRetry = now + 500;
         std::vector<Parked> keep;
@@ -633,17 +595,8 @@ sg::Verdict OnHoleBeginPlayPre(const sg::Call& c) {
     return sg::Verdict::Cancel;
 }
 
-sg::Verdict OnHoleOverlapPre(const sg::Call&) {
-    return IsClient(g_session.load(std::memory_order_acquire)) ? sg::Verdict::Cancel : sg::Verdict::Run;
-}
-
-sg::Verdict OnDigPre(const sg::Call&) {
-    ++g_digDepth;
-    return sg::Verdict::Run;
-}
-void OnDigPost(const sg::Call&) {
-    if (g_digDepth > 0) --g_digDepth;
-}
+sg::Verdict OnDigPre(const sg::Call&) { ++g_digDepth; return sg::Verdict::Run; }
+void OnDigPost(const sg::Call&) { if (g_digDepth > 0) --g_digDepth; }
 
 ue_wrap::reflection::ParamOffset g_holdParam{L"holdObject"};
 
@@ -691,7 +644,7 @@ sg::Verdict OnHoleUsePre(const sg::Call& c) {
 const Watch kWatches[] = {
     {&kRowHoleBeginPlay, kTagHoleBeginPlay, "dirthole_C.ReceiveBeginPlay", &OnHoleBeginPlayPre, nullptr},
     {&kRowHoleUse, kTagHoleUse, "dirthole_C.playerUsedOn", &OnHoleUsePre, nullptr},
-    {&kRowHoleOverlap, kTagHoleOverlap, "dirthole_C box overlap", &OnHoleOverlapPre, nullptr},
+    {&kRowHoleOverlap, kTagHoleOverlap, "dirthole_C box overlap", &coop::dig_fill::OnHoleOverlapPre, nullptr},
     {&kRowShovelDig, kTagShovelDig, "prop_shovel_C.event_dighole", &OnDigPre, &OnDigPost},
     {&kRowBury, kTagBury, "dirthole_C.processBuriedItem", &OnBuryPre, &OnBuryPost},
     {&kRowPlantBeginPlay, kTagPlantBeginPlay, "growingPlant_C.ReceiveBeginPlay", &OnPlantBeginPlayPre, nullptr},
@@ -736,6 +689,7 @@ coop::blob_chunks::Assembler g_asmIntent, g_asmState;
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
+    coop::dig_fill::Install(session);
     if (!session) return;
     RegisterWatches();
 }
@@ -748,7 +702,7 @@ void Tick(coop::net::Session& session) {
     if (!session.running()) return;
     if (session.role() == coop::net::Role::Host) HostTick(session);
     else ClientTick(session);
-    DrainOut(session);
+    coop::dig_out::Drain(session);
     if (!g_asmIntent.Idle() || !g_asmState.Idle()) {
         static uint64_t s_nextSweep = 0;
         if (NowMs() >= s_nextSweep) {
@@ -826,7 +780,8 @@ void OnDisconnect() {
     g_parked.clear();
     g_digs.clear();
     g_pending.clear();
-    g_out.clear();
+    coop::dig_out::Clear();
+    coop::dig_fill::Reset();
     g_capturedPlants.clear();
     for (auto& sl : g_slots) sl = Slot{};
     g_asmIntent.Clear();
@@ -835,7 +790,7 @@ void OnDisconnect() {
     g_nextReq = 1;
     g_nextCensus = 0;
     g_digDepth = g_buryDepth = g_mirrorSpawning = 0;
-    g_rowsFullSaid = g_fullSaid = false;
+    g_rowsFullSaid = false;
     g_registered = g_gone = g_digsRun = g_buriesRun = g_fillsRun = g_denied = g_dropped = 0;
     g_appliedRows = g_adopted = g_spawned = g_goneApplied = g_digsSent = g_burySent = g_refusedBodies = 0;
 }

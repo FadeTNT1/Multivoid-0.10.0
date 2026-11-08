@@ -2097,9 +2097,11 @@ inline constexpr const wchar_t* WidgetTickFn = L"Tick";
 // prop from its sanity (prop_lifecycle::IsPerPlayerPropClass).
 inline constexpr const wchar_t* BurgerHallucinationClass = L"prop_burgerHallucinate_C";
 inline constexpr const wchar_t* InsanityPropClass = L"insanityProp_C";
-// Where the game's prop classes live, as /Game/objects/<stem>.<stem>_C: the load of a prop class no instance on
-// this peer has loaded yet (ue_wrap::prop::ResolveOrLoadPropClass).
-inline constexpr const wchar_t* PropsContentDir = L"/Game/objects/";
+// Where the game's prop classes live, as <dir><stem>.<stem>_C: the load of a prop class no instance on this peer
+// has loaded yet (ue_wrap::prop::ResolveOrLoadPropClass), tried dir by dir. Most sit in /Game/objects/; the Kerfur
+// Omega quest's boxes (prop_container_oldbox_kerfurJoints_C, prop_container_oldbox_C) sit in the /Game/ root (the
+// 0.10.0 pak index), so a client that had never met one dropped the host's spawn of it as "class not found".
+inline constexpr const wchar_t* PropsContentDirs[] = {L"/Game/objects/", L"/Game/"};
 inline constexpr const wchar_t* BlueprintGeneratedClassName = L"BlueprintGeneratedClass";
 // The persistent actors a held tool leaves behind (coop/items/save_actor_sync, ue_wrap/actors/save_actor). Each is an
 // actor_save_C, NOT a prop_C, so no prop lane sees it. Read from the 0.10.0 bytecode capture (the producer, then the

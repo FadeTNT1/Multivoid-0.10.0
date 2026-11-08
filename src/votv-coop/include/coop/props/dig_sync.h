@@ -11,7 +11,7 @@
 // client for its crater, sounds and animation; the hole it spawns is read at its BeginPlay and destroyed, and the host
 // spawns the one hole every peer then mirrors), a burial or planting (the hole's playerUsedOn is refused; the held
 // item's own save record goes with the intent and the host rebuilds the item and runs processBuriedItem) and a fill
-// (a dirt ball used on a hole). A mirror hole's BeginPlay (which digs a mound up and attaches the hole) and its fill
+// (a dirt ball used on a hole, or thrown into it: dig_fill). A mirror hole's BeginPlay (which digs a mound up and attaches the hole) and its fill
 // overlap are refused on a client: the host runs them and the results arrive as DigState and the prop lane.
 //
 // LATE JOIN: the save carries the holes and mounds natively; the ready edge sends every row and an end marker, and a
