@@ -183,6 +183,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/character_push.cpp
     src/ue_wrap/actors/puppet.cpp
     src/ue_wrap/actors/puppet_spawn.cpp
+    src/ue_wrap/actors/puppet_gesture.cpp
     src/ue_wrap/actors/kerfur.cpp
     src/ue_wrap/actors/kerfus.cpp
     src/ue_wrap/actors/zombie.cpp

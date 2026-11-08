@@ -476,6 +476,7 @@ set(VOTVCOOP_SOURCES
     src/coop/player/sleeper_drag.cpp
     src/coop/player/sleeper_wire.cpp
     src/coop/player/sleepers.cpp
+    src/coop/player/push_wake_animation.cpp
     src/coop/player/sleeper_snore.cpp
     src/coop/player/sleeper_snore_sound.cpp
     resources/snore.rc
