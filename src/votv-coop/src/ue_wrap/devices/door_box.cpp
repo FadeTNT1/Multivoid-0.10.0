@@ -8,7 +8,9 @@
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/types.h"
+#include "ue_wrap/devices/drone_console.h"
 #include "ue_wrap/engine/engine.h"
+#include "ue_wrap/engine/engine_component.h"
 
 #include <chrono>
 #include <cmath>
@@ -274,6 +276,13 @@ bool ApplyOpened(void* actor, bool want) {
         if (d == &g_console && verb) {
             ParamFrame f(verb);
             if (f.valid()) Call(actor, f);
+        }
+        // The console's own press also plays the lid's `audio_door` (the bytecode of actionOptionIndex, action
+        // 10/11, right after setButtonsCollision), so a peer that only mirrors the lid hears it open and shut
+        // like the one that pressed it.
+        if (d == &g_console) {
+            void* const doorCue = ue_wrap::drone_console::PartOf(actor, L"audio_door");
+            if (doorCue) ue_wrap::engine::PlayAudioComponent(doorCue);
         }
         void* tl = d->offTimeline < 0 ? nullptr : *reinterpret_cast<void* const*>(
             reinterpret_cast<const char*>(actor) + d->offTimeline);

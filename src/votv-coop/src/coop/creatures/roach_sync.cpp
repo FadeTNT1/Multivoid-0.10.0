@@ -389,8 +389,11 @@ void SendSnapshot(coop::net::Session* s, const std::vector<SnapEntry>& snap, int
             ? s->SendReliable(coop::net::ReliableKind::RoachState, &p, sizeof(p))
             : s->SendReliableToSlot(toSlot, coop::net::ReliableKind::RoachState, &p, sizeof(p));
         if (!ok) {
-            UE_LOGW("roach_sync: RoachState send FAILED (seq=%u page %d/%d, toSlot=%d)",
-                    g_seq, pg + 1, pages, toSlot);
+            // A broadcast with nobody connected has no one to refuse it: the host's own world ticks before its first
+            // joiner (nine of these, a second apart, preceded the first join in the 2026-11-07 host log).
+            if (toSlot >= 0 || s->AnyWorldReadyPeer())
+                UE_LOGW("roach_sync: RoachState send FAILED (seq=%u page %d/%d, toSlot=%d)",
+                        g_seq, pg + 1, pages, toSlot);
             return;  // partial snapshot: receiver's seq/page assembly discards it
         }
     }
