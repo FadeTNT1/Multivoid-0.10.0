@@ -402,6 +402,14 @@ void DisableCharacterTicks(void* actor) {
     E::SetActorTickEnabled(actor, false);
 }
 
+void EnableCharacterTicks(void* actor) {
+    if (!actor || !R::IsLive(actor)) return;
+    if (void* cmc = ReadPtr(actor, P::off::ACharacter_CharacterMovement)) {
+        if (R::IsLive(cmc)) E::SetComponentTickEnabled(cmc, true);
+    }
+    E::SetActorTickEnabled(actor, true);
+}
+
 void DisableMovementTick(void* actor) {
     if (!actor || !R::IsLive(actor)) return;
     // CMC tick off, to stop gravity and velocity integration so the networked SetActorLocation

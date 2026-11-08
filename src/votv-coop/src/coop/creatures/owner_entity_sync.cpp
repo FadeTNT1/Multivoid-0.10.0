@@ -6,6 +6,7 @@
 
 #include "coop/creatures/owner_entity_sync.h"
 
+#include "coop/creatures/eyer_stare.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"    // kMaxPeers
@@ -17,7 +18,8 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
-#include "ue_wrap/actors/puppet.h"                  // DisableCharacterTicks (the npc-mirror park)
+#include "ue_wrap/actors/eyer.h"                    // IsAngry (a display copy that was stared at)
+#include "ue_wrap/actors/puppet.h"                  // Disable/EnableCharacterTicks (the npc-mirror park)
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
 #include "ue_wrap/core/types.h"
@@ -30,6 +32,7 @@
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace coop::owner_entity_sync {
@@ -103,8 +106,16 @@ constexpr size_t kMaxOwned = 8;   // eyers are rare singletons, a swarm lives se
 struct Mirror {
     void*   actor;
     int32_t idx;
+    uint8_t classId;
 };
 std::unordered_map<uint32_t, Mirror> g_mirrors;  // key = (slot << 16) | seq
+
+// Keys of display copies this machine's player stared at and took over (OnMirrorAngry): the copy is this
+// machine's own entity now, so the owner's keepalive and pose for that key are ignored. Bounded; a stale key
+// only suppresses a copy of an entity that is gone, and a destroy message erases it.
+std::unordered_set<uint32_t> g_taken;
+constexpr size_t kMaxTaken = 64;
+constexpr uint8_t kEyerClassId = 0;
 
 uint32_t Key(int slot, uint16_t seq) {
     return (static_cast<uint32_t>(slot) << 16) | seq;
@@ -204,6 +215,7 @@ void AnnounceOwned(coop::net::Session* s, Owned& o, long long now) {
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
+    coop::eyer_stare::Install();   // idempotent; retried until its watches register
     if (g_observerArmed) return;
 
     // Native classes, in the index from boot: the observer arms on the first call.
@@ -323,6 +335,7 @@ void OnSpawnMsg(const coop::net::OwnerEntitySpawnPayload& p, int senderPeerSlot)
         return;
     }
     const uint32_t key = Key(senderPeerSlot, p.seq);
+    if (g_taken.count(key)) return;   // this machine's player took that copy over: it is no longer the owner's to place
     auto it = g_mirrors.find(key);
     if (it != g_mirrors.end()) {
         // Keepalive re-announce of a known entity: refresh the pose.
@@ -399,8 +412,8 @@ void OnSpawnMsg(const coop::net::OwnerEntitySpawnPayload& p, int senderPeerSlot)
             return;
         }
     }
-    // PARK the mirror: no AI (actor + CMC ticks off -> no isLooking/anger/dash
-    // loop). Collision was already dropped pre-Finish (F-4). A member that is no Character (the swarm) has no
+    // PARK the mirror: no pursuit and no kill (actor + CMC ticks off, collision off). Its timers still run, which is
+    // how it judges THIS machine's player staring at it (OnMirrorAngry). Collision was already dropped pre-Finish (F-4). A member that is no Character (the swarm) has no
     // movement component, so its actor tick goes off (the chase of this machine's player 0) and its root is held
     // kinematic, the pose stream's alone.
     if (E::GetCharacterMovementComponent(spawned)) {
@@ -409,7 +422,7 @@ void OnSpawnMsg(const coop::net::OwnerEntitySpawnPayload& p, int senderPeerSlot)
         E::SetActorTickEnabled(spawned, false);
         E::SetActorSimulatePhysics(spawned, false);
     }
-    g_mirrors[key] = Mirror{spawned, R::InternalIndexOf(spawned)};
+    g_mirrors[key] = Mirror{spawned, R::InternalIndexOf(spawned), p.classId};
     UE_LOGI("owner_entity: mirror '%ls' materialized for slot=%d seq=%u at (%.0f,%.0f,%.0f) "
             "(brain-parked, collision-off)",
             kOwnerEntityClasses[p.classId], senderPeerSlot, p.seq, p.x, p.y, p.z);
@@ -436,6 +449,7 @@ void OnDestroyMsg(const coop::net::OwnerEntityDestroyPayload& p, int senderPeerS
         OnPeerLeftSlot(slot);
         return;
     }
+    g_taken.erase(Key(slot, p.seq));
     auto it = g_mirrors.find(Key(slot, p.seq));
     if (it == g_mirrors.end()) return;
     DestroyMirrorActor(it->second.actor, it->second.idx);
@@ -444,10 +458,59 @@ void OnDestroyMsg(const coop::net::OwnerEntityDestroyPayload& p, int senderPeerS
             slot, p.seq);
 }
 
+void OnMirrorAngry(void* eyer) {
+    if (!GT::IsGameThread() || !eyer) return;
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected()) return;
+    auto it = g_mirrors.begin();
+    while (it != g_mirrors.end() && it->second.actor != eyer) ++it;
+    if (it == g_mirrors.end()) return;   // an eyer this machine owns: its own stare, nothing to hand over
+    const uint32_t key = it->first;
+    const Mirror m = it->second;
+    if (m.classId != kEyerClassId || !R::IsLiveByIndex(m.actor, m.idx) || !ue_wrap::eyer::IsAngry(m.actor)) return;
+    if (g_owned.size() >= kMaxOwned) {
+        UE_LOGW("owner_entity: owned cap %zu hit -- the stared-at copy of slot=%d seq=%u is NOT taken over",
+                kMaxOwned, SlotOfKey(key), static_cast<unsigned>(key & 0xFFFF));
+        return;
+    }
+    ue_wrap::FVector loc{};
+    ue_wrap::FRotator rot{};
+    if (!E::TryGetActorLocation(m.actor, loc) || !E::TryGetActorRotation(m.actor, rot)) return;
+
+    // The copy was built by this machine's player staring at it. Run it natively from here: its pursuit reads
+    // this machine's player 0, its kill sphere bites this machine's player through the game's own damage verb, and
+    // its dash raises this machine's event count and lowers it when the eyer ends. It is announced as this peer's
+    // own entity, so every other peer shows it, and the owner's copy of the same key stays the owner's.
+    Owned o{};
+    o.seq = g_nextSeq++;
+    if (g_nextSeq == 0) g_nextSeq = 1;
+    o.classId = m.classId;
+    o.actor = m.actor;
+    o.idx = m.idx;
+    o.x = loc.X; o.y = loc.Y; o.z = loc.Z;
+    o.yaw = rot.Yaw;
+    o.lastAnnounceMs = NowMs();
+    g_owned.push_back(o);
+    if (g_taken.size() >= kMaxTaken) g_taken.clear();
+    g_taken.insert(key);
+    g_mirrors.erase(it);
+    // Last, because enabling the collision updates the overlaps at once and the kill sphere may already hold a player.
+    ue_wrap::puppet::EnableCharacterTicks(m.actor);
+    E::SetActorEnableCollision(m.actor, true);
+    AnnounceOwned(s, g_owned.back(), o.lastAnnounceMs);
+    UE_LOGI("owner_entity: this machine's player stared at the copy of slot=%d seq=%u -- taken over as OWN seq=%u at "
+            "(%.0f,%.0f,%.0f), it now stalks this player", SlotOfKey(key), static_cast<unsigned>(key & 0xFFFF), o.seq,
+            o.x, o.y, o.z);
+}
+
 void OnPeerLeftSlot(int slot) {
     if (!GT::IsGameThread()) return;
     if (slot <= 0 || slot >= static_cast<int>(coop::players::kMaxPeers)) return;
     int destroyed = 0;
+    for (auto it = g_taken.begin(); it != g_taken.end();) {
+        if (SlotOfKey(*it) == slot) it = g_taken.erase(it);
+        else ++it;
+    }
     for (auto it = g_mirrors.begin(); it != g_mirrors.end();) {
         if (static_cast<int>(it->first >> 16) == slot) {
             DestroyMirrorActor(it->second.actor, it->second.idx);
@@ -477,6 +540,7 @@ void OnDisconnect() {
         for (auto& kv : g_mirrors) DestroyMirrorActor(kv.second.actor, kv.second.idx);
     }
     g_mirrors.clear();
+    g_taken.clear();
     g_owned.clear();
     {
         // A birth queued in the disconnecting tick must not survive into the next session (a stale address

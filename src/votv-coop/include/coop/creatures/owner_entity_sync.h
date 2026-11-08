@@ -6,10 +6,9 @@
 // roll -- the spawner ticker runs on every peer -- OWNS the entity it rolled, whose native AI targets
 // its own player, and BROADCASTS it so every other peer renders a display mirror.
 //
-// The first member is eyer_C, from ticker_eyers: the night stalker that watches you, angers when
-// stared at and dashes to kill. Its roll is world-anchored, but its behaviour loop reads the LOCAL
-// player, so per-peer ownership is the only shape that preserves the encounter for everyone. The
-// second is the wasp swarm, rolled by a nest near the local player and chasing it.
+// Members: eyer_C (ticker_eyers: the night stalker that angers when stared at and dashes to kill) and
+// the wasp swarm (a nest near the local player). A stare at another peer's eyer copy hands that copy to
+// the staring machine (OnMirrorAngry), so the player who stares is the one hunted and bitten.
 // Identity is (transport senderPeerSlot, owner-local seq). The lane is deliberately NOT the
 // host-authoritative element registry: peer-owned identity is a different axis, and npc_mirror
 // hard-asserts host-range eids. Wired through subsystems; dispatch in event_dispatch_entity.
@@ -43,13 +42,20 @@ void Tick();
 
 // Receivers (event_feed drain, game thread); senderPeerSlot keys the mirror. A spawn materializes
 // the class at the wire transform inside a ScopedMirrorSpawn and then PARKS it:
-// DisableCharacterTicks on the actor and its movement component, so no AI, no anger loop and no
-// dash, and SetActorEnableCollision(false), so the killsphere can never overlap-kill a viewing
-// peer. Pose messages drive SetActorLocation and SetActorRotation. All three kinds are
+// DisableCharacterTicks on the actor and its movement component, so no pursuit and no dash, and
+// SetActorEnableCollision(false), so the killsphere can never overlap-kill a viewing peer. Its timers
+// still run, which is how the copy judges the viewer's own stare (OnMirrorAngry). Pose messages drive SetActorLocation and SetActorRotation. All three kinds are
 // client-relayable, client to host to other clients, and the origin never receives its own send.
 void OnSpawnMsg(const coop::net::OwnerEntitySpawnPayload& p, int senderPeerSlot);
 void OnPoseMsg(const coop::net::OwnerEntityPosePayload& p, int senderPeerSlot);
 void OnDestroyMsg(const coop::net::OwnerEntityDestroyPayload& p, int senderPeerSlot);
+
+// A display copy became angry (the goAngry watch, coop/creatures/eyer_stare): its own timers judged THIS machine's
+// player staring at it. An eyer's copy is handed to this machine: its ticks and collision come back, so it stalks
+// and bites this machine's player alone, and it is announced as this peer's own entity (a new seq) for every other
+// peer to show. The owner's eyer is untouched and keeps stalking the owner; this machine ignores that key from then
+// on. Any other actor, a copy of another class, or an eyer this machine owns is ignored. Game thread.
+void OnMirrorAngry(void* eyer);
 
 // A peer left: destroy every mirror keyed to its slot (DisconnectSlot fanout).
 void OnPeerLeftSlot(int slot);
