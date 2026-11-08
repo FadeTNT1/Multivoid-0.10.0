@@ -258,8 +258,9 @@ bool MorningUfoFly(void* actor) {
     return E::SetActorHiddenInGame(actor, false);
 }
 
-bool ReadVentCrawlerBox(void* crawler, FVector& center, FVector& extent, FRotator& rotation) {
-    void* box = MemberObject(crawler, P::name::VentCrawlerBoxProp);
+namespace {
+// A box component `box`'s world centre, scaled half extent and world rotation.
+bool ReadBoxBounds(void* box, FVector& center, FVector& extent, FRotator& rotation) {
     if (!box) return false;
     void* fn = R::FindDispatchFunctionCached(R::ClassOf(box), P::name::BoxGetScaledExtentFn);
     if (!fn) return false;
@@ -268,6 +269,35 @@ bool ReadVentCrawlerBox(void* crawler, FVector& center, FVector& extent, FRotato
     if (!frame.GetRaw(L"ReturnValue", &extent, sizeof(extent))) return false;
     if (!E::TryGetComponentLocation(box, center)) return false;
     rotation = E::GetComponentWorldRotation(box);
+    return true;
+}
+}  // namespace
+
+bool ReadVentCrawlerBox(void* crawler, FVector& center, FVector& extent, FRotator& rotation) {
+    return ReadBoxBounds(MemberObject(crawler, P::name::VentCrawlerBoxProp), center, extent, rotation);
+}
+
+bool ArirTowerAppear(void* actor, bool shown) {
+    return CallBoolVerb(actor, P::name::ArirTowerAppearFn, P::name::ArirTowerDirParam, shown);
+}
+
+bool ReadArirTowerVisible(void* actor, bool& out) {
+    return ReadBoolMember(actor, P::name::ArirTowerVisibleProp, out);
+}
+
+bool ReadArirTowerBox(void* actor, FVector& center, FVector& extent, FRotator& rotation) {
+    return ReadBoxBounds(MemberObject(actor, P::name::ArirTowerBoxProp), center, extent, rotation);
+}
+
+bool ArirTowerSeen(void* actor, float tolerance, bool& seen) {
+    void* sphere = MemberObject(actor, P::name::ArirTowerSeenProp);
+    void* fn = sphere ? R::FindDispatchFunctionCached(R::ClassOf(sphere), P::name::WasRecentlyRenderedFn) : nullptr;
+    if (!fn) return false;
+    ParamFrame frame(fn);
+    if (!frame.valid() || !frame.Set<float>(L"Tolerance", tolerance) || !Call(sphere, frame)) return false;
+    uint8_t ret = 0;
+    if (!frame.GetRaw(L"ReturnValue", &ret, sizeof(ret))) return false;
+    seen = ret != 0;
     return true;
 }
 

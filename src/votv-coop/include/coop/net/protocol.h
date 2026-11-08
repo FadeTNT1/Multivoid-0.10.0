@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 333;
+inline constexpr uint16_t kProtocolVersion = 335;
 
 // The peer slots a per-slot wire array holds: the host and nine clients. It equals
 // coop::players::kMaxPeers (static_assert'd in coop/net/session.h); this header stays free of the
@@ -2839,7 +2839,8 @@ constexpr uint8_t kAgrav      = 4;   // trigger_agrav_C, level-placed (the anti-
 constexpr uint8_t kMidas      = 5;   // midasufotest_C, level-placed (the gamemode's ufo_midas flight)
 constexpr uint8_t kDropper    = 6;   // a ufoDropper_C child (the eventer's droppers), a world-actor mirror
 constexpr uint8_t kMorningUfo = 7;   // morningUfo_C (morningGay), a world-actor mirror
-constexpr uint8_t kLast       = kMorningUfo;
+constexpr uint8_t kArirTower  = 8;   // arirShip_tower_C, level-placed (the radio tower's ariral ship)
+constexpr uint8_t kLast       = kArirTower;
 }  // namespace event_scene_ids
 namespace event_scene_phases {
 // kSoltoClean, monotonic:
@@ -2862,6 +2863,9 @@ constexpr uint8_t kMidasEnd      = 2;  // setActive(false): the flight is over (
 constexpr uint8_t kDropperDeployed = 1;  // the box overlap or forceDeploy: shown, its descent timeline playing
 // kMorningUfo:
 constexpr uint8_t kMorningUfoFly   = 1;  // a player's box overlap: `fly` set, shown
+// kArirTower:
+constexpr uint8_t kTowerAppear     = 1;  // appear(true): the ship fades in, its sound, shake and push
+constexpr uint8_t kTowerLeave      = 2;  // appear(false): it fades out and, at the end, mints its dreamer and goes
 constexpr uint8_t kLast          = 3;
 }  // namespace event_scene_phases
 namespace event_scene_flags {

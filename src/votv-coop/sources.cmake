@@ -236,6 +236,7 @@ set(VOTVCOOP_SOURCES
     src/coop/world/event_scene_refuse.cpp
     src/coop/world/event_scene_agrav.cpp
     src/coop/world/event_scene_crawler.cpp
+    src/coop/world/event_scene_tower.cpp
     src/coop/world/event_sound_relay.cpp
     src/coop/props/prop_echo_suppress.cpp
     src/coop/props/pile_look.cpp

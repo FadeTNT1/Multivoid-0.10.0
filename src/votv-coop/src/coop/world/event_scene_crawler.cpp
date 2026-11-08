@@ -34,6 +34,22 @@
 #include <vector>
 
 namespace coop::event_scene_sync::detail {
+
+// Whether `p` lies in the box at `c` with half extent `e` turned by `r`, padded by `pad`: `p - c` in the box's own
+// axes (FRotationMatrix's columns), against the extent.
+bool InsideBox(const ue_wrap::FVector& p, const ue_wrap::FVector& c, const ue_wrap::FVector& e,
+               const ue_wrap::FRotator& r, float pad) {
+    constexpr float kDegToRad = 0.017453292519943f;
+    const float sp = std::sin(r.Pitch * kDegToRad), cp = std::cos(r.Pitch * kDegToRad);
+    const float sy = std::sin(r.Yaw * kDegToRad),   cy = std::cos(r.Yaw * kDegToRad);
+    const float sr = std::sin(r.Roll * kDegToRad),  cr = std::cos(r.Roll * kDegToRad);
+    const float dx = p.X - c.X, dy = p.Y - c.Y, dz = p.Z - c.Z;
+    const float lx = dx * (cp * cy) + dy * (cp * sy) + dz * sp;
+    const float ly = dx * (sr * sp * cy - cr * sy) + dy * (sr * sp * sy + cr * cy) + dz * (-sr * cp);
+    const float lz = dx * (-(cr * sp * cy + sr * sy)) + dy * (cy * sr - cr * sp * sy) + dz * (cr * cp);
+    return std::fabs(lx) <= e.X + pad && std::fabs(ly) <= e.Y + pad && std::fabs(lz) <= e.Z + pad;
+}
+
 namespace {
 
 namespace R  = ue_wrap::reflection;
@@ -70,21 +86,6 @@ bool WasStarted(int32_t idx) {
     for (const Started& s : g_started)
         if (s.idx == idx && s.serial == serial) return true;
     return false;
-}
-
-// Whether `p` lies in the box at `c` with half extent `e` turned by `r`, padded by `pad`: `p - c` in the box's own
-// axes (FRotationMatrix's columns), against the extent.
-bool InsideBox(const ue_wrap::FVector& p, const ue_wrap::FVector& c, const ue_wrap::FVector& e,
-               const ue_wrap::FRotator& r, float pad) {
-    constexpr float kDegToRad = 0.017453292519943f;
-    const float sp = std::sin(r.Pitch * kDegToRad), cp = std::cos(r.Pitch * kDegToRad);
-    const float sy = std::sin(r.Yaw * kDegToRad),   cy = std::cos(r.Yaw * kDegToRad);
-    const float sr = std::sin(r.Roll * kDegToRad),  cr = std::cos(r.Roll * kDegToRad);
-    const float dx = p.X - c.X, dy = p.Y - c.Y, dz = p.Z - c.Z;
-    const float lx = dx * (cp * cy) + dy * (cp * sy) + dz * sp;
-    const float ly = dx * (sr * sp * cy - cr * sy) + dy * (sr * sp * sy + cr * cy) + dz * (-sr * cp);
-    const float lz = dx * (-(cr * sp * cy + sr * sy)) + dy * (cy * sr - cr * sp * sy) + dz * (cr * cp);
-    return std::fabs(lx) <= e.X + pad && std::fabs(ly) <= e.Y + pad && std::fabs(lz) <= e.Z + pad;
 }
 
 // The first client puppet inside the crawler's box, or null.

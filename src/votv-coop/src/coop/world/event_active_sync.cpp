@@ -144,6 +144,7 @@ const LaneOwned kLaneOwnedClasses[] = {
     { "ufo_joel_C", "world_actor_sync" },
     { "ufo_pillfo_C", "world_actor_sync" },
     { "midasufotest_C", "event_scene" },            // the ufo_midas flight: the host's phase switches a client's on
+    { "arirShip_tower_C", "event_scene" },          // the radio tower's ship: the host's appear is a phase each client replays
     // The eventer's droppers (fallbody, fallcar, graystank): ufoDropper_C's box overlap calls setEvent(true) on
     // itself, so ClassOf names the subclass; each is a world-actor mirror the connect snapshot re-spawns.
     { "ufoDropper_body_C", "world_actor_sync" },
