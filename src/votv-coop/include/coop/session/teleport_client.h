@@ -37,6 +37,30 @@ void TeleportClientsToHost();
 // caller tells a changed seat from the rest by reading the slot's generation again.
 bool TeleportSlotToHostWithToken(int peerSlot, uint32_t generation);
 
+// What /tpto came to (TeleportToPlayer below).
+enum class ToPlayer : uint8_t {
+    Done,           // the caller was moved (or told to move) beside the target
+    NoSession,      // not a running hosted session
+    SameBody,       // the caller named themselves
+    CallerGone,     // the caller's seat changed hands
+    TargetGone,     // the target's seat changed hands
+    CallerAway,     // the caller is in a pocket dimension or still loading
+    TargetAway,     // the target is in a pocket dimension
+    TargetJoining,  // the target's world is not up yet
+    TargetDead,     // the target is dead
+    NoSpot,         // no clear standing place beside the target
+    Failed,         // a pose could not be read or the move could not be sent
+};
+
+// HOST, game thread. Move the player at `callerSlot` (0 is the host) beside the player at `targetSlot`, each
+// seat checked against its occupancy generation (0 for the host). The destination is chosen here, on the host:
+// the first of a ring of places around the target, behind first, with a clear line from the target and a floor
+// and head room (coop/player/anti_noclip_rescue StandingAt). The host moves itself through ApplyLocally and a
+// client through the TeleportClient lane, whose verb rewrites mainPlayer's `lastLoc`, so the game's anti-noclip
+// check sees an arrival, not a crossing of walls. Refuses a target in another level, still joining or dead.
+ToPlayer TeleportToPlayer(coop::net::Session& session, int callerSlot, uint32_t callerGen, int targetSlot,
+                          uint32_t targetGen);
+
 // Receiver: apply the teleport on the local mainPlayer (K2_TeleportTo).
 // Called from event_feed.cpp on incoming ReliableKind::TeleportClient AND
 // gated to client-role receivers (host echo is a no-op). Game thread only.

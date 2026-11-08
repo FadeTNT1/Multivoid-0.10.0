@@ -16,6 +16,7 @@
 #include "coop/commands/moderation_commands.h"
 #include "coop/commands/mv_commands.h"
 #include "coop/commands/settings_commands.h"
+#include "coop/commands/timeout_commands.h"
 
 #include "coop/comms/chat_feed.h"
 #include "coop/items/inventory_restore.h"
@@ -24,6 +25,7 @@
 #include "coop/moderation/ban_list.h"
 #include "coop/moderation/moderation.h"
 #include "coop/moderation/seen_players.h"
+#include "coop/moderation/timeout.h"
 #include "coop/net/intent_bucket.h"
 #include "coop/net/peer_identity.h"
 #include "coop/net/protocol.h"
@@ -34,6 +36,7 @@
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
 #include "coop/session/player_handshake.h"
+#include "coop/session/teleport_client.h"
 #include "coop/text/utf8_codec.h"
 #include "l10n/l10n.h"
 
@@ -157,6 +160,27 @@ coop::commands::moderation::Ports RealModerationPorts() {
     return p;
 }
 
+// The timeout and teleport-to commands' ports: the jail table, the teleport verb over this transport's
+// session, the replies and the action log.
+coop::teleport_client::ToPlayer TeleportToPort(int callerSlot, uint32_t callerGen, int targetSlot,
+                                               uint32_t targetGen) {
+    coop::net::Session* s = g_session.load(std::memory_order_acquire);
+    if (!s) return coop::teleport_client::ToPlayer::NoSession;
+    return coop::teleport_client::TeleportToPlayer(*s, callerSlot, callerGen, targetSlot, targetGen);
+}
+
+coop::commands::timeout::Ports RealTimeoutPorts() {
+    coop::commands::timeout::Ports p;
+    p.hosted = &coop::moderation::HostedSessionRunning;
+    p.issue = &coop::timeout::Issue;
+    p.release = &coop::timeout::Release;
+    p.isJailed = &coop::timeout::IsJailed;
+    p.teleportTo = &TeleportToPort;
+    p.notify = &ReplyTo;
+    p.log = &LogAction;
+    return p;
+}
+
 // The inventory commands' ports: the hosted-session test, the restore of coop/items/inventory_restore and the action log.
 bool RestoreInventoryPort(int slot, const std::string& backup, std::string& reply) {
     return coop::inventory_restore::Request(slot, backup, reply);
@@ -238,6 +262,8 @@ struct RegistryHolder {
             UE_LOGE("command_sync: builtin registration refused");
         if (!coop::commands::moderation::Register(registry, RealModerationPorts()))
             UE_LOGE("commands: the moderation commands did not register");
+        if (!coop::commands::timeout::Register(registry, RealTimeoutPorts()))
+            UE_LOGE("commands: the timeout commands did not register");
         if (!coop::commands::inventory::Register(registry, RealInventoryPorts()))
             UE_LOGE("commands: the inventory commands did not register");
         if (!coop::commands::settings::Register(registry, RealSettingsPorts()))

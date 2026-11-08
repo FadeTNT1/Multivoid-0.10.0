@@ -495,6 +495,7 @@ set(VOTVCOOP_SOURCES
     src/coop/player/stat_orders.cpp
     src/coop/player/stat_orders_wire.cpp
     src/coop/player/stat_orders_wire_selftest.cpp
+    src/coop/player/timeout_hold.cpp
     src/coop/build_trust/build_trust.cpp
     src/coop/build_trust/build_trust_selftest.cpp
     src/coop/build_trust/self_identity.cpp
@@ -556,6 +557,7 @@ set(VOTVCOOP_SOURCES
     src/coop/input/game_window_proc.cpp
     src/coop/input/input_owner.cpp
     src/coop/session/teleport_client.cpp
+    src/coop/session/teleport_to_player.cpp
     src/ui/imgui_overlay.cpp
     src/ui/overlay_seams.cpp
     src/ui/overlay_diag.cpp
@@ -618,6 +620,7 @@ set(VOTVCOOP_SOURCES
     src/coop/moderation/ban_list_selftest.cpp
     src/coop/moderation/moderation.cpp
     src/coop/moderation/seen_players.cpp
+    src/coop/moderation/timeout.cpp
     src/coop/server_profile/server_profile.cpp
     src/coop/server_profile/server_profile_selftest.cpp
     src/coop/commands/command_line.cpp
@@ -628,10 +631,12 @@ set(VOTVCOOP_SOURCES
     src/coop/commands/action_source.cpp
     src/coop/commands/commands_selftest.cpp
     src/coop/commands/commands_cases_moderation.cpp
+    src/coop/commands/commands_cases_timeout.cpp
     src/coop/commands/commands_cases_settings.cpp
     src/coop/commands/commands_cases_grammar.cpp
     src/coop/commands/commands_cases_mv.cpp
     src/coop/commands/moderation_commands.cpp
+    src/coop/commands/timeout_commands.cpp
     src/coop/commands/mv_commands.cpp
     src/coop/commands/mv_info.cpp
     src/coop/commands/settings_commands.cpp

@@ -300,6 +300,13 @@ bool IsVoidPosition(const ue_wrap::FVector& at) {
     return g_count > 0 && at.Z < g_minZ - kVoidBelowCm;
 }
 
+bool StandingAt(void* player, const ue_wrap::FVector& at, ue_wrap::FVector& out) {
+    if (!player || !R::IsLive(player)) return false;
+    float half = 0.f;
+    if (!AN::CapsuleHalfHeight(player, half)) half = 88.f;   // the player capsule's half height when it will not read
+    return ValidStanding(player, at, half, out);
+}
+
 bool DevForce() {
     if (!InSession()) return false;
     void* player = coop::players::Registry::Get().Local();

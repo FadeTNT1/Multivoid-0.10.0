@@ -782,6 +782,7 @@ bool RunSelftest() {
     RegistryCases(check);
     QualifierCases(check);
     ModerationCases(check);
+    TimeoutCases(check);
     SettingsCases(check);
     GrammarCases(check);
     MvCases(check);

@@ -5,6 +5,8 @@
 #include "coop/comms/chat_feed.h"
 #include "coop/dev/object_overlay.h"
 #include "coop/dev/ragdoll_bone_overlay.h"
+#include "coop/moderation/timeout.h"
+#include "coop/player/timeout_hold.h"
 #include "coop/player/nameplate.h"
 #include "coop/text/utf8_codec.h"
 #include "coop/player/nick_color.h"
@@ -375,6 +377,7 @@ bool IsActive() {
            coop::chat_feed::RevealActive() ||
            coop::dev::object_overlay::IsEnabled() ||
            coop::dev::ragdoll_bone_overlay::IsEnabled() ||
+           coop::timeout_hold::Active() ||
            coop::voice_chat::Enabled();  // the local mic indicator works before a join too
 }
 
@@ -396,6 +399,25 @@ void DrawLocalVoiceIcon() {
     // Offset right of the left edge so it clears the game's native bottom-left vitals column (the
     // food and stamina icons and their numbers); a compact badge near the bottom edge.
     ui::voice_icons::Draw(dl, ImVec2(S(170.f), io.DisplaySize.y - S(36.f)), S(28.f), icon, 0.9f);
+}
+
+// A player held in a timeout reads it on the screen, with the time left. The jail's name is one constant
+// (coop/moderation/timeout.h kJailName), substituted into the line.
+void DrawTimeoutBanner() {
+    const int left = coop::timeout_hold::RemainingSecs();
+    if (left <= 0) return;
+    char clock[16];
+    std::snprintf(clock, sizeof(clock), "%d:%02d", left / 60, left % 60);
+    char line[256];
+    if (l10n::Fmt(line, sizeof(line), l10n::T("You were sent to %1$s -- %2$s"), coop::timeout::kJailName, clock) < 0)
+        return;
+    const ImGuiIO& io = ImGui::GetIO();
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    ImFont* font = ImGui::GetFont();
+    const float px = S(32.f);
+    const ImVec2 sz = font->CalcTextSizeA(px, FLT_MAX, 0.f, line);
+    TextOutlined(dl, font, px, ImVec2((io.DisplaySize.x - sz.x) * 0.5f, io.DisplaySize.y * 0.16f),
+                 IM_COL32(255, 120, 110, 245), IM_COL32(0, 0, 0, 220), line);
 }
 
 // The dev ragdoll skeleton overlay: bone-to-parent lines and joint dots for every active
@@ -440,6 +462,7 @@ void Render() {
     DrawNameplates();
     ui::chat_view::Draw();  // the feed + the T-activated history reveal (ui/chat_view.h)
     DrawLocalVoiceIcon();
+    DrawTimeoutBanner();
 }
 
 }  // namespace ui::hud

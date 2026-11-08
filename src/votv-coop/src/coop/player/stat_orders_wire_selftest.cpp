@@ -205,6 +205,13 @@ void RunOrderCodec(Tally& check) {
     setty.effect = "ignored";
     check(PackOrder(setty, &p) && p.effect[0] == 0 && UnpackOrder(&p, sizeof p, &out) && out.effect.empty() && out.field == 3,
           "codec: a SetStat's effect is not packed");
+    OrderWire jail{};
+    jail.token = 7;
+    jail.op = Op::Jail;
+    jail.seconds = 120.0f;
+    check(std::strcmp(OpText(Op::Jail), "jail") == 0 && PackOrder(jail, &p) && p.effect[0] == 0 &&
+              UnpackOrder(&p, sizeof p, &out) && SameOrder(jail, out),
+          "codec: a jail order carries its seconds and no name");
     OrderWire bad = SampleOrder(Op::AddEffect);
     bad.effect = "abcdefghijkl";
     check(!PackOrder(bad, &p), "codec: PackOrder is false for a 12-character name");

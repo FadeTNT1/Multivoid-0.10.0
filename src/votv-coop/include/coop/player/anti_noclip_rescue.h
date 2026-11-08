@@ -41,6 +41,11 @@ void OnDisconnect();
 // until a place has been sampled.
 bool IsVoidPosition(const ue_wrap::FVector& at);
 
+// Whether a player's body could stand at `at`: static floor under it and head room over it. On success `out` is the
+// centre to stand at, on the floor. `player` is any live player actor, the trace's context. The rescue's own test,
+// offered to the other verbs that place a player (an admin's teleport to a player). Game thread.
+bool StandingAt(void* player, const ue_wrap::FVector& at, ue_wrap::FVector& out);
+
 // Developer drill: stand the check's line through the world, so the next tick's check fires and the rescue runs
 // the way a real trip would. False when there is no session, no local player or the field does not resolve.
 bool DevForce();

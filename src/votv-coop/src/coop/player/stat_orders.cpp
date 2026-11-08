@@ -8,6 +8,7 @@
 #include "coop/net/net_clock.h"
 #include "coop/net/protocol.h"
 #include "coop/player/player_profile_store.h"
+#include "coop/player/timeout_hold.h"
 #include "coop/session/net_pump.h"  // IsWorldSettled
 #include "coop/session/player_handshake.h"
 
@@ -119,11 +120,20 @@ Result ApplyRemove(const OrderWire& o, float* valueNow) {
     return Result::Applied;
 }
 
+// The jail order is for a client's body: the host is never held, whatever line asked.
+Result ApplyJail(const OrderWire& o, float* valueNow) {
+    if (g_session && g_session->role() == Role::Host) return Result::Refused;
+    if (!coop::timeout_hold::Apply(o.seconds)) return Result::Refused;
+    *valueNow = static_cast<float>(coop::timeout_hold::RemainingSecs());
+    return Result::Applied;
+}
+
 // The apply, shared by a client's handler and the host's own player. valueNow is meaningful for
 // Applied only (the caller's pack and answer drop it otherwise).
 Result ApplyOrder(const OrderWire& o, float* valueNow) {
     *valueNow = 0.f;
     switch (o.op) {
+        case Op::Jail:         return ApplyJail(o, valueNow);
         case Op::SetStat:      return ApplySet(o, valueNow);
         case Op::AddEffect:    return ApplyAdd(o, valueNow);
         case Op::RemoveEffect: return ApplyRemove(o, valueNow);
@@ -209,7 +219,8 @@ Sent SendOrder(uint8_t slot, const Order& order, OrderDone done) {
     UE_ASSERT_GAME_THREAD("stat_orders::SendOrder");
     Session* s = g_session;
     if (!s || !s->running() || s->role() != Role::Host) return Sent::NotHost;
-    if (order.op != Op::SetStat && !ValidEffectName(order.effect)) return Sent::BadName;
+    const bool effectOp = order.op == Op::AddEffect || order.op == Op::RemoveEffect;
+    if (effectOp && !ValidEffectName(order.effect)) return Sent::BadName;
     OrderWire w{0, order.op, static_cast<uint8_t>(order.field), order.value, order.strength, order.seconds,
                 order.effect};
     if (slot == 0) {

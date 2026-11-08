@@ -70,6 +70,7 @@ const char* OpText(Op op) {
         case Op::SetStat:      return "set";
         case Op::AddEffect:    return "add";
         case Op::RemoveEffect: return "remove";
+        case Op::Jail:         return "jail";
     }
     return "unknown";
 }
