@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 337;
+inline constexpr uint16_t kProtocolVersion = 338;
 
 // The peer slots a per-slot wire array holds: the host and nine clients. It equals
 // coop::players::kMaxPeers (static_assert'd in coop/net/session.h); this header stays free of the
@@ -4930,7 +4930,7 @@ struct PropImpactFxPayload {
 static_assert(sizeof(PropImpactFxPayload) == 20, "PropImpactFxPayload must be 20 bytes");
 static_assert(sizeof(PropImpactFxPayload) <= 256 - 20 - 8, "PropImpactFxPayload must fit in one reliable datagram");
 
-// A cosmetic effect a player's melee swing or held item made (MeleeFxRequest, MeleeFx): what happened (kMeleeFx*), who
+// A cosmetic effect a player's melee swing, held item or safe dial made (MeleeFxRequest, MeleeFx): what happened (kMeleeFx*), who
 // made it, where, and the assets to play there as asset paths in `text` (the sound's, then the particle system's, ASCII,
 // no terminator). A receiver plays them at the point on its own machine and resolves the paths itself; nothing here
 // names an object of the sender's process. The message is sent as its header and the used part of `text`.
@@ -4938,7 +4938,8 @@ inline constexpr uint8_t kMeleeFxSwing   = 0;   // a swing's own sound, the whoo
 inline constexpr uint8_t kMeleeFxHit     = 1;   // a swing's strike on a surface, a prop or a creature
 inline constexpr uint8_t kMeleeFxContact = 2;   // a held prop struck something, without breaking
 inline constexpr uint8_t kMeleeFxBreak   = 3;   // a held prop broke
-inline constexpr uint8_t kMeleeFxKindCount = 4;
+inline constexpr uint8_t kMeleeFxSafe    = 4;   // a safe's dial: a click, the wrong-code reset, the opening, at the safe's door
+inline constexpr uint8_t kMeleeFxKindCount = 5;
 inline constexpr uint8_t kMeleeFxSound    = 1;  // effects bit: `soundLen` bytes of sound path in `text`
 inline constexpr uint8_t kMeleeFxParticle = 2;  // effects bit: `particleLen` bytes of particle path after them
 inline constexpr int kMeleeFxTextCap = 160;
