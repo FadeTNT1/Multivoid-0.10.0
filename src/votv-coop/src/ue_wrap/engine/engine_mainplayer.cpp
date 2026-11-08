@@ -476,6 +476,14 @@ bool ReadMainPlayerSittingOn(void* mainPlayer, void*& sittingOn) {
     return true;
 }
 
+bool ReadMainPlayerActiveInterface(void* mainPlayer, void*& activeInterface) {
+    if (!mainPlayer || !R::IsLive(mainPlayer)) return false;
+    const int32_t off = ue_wrap::reflected_offset::MainPlayer_activeInterface();
+    if (off < 0) return false;
+    activeInterface = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(mainPlayer) + off);
+    return true;
+}
+
 namespace {
 
 // One bool property's resolved place on a class: the byte and the bit mask, kept per class.

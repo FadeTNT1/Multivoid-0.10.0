@@ -397,6 +397,10 @@ msgstr "[[Contact (optional, e.g. a Discord name)]]"
 msgid "Continue anyway"
 msgstr "[[Continue anyway]]"
 
+#, c-format
+msgid "Cooldown: %1$d:%2$02d"
+msgstr "[[Cooldown: %1$d:%2$02d]]"
+
 msgid "Cosmetics"
 msgstr "[[Cosmetics]]"
 
@@ -987,8 +991,14 @@ msgstr "[[Skins]]"
 msgid "Skins come from converter .pak files under Content/Paks/LogicMods (any subfolder). One pak may carry several skins -- the four scientists ship together in scientists.pak."
 msgstr "[[Skins come from converter .pak files under Content/Paks/LogicMods (any subfolder). One pak may carry several skins -- the four scientists ship together in scientists.pak.]]"
 
+msgid "Slow down"
+msgstr "[[Slow down]]"
+
 msgid "Someone else has that item."
 msgstr "[[Someone else has that item.]]"
+
+msgid "Someone is already waking them"
+msgstr "[[Someone is already waking them]]"
 
 msgid "Something was sent before the identity was proved."
 msgstr "[[Something was sent before the identity was proved.]]"
@@ -1193,6 +1203,12 @@ msgstr "[[The transport handshake with the host failed.]]"
 msgid "Their identity is not proved yet."
 msgstr "[[Their identity is not proved yet.]]"
 
+msgid "They are not asleep"
+msgstr "[[They are not asleep]]"
+
+msgid "They would not wake up"
+msgstr "[[They would not wake up]]"
+
 #, c-format
 msgid "This Multivoid (b%1$s) is made for VOTV %2$s. Your game is VOTV %3$s, a newer version."
 msgstr "[[This Multivoid (b%1$s) is made for VOTV %2$s. Your game is VOTV %3$s, a newer version.]]"
@@ -1266,6 +1282,9 @@ msgstr "[[Tidied: %1$d duplicate line(s) merged, %2$d setting(s) placed under th
 
 msgid "Tidy up multivoid.ini"
 msgstr "[[Tidy up multivoid.ini]]"
+
+msgid "Too far away to wake them"
+msgstr "[[Too far away to wake them]]"
 
 msgid "Too many actions at once, try again."
 msgstr "[[Too many actions at once, try again.]]"
@@ -1436,6 +1455,9 @@ msgstr "[[You can't see that from there]]"
 msgid "You can't travel to another dimension while hosting: the shared world runs on your machine. Stop hosting first to take the trip."
 msgstr "[[You can't travel to another dimension while hosting: the shared world runs on your machine. Stop hosting first to take the trip.]]"
 
+msgid "You can't wake anyone right now"
+msgstr "[[You can't wake anyone right now]]"
+
 #, c-format
 msgid "Your body skin (%s) could not be saved to multivoid.ini this launch -- it is temporary for this session. Fix whatever keeps the file from being read or saved (a lock from an editor or antivirus, permissions, or a file saved as UTF-16); nothing is lost once a launch can save again."
 msgstr "[[Your body skin (%s) could not be saved to multivoid.ini this launch -- it is temporary for this session. Fix whatever keeps the file from being read or saved (a lock from an editor or antivirus, permissions, or a file saved as UTF-16); nothing is lost once a launch can save again.]]"
@@ -1486,6 +1508,9 @@ msgstr "[[Your player id %s]]"
 
 msgid "[E] Loot"
 msgstr "[[[E] Loot]]"
+
+msgid "[RMB x2] Wake"
+msgstr "[[[RMB x2] Wake]]"
 
 msgid "banned"
 msgstr "[[banned]]"

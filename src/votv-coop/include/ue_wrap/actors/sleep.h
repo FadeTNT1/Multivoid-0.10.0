@@ -49,6 +49,12 @@ bool SetDreamProbability(float v);
 bool SetGlobalTimeDilation(float v);
 float GetGlobalTimeDilation();
 
+// Reflected gamemode.wakeup() (no parameters): the game's own end of a rest. It needs isSleep, re-possesses the
+// player, fires the wokenUp delegate (the bed subscribes), resets sleepTime, restores the view and the dilation and
+// clears isSleep. False when the verb or the gamemode does not resolve, or when isSleep is not set (nothing is
+// called then). Game thread.
+bool CallWakeup();
+
 // ---- dev-drill helpers (coop/dev/midnight_drill and coop/dev/sleep_drill) ----
 // First live bed actor (bed_C or a descendant), or null. One GUObjectArray walk per call --
 // one-shot use only.

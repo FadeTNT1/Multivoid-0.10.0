@@ -27,6 +27,7 @@ int32_t g_offDreamProb = -1;   // mainGamemode.dreamProbability (-1 = the SP sen
 int32_t g_offBed = -1;         // mainGamemode.bed (Abed_C*)
 int32_t g_offOrigPawn = -1;    // mainGamemode.origPawn (APawn*)
 void* g_sleepFn = nullptr;     // gamemode.sleep(bed, dropItem, ignoreRagdoll)
+void* g_wakeFn = nullptr;      // gamemode.wakeup(): no parameters
 
 void* g_gsCdo = nullptr;            // GameplayStatics CDO
 void* g_setDilationFn = nullptr;    // SetGlobalTimeDilation(WorldContextObject, TimeDilation)
@@ -69,6 +70,7 @@ void ResolvePass() {
     if (g_offBed < 0) g_offBed = R::FindPropertyOffset(g_gmCls, L"bed");
     if (g_offOrigPawn < 0) g_offOrigPawn = R::FindPropertyOffset(g_gmCls, L"origPawn");
     if (!g_sleepFn) g_sleepFn = R::FindFunction(g_gmCls, L"sleep");
+    if (!g_wakeFn) g_wakeFn = R::FindFunction(g_gmCls, P::name::MainGamemodeWakeupFn);
 
     if (!g_gsCdo) g_gsCdo = FindStaticsCdo();
     if (g_gsCdo) {
@@ -82,13 +84,13 @@ void ResolvePass() {
                       g_setDilationFn;
     if (core && !g_coreResolved) {
         g_coreResolved = true;
-        UE_LOGI("sleep: resolved (isSleep=0x%X dreamProb=0x%X bed=0x%X origPawn=0x%X sleep=%s "
+        UE_LOGI("sleep: resolved (isSleep=0x%X dreamProb=0x%X bed=0x%X origPawn=0x%X sleep=%s wakeup=%s "
                 "dilation set/get=%s/%s)",
                 g_offIsSleep, g_offDreamProb, g_offBed, g_offOrigPawn,
-                g_sleepFn ? "yes" : "NO", g_setDilationFn ? "yes" : "NO",
+                g_sleepFn ? "yes" : "NO", g_wakeFn ? "yes" : "NO", g_setDilationFn ? "yes" : "NO",
                 g_getDilationFn ? "yes" : "NO");
     }
-    g_allResolved = core && g_offOrigPawn >= 0 && g_sleepFn && g_getDilationFn;
+    g_allResolved = core && g_offOrigPawn >= 0 && g_sleepFn && g_wakeFn && g_getDilationFn;
 }
 
 }  // namespace
@@ -216,6 +218,14 @@ bool CallSleep(void* bed) {
     if (!f.Set<void*>(L"bed", bed)) return false;
     f.Set<bool>(L"dropItem", false);
     f.Set<bool>(L"ignoreRagdoll", true);
+    return ue_wrap::Call(gm, f);
+}
+
+bool CallWakeup() {
+    void* gm = world_singleton::Gamemode();
+    if (!gm || !g_wakeFn || !IsSleeping()) return false;
+    ue_wrap::ParamFrame f(g_wakeFn);  // no parameters
+    if (!f.valid()) return false;
     return ue_wrap::Call(gm, f);
 }
 

@@ -65,6 +65,7 @@
 #include "coop/player/sleep_rest.h"
 #include "coop/player/sanity_watch.h"
 #include "coop/player/sleep_sync.h"
+#include "coop/player/tipsy.h"
 #include "coop/creatures/wisp_attack_sync.h"  // Killer Wisp coop: host detect + neutralize + relay
 #include "coop/creatures/wisp_grab_hold.h"  // Killer Wisp: grab-window body placement (per-slot/full teardown)
 #include "coop/creatures/wisp_tear_mirror.h"  // Killer Wisp coop: victim kill + tear mirror
@@ -592,6 +593,7 @@ DisconnectStats DisconnectAll() {
     coop::drive_rack_sync::OnDisconnect();  // rack baselines/shadow + deny/taken rings
     coop::sanity_watch::OnDisconnect();
     coop::sleep_sync::OnDisconnect();
+    coop::tipsy::OnDisconnect();  // a new session starts sober
     coop::sleep_rest::OnDisconnect();  // a rest in progress goes back to factor 1
     coop::prop_throw::OnDisconnect();  // the thrower's records of its own throws
     coop::wisp_attack_sync::OnDisconnect();  // clear damage-cancel latch + handled-wisp edges + pending despawns
@@ -781,6 +783,7 @@ void TickGameplay(coop::net::Session& session, bool isConnected, bool isHost,
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:save_cycle_off"}; coop::save_block::Tick(&session); }  // client native save-cycle OFF -- hold gamemode.disableSave=true under the verb gates
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:sanity_watch"}; coop::sanity_watch::Tick(); }  // the sanity line every 10 s, a tier change at once, the lights near the hand while it drains
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:sleep"}; coop::sleep_sync::Tick(); }  // the local rest-state poll + its send + the client's dream hold
+    { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:tipsy"}; coop::tipsy::Tick(); }  // the snackEaten watch until live: a drunk beer or wine makes the player tipsy
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:sleep_rest"}; coop::sleep_rest::Tick(); }  // a client's rest: the sleep watch until live, then the effects' factor and food and coffee while it lasts
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:wisp_attack"}; coop::wisp_attack_sync::Tick(); }  // host detect wisp-grabs-client -> neutralize + relay (host-only, no-op on client)
     { PP::Scope _s{PP::Bucket::Interactable}; ue_wrap::ScopedWalkTimer _w{"sync:wisp_tear"}; coop::wisp_tear_mirror::Tick(); }  // discharge the victim's scheduled ragdoll death (any peer, no-op until armed)

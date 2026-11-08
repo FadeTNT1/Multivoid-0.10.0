@@ -43,6 +43,11 @@ struct Plate {
     bool  showNick = true;
     bool  lootHint = false;
     bool  joining = false;   // a sleeper that is a connecting player's joining body: "(joining...)" under the name
+    // An online sleeper the viewer may push awake (coop/player/push_wake): 0 none, 1 "[RMB x2] Wake", 2 the cooldown
+    // the host named, `wakeSecs` of it left. Drawn where the loot hint sits.
+    uint8_t wakeHint = 0;
+    int   wakeSecs = 0;
+    bool  tipsy = false;     // the peer drank wine or beer lately (coop/player/tipsy): bubbles beside the plate
     int   healthPct = 100;   // 0..100 streamed-vitals health (display-only)
     int   ping = -1;         // RTT to the SESSION in ms (0 = sub-ms LAN -> "<1ms")
     // Carried so the plate does not have to INFER "no number to show" from ping == -1. The host has

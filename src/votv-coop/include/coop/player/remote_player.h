@@ -125,6 +125,8 @@ public:
     float GetSleep() const { return sleep_; }
     // True while the hurt-flash window is active (a test seam).
     bool IsHurtFlashing() const { return hurtFlashActive_; }
+    // The streamed tipsy bit (PoseSnapshot stateBits): the peer drank lately. The nameplate animates it; nothing else reads it.
+    bool IsTipsy() const { return tipsy_; }
 
     // True while a ragdoll display body is spawned: the peer is ragdolled (fainted, fell, died).
     bool IsRagdollDisplayed() const { return ragdoll_.Active(); }
@@ -222,6 +224,7 @@ private:
     // transition. Both reset in Destroy.
     uint64_t hurtFlashEndMs_ = 0;
     bool     hurtFlashActive_ = false;
+    bool     tipsy_ = false;   // the pose's tipsy bit, as last streamed
     static constexpr uint64_t kHurtFlashMs = 500;     // red for about half a second per hit
     static constexpr float    kHurtEpsilon = 0.006f;  // over one wire quantisation step (1/255), so dequantisation jitter is ignored
     // The puppet's original materials on both visible meshes, saved on the flash's rising edge

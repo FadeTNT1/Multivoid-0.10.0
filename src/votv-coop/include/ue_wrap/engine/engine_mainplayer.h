@@ -216,6 +216,10 @@ bool ReadMainPlayerRagdollState(void* mainPlayer, bool& isRagdoll, bool& dead);
 // seats its driver through the same sit path -- or null on foot. False while unresolved.
 bool ReadMainPlayerSittingOn(void* mainPlayer, void*& sittingOn);
 
+// AmainPlayer_C::activeInterface: the screen of a device the player is inside (the laptop, the keypad, a console), or
+// null on foot. The game ignores its RMB while it is set. False while unresolved. Game thread.
+bool ReadMainPlayerActiveInterface(void* mainPlayer, void*& activeInterface);
+
 // Write the same `dead` bool, and read it back: wrote is not holds. The one writer of this field
 // in our layer -- death_revive clears it to end an episode, a drill sets it to author one -- so the
 // masked write and its offset live here, beside the read, instead of once per caller.
