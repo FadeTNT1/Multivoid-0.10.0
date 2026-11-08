@@ -35,6 +35,9 @@ UE_FACT_FN(kRowSlotSaveSelf, "save_block", L"saveSlot_C", L"saveSelf", Declared)
 UE_FACT_FN(kRowMetaSave, "save_block", L"save_metadata_C", L"saveMetadata", Declared);
 UE_FACT_FN(kRowMetaSaveSelf, "save_block", L"save_metadata_C", L"saveSelf", Declared);
 UE_FACT_FN(kRowPersistSaveSelf, "save_block", L"save_persistent_C", L"saveSelf", Declared);
+// The world file carries the host's key bindings (save_main_C keybinds, keybinds_keys, keybindsnames) and
+// mainGamemode_C::receiveBeginPlay applies them to the engine's input settings through this function.
+UE_FACT_FN(kRowMainSaveKeybinds, "save_block", L"save_main_C", L"saveKeybinds", Declared);
 
 namespace coop::save_block {
 
@@ -59,6 +62,7 @@ WrittenFn g_written = nullptr;
 constexpr int kTagGamemodeSave = 1;
 constexpr int kTagSaveToSlot = 2;
 constexpr int kTagOther = 3;
+constexpr int kTagKeybinds = 4;
 
 // The words the client sees when it tries to save.
 constexpr const wchar_t* kNotHostLine = L"You're not the host, you can't save.";
@@ -231,8 +235,20 @@ bool WorldSaveGate(void* /*saveObject*/, const wchar_t* slotName) {
     return false;
 }
 
+// Key bindings are the player's own and never cross: a client that loaded the host's world keeps the bindings
+// its own game loaded from its own keybinds.sav, instead of taking the ones stored in the host's world file.
+SG::Verdict OnKeybindsPre(const SG::Call&) {
+    if (!MustNotSave()) return SG::Verdict::Run;
+    static std::atomic<uint64_t> sCount{0};
+    if (sCount.fetch_add(1, std::memory_order_relaxed) < 3)
+        UE_LOGI("player_settings: client kept its own key bindings -- save_main_C::saveKeybinds of the host's "
+                "world was not applied");
+    return SG::Verdict::Cancel;
+}
+
 bool WatchAll() {
     bool ok = SG::WatchName(kRowGamemodeSave, kTagGamemodeSave, &OnSavePre, nullptr);
+    ok = SG::WatchName(kRowMainSaveKeybinds, kTagKeybinds, &OnKeybindsPre, nullptr) && ok;
     ok = SG::WatchName(kRowSlotSaveToSlot, kTagSaveToSlot, &OnSaveToSlotPre, &OnSaveToSlotPost) && ok;
     for (const ue_wrap::facts::Function* row : {&kRowSlotSave, &kRowSlotSaveManual, &kRowSlotSavePlayerOnly,
                                                 &kRowSlotSaveSelf, &kRowMetaSave, &kRowMetaSaveSelf,

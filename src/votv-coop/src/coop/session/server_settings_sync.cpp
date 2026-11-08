@@ -43,6 +43,15 @@ static_assert(reg::kServerSettingTextMax <= net::kServerSettingTextMax &&
 
 namespace {
 
+// Settings are per player and never cross between peers (user rule). The two replicated rows,
+// voice.distance_cm and net.allow_other_builds, stay host-scope on the host (the host's gate and
+// its own range) but are no longer sent or applied: a client keeps its own install values and the
+// session layer on a client stays empty. Neither is needed to join: allow_other_builds is read on
+// the host only, and the voice range is each listener's own. The wire kind stays (no protocol bump);
+// a ServerSetting from an older host is dropped.
+// An atomic, not a constant, so the compiler keeps the dormant send path without an unreachable-code warning.
+std::atomic<bool> g_sendServerSettings{false};
+
 // The sender's handle: the process's one long-lived Session, set once at boot, before any other
 // thread reads it, and never written again. The sender gates on running() instead of clearing it.
 Session* g_session = nullptr;
@@ -87,6 +96,7 @@ void PushAnnouncementLine(const reg::Row* row) {
 // Returns false only when the send failed, so the caller's latch holds; a value the wire cannot
 // carry is warned and counts as sent, or it would hold its slot's latch for ever.
 bool SendRow(Session& s, int slot, const reg::Row* row, uint8_t flags, const char* why) {
+    if (!g_sendServerSettings.load()) return true;  // per-player settings: nothing is sent, the slot's latch holds
     const std::string v = cfg::EffectiveText(*row);
     const size_t k = std::strlen(row->key);  // at most kServerSettingKeyMax: a build-time check
     if (v.size() > net::kServerSettingTextMax) {
@@ -163,6 +173,9 @@ void OnSessionStart(bool host) {
         return;
     }
     g_announcedCount.store(0);
+    UE_LOGI("player_settings: %s keeps its own settings -- game options (settings.sav), key bindings "
+            "(keybinds.sav) and mod prefs (multivoid.ini) are never sent to or taken from another peer",
+            host ? "host" : "client");
     cfg::SessionLayerBegin(host);
 }
 
@@ -198,6 +211,13 @@ void HostTick(Session& session) {
 
 void HandleServerSetting(const Session::ReliableMessage& msg) {
     UE_ASSERT_GAME_THREAD("server_settings::HandleServerSetting");
+    if (!g_sendServerSettings.load()) {
+        static std::atomic<uint32_t> sDropped{0};
+        if (sDropped.fetch_add(1) < 3)
+            UE_LOGW("player_settings: ServerSetting from the host ignored -- settings are per player and never "
+                    "applied from another peer");
+        return;
+    }
     if (msg.payloadLen < 3) {
         DropMalformed(msg.payloadLen);
         return;
