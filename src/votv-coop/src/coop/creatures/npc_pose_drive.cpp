@@ -139,6 +139,17 @@ void Npc::Tick() {
         // Remembered only when the transform write took, so a failed write is tried again.
         if (!SameAsApplied(actor) && ApplyToEngine()) RememberApplied(actor);
     }
+    // Killer wisp mirror: its tick is parked, so the reach (`stretch`) the host's copy plays and the beam ends its tick
+    // sets are replayed here from the streamed bit; the mesh yaw rides the body-yaw drive below. Asked once per mirror.
+    if (killerWisp_ == 0) killerWisp_ = ue_wrap::wisp::IsKillerWisp(actor) ? 1 : -1;
+    if (killerWisp_ == 1) {
+        const bool reach = (curStateBits_ & coop::net::kEntityPoseBitWispStretch) != 0;
+        if (reach != wispStretch_ && ue_wrap::wisp::DriveStretch(actor, reach)) wispStretch_ = reach;
+        ue_wrap::wisp::DriveBeams(actor);
+        // The chase cue on the host's chase edge: the sense pulse its `movetotarg` plays.
+        const bool chase = (curStateBits_ & coop::net::kEntityPoseBitWispChase) != 0;
+        if (chase != wispChase_) { wispChase_ = chase; if (chase) ue_wrap::wisp::DriveChaseCue(actor); }
+    }
     // Wisp mirror: replay the native landing edge (landed=true + dir(true) -> the fade-in the wisp
     // gates behind a CMC-tick-computed CurrentFloor read its parked CMC can never produce).
     // Grounded-per-host = drive; retried each frame until wisp_C resolves, whether or not the pose
@@ -193,6 +204,7 @@ bool Npc::ApplyToEngine() {
     if (hasBodyYaw_) {
         Pup::DriveKerfurBodyYaw(actor, curBodyYaw_);
         ue_wrap::fossilhound::DriveBodyYaw(actor, curBodyYaw_);
+        if (killerWisp_ == 1) ue_wrap::wisp::DriveMeshYaw(actor, curBodyYaw_);
     }
     // Write the host-authoritative kerfur command and spooky flag so the parked mirror's AnimBP
     // state machine matches the host (the mirror runs no AI -> it can't pick its own). Class-gated

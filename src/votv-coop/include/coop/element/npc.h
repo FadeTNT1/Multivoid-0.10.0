@@ -73,6 +73,9 @@ private:
     bool             dirty_          = true;   // unapplied change to push to the engine
     bool             isWispMirror_   = false;  // wisp_C mirror: replay the landing edge (fade-in)
     bool             wispLanded_     = false;  //   ... one-shot latch (drive succeeded)
+    int8_t           killerWisp_     = 0;      // 0 not yet asked, 1 a killer wisp mirror, -1 another class
+    bool             wispChase_      = false;  //   the host's chase edge last seen on this killer wisp mirror
+    bool             wispStretch_    = false;  //   the reach last replayed onto this killer wisp mirror
 
     // What ApplyToEngine last wrote, and onto which actor, so a pose identical to it costs
     // nothing: the host's rotation re-sends a mirror that lies still (an eggvasion's 121 eggs) the

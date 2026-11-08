@@ -392,7 +392,14 @@ void Tick() {
                 // Re-assert every tick: the blueprint's nearest re-scan writes the target on its
                 // own cadence, and the per-tick write dominates it between scans.
                 Aggro& a = g_aggro.find(eid)->second;
+                // The graph's scan rewrites Target to its own nearest pick and re-issues the AI move toward
+                // it; a Target written back moves nothing, because the move proxy keeps the goal it was
+                // made with. So when the graph has overwritten our pick, write it back and re-issue the
+                // move, or the wisp chases the nearest pawn while its target reads as the pick. Not while a
+                // grab is arming (the capture stopped the move on purpose).
+                const bool overwritten = st.target != a.actor;
                 ue_wrap::wisp::WriteTarget(actor, a.actor);
+                if (overwritten && !st.tryGrab) ue_wrap::wisp::CallMoveToTarget(actor);
                 victim = a.actor;  // downstream classification sees OUR pick this tick
             }
         }

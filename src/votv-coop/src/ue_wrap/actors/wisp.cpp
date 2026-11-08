@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cwchar>
 
 namespace ue_wrap::wisp {
 namespace {
@@ -39,6 +40,9 @@ int32_t g_playerDmgOff  = -1;       // playerDamaged (0x0635, bool)
 int32_t g_harmlessOff   = -1;       // harmless      (0x0658, bool)
 int32_t g_targetOff     = -1;       // Target        (APawn*; reflected only, written)
 void*   g_releaseFn     = nullptr;  // releasePlayer() -- the grab-cancel verb
+void*   g_stretchFn     = nullptr;  // stretch(forward) -- the reach timeline's play/reverse event
+void*   g_beamSendsFn   = nullptr;  // beamsends() -- the beams' end points, called by the graph's tick
+void*   g_moveToTargFn  = nullptr;  // movetotarg() -- the AI move toward Target and the sense pulse
 
 // Documented Alpha 0.9.0-n fallbacks (CXXHeaderDump/killerwisp.hpp).
 constexpr int32_t kTryGrabFallback   = 0x05D8;
@@ -102,6 +106,15 @@ bool ResolveFromClass(void* cls) {
     void* releaseFn = R::FindFunction(cls, L"releasePlayer");
     if (!releaseFn) UE_LOGW("wisp: releasePlayer UFunction not found -- grab-cancel verb unavailable");
 
+    // The mirror's presentation events (killerwisp.json: stretch is a custom event with a `forward`
+    // bool, beamsends a plain function). Tolerated null: the mirror then keeps its rest pose.
+    g_stretchFn   = R::FindFunction(cls, L"stretch");
+    g_beamSendsFn = R::FindFunction(cls, L"beamsends");
+    g_moveToTargFn = R::FindFunction(cls, L"movetotarg");
+    if (!g_stretchFn || !g_beamSendsFn)
+        UE_LOGW("wisp: stretch=%p beamsends=%p -- a mirror's reach/beam presentation is unavailable",
+                g_stretchFn, g_beamSendsFn);
+
     g_wispCls      = cls;
     g_tryGrabOff   = tryGrabOff;
     g_grabOff      = grabOff;
@@ -152,6 +165,84 @@ bool ReadState(void* wisp, State& out) {
     out.harmless      = ReadAt<bool>(wisp, g_harmlessOff);
     out.target        = g_targetOff >= 0 ? ReadAt<void*>(wisp, g_targetOff) : nullptr;
     return true;
+}
+
+bool ReadAttackPose(void* wisp, bool& outStretching, bool& outChasing, float& outMeshYaw) {
+    State st;
+    if (!ReadState(wisp, st)) return false;   // null / unresolved / not a killer wisp
+    void* mesh = BodyMesh(wisp);
+    if (!mesh) return false;
+    ue_wrap::FRotator rot{};
+    if (!ue_wrap::engine::TryGetComponentWorldRotation(mesh, rot)) return false;
+    outStretching = st.tryGrab || st.grab;
+    outChasing = st.target != nullptr;
+    outMeshYaw = rot.Yaw;
+    return true;
+}
+
+bool DriveMeshYaw(void* wisp, float yaw) {
+    void* mesh = BodyMesh(wisp);
+    if (!mesh) return false;
+    return ue_wrap::engine::SetComponentWorldRotation(mesh, ue_wrap::FRotator{0.f, yaw, 0.f});
+}
+
+bool DriveStretch(void* wisp, bool forward) {
+    if (!wisp || !EnsureResolved() || !IsKillerWisp(wisp) || !g_stretchFn) return false;
+    if (forward) ForceMeshTick(wisp);   // a parked mirror's mesh must pose for the reach to show
+    ue_wrap::ParamFrame f(g_stretchFn);
+    if (!f.valid()) return false;
+    // An unresolved param name would leave `forward` zero, a reverse on the rising edge: refuse then.
+    if (!f.Set<uint8_t>(L"forward", forward ? 1 : 0)) return false;
+    return ue_wrap::Call(wisp, f);
+}
+
+bool CallMoveToTarget(void* wisp) {
+    if (!wisp || !EnsureResolved() || !IsKillerWisp(wisp) || !g_moveToTargFn) return false;
+    ue_wrap::ParamFrame f(g_moveToTargFn);  // zero-arg
+    if (!f.valid()) return false;
+    return ue_wrap::Call(wisp, f);
+}
+
+bool DriveChaseCue(void* wisp) { return CallMoveToTarget(wisp); }
+
+void NeutralizeMirrorBrain(void* wisp) {
+    if (!wisp || !EnsureResolved() || !IsKillerWisp(wisp)) return;
+    // K2_ClearTimer(Object, FunctionName): the inverse of the BeginPlay's K2_SetTimerDelegate arm.
+    static void* sKslCdo = nullptr;
+    static void* sClearFn = nullptr;
+    if (!sKslCdo) sKslCdo = R::FindClassDefaultObject(L"KismetSystemLibrary");
+    if (sKslCdo && !sClearFn) {
+        if (void* kc = R::FindClass(L"KismetSystemLibrary")) sClearFn = R::FindFunction(kc, L"K2_ClearTimer");
+    }
+    if (sKslCdo && sClearFn) {
+        ue_wrap::ParamFrame f(sClearFn);
+        if (f.valid()) {
+            f.Set<void*>(L"Object", wisp);
+            const wchar_t* fn = L"updatesense";
+            const int32_t num = static_cast<int32_t>(std::wcslen(fn)) + 1;
+            struct { const wchar_t* data; int32_t n; int32_t m; } fs{fn, num, num};
+            if (f.SetRaw(L"FunctionName", &fs, sizeof(fs))) ue_wrap::Call(sKslCdo, f);
+        }
+    } else {
+        UE_LOGW("wisp: K2_ClearTimer unresolved -- a killer wisp mirror's sense timer NOT cleared");
+    }
+    // Detach the AI controller: the graph's moves (BeginPlay's random walk, its fail chain, the chase)
+    // are all CreateMoveToProxyObject, which yields no proxy without a controller.
+    static void* sDetachFn = nullptr;
+    if (!sDetachFn) sDetachFn = R::FindFunction(g_wispCls, L"DetachFromControllerPendingDestroy");
+    if (sDetachFn) {
+        ue_wrap::ParamFrame f(sDetachFn);
+        if (f.valid()) ue_wrap::Call(wisp, f);
+    } else {
+        UE_LOGW("wisp: DetachFromControllerPendingDestroy unresolved -- a killer wisp mirror keeps its AI controller");
+    }
+}
+
+bool DriveBeams(void* wisp) {
+    if (!wisp || !EnsureResolved() || !IsKillerWisp(wisp) || !g_beamSendsFn) return false;
+    ue_wrap::ParamFrame f(g_beamSendsFn);  // zero-arg
+    if (!f.valid()) return false;
+    return ue_wrap::Call(wisp, f);
 }
 
 bool InGrabRange(void* wisp, void* target) {

@@ -29,6 +29,7 @@
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/actors/puppet.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/actors/wisp.h"       // NeutralizeMirrorBrain -- a killer wisp mirror decides nothing
 #include "ue_wrap/core/sdk_profile.h"  // NpcClass_Wisp, NpcClass_GeomOcta (the mirrors that keep their actor tick)
 #include "ue_wrap/core/types.h"
 
@@ -416,6 +417,8 @@ bool SpawnFreshNpcMirror(const std::wstring& classW, void* actorClass, uint32_t 
     // Disabling the ticks does not stop timers: a kerfur arms three looping ones that keep running
     // local AI on a parked mirror. A no-op on other classes.
     ue_wrap::kerfur::NeutralizeAiTimers(spawned);
+    // The killer wisp's own sense timer and AI moves would chase THIS machine's nearest player on the mirror.
+    ue_wrap::wisp::NeutralizeMirrorBrain(spawned);
 
     // Hidden until the reveal, after the install so it is enumerable. A fresh-spawn NPC has no
     // local twin, so it is confirmed and revealed at the curtain lift; collision Off, not PhysicsOnly:
