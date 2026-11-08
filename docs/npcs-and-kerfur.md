@@ -66,6 +66,16 @@ every route, so its eyers are the host's. The second member is the wasp swarm: a
 the local player is within 5000 units, and its tick chases that player. Another peer's mirror is held
 kinematic with its tick off, and its BeginPlay still stings that peer's own player within reach.
 
+An eyer judges the stare (`islooking`: this machine's camera, rendered, dot above 0.96), the pursuit and the
+bite (the kill sphere's overlap, 60 damage) against its own machine's player 0. Its display copy on another
+peer is parked (tick and collision off), but its timers still run, so the copy builds anger from the viewer's
+own stare: ten seconds, or a photo taken in view. When the copy reaches `goAngry`, `coop/creatures/eyer_stare`
+hands it to the viewer's machine (`owner_entity_sync::OnMirrorAngry`): ticks and collision come back, it runs
+natively against the staring player, and it is announced as that peer's own entity for everyone else to show.
+The first owner's eyer is untouched and keeps stalking its own player. The kill is the game's own, on the
+staring player's machine. The eyer's kill sphere also ignores a peer's puppet: the body would otherwise play
+the bite, raise a blackout on this screen and destroy the eyer without hurting anyone.
+
 ### Which spawners a client refuses
 
 A connected client ticks no shared-world spawner and rolls no shared-world spawn RNG: shared
@@ -98,7 +108,7 @@ leaving one leaves nothing to restore.
 | zombie horde controller | BeginPlay, `spawnZombieFromStack` and `initiateWave` refused | its waves spawn around player 0's camera and its end pays rewards and saves: the host runs the horde, so its zombies spawn around the host and reach every peer |
 | alien dropper (and the angry flesh's artillery) | BeginPlay, its two timers, the mortar and the drop's finish refused; the flesh's `artilleryTimer` refused | on a client both are host mirrors (the dropper on the world-actor lane); the storm, the hints, the mortar, the killer wisp and the aliens are the host's, the creatures crossing through the class catch |
 | firefly, pinecone | left running | anchored on the local player's camera: each peer owns its roll and the others render a mirror |
-| eyer, wasp nest | left running | each stalks its own peer's player: each peer owns its eyer and its swarm, and the others render a mirror (`coop/creatures/owner_entity_sync`) |
+| eyer, wasp nest | left running | each stalks its own peer's player: each peer owns its eyer and its swarm, and the others render a mirror (`coop/creatures/owner_entity_sync`); a player who stares at an eyer's copy takes it over (`coop/creatures/eyer_stare`) |
 | underground garbage | left running | per-peer loot mounds; refusing one would delete a client's loot with no host replacement |
 | deer, bp7, hexahive, walking tree, sus hole, beehive, bush, tick | left running | the product has no mirror of its own for these, and refusing a spawner whose output nothing replaces would just remove the content |
 | walking mannequin | the spawner's tick and the spawn point's spawn refused; the walker's own tick and jump timer refused | the host's walker crosses as a prop mirror and its walk streams on the prop lanes (`coop/props/prop_motion_scan`); a client's own spawner minted a second walker that crossed back as a client prop, and the mirror's tick walked it off whenever the client looked away. The walker freezes for the host's camera only: one shared walker has one brain |
@@ -224,6 +234,7 @@ wisp in flight is transient and owes nothing.
 | The Omega's floppy state is not synced, so a relayed get-reports diverges on its result; its accessories and carried object likewise | `[V]` no lane under `coop/creatures` carries them |
 | The insomniac, Funguy and killer wisp mirrors are not brain-parked: only the zombie family, the hound and the Octa are (`coop/creatures/npc_mirror_brain_table`), so a mirror of the others runs its own BeginPlay on the client (the insomniac's own walk toward the client's player and its distance self-destroy, the Funguy's own AI), over a pose-driven body with its movement tick off. The host's natural births of all three now reach clients | `[V]` the table's class list; the births' crossing and the mirrors' looks are `[?]` until a session shows them |
 | Two stalker classes are owned per peer so far, the eyer and the wasp swarm; a client's hit on a nest still rolls its swarm on the host alone, chasing the host's player | `[V]` `coop/creatures/owner_entity_sync`, the member table |
+| A stare at another peer's eyer copy makes a second eyer: the owner's stays alive and a third peer shows both. Peers other than the staring one see the taken-over eyer by its 4 Hz pose, and hear none of its bite or dash sounds (2D on the staring machine) | `[RD]` `coop/creatures/eyer_stare`; the capture's `eyer_c` bodies; not yet run |
 | The host-born classes are host-authored, and a client loses its own copy of what they did: a client's interaction with the living Erie or the rufus (their mirrors' graphs are refused), the alien dropper's hints and camera storm, a horde around a client far from the host. The killer wisps, aliens and ship the dropper leaves cross; its mortar's missiles, the krampus's fireballs and the other creatures' projectiles do not | `[V]` `coop/creatures/host_born_spawn` and the rows above; the births on a client are `[?]` until a two-peer session shows them |
 | The angry flesh's kill of a client is the client's mirror's tick, a pose-driven body: its reach follows the host's flesh a pose window late | `[?]` read from the capture, not yet run |
 | The conversion is detected by a poll, five times a second, not at the verb | `[V]` `coop/creatures/kerfur_convert`; the lane reads the result rather than the call, because a peer's own conversion has already happened by the time any watch of ours runs |

@@ -170,6 +170,11 @@ void DriveKerfurBodyYaw(void* npcActor, float yaw);
 // spawn parks its ticks directly (puppet_spawn.cpp). No-op on a null or dead actor.
 void DisableCharacterTicks(void* actor);
 
+// The inverse of DisableCharacterTicks: the actor tick and the CharacterMovement tick back on, so the
+// actor's own Blueprint tick and movement run again. A mirror handed to the local player to run natively.
+// No-op on a null or dead actor.
+void EnableCharacterTicks(void* actor);
+
 // The CMC-only park: the movement tick off, the actor tick left on, for a mirror whose
 // ReceiveTick is per-viewer cosmetic (wisp_C fade, bob, shy despawn) while the pose lane owns
 // position. The CMC-computed landing gate (CurrentFloor) then stays stale, so the pose lane
