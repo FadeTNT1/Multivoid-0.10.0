@@ -211,6 +211,7 @@ set(VOTVCOOP_SOURCES_UE_WRAP_2
     src/ue_wrap/actors/prop_events.cpp
     src/ue_wrap/actors/prop_use.cpp
     src/ue_wrap/actors/prop_fire.cpp
+    src/ue_wrap/actors/wend_skull.cpp
     src/ue_wrap/actors/fire.cpp
     src/ue_wrap/actors/poster.cpp
     src/ue_wrap/actors/save_actor.cpp
