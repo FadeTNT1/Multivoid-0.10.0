@@ -46,6 +46,11 @@ void OnMirrorBound(coop::element::ElementId eid, void* actor);
 // CLIENT, game thread (event_feed drain): a creature's count from the host.
 void OnReliable(const coop::net::CreatureEventActivePayload& payload);
 
+// CLIENT, game thread: take `n` registrations off the event count with the gamemode as the context (setEvent(false),
+// which clamps at 0 and removes a sender that is not there, so only the count moves). For a registration whose sender
+// is gone and ended without its false; returns how many calls ran. Needs only the resolved setEvent and library object.
+int ReleaseOnGamemode(int n);
+
 // Teardown: retract what a client still has applied, drop both halves' state and the session.
 void OnDisconnect();
 

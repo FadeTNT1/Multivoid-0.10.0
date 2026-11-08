@@ -16,6 +16,7 @@
 #include "coop/creatures/piramid_sync.h"  // the piramid heading
 
 #include "coop/items/coingun_sync.h"   // the coin birth value
+#include "coop/world/event_count_upkeep.h"  // a destroyed mirror's registration in the event count
 #include "coop/world/ufo_event_sync.h"  // the gamemode UFOs' birth setups
 #include "coop/world/fire_sync.h"       // a burning patch's fields
 #include "coop/element/element_deleter.h"
@@ -448,7 +449,9 @@ void OnDisconnect() {
         // K2_DestroyActor call is exactly the recycled-slot shape, where a foreign live occupant
         // passes IsLive and the call runs on the wrong object. The WorldActor stores its index.
         if (actor && g_k2DestroyFn && R::IsLiveByIndex(actor, el->GetInternalIdx())) {
+            const coop::event_count_upkeep::Held held = coop::event_count_upkeep::Snapshot(actor);
             R::CallFunction(actor, g_k2DestroyFn, nullptr);  // K2_DestroyActor (game thread)
+            coop::event_count_upkeep::ReleaseLeft(actor, held, "world-actor drain");
             ++nK2;
         }
     }

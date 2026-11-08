@@ -232,7 +232,7 @@ snapshot entry per in-flight event so the joiner replays it from the start with 
 override (`coop/world/event_active_sync`). A creature with no event row is not replayed: the host sends the
 creature's count of running events whole, by element id, and a client applies it to its mirror's
 registration in the event count (`coop/world/creature_event_relay`) [?]; the creatures whose event
-is computed from the local camera, render state or player 0 (the killer wisp, the fossilhound, the antibreather, the egg) keep their own per viewer. Events whose only trace is a one-shot particle emitter
+is computed from the local camera, render state or player 0 (the killer wisp, the fossilhound, the antibreather, the egg) keep their own per viewer. A client's count is kept honest by `coop/world/event_count_upkeep`: it logs each begin and end with the sender class, names the holders of a count held over 30 s, takes back the registration of a mirror the host's destroy retired before its own false ran (the pillfo and joel end in a timeline finish, with no destroy hook) and lowers a count that stands above its live senders for three polls, one `setEvent(false)` on the gamemode per stale registration; a live sender is never touched [?]. Events whose only trace is a one-shot particle emitter
 (the meteor shower) are mirrored as cues: the host sees the row's `runEvent` return and broadcasts
 the emitter's identity and position, a joiner's snapshot reads the live emitters from the object
 index, and a client spawns the same emitter (`coop/world/event_cue_sync`). The earth teleport

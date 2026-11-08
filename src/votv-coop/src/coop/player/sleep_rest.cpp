@@ -5,6 +5,7 @@
 #include "coop/net/net_clock.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/world/event_count_upkeep.h"
 
 #include "ue_wrap/actors/effects.h"
 #include "ue_wrap/actors/sleep.h"
@@ -175,12 +176,7 @@ void OnSleepRefused() {
             !haveCount ? "the event registry does not resolve"
             : count > 0 ? "the 'can sense something' check holds on the count"
                         : "no event count; the other refusals (hunger, a fall, stress, elevation, camera outside the box) stand");
-    if (haveCount && count > live && live >= 0 && arr.num <= 4096) {
-        if (AE::WriteCount(live))
-            UE_LOGW("sleep_rest: activeEvents was %d with %d live sender(s) -- %d stale registration(s) of events that "
-                    "ended without their setEvent(false) taken back; the next sleep is not blocked by them",
-                    count, live, count - live);
-    }
+    if (haveCount) coop::event_count_upkeep::ReclaimDead("sleep refused");
 }
 
 // The call has run: the game set the world's dilation and the sleeping flag inside it. A refusal leaves the

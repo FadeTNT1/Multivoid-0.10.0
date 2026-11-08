@@ -21,6 +21,7 @@
 #include "coop/element/registry.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
+#include "coop/world/event_count_upkeep.h"
 #include "coop/world/event_fire_sync.h"
 
 #include "ue_wrap/core/game_thread.h"
@@ -311,15 +312,21 @@ void PumpHost() {
     WatchTargets(now);
 }
 
-// HOST: an event began or ended, after the game's own bookkeeping ran, so the refcount the lines
-// print is the one it left.
+// An event began or ended, after the game's own bookkeeping ran, so the refcount the lines print is the one it left.
+// HOST: judged for reach and timed. CLIENT: logged (event_count_upkeep).
 void OnSetEventPost(const sg::Call& call) {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
+    if (!s || !s->connected()) return;
+    const bool host = s->role() == coop::net::Role::Host;
+    if (!host && s->role() != coop::net::Role::Client) return;
     if (!ResolveSetEvent() || call.function != g_setEventFn) return;
     void* sender = *reinterpret_cast<void* const*>(call.locals + g_offContext);
     if (!sender || !R::IsLive(sender)) return;
     const bool active = call.locals[g_offActive] != 0;
+    if (!host) {   // a client has no replay to judge; its begins and ends are logged so a stuck count names its holder
+        coop::event_count_upkeep::OnClientSetEvent(sender, active);
+        return;
+    }
     ForgetOtherWorlds();
     const long long now = NowMs();
     if (active) {
@@ -368,6 +375,7 @@ void Install(coop::net::Session* session) {
         }
     }
     PumpHost();
+    coop::event_count_upkeep::Tick(session);
 }
 
 void SendJoinSnapshotForSlot(int slot) {
@@ -451,6 +459,7 @@ void OnReliable(const coop::net::EventSnapshotPayload& payload) {
 }
 
 void OnDisconnect() {
+    coop::event_count_upkeep::OnDisconnect();
     g_audit.clear();
     g_auditSaid.clear();
     g_targetGone.clear();
