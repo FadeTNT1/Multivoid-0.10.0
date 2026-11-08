@@ -1323,7 +1323,9 @@ enum class ReliableKind : uint8_t {
     // (coop::microwave_sync), on every change and once a second while it runs. A client draws the run and its stop
     // and turns the plate; its own wave and the loop's effects are cancelled. Never relayed; a client's copy is
     // refused at the host's receive edge. Late join: every noted microwave's state to the joiner at its ready edge,
-    // no ding. MicrowaveStatePayload.
+    // no ding. The same message with the skull-fire flag names an animal skull (coop::skull_fire_sync) whose effect
+    // fired on the host: every client runs that skull's ignite on its own machine. A joiner mid-effect misses it.
+    // MicrowaveStatePayload.
     MicrowaveState = 220,
 
     // PEER->PEER, relayed: the dirt of the kitchen sink and the shower cubicle (sink_C / prop_shower_C `clean`,
@@ -2782,7 +2784,8 @@ static_assert(sizeof(MicrowaveIntentPayload) <= 256 - 20 - 8, "MicrowaveIntentPa
 namespace microwave_state_flags {
 constexpr uint8_t kActive = 1u << 0;   // running
 constexpr uint8_t kDing   = 1u << 1;   // this state is the stop of a run: play the ding
-constexpr uint8_t kKnown  = kActive | kDing;
+constexpr uint8_t kSkullFire = 1u << 2;   // `key` is an animal skull's prop key, not a microwave's: its effect fired; no other field is used
+constexpr uint8_t kKnown  = kActive | kDing | kSkullFire;
 }  // namespace microwave_state_flags
 struct MicrowaveStatePayload {
     WireKey key;          // 32

@@ -18,7 +18,7 @@
 // a joiner gets every noted microwave's at its ready edge. A client writes the mode and draws the run as wave does
 // (the light, the loop sound) and its stop as the loop does (the ding, the light, the sound), and turns the plate
 // itself while it runs and is powered. The door is the swinger lane's (coop/interactables/interactable_sync).
-// Game thread.
+// The same message with the skull-fire flag is an animal skull's cue (coop/interactables/skull_fire_sync). Game thread.
 
 #pragma once
 

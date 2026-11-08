@@ -399,6 +399,18 @@ runs; a joiner gets every noted one's at its ready edge. A client writes the mod
 sound), and turns the plate itself while it runs and is powered. `[?]` until a two-peer run reads
 the `[MICROWAVE]` lines; the sparks and the spin a metal object gets inside are the host's alone.
 
+An animal skull (`prop_wendskull_C`) is the one thing whose `microwave(self)` does a thing to the
+player: it waits 1 s, rolls 10 %, and `ignite(60)` lights it, plays a 2D ambience, spawns ten
+`wendussy_C` and a `wendigodreamer_C` (each reads player 0 and the local camera) and ends with the
+`microskull` achievement and its own destroy. The cancelled client loop means the roll is the
+host's alone. `coop/interactables/skull_fire_sync` watches the skull's `ignite` on the host and
+sends its prop key as a `MicrowaveState` with the skull-fire flag, once per skull; each client runs
+the skull's own `ignite` on its copy, so the effect and its sounds are made on every player's
+machine against that player. The host is never sent its own cue; a copy's end destroy is marked as
+the wire's. `[?]` until a two-peer run: whether the copy's latent graph runs to its end, and what
+`wendigodreamer_C` does (its body is not in the capture). A joiner mid-effect misses it, and a
+client who lights a skull with a lighter runs it on their machine alone.
+
 ### The computer and the economy
 
 The base laptop (its tab and inbox), the shared balance, the upgrade levels, the shop orders, the

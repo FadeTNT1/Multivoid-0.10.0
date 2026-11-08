@@ -3,6 +3,7 @@
 #include "coop/interactables/microwave_sync.h"
 
 #include "coop/element/intent_authority.h"
+#include "coop/interactables/skull_fire_sync.h"
 #include "coop/net/intent_bucket.h"
 #include "coop/net/intent_queue.h"
 #include "coop/net/net_clock.h"
@@ -394,6 +395,7 @@ void Install(coop::net::Session* session) {
     if (!session) return;
     if (g_localBit == 0) g_localBit = sg::ScopeBitFor(&g_localBit);
     RegisterWatches();
+    coop::skull_fire_sync::Install(session);   // an animal skull the loop lit: its effect is made on every player's machine
 }
 
 void Tick(coop::net::Session& session) {
@@ -401,6 +403,7 @@ void Tick(coop::net::Session& session) {
         sg::ResolvePendingNames();
         Settle();
     }
+    coop::skull_fire_sync::Tick();
     if (!session.running()) return;
     if (session.role() == coop::net::Role::Host) {
         for (uint8_t slot = 1; slot < coop::net::kMaxPeers; ++slot) {
@@ -440,6 +443,10 @@ void OnIntent(coop::net::Session& session, const coop::net::MicrowaveIntentPaylo
 
 void OnState(const coop::net::MicrowaveStatePayload& p) {
     if (!IsClient(g_session.load(std::memory_order_acquire))) return;
+    if (p.flags & MS::kSkullFire) {
+        coop::skull_fire_sync::OnCue(p);
+        return;
+    }
     const std::wstring key = coop::net::StringFromWireKey(p.key);
     void* mw = coop::prop_key_index::Find(key);
     MW::State was;
@@ -470,6 +477,8 @@ void OnState(const coop::net::MicrowaveStatePayload& p) {
 bool WellFormed(const coop::net::MicrowaveStatePayload& p) {
     if (p.key.len == 0 || p.key.len > sizeof(p.key.data)) return false;
     if (p.reserved[0] || p.reserved[1] || p.reserved[2] || (p.flags & ~MS::kKnown) != 0) return false;
+    if (p.flags & MS::kSkullFire)   // a skull's cue names the skull and nothing else
+        return p.flags == MS::kSkullFire && p.timer == 0.f && p.remaining == 0.f && p.timeMode == 0;
     if (!std::isfinite(p.timer) || !std::isfinite(p.remaining)) return false;
     if (p.timer < 0.f || p.timer > 3600.f || p.remaining < 0.f || p.remaining > 3600.f) return false;
     return p.timeMode >= 0 && p.timeMode < P::name::MicrowaveModeCount;
@@ -486,6 +495,7 @@ void OnDisconnect() {
                 static_cast<unsigned long long>(g_published), static_cast<unsigned long long>(g_applied),
                 static_cast<unsigned long long>(g_unknown), static_cast<unsigned long long>(g_cancelledWave),
                 static_cast<unsigned long long>(g_cancelledEffects));
+    coop::skull_fire_sync::OnDisconnect();
     g_host.clear();
     g_turning.clear();
     g_lastTurnMs = 0;

@@ -1765,6 +1765,11 @@ inline constexpr int MicrowaveActionMode = 4;
 inline constexpr int MicrowaveActionStart = 8;
 inline constexpr int   MicrowaveModeCount = 5;
 inline constexpr float MicrowaveSpinDegPerSec = 60.0f;
+// The animal skull (prop_wendskull_C). A microwave's loop calls its microwave(self); that waits 1 s, rolls 10 % and
+// calls ignite(60): a light, a 2D ambience, then ten wendussy_C and a wendigodreamer_C, each of which reads player 0 and
+// the local camera, and at the end progressAchievement(microskull) and its own destroy.
+inline constexpr const wchar_t* WendSkullClass = L"prop_wendskull_C";
+inline constexpr float WendSkullMicrowaveFuel = 60.0f;
 inline constexpr const wchar_t* AddLocalRotationFn = L"K2_AddLocalRotation";
 // The sink and the shower: the dirt scalar `clean` (0 filthy .. 1 spotless) their cleanSponge raises, and the no-arg
 // upd() that clamps it and paints it onto the cube's material. The bucket: `height` (the water level), `height_interp`

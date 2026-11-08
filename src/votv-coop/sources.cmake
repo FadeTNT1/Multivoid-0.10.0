@@ -450,6 +450,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/coffee_intent.cpp
     src/coop/interactables/coffee_state.cpp
     src/coop/interactables/microwave_sync.cpp
+    src/coop/interactables/skull_fire_sync.cpp
     src/coop/interactables/tool_action.cpp
     src/coop/interactables/pry_sync.cpp
     src/coop/interactables/piece_break_fx.cpp
