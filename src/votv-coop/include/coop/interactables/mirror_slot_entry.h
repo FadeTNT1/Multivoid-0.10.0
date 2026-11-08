@@ -8,9 +8,10 @@
 // player carries is taken by its carrier's world alone, and every other peer refuses the device's overlap entry for
 // it at the script gate, as it does for a device a remote player carries; the carrier's take reaches them through the
 // device's own lane or the relayed destroy. The floppy slot's entry is
-// the same rule for a disc in transit (coop/interactables/floppy_slot_entry). Two such takes are not refused yet,
-// since no lane carries what they change and a refusal would only hide that: the back panel the desk's frame
-// destroys into its panel state, and the sack the drone puts on. Game thread.
+// the same rule for a disc in transit (coop/interactables/floppy_slot_entry); the desk's back panel entry is
+// refused the same way in coop/interactables/physmods_sync, whose panel lane carries the flag. One such take is
+// not refused yet, since no lane carries what it changes and a refusal would only hide that: the sack the drone
+// puts on. Game thread.
 
 #pragma once
 
