@@ -27,8 +27,10 @@ namespace coop::element { class Player; }
 namespace coop::players {
 
 // Peer session ids: the host is 0, clients count up from 1. Each peer has one local and up to
-// the maximum minus one puppets; the maximum covers a host and three clients.
-inline constexpr uint8_t kMaxPeers       = 4;
+// the maximum minus one puppets; the maximum covers a host and nine clients. A per-slot bitmask
+// is a uint32_t (static_assert'd in coop/net/session.h), and the per-slot wire arrays carry their
+// own copy of the count (protocol.h kPeerSlotsOnWire), asserted equal there too.
+inline constexpr uint8_t kMaxPeers       = 10;
 inline constexpr uint8_t kPeerIdHost     = 0;
 inline constexpr uint8_t kPeerIdUnknown  = 0xFF;  // not in registry
 

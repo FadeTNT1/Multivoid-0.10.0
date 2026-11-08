@@ -336,9 +336,10 @@ bool Session::StartLanDirect() {
             return false;
         }
         hPollGroup_.store(hPoll);
-        UE_LOGI("net: host listening on port %u (hListen=0x%08x hPoll=0x%08x), capacity=%d clients",
+        UE_LOGI("net: host listening on port %u (hListen=0x%08x hPoll=0x%08x), capacity=%d clients "
+                "(%d players of at most %d)",
                 cfg_.port, static_cast<unsigned>(hListen),
-                static_cast<unsigned>(hPoll), kMaxPeers - 1);
+                static_cast<unsigned>(hPoll), PlayerCap() - 1, PlayerCap(), static_cast<int>(kMaxPeers));
     } else {  // Client
         SteamNetworkingIPAddr addr{};
         if (!addr.ParseString(cfg_.peerIp.c_str())) {
@@ -439,11 +440,11 @@ bool Session::StartP2P(bool relayOnly) {
         }
         hPollGroup_.store(hPoll);
         UE_LOGI("net: P2P host listening as '%s' via signaling %s "
-                "(hListen=0x%08x hPoll=0x%08x), capacity=%d clients",
+                "(hListen=0x%08x hPoll=0x%08x), capacity=%d clients (%d players of at most %d)",
                 peer_identity::LocalIdentityString().c_str(),
                 endpoint_log::LogEndpoint(cfg_.signalingUrl).c_str(),
                 static_cast<unsigned>(hListen), static_cast<unsigned>(hPoll),
-                kMaxPeers - 1);
+                PlayerCap() - 1, PlayerCap(), static_cast<int>(kMaxPeers));
     } else {  // Client
         if (cfg_.hostIdentity.empty()) {
             UE_LOGE("net: P2P client requires hostIdentity (the host to dial)");

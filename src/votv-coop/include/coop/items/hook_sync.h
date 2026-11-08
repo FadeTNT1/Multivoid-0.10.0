@@ -79,7 +79,7 @@ uint32_t BittenEidFrom(int ownerSlot);
 // The player slots whose hook pulls `actor`, as a bit mask (bit 0 the host): the claim pass's last reading, at most a
 // 20 Hz pass old; 0 for a prop no player's hook pulls (an anchored or level hook is a tether, not a hold). Host only;
 // game thread.
-uint8_t PlayerHookHolders(void* actor);
+uint32_t PlayerHookHolders(void* actor);
 
 // Session end: destroy every mirror. They are actors WE spawned and must not linger into
 // single-player.

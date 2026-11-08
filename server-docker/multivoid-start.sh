@@ -7,7 +7,7 @@
 #   SERVER_PORT       UDP port (Pterodactyl's allocation)          -> MULTIVOID_PORT
 #   SERVER_NAME       lobby name                                   -> MULTIVOID_SERVER_NAME
 #   PASSWORD          empty = open                                 -> MULTIVOID_PASSWORD
-#   MAX_PLAYERS       2..4, the server included                    -> MULTIVOID_MAX_PLAYERS
+#   MAX_PLAYERS       2..10, the server included                   -> MULTIVOID_MAX_PLAYERS
 #   SAVE_SLOT         world slot                                   -> MULTIVOID_SAVE_SLOT
 #   LIST_PUBLIC       1/0, list on the master                      -> MULTIVOID_LIST_PUBLIC
 #   REACH             direct | brokered                            -> MULTIVOID_REACH

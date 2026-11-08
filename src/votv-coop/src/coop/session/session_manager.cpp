@@ -13,6 +13,7 @@
 #include "coop/net/lobby_announcer.h"
 #include "coop/net/master_slots.h"  // which master a new lobby, the list and the update check use
 #include "coop/net/protocol.h"  // kProtocolVersion (the b<N> build rev), kDefaultPort
+#include "coop/player/players_registry.h"  // kMaxPeers, the player cap's ceiling
 #include "coop/session/join_progress.h"
 #include "coop/session/shutdown.h"
 #include "coop/version.h"  // kGameTarget -- the game half of the Paper-pair identity (CMake-generated)
@@ -59,7 +60,7 @@ struct DeferredAnnounce {
     std::string name;
     std::string world;
     bool locked = false;
-    int playersMax = 4;
+    int playersMax = coop::players::kMaxPeers;
     int directPort = 0;
 };
 std::mutex g_deferredMu;
@@ -354,8 +355,16 @@ bool HostRefusedBySubstrate(net::Refusal* out = nullptr) {
 }
 }  // namespace
 
+int ResolvePlayersMax(int requested) {
+    const long want = requested > 0
+        ? requested
+        : ::coop::config::ResolveInt(::coop::config_registry::rows::net_max_players);
+    return static_cast<int>(std::clamp(want, 2L, static_cast<long>(coop::players::kMaxPeers)));
+}
+
 void HostLobby(const std::string& name, const std::string& world, bool locked, int playersMax) {
     if (HostRefusedBySubstrate()) return;
+    playersMax = ResolvePlayersMax(playersMax);
     if (g_actionBusy.exchange(true)) { UE_LOGW("session_manager: action busy -- Host ignored"); return; }
     const std::string masterUrl = slots::Selected().url;
     std::thread([masterUrl, name, world, locked, playersMax] {
@@ -366,7 +375,8 @@ void HostLobby(const std::string& name, const std::string& world, bool locked, i
             const lobby::HostInfo info =
                 Announcer().Host(masterUrl, name, world, locked, playersMax, 8000);
             if (info.ok && !coop::shutdown::IsShuttingDown()) {
-                const net::Config cfg = LobbyP2PConfig(net::Role::Host, info);
+                net::Config cfg = LobbyP2PConfig(net::Role::Host, info);
+                cfg.maxPlayers = playersMax;
                 QueueStart(cfg);
                 UE_LOGI("session_manager: HOST ready -- lobby=%s identity=%s (session boot = harness Tier 2)",
                         info.lobbyId.c_str(), info.hostIdentity.c_str());
@@ -385,14 +395,15 @@ extern std::atomic<bool> g_listedState;  // defined below at SetListed (UI mirro
 void AnnounceEnvHostHidden(const std::string& name, const std::string& world) {
     if (g_actionBusy.exchange(true)) { UE_LOGW("session_manager: action busy -- env announce skipped"); return; }
     const std::string masterUrl = slots::Selected().url;
-    std::thread([masterUrl, name, world] {
+    const int playersMax = ResolvePlayersMax(0);  // the ini read stays on the caller's thread
+    std::thread([masterUrl, name, world, playersMax] {
         // An exception escaping a detached thread is std::terminate; the store(false) is outside
         // the try so g_actionBusy clears on every path.
         try {
             if (coop::shutdown::IsShuttingDown()) { g_actionBusy.store(false); return; }
             const lobby::HostInfo info =
                 Announcer().Host(masterUrl, name, world,
-                                 /*locked=*/false, /*playersMax=*/4, 8000);
+                                 /*locked=*/false, playersMax, 8000);
             if (info.ok) {
                 Announcer().SetListed(false); // the hide-from-list flag, immediately
                 // Seed the UI mirror too, or the scoreboard's "Show in server browser" tick reads
@@ -418,6 +429,9 @@ bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked
     if (refused) *refused = net::Refusal{};
     if (HostRefusedBySubstrate(refused)) return false;
     if (g_actionBusy.exchange(true)) { UE_LOGW("session_manager: action busy -- HostWithSave ignored"); return false; }
+    playersMax = ResolvePlayersMax(playersMax);
+    UE_LOGI("session_manager: HostWithSave seats %d players, the host included (at most %d)", playersMax,
+            static_cast<int>(coop::players::kMaxPeers));
     // The secret this session will require, resolved once and carried into whichever host path
     // runs: empty unless `locked`, so the caller's bool alone decides whether the lock has teeth.
     // The caller's string, not a re-read of the row it wrote (the config layer line-scans the ini
@@ -456,6 +470,7 @@ bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked
         {
             std::lock_guard<std::mutex> lk(g_pendHostMu);
             cfg.lobbyPassword = lobbyPw;
+            cfg.maxPlayers = playersMax;
             g_pendingHost.cfg = cfg;
             g_pendingHost.save = choice;
             g_pendingHost.listed = false;
@@ -563,6 +578,7 @@ bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked
             {
                 std::lock_guard<std::mutex> lk(g_pendHostMu);
                 cfg.lobbyPassword = lobbyPw;
+                cfg.maxPlayers = playersMax;
                 g_pendingHost.cfg = cfg;
                 g_pendingHost.save = choice;
                 g_pendingHost.listed = listed;

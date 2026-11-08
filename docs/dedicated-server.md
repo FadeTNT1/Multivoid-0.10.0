@@ -66,8 +66,8 @@ no spectator pawn class worth driving, and taking the host's pawn away would bre
 that reads "the local player" -- the save, the time, the gamemode's per-player Blueprint state).
 The decision for the first cut: **the pawn is parked where the save left it**, named by its
 nickname (`host_nick`, default `Server`) so the scoreboard is honest about the fourth body. It is
-visible and collidable. It uses one of the four peer slots (`kMaxPeers` is a wire constant; three
-friends plus the server). The death guard already answers a death with a revive rather than a trip
+visible and collidable. It uses one of the ten peer slots (`kMaxPeers` is a wire constant; nine
+friends plus the server, fewer when `max_players` is lowered). The death guard already answers a death with a revive rather than a trip
 to the menu (`coop/player/death_revive`), so a creature that kills the parked body does not end
 the world.
 
@@ -107,7 +107,7 @@ config read, so no row of `multivoid.ini`, no registry entry and no wire byte ch
 | `port` | `MULTIVOID_PORT` | `-mvport=` | `47621`* | `VOTVCOOP_NET_PORT` |
 | `name` | `MULTIVOID_SERVER_NAME` | `-mvname=` | `Multivoid Server` | lobby name |
 | `password` | `MULTIVOID_PASSWORD` | `-mvpassword=` | empty (open) | `VOTVCOOP_NET_LOBBY_PASSWORD` + lock |
-| `max_players` | `MULTIVOID_MAX_PLAYERS` | `-mvmaxplayers=` | `4` (clamped 2..4, server included) | lobby cap |
+| `max_players` | `MULTIVOID_MAX_PLAYERS` | `-mvmaxplayers=` | `10` (clamped 2..10, server included) | lobby cap; seats past it are refused (`MV-H21`, the server is full) |
 | `save_slot` | `MULTIVOID_SAVE_SLOT` | `-mvslot=` | `multivoid_server` | the world |
 | `list_public` | `MULTIVOID_LIST_PUBLIC` | `-mvlist=` | `1` | `HostMode.listed` |
 | `reach` | `MULTIVOID_REACH` | `-mvreach=` | `direct` | `HostMode.reach` |
@@ -220,7 +220,7 @@ into the server's files through the panel's file manager or SFTP. The egg's vari
 | `SERVER_PORT` | the allocation's port | UDP |
 | `SERVER_NAME` | `Multivoid Server` | |
 | `PASSWORD` | empty | empty = open |
-| `MAX_PLAYERS` | `4` | the server is one of them |
+| `MAX_PLAYERS` | `10` | 2..10; the server is one of them |
 | `SAVE_SLOT` | `multivoid_server` | |
 | `LIST_PUBLIC` | `1` | |
 | `AUTOSAVE_MINUTES` | `10` | |

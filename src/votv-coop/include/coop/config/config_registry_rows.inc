@@ -55,6 +55,10 @@ CFG_STRING(net_server, "net.server", "net", "", "VOTVCOOP_NET_SERVER", false,
     "Set from your nickname the first time you host; empty means you have not hosted yet.")
 CFG_INT(net_port, "net.port", "net", ::coop::net::kDefaultPort, 1, 65535, "VOTVCOOP_NET_PORT",
     "UDP port a DIRECT host listens on: the lan topology, and a DIRECT game hosted from the menu.")
+CFG_INT(net_max_players, "net.max_players", "net", ::coop::players::kMaxPeers, 2, ::coop::players::kMaxPeers,
+    "VOTVCOOP_NET_MAX_PLAYERS",
+    "How many players a session you host seats, you included (2 to 10). Lower it for a smaller "
+    "game; the server browser shows it as the session's player limit.")
 CFG_ENUM(net_topology, "net.topology", "net", "lan", "lan|p2p", "VOTVCOOP_NET_TOPOLOGY",
     "Transport shape: lan = direct UDP, p2p = internet session via the signaling server "
     "(NAT traversal, no port forwarding needed).")

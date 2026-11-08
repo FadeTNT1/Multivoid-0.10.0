@@ -28,7 +28,7 @@ using coop::net::FuseTowerPayload;
 using coop::net::FuseTowerRow;
 using coop::net::kFuseTowers;
 
-static_assert(coop::net::kMaxPeers <= 8, "the owed rows are one bit a slot");
+static_assert(coop::net::kMaxPeers <= 16, "the owed rows are one bit a slot of a uint16_t");
 
 // A client brings a panel to the host's with its own retract; a retract that left the panel idle (a montage
 // that would not start) is asked again no sooner than this.
@@ -101,7 +101,7 @@ bool SameRows(const FuseTowerPayload& a, const FuseTowerPayload& b) {
 FuseTowerPayload g_lastSent{};
 bool     g_haveSent = false;
 bool     g_acksDirty = false;
-uint8_t  g_owed = 0;
+uint16_t g_owed = 0;
 coop::roster_ledger::PerSlotState<bool> g_answerOwed;  // a refusal's answer, owed to this slot alone; leaves with it
 uint64_t g_broadcasts = 0;
 
@@ -350,7 +350,7 @@ void AdmitRows(FuseTowerPayload& p) {
 void QueueConnectBroadcastForSlot(int slot) {
     auto* s = Connected();
     if (!s || s->role() != coop::net::Role::Host || slot <= 0 || slot >= coop::net::kMaxPeers) return;
-    g_owed = static_cast<uint8_t>(g_owed | (1u << slot));
+    g_owed = static_cast<uint16_t>(g_owed | (1u << slot));
     HostServeOwed(s);
     if (g_owed & (1u << slot)) UE_LOGI("fuse_tower: slot %d's rows wait for the host's towers to resolve", slot);
 }
