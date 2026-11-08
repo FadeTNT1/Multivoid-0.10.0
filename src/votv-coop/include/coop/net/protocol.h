@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 339;
+inline constexpr uint16_t kProtocolVersion = 340;
 
 // The peer slots a per-slot wire array holds: the host and nine clients. It equals
 // coop::players::kMaxPeers (static_assert'd in coop/net/session.h); this header stays free of the
