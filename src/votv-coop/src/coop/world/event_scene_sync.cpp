@@ -44,12 +44,16 @@ long long NowMs() {
 
 // A level-placed scene's target is found by name; the others are world-actor mirrors by element id.
 bool IsLevelScene(uint8_t scene) {
-    return scene == ids::kBoarShield || scene == ids::kAgrav || scene == ids::kMidas;
+    return scene == ids::kBoarShield || scene == ids::kAgrav || scene == ids::kMidas || scene == ids::kArirTower;
 }
 
 const wchar_t* LevelClassOf(uint8_t scene) {
-    if (scene == ids::kMidas) return P::name::MidasUfoClass;
-    return scene == ids::kBoarShield ? P::name::UfoShieldShaderClass : P::name::TriggerAgravClass;
+    switch (scene) {
+    case ids::kMidas:      return P::name::MidasUfoClass;
+    case ids::kBoarShield: return P::name::UfoShieldShaderClass;
+    case ids::kArirTower:  return P::name::ArirTowerClass;
+    default:               return P::name::TriggerAgravClass;
+    }
 }
 
 // The phase each scene may name.
@@ -62,6 +66,7 @@ uint8_t LastPhaseOf(uint8_t scene) {
     case ids::kMidas:      return ph::kMidasEnd;
     case ids::kDropper:    return ph::kDropperDeployed;
     case ids::kMorningUfo: return ph::kMorningUfoFly;
+    case ids::kArirTower:  return ph::kTowerLeave;
     default:               return 0;
     }
 }
@@ -71,7 +76,8 @@ uint8_t LastPhaseOf(uint8_t scene) {
 bool IsRestingPhase(uint8_t scene, uint8_t phase) {
     return (scene == ids::kBoarShield && phase == ph::kShieldHidden) ||
            (scene == ids::kAgrav && phase == ph::kAgravCloakOff) ||
-           (scene == ids::kMidas && phase == ph::kMidasEnd);
+           (scene == ids::kMidas && phase == ph::kMidasEnd) ||
+           (scene == ids::kArirTower && phase == ph::kTowerLeave);
 }
 
 // ---- the host's table ----
@@ -181,6 +187,10 @@ bool ApplyToLevel(const coop::net::EventScenePhasePayload& p) {
         // end only closes the row; the run starts it, from where the host's is for a joiner.
         ok = true;
         if (p.phase == ph::kMidasRun) ok = ES::MidasRun(actor, snapshot ? static_cast<float>(p.progress) / 255.f : 0.f);
+    } else if (p.scene == ids::kArirTower) {
+        // The host's appear, run through the ship's own verb: its fade, the vehicletp sound, the shake and the push,
+        // and on the way out its dreamer and its end. The client's own loop is refused (event_scene_refuse).
+        ok = detail::ArirTowerClientApply(actor, p.phase == ph::kTowerAppear);
     } else {
         // The shimmer and the hover sound, and the blue light on the local camera: the game's own runTrigger attaches
         // that to its player 0 only, and a client's trigger never runs it (its player is not in the box).
@@ -195,7 +205,9 @@ bool ApplyToLevel(const coop::net::EventScenePhasePayload& p) {
     }
     g_appliedByKey[key] = p.phase;
     UE_LOGI("event_scene[%s]: '%ls' phase %u%s applied%s",
-            p.scene == ids::kBoarShield ? "boarShield" : (p.scene == ids::kMidas ? "midas" : "agrav"),
+            p.scene == ids::kBoarShield ? "boarShield"
+            : p.scene == ids::kMidas    ? "midas"
+            : p.scene == ids::kArirTower ? "arirTower" : "agrav",
             key.c_str(), p.phase, snapshot ? " (snapshot)" : "", ok ? "" : " -- a verb did not dispatch");
     return true;
 }
@@ -237,8 +249,9 @@ void NoteHostPhase(uint8_t scene, uint8_t phase, void* actor) {
         if (IsLevelScene(scene)) row->key = ES::ShortName(actor);
     }
     // The cleaner's phases only advance, and the walk-in saucers start once; a re-entered body (each overlap is a
-    // DoOnce, or a flag already set) adds nothing.
-    if ((scene == ids::kSoltoClean || scene == ids::kDropper || scene == ids::kMorningUfo) && phase <= row->phase)
+    // DoOnce, or a flag already set) adds nothing. The tower ship's appear and leave advance the same way.
+    if ((scene == ids::kSoltoClean || scene == ids::kDropper || scene == ids::kMorningUfo ||
+         scene == ids::kArirTower) && phase <= row->phase)
         return;
     row->phase = phase;
     row->dirty = true;
@@ -260,6 +273,7 @@ void Tick() {
     if (!s || !s->running()) return;
     if (s->role() == coop::net::Role::Host) {
         detail::CrawlerHostTick();
+        detail::ArirTowerHostTick();
         coop::event_sound_relay::Tick();
         for (size_t i = 0; i < g_host.size();) {
             HostScene& h = g_host[i];
@@ -356,6 +370,7 @@ void OnDisconnect() {
     g_heldForLevel.clear();
     detail::AgravOnDisconnect();
     detail::CrawlerOnDisconnect();
+    detail::ArirTowerOnDisconnect();
     coop::event_sound_relay::OnDisconnect();
 }
 

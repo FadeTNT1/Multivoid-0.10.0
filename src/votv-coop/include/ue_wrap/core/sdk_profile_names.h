@@ -728,6 +728,23 @@ inline constexpr const wchar_t* MidasUfoClass          = L"midasufotest_C";
 inline constexpr const wchar_t* MidasUfoSetActiveFn    = L"setActive";
 inline constexpr const wchar_t* MidasUfoActiveParam    = L"active";
 inline constexpr const wchar_t* MidasUfoProgressProp   = L"a";
+// arirShip_tower_C: the level-placed ariral ship at the radio tower (a triggerbase_C). Its BeginPlay loops on a 5 s
+// delay: while `visible` it calls appear(false); else on day >= 20, at hour 21..3, a 10 % roll, with player 0 in its
+// `box` and its `sphere_0` not rendered in the last 0.2 s it calls appear(true). appear(dir) shows or hides it (the
+// `a` fade timeline, the `press` push on nearby props, the vehicletp sound and a camera shake), and the fade-out's
+// finish mints a ufodreamer_C and destroys the ship.
+inline constexpr const wchar_t* ArirTowerClass         = L"arirShip_tower_C";
+inline constexpr const wchar_t* ArirTowerAppearFn      = L"appear";
+inline constexpr const wchar_t* ArirTowerDirParam      = L"dir";
+inline constexpr const wchar_t* ArirTowerVisibleProp   = L"visible";
+inline constexpr const wchar_t* ArirTowerBoxProp       = L"box";
+inline constexpr const wchar_t* ArirTowerSeenProp      = L"sphere_0";
+inline constexpr const wchar_t* WasRecentlyRenderedFn  = L"WasRecentlyRendered";
+inline constexpr int            kArirTowerMinDay       = 20;      // the roll opens on this day
+inline constexpr int            kArirTowerNightFrom    = 21;      // hour >= this ...
+inline constexpr int            kArirTowerNightTo      = 3;       // ... or hour <= this
+inline constexpr float          kArirTowerChance       = 0.1f;    // the graph's RandomBoolWithWeight(0.1)
+inline constexpr float          kArirTowerSeenWindow   = 0.2f;    // the graph's WasRecentlyRendered tolerance
 
 // World-actor mirrors whose whole presentation is their own deterministic tick on a component, not
 // the root the pose drive moves: the client mirror keeps its actor tick (world_actor_mirror). Every

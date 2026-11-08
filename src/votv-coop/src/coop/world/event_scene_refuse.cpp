@@ -93,6 +93,9 @@ UE_FACT_FN(kRowMidasSetActive, "event_scene_sync", L"midasufotest_C", L"setActiv
 // The dropper's rows are ufoDropper_C's bodies, which its four children inherit.
 UE_FACT_FN(kRowDropperOverlap, "event_scene_sync", L"ufoDropper_C", L"BndEvt__ufoDropper_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
 UE_FACT_FN(kRowDropperForceDeploy, "event_scene_sync", L"ufoDropper_C", L"forceDeploy", Declared);
+// The radio tower's ariral ship: appear(dir) shows or hides it. On the host it is the phase edge, on a client every
+// call but the host's replay is refused (its own 5 s loop would roll for its own player 0).
+UE_FACT_FN(kRowArirTowerAppear, "event_scene_sync", L"arirShip_tower_C", L"appear", Declared);
 UE_FACT_FN(kRowMorningUfoOverlap, "event_scene_sync", L"morningUfo_C", L"BndEvt__morningUfo_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature", Declared);
 
 // What a row does on each side.
@@ -110,6 +113,7 @@ enum class Kind : uint8_t {
     MidasSetActive,   // HOST: the flight begun or ended
     DropperDeploy,    // HOST: deployed
     MorningUfoFly,    // HOST (after the body): flying, once the body set `fly`
+    ArirTowerAppear,  // HOST: shown or hidden; CLIENT: refused unless it is the host's phase being played
 };
 
 struct Row {
@@ -160,6 +164,7 @@ constexpr Row kRows[] = {
     {&kRowDropperOverlap,     "ufoDropper.BoxOverlap",     Kind::DropperDeploy},
     {&kRowDropperForceDeploy, "ufoDropper.forceDeploy",    Kind::DropperDeploy},
     {&kRowMorningUfoOverlap,  "morningUfo.BoxOverlap",     Kind::MorningUfoFly},
+    {&kRowArirTowerAppear,    "arirTower.appear",          Kind::ArirTowerAppear},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x45530000;   // 'ES', then the row
@@ -271,6 +276,13 @@ SG::Verdict OnRowPre(const SG::Call& call) {
         return SG::Verdict::Run;
     case Kind::MorningUfoFly:
         return SG::Verdict::Run;   // the post reads what the body decided
+    case Kind::ArirTowerAppear: {
+        if (client) return ArirTowerApplying() ? SG::Verdict::Run : Refuse(row, obj);
+        bool shown = false;
+        if (host && ES::ReadBoolParam(call.function, call.locals, P::name::ArirTowerDirParam, shown))
+            NoteHostPhase(ids::kArirTower, shown ? ph::kTowerAppear : ph::kTowerLeave, obj);
+        return SG::Verdict::Run;
+    }
     case Kind::AgravCloak: {
         bool forward = false;
         if (host && ES::ReadBoolParam(call.function, call.locals, P::name::AgravForwardParam, forward)) {

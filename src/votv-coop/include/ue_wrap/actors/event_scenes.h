@@ -103,6 +103,23 @@ bool ReadMorningUfoFly(void* actor, bool& out);
 // resolve.
 bool MorningUfoFly(void* actor);
 
+// ---- the radio tower's ariral ship (arirShip_tower_C, level-placed) ----
+
+// Its own appear(dir): shown (the fade-in, the push, the sound and the shake) or hidden (the fade-out, whose end
+// mints its dreamer and destroys it). False when the verb did not dispatch.
+bool ArirTowerAppear(void* actor, bool shown);
+
+// Its `visible`, set by appear. False when the member does not resolve.
+bool ReadArirTowerVisible(void* actor, bool& out);
+
+// Its `box`, the walk-in volume: the box's world centre, its scaled half extent and its world rotation. False when
+// the component or a read does not resolve.
+bool ReadArirTowerBox(void* actor, FVector& center, FVector& extent, FRotator& rotation);
+
+// Whether this machine's camera drew its `sphere_0` in the last `tolerance` seconds (the graph's own test that keeps
+// the ship from popping in before a player's eyes). False when the test did not resolve.
+bool ArirTowerSeen(void* actor, float tolerance, bool& seen);
+
 // ---- the vent crawler (ventCrawler_C) ----
 
 // Its `Box`, the crawl's start: the box's world centre, its scaled half extent and its world rotation. False
