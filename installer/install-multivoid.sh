@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Multivoid friend installer for Linux (Voices of the Void 0.10.0 run through Proton / Wine).
+# Multivoid friend installer for Linux and macOS (Voices of the Void 0.10.0 run through Proton / Wine / CrossOver).
 #
 # Linux twin of Install-Multivoid.ps1: same payload layout, same manifest, same menu.
 #   payload/mod/            -> <game>/VotV/Binaries/Win64/Mods/Multivoid/
 #   payload/loader/dwmapi.dll -> <game>/VotV/Binaries/Win64/dwmapi.dll   (the Multivoid loader)
 #   payload/pak/            -> <game>/VotV/Content/Paks/LogicMods/multivoid/   (optional skins)
 #
-# Needs: bash, coreutils, find, grep, sed, od, sha256sum (or shasum / openssl). Nothing is downloaded.
+# Needs: bash (3.2 on macOS is fine), find, grep, sed, awk, od, sha256sum (or shasum / openssl). Nothing is downloaded.
+# macOS: VOTV has no Mac build; this installs into the Windows build inside a Wine wrapper (CrossOver, Whisky,
+# Sikarugir/Kegworks, plain Wine). Mac support is community-made and untested by the Multivoid authors.
 #
 #   chmod +x install-multivoid.sh && ./install-multivoid.sh
 #
@@ -19,6 +21,7 @@
 #   --yes, -y                           never ask a question; every question takes its safe default
 #   --skip-version-check                go on although the exe is not the 0.10.0 build
 #   --ue4ss ask|keep|replace            what to do about an existing UE4SS / foreign dwmapi.dll
+#   --no-dll-override                   do not touch the Wine prefix's user.reg (no dwmapi=native,builtin override)
 #   --remove-logs                       uninstall only, unattended: also delete logs and bug reports
 #   --remove-user-data                  uninstall only, unattended: also delete settings, saves, identity key
 #   --payload-dir <dir>                 payload folder somewhere else (default: payload/ beside this script)
@@ -41,12 +44,21 @@ EXE_NAME='VotV-Win64-Shipping.exe'
 MANIFEST_NAME='install-manifest.json'
 BACKUP_SUFFIX='.multivoid-backup'
 OLD_LAYOUT_DIR='multivoid-old-install-backup'
+TAB=$(printf '\t')
+OVERRIDE_VALUE='native,builtin'
+
+if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+    IS_MAC=1; OS_LABEL=macos; OS_PRETTY='macOS (Wine wrapper)'; GUIDE_NAME='INSTALL-MAC.md'
+else
+    IS_MAC=0; OS_LABEL=linux; OS_PRETTY='Linux (Proton/Wine)'; GUIDE_NAME='INSTALL-LINUX.md'
+fi
 
 ACTION=''
 GAME_PATH=''
 PAYLOAD_DIR=''
 UE4SS_MODE='ask'
 SKIP_VERSION_CHECK=0
+NO_DLL_OVERRIDE=0
 REMOVE_LOGS=0
 REMOVE_USER_DATA=0
 ASSUME_YES=0
@@ -70,6 +82,7 @@ while [ $# -gt 0 ]; do
         --ue4ss=*)            UE4SS_MODE=${1#--ue4ss=} ;;
         --yes|-y|--non-interactive) ASSUME_YES=1 ;;
         --skip-version-check) SKIP_VERSION_CHECK=1 ;;
+        --no-dll-override)    NO_DLL_OVERRIDE=1 ;;
         --remove-logs)        REMOVE_LOGS=1 ;;
         --remove-user-data)   REMOVE_USER_DATA=1 ;;
         -h|--help)            usage; exit 0 ;;
@@ -115,7 +128,7 @@ prompt() {
     printf '%s' "$1" >&2
     if ! IFS= read -r REPLY; then
         printf '\n' >&2
-        die 'Input closed. Run this installer from a terminal (see INSTALL-LINUX.md), or pass --action and --game-path.'
+        die "Input closed. Run this installer from a terminal (see $GUIDE_NAME), or pass --action and --game-path."
     fi
 }
 
@@ -143,9 +156,9 @@ ask_yn() {
 # ---------------------------------------------------------------------------------------------------------------
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum -- "$1" | cut -d' ' -f1
+        sha256sum "$1" | cut -d' ' -f1
     elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 -- "$1" | cut -d' ' -f1
+        shasum -a 256 "$1" | cut -d' ' -f1
     else
         openssl dgst -sha256 "$1" | sed 's/^.*= *//'
     fi
@@ -232,11 +245,21 @@ add_cand() {
 
 # scan_root <dir>: every VotV-Win64-Shipping.exe below it (bounded depth) becomes a candidate.
 scan_root() {
+    local root=$1 depth=${2:-9} f
+    [ -d "$root" ] || return 0
+    while IFS= read -r f; do
+        if resolve_win64 "$(dirname "$f")"; then add_cand "$R_WIN64"; fi
+    done < <(find -L "$root" -maxdepth "$depth" -type f -iname "$EXE_NAME" 2>/dev/null)
+}
+
+# scan_prefix <drive_c>: a Wine prefix's C: drive. Deeper than scan_root (Program Files/Steam/steamapps/common/...),
+# and the big windows/ system tree is skipped.
+scan_prefix() {
     local root=$1 f
     [ -d "$root" ] || return 0
     while IFS= read -r f; do
         if resolve_win64 "$(dirname "$f")"; then add_cand "$R_WIN64"; fi
-    done < <(find -L "$root" -maxdepth 9 -type f -iname "$EXE_NAME" 2>/dev/null)
+    done < <(find -L "$root" -maxdepth 12 \( -type d -iname windows -prune \) -o \( -type f -iname "$EXE_NAME" -print \) 2>/dev/null)
 }
 
 # scan_steam_common <steamapps/common>: only folders named like the game, as the Windows installer does.
@@ -250,9 +273,36 @@ scan_steam_common() {
     done
 }
 
+# find_candidates_mac: VOTV has no Mac build, so look inside the usual Wine wrappers and the user folders.
+find_candidates_mac() {
+    local root app base
+    CANDS=()
+    info 'Looking in CrossOver bottles, Whisky bottles and Sikarugir / Kegworks / Wineskin wrappers...'
+    for root in \
+        "$HOME/Library/Application Support/CrossOver/Bottles"/*/drive_c \
+        "$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles"/*/drive_c \
+        "$HOME/Library/Application Support/com.isaacmarovitz.Whisky/Bottles"/*/drive_c \
+        "$HOME/.wine/drive_c"; do
+        scan_prefix "$root"
+    done
+    for base in "$HOME/Applications" /Applications; do
+        for app in Sikarugir Kegworks Wineskin; do
+            for root in "$base/$app"/*.app/Contents/SharedSupport/prefix/drive_c; do
+                scan_prefix "$root"
+            done
+        done
+    done
+
+    info 'Looking in Games, Downloads, Desktop and Documents (this can take a moment; macOS may ask for folder access)...'
+    for root in "$HOME/Games" "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents"; do
+        scan_root "$root"
+    done
+}
+
 find_candidates() {
     local lib vdf root m h
     CANDS=()
+    if [ "$IS_MAC" = 1 ]; then find_candidates_mac; return 0; fi
     local steam_roots=(
         "$HOME/.local/share/Steam"
         "$HOME/.steam/steam"
@@ -388,7 +438,11 @@ game_pids() {
     for pid in $(pgrep -f -i 'VotV-Win64-Shipping\.exe' 2>/dev/null); do
         [ "$pid" = "$$" ] && continue
         [ "$pid" = "$PPID" ] && continue
-        cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
+        if [ -r "/proc/$pid/cmdline" ]; then
+            cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
+        else
+            cmd=$(ps -p "$pid" -o command= 2>/dev/null)          # macOS has no /proc
+        fi
         case $cmd in *install-multivoid*) continue ;; esac     # this script, when the exe path was passed to it
         RUNNING_PIDS="$RUNNING_PIDS $pid"
     done
@@ -444,6 +498,7 @@ M_PRESENT=0; M_LOADER=1
 M_FBASE=(); M_FPATH=()
 M_BORIG=(); M_BBACKUP=(); M_BSHA=()
 M_OLDMOVED=()
+M_OV_REG=''; M_OV_STATE=''; M_OV_PRIOR=''; M_OV_SEP=0      # the Wine user.reg override an earlier run added
 
 # A manifest path must stay inside the game folder: no absolute paths, no "..".
 safe_rel() {
@@ -454,9 +509,10 @@ safe_rel() {
 }
 
 read_manifest() {
-    local flat line b p o s
+    local flat line b p o s ov
     M_PRESENT=0; M_LOADER=1
     M_FBASE=(); M_FPATH=(); M_BORIG=(); M_BBACKUP=(); M_BSHA=(); M_OLDMOVED=()
+    M_OV_REG=''; M_OV_STATE=''; M_OV_PRIOR=''; M_OV_SEP=0
     [ -f "$MANIFEST" ] || return 0
     flat=$(tr -d '\r\n' < "$MANIFEST")
     case $flat in
@@ -466,12 +522,20 @@ read_manifest() {
     M_PRESENT=1
     if printf '%s' "$flat" | grep -Eq '"loader" *: *false'; then M_LOADER=0; fi
 
+    ov=$(printf '%s' "$flat" | grep -Eo '"dllOverride" *: *\{[^}]*\}')
+    if [ -n "$ov" ]; then
+        M_OV_REG=$(printf '%s' "$ov" | sed -E 's/.*"userReg" *: *"([^"]*)".*/\1/' | sed 's/\\\\/\\/g')
+        M_OV_STATE=$(printf '%s' "$ov" | sed -E 's/.*"state" *: *"([^"]*)".*/\1/')
+        M_OV_PRIOR=$(printf '%s' "$ov" | sed -E 's/.*"prior" *: *"([^"]*)".*/\1/')
+        M_OV_SEP=$(printf '%s' "$ov" | sed -E 's/.*"sep" *: *([01]).*/\1/')
+    fi
+
     while IFS=$'\t' read -r b p; do
         p=$(printf '%s' "$p" | sed -e 's/\\\\/\//g' -e 's/\\/\//g')
         if ! safe_rel "$p"; then warn "Ignoring unsafe path in the manifest: $p"; continue; fi
         M_FBASE+=("$b"); M_FPATH+=("$p")
     done < <(printf '%s' "$flat" | grep -Eo '"base" *: *"[^"]*" *, *"path" *: *"[^"]*"' |
-             sed -E 's/.*"base" *: *"([^"]*)".*"path" *: *"([^"]*)".*/\1\t\2/')
+             sed -E 's/.*"base" *: *"([^"]*)".*"path" *: *"([^"]*)".*/\1'"$TAB"'\2/')
 
     while IFS=$'\t' read -r o b s; do
         o=$(printf '%s' "$o" | sed -e 's/\\\\/\//g' -e 's/\\/\//g')
@@ -479,12 +543,12 @@ read_manifest() {
         if ! safe_rel "$o" || ! safe_rel "$b"; then warn "Ignoring unsafe backup entry in the manifest: $o"; continue; fi
         M_BORIG+=("$o"); M_BBACKUP+=("$b"); M_BSHA+=("$s")
     done < <(printf '%s' "$flat" | grep -Eo '"original" *: *"[^"]*" *, *"backup" *: *"[^"]*" *, *"sha256" *: *"[^"]*"' |
-             sed -E 's/.*"original" *: *"([^"]*)".*"backup" *: *"([^"]*)".*"sha256" *: *"([^"]*)".*/\1\t\2\t\3/')
+             sed -E 's/.*"original" *: *"([^"]*)".*"backup" *: *"([^"]*)".*"sha256" *: *"([^"]*)".*/\1'"$TAB"'\2'"$TAB"'\3/')
 
     while IFS=$'\t' read -r o p; do
         M_OLDMOVED+=("$o"$'\t'"$p")
     done < <(printf '%s' "$flat" | grep -Eo '"Original" *: *"[^"]*" *, *"MovedTo" *: *"[^"]*"' |
-             sed -E 's/.*"Original" *: *"([^"]*)".*"MovedTo" *: *"([^"]*)".*/\1\t\2/')
+             sed -E 's/.*"Original" *: *"([^"]*)".*"MovedTo" *: *"([^"]*)".*/\1'"$TAB"'\2/')
 }
 
 # Manifest being built.
@@ -499,11 +563,15 @@ write_manifest() {
     {
         printf '{\n'
         printf '  "schema": 1,\n'
-        printf '  "installer": "Multivoid Installer %s (linux)",\n' "$INSTALLER_VERSION"
+        printf '  "installer": "Multivoid Installer %s (%s)",\n' "$INSTALLER_VERSION" "$OS_LABEL"
         printf '  "gameTarget": "%s",\n' "$GAME_TARGET"
         printf '  "installedAt": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         json_esc "$WIN64"; printf '  "gamePath": "%s",\n' "$JESC"
         printf '  "loader": %s,\n' "$loader"
+        if [ -n "$OV_STATE" ] && [ -n "$OV_REG" ]; then
+            json_esc "$OV_REG"
+            printf '  "dllOverride": {"userReg": "%s", "state": "%s", "prior": "%s", "sep": %s},\n' "$JESC" "$OV_STATE" "$OV_PRIOR" "$OV_SEP"
+        fi
 
         n=${#MF_PATH[@]}
         if [ "$n" -eq 0 ]; then printf '  "files": [],\n'; else
@@ -658,6 +726,230 @@ copy_payload_file() {
     [ "$(sha256_of "$CP_DEST")" = "$srcsha" ] || die "Copy verification failed for $rel (the file on disk does not match the payload)."
 }
 
+# ---------------------------------------------------------------------------------------------------------------
+# Wine prefix DLL override ("dwmapi"="native,builtin" under [Software\\Wine\\DllOverrides] in the prefix's user.reg)
+# ---------------------------------------------------------------------------------------------------------------
+OV_REG=''; OV_STATE=''; OV_PRIOR=''; OV_SEP=0
+OV_PENDING=0                # uninstall could not undo the override (Wine was running): keep the manifest
+DLL_OVERRIDE_OK=0
+
+# find_prefix: PREFIX = the Wine prefix holding the game (a folder with drive_c and user.reg above WIN64).
+find_prefix() {
+    local p
+    PREFIX=''
+    case $WIN64 in */drive_c/*) ;; *) return 1 ;; esac
+    p=${WIN64%%/drive_c/*}
+    [ -d "$p/drive_c" ] && [ -f "$p/user.reg" ] || return 1
+    PREFIX=$p
+}
+
+# wine_idle <what>: 0 when no wineserver runs (or the check is impossible); 1 when the user chose to skip.
+wine_idle() {
+    command -v pgrep >/dev/null 2>&1 || {
+        warn 'pgrep not found: cannot check whether Wine is running. Make sure CrossOver / your Wine wrapper is quit.'
+        return 0
+    }
+    while pgrep -f wineserver >/dev/null 2>&1; do
+        warn "Wine is running (wineserver). Quit CrossOver / Whisky / the wrapper (the whole bottle) first: Wine rewrites user.reg when it exits and would undo $1."
+        [ "$INTERACTIVE" = 1 ] || return 1
+        prompt 'Quit it, then press Enter to check again (s to skip this step): '
+        case $(lc "${REPLY//[[:space:]]/}") in s|skip) return 1 ;; esac
+    done
+    return 0
+}
+
+# reg_apply <user.reg> <out>: writes the edited registry to <out>; OV_STATE/OV_PRIOR/OV_SEP describe what was done:
+#   added      a dwmapi line was inserted into the existing DllOverrides section
+#   replaced   there was another dwmapi value (OV_PRIOR); it was replaced
+#   section    the section did not exist; it was appended (OV_SEP=1 when a blank separator line had to be added)
+#   unchanged  the line was already ours       fail  the file looks unsafe to edit
+reg_apply() {
+    local reg=$1 out=$2 st line rest
+    st="$out.status"
+    MV_VALUE=$OVERRIDE_VALUE MV_TS=$(date +%s) MV_STATUS=$st awk '
+        BEGIN { HDR = "[software\\\\wine\\\\dlloverrides]" }
+        function is_hdr(l,   t) {
+            t = tolower(l)
+            if (index(t, HDR) != 1) return 0
+            return (length(t) == length(HDR) || substr(t, length(HDR) + 1, 1) == " ")
+        }
+        function is_key(l) { return index(tolower(l), "\"dwmapi\"=") == 1 }
+        { lines[NR] = $0 }
+        END {
+            n = NR; hs = 0; found = 0; ins = 0; sep = 0; prior = ""; state = "added"
+            for (i = 1; i <= n; i++) if (is_hdr(lines[i])) { hs = i; break }
+            if (hs) for (j = hs + 1; j <= n && substr(lines[j], 1, 1) != "["; j++) if (is_key(lines[j])) { found = j; break }
+            want = "\"dwmapi\"=\"" ENVIRON["MV_VALUE"] "\""
+            if (found) {
+                cur = substr(lines[found], 10)
+                if (tolower(lines[found]) == tolower(want)) state = "unchanged"
+                else if (length(cur) >= 2 && substr(cur, 1, 1) == "\"" && substr(cur, length(cur)) == "\"") {
+                    prior = substr(cur, 2, length(cur) - 2)
+                    if (index(prior, "\"") || index(prior, "\\") || index(prior, "|")) state = "fail"
+                    else state = "replaced"
+                } else state = "fail"
+            } else if (hs) {
+                ins = hs
+                while (ins + 1 <= n && substr(lines[ins + 1], 1, 1) == "#") ins++
+            } else {
+                state = "section"
+                if (n > 0 && lines[n] != "") sep = 1
+            }
+            for (i = 1; i <= n; i++) {
+                if (state == "replaced" && i == found) print want; else print lines[i]
+                if (state == "added" && i == ins) print want
+            }
+            if (state == "section") {
+                if (sep) print ""
+                print "[Software\\\\Wine\\\\DllOverrides] " ENVIRON["MV_TS"]
+                print want
+                print ""
+            }
+            print state "|" prior "|" sep > (ENVIRON["MV_STATUS"])
+        }' "$reg" > "$out" || { rm -f -- "$out" "$st"; return 1; }
+    line=$(cat "$st" 2>/dev/null); rm -f -- "$st"
+    [ -n "$line" ] || return 1
+    OV_STATE=${line%%|*}; rest=${line#*|}
+    OV_PRIOR=${rest%|*}; OV_SEP=${rest##*|}
+}
+
+# reg_remove <user.reg> <out> <state> <prior> <sep>: undoes reg_apply. RM_RESULT = removed | restored | absent | changed.
+reg_remove() {
+    local reg=$1 out=$2 st
+    st="$out.status"
+    MV_VALUE=$OVERRIDE_VALUE MV_STATE=$3 MV_PRIOR=$4 MV_SEP=$5 MV_STATUS=$st awk '
+        BEGIN { HDR = "[software\\\\wine\\\\dlloverrides]" }
+        function is_hdr(l,   t) {
+            t = tolower(l)
+            if (index(t, HDR) != 1) return 0
+            return (length(t) == length(HDR) || substr(t, length(HDR) + 1, 1) == " ")
+        }
+        function is_key(l) { return index(tolower(l), "\"dwmapi\"=") == 1 }
+        { lines[NR] = $0 }
+        END {
+            n = NR; hs = 0; found = 0; result = "absent"
+            for (i = 1; i <= n; i++) if (is_hdr(lines[i])) { hs = i; break }
+            if (hs) for (j = hs + 1; j <= n && substr(lines[j], 1, 1) != "["; j++) if (is_key(lines[j])) { found = j; break }
+            want = "\"dwmapi\"=\"" ENVIRON["MV_VALUE"] "\""
+            if (found) {
+                if (tolower(lines[found]) != tolower(want)) result = "changed"
+                else if (ENVIRON["MV_STATE"] == "replaced") {
+                    lines[found] = "\"dwmapi\"=\"" ENVIRON["MV_PRIOR"] "\""
+                    result = "restored"
+                } else {
+                    drop[found] = 1; result = "removed"
+                    if (ENVIRON["MV_STATE"] == "section") {
+                        e = hs
+                        while (e + 1 <= n && substr(lines[e + 1], 1, 1) != "[") e++
+                        other = 0
+                        for (k = hs + 1; k <= e; k++) if (k != found && lines[k] != "" && substr(lines[k], 1, 1) != "#") other = 1
+                        if (!other) {
+                            for (k = hs; k <= e; k++) drop[k] = 1
+                            if (ENVIRON["MV_SEP"] == "1" && hs > 1 && lines[hs - 1] == "") drop[hs - 1] = 1
+                        }
+                    }
+                }
+            }
+            for (i = 1; i <= n; i++) if (!drop[i]) print lines[i]
+            print result > (ENVIRON["MV_STATUS"])
+        }' "$reg" > "$out" || { rm -f -- "$out" "$st"; return 1; }
+    RM_RESULT=$(cat "$st" 2>/dev/null); rm -f -- "$st"
+    [ -n "$RM_RESULT" ] || return 1
+}
+
+# apply_dll_override: returns 0 when the override is in place afterwards, 1 when it is left to the user.
+apply_dll_override() {
+    local reg tmp bak
+    OV_REG=''; OV_STATE=''; OV_PRIOR=''; OV_SEP=0; DLL_OVERRIDE_OK=0
+    if [ "$NO_DLL_OVERRIDE" = 1 ]; then info 'Not touching the Wine prefix (--no-dll-override).'; return 1; fi
+    if ! find_prefix; then
+        info 'The game is not inside a Wine prefix I can see (no drive_c + user.reg above it): the dwmapi override is manual.'
+        return 1
+    fi
+    reg="$PREFIX/user.reg"
+    ok "Wine prefix: $PREFIX"
+    if ! ask_yn "Add the dwmapi=native,builtin DLL override to this prefix's user.reg?" 1; then return 1; fi
+    if ! wine_idle 'the override'; then warn 'Skipped the DLL override: Wine is running.'; return 1; fi
+    if ! head -n 1 "$reg" 2>/dev/null | grep -q 'WINE REGISTRY'; then
+        warn "$reg does not look like a Wine registry file; leaving it alone."
+        return 1
+    fi
+    tmp="$reg.multivoid-tmp.$$"
+    if ! reg_apply "$reg" "$tmp"; then warn "Could not edit $reg; leaving it alone."; return 1; fi
+    case $OV_STATE in
+        unchanged)
+            rm -f -- "$tmp"
+            ok 'The dwmapi override is already set in this prefix.'
+            if [ "$M_OV_REG" = "$reg" ]; then OV_REG=$M_OV_REG; OV_STATE=$M_OV_STATE; OV_PRIOR=$M_OV_PRIOR; OV_SEP=$M_OV_SEP
+            else OV_STATE=''; fi
+            DLL_OVERRIDE_OK=1
+            return 0 ;;
+        added|replaced|section) ;;
+        *) rm -f -- "$tmp"; warn "The dwmapi entry in $reg has an unusual form; leaving it alone."; OV_STATE=''; return 1 ;;
+    esac
+    new_backup_name "$reg"; bak=$NEWBK
+    if ! cp -p -- "$reg" "$bak"; then rm -f -- "$tmp"; warn "Could not back up $reg; leaving it alone."; OV_STATE=''; return 1; fi
+    if ! cat "$tmp" > "$reg"; then
+        cat "$bak" > "$reg"; rm -f -- "$tmp"
+        warn "Could not write $reg (restored from the backup)."; OV_STATE=''; return 1
+    fi
+    rm -f -- "$tmp"
+    OV_REG=$reg
+    ok "dwmapi=native,builtin set in $reg (backup: $(basename "$bak"))"
+    DLL_OVERRIDE_OK=1
+    return 0
+}
+
+# remove_dll_override: uninstall side; M_OV_* come from the manifest.
+remove_dll_override() {
+    local reg=$M_OV_REG tmp
+    if [ ! -f "$reg" ]; then info "Wine registry $reg is gone; no override to undo."; return 0; fi
+    if ! wine_idle 'the removal'; then
+        warn "Left the dwmapi override in $reg. Quit Wine and run Uninstall again, or remove the \"dwmapi\" line by hand."
+        OV_PENDING=1
+        return 0
+    fi
+    tmp="$reg.multivoid-tmp.$$"
+    if ! reg_remove "$reg" "$tmp" "$M_OV_STATE" "$M_OV_PRIOR" "$M_OV_SEP"; then
+        warn "Could not edit $reg; the dwmapi override stays."
+        return 0
+    fi
+    case $RM_RESULT in
+        removed)  cat "$tmp" > "$reg" && ok "removed the dwmapi override from $reg" ;;
+        restored) cat "$tmp" > "$reg" && ok "restored the previous dwmapi override ($M_OV_PRIOR) in $reg" ;;
+        changed)  warn "The dwmapi entry in $reg is no longer the one Multivoid set; left alone." ;;
+        *)        info "No dwmapi override found in $reg." ;;
+    esac
+    rm -f -- "$tmp"
+}
+
+print_override_done() {
+    echo
+    echo "  ${C_GREEN}Wine will load the Multivoid loader: the dwmapi override is set in the prefix.${C_RESET} No launch option needed."
+    echo '  After a run, Mods/Multivoid/loader.log says whether the loader ran.'
+    if [ "$IS_MAC" = 1 ]; then
+        echo '  Mac note (untested): if the Multiplayer menu or the F1 overlay does not show, see "In-game overlay" in INSTALL-MAC.md.'
+    fi
+}
+
+print_mac_help() {
+    echo
+    echo "${C_CYAN}Last step: make Wine load the Multivoid loader (macOS, untested by the Multivoid authors)${C_RESET}"
+    echo '  Wine prefers its own built-in dwmapi.dll over the one beside the game. Tell it to use the native one,'
+    echo '  with Wine / the bottle fully quit first:'
+    echo
+    echo '  CrossOver: select the bottle > Wine Configuration > Libraries > type dwmapi > Add > select it > Edit > "Native then Builtin".'
+    echo '  Whisky   : bottle > Config > Open Wine Configuration (winecfg) > Libraries > add dwmapi > Edit > "Native then Builtin".'
+    echo '  Sikarugir / Kegworks / Wineskin: open the wrapper app > Tools > Config Utility (winecfg) > Libraries > add dwmapi >'
+    echo '             Edit > "Native then Builtin" (Wineskin: Advanced > Tools > Config Utility).'
+    echo '  Plain Wine / Game Porting Toolkit: WINEDLLOVERRIDES="dwmapi=n,b" wine VotV-Win64-Shipping.exe'
+    echo
+    echo '  After a run, Mods/Multivoid/loader.log says whether the loader ran. No Multiplayer entry in the menu'
+    echo '  usually means the override is missing.'
+    echo '  In-game overlay (chat, F1) may not show under D3DMetal. If it is missing, try the DX11 path: add -dx11 to the'
+    echo '  game launch command (CrossOver: "Run Command"), and/or turn DXVK on for the bottle. See INSTALL-MAC.md.'
+}
+
 print_proton_help() {
     echo
     echo "${C_CYAN}Last step: make Wine / Proton load the Multivoid loader${C_RESET}"
@@ -749,6 +1041,17 @@ do_install() {
     for ((i = 0; i < ${#OL_ORIG[@]}; i++)); do OM_LIST+=("${OL_ORIG[$i]}"$'\t'"${OL_TO[$i]}"); done
     for e in "${M_OLDMOVED[@]}"; do OM_LIST+=("$e"); done
 
+    # The Wine prefix override (only when Multivoid's own loader is the one that starts the mod).
+    DLL_OVERRIDE_OK=0; OV_REG=''; OV_STATE=''; OV_PRIOR=''; OV_SEP=0
+    if [ "$PLAN_INSTALL" = 1 ]; then
+        step "$verb : Wine DLL override"
+        apply_dll_override
+    fi
+    # Nothing new was added this time (override pre-existing or declined): keep what an earlier run recorded.
+    if [ -z "$OV_STATE" ] && [ -n "$M_OV_STATE" ] && [ -n "$M_OV_REG" ] && [ "$DLL_OVERRIDE_OK" = 0 ] && [ -f "$M_OV_REG" ]; then
+        OV_REG=$M_OV_REG; OV_STATE=$M_OV_STATE; OV_PRIOR=$M_OV_PRIOR; OV_SEP=$M_OV_SEP
+    fi
+
     write_manifest "$([ "$PLAN_INSTALL" = 1 ] && echo true || echo false)"
     ok "Manifest written: Mods/Multivoid/$MANIFEST_NAME"
 
@@ -756,7 +1059,9 @@ do_install() {
     echo "  files: $n_new added, $n_upd replaced, $n_ok already correct"
     if [ "$PLAN_INSTALL" = 1 ]; then
         ok 'The Multivoid loader (dwmapi.dll) is in place.'
-        print_proton_help
+        if [ "$DLL_OVERRIDE_OK" = 1 ]; then print_override_done
+        elif [ "$IS_MAC" = 1 ]; then print_mac_help
+        else print_proton_help; fi
     else
         warn 'The mod is installed, but it relies on UE4SS to start it. Start the game through your UE4SS setup.'
         echo '  (With UE4SS under Proton use the launch option from docs/install.md: WINEDLLOVERRIDES="dwmapi.dll,main.dll,UE4SS=n,b" %command%)'
@@ -812,6 +1117,8 @@ or run Repair first, which writes a manifest, then Uninstall."
     for p in "${M_OLDMOVED[@]}"; do
         info "Old-layout file ${p%%$'\t'*} stays in $OLD_LAYOUT_DIR/ (delete that folder when you like)."
     done
+    OV_PENDING=0
+    if [ -n "$M_OV_STATE" ] && [ -n "$M_OV_REG" ]; then remove_dll_override; fi
 
     # What the installer did not put there: logs, settings, saves, identity.
     local logs=() data=() diag=() has_locale=0 name
@@ -852,7 +1159,8 @@ or run Repair first, which writes a manifest, then Uninstall."
 
     if [ -f "$MANIFEST" ]; then
         n=$(find "$MOD_DIR" -type f ! -path "$MANIFEST" 2>/dev/null | wc -l | tr -d '[:space:]')
-        if [ "$n" -eq 0 ]; then rm -f -- "$MANIFEST"
+        if [ "$OV_PENDING" = 1 ]; then info 'The install manifest stays because the Wine DLL override is still to be removed.'
+        elif [ "$n" -eq 0 ]; then rm -f -- "$MANIFEST"
         else info 'The install manifest stays because kept data remains in the mod folder.'; fi
     fi
     prune_empty "$MOD_DIR"
@@ -867,8 +1175,8 @@ or run Repair first, which writes a manifest, then Uninstall."
 # Main
 # ---------------------------------------------------------------------------------------------------------------
 show_banner() {
-    printf '\n  %sMultivoid installer%s   for Voices of the Void %s on Linux (Proton/Wine)   (installer %s)\n\n' \
-        "$C_CYAN" "$C_RESET" "$GAME_TARGET" "$INSTALLER_VERSION"
+    printf '\n  %sMultivoid installer%s   for Voices of the Void %s on %s   (installer %s)\n\n' \
+        "$C_CYAN" "$C_RESET" "$GAME_TARGET" "$OS_PRETTY" "$INSTALLER_VERSION"
 }
 
 read_menu_choice() {
@@ -887,7 +1195,7 @@ read_menu_choice() {
     done
 }
 
-for tool in find grep sed od tr cut wc sort; do
+for tool in find grep sed awk od tr cut wc sort; do
     command -v "$tool" >/dev/null 2>&1 || { echo "Missing required tool: $tool" >&2; exit 2; }
 done
 command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1 ||
@@ -906,7 +1214,7 @@ case $ACTION in
 esac
 
 # Started with no arguments (likely a double-click in a terminal that closes at once): let the output be read.
-if [ "$ARGC" -eq 0 ] && [ -t 0 ] && [ -t 1 ]; then
+if [ "$ARGC" -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ -z "${MULTIVOID_LAUNCHER:-}" ]; then
     printf '\nPress Enter to close. '
     IFS= read -r _
 fi
