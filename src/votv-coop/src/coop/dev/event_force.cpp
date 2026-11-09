@@ -111,14 +111,14 @@ bool ResolveOffsets(void* boxObj) {
     if (g_offIsActiveByte >= 0 && g_offN >= 0 && g_offBoxComp >= 0) return true;
     void* cls = R::ClassOf(boxObj);
     if (!cls) return false;
-    if (!R::FindBoolProperty(cls, L"IsActive", g_offIsActiveByte, g_maskIsActive)) {
-        UE_LOGW("event_force: trigger_box_C.IsActive bool property unresolved");
+    if (!R::FindBoolProperty(cls, L"isTriggerActive", g_offIsActiveByte, g_maskIsActive)) {
+        UE_LOGW("event_force: trigger_box_C.isTriggerActive bool property unresolved");
         return false;
     }
-    g_offN = R::FindPropertyOffset(cls, L"N");
+    g_offN = R::FindPropertyOffset(cls, L"amount");
     g_offBoxComp = R::FindPropertyOffset(cls, L"Box");
     if (g_offN < 0 || g_offBoxComp < 0) {
-        UE_LOGW("event_force: trigger_box_N offsets unresolved (N=%d Box=%d)", g_offN, g_offBoxComp);
+        UE_LOGW("event_force: trigger_box_N offsets unresolved (amount=%d Box=%d)", g_offN, g_offBoxComp);
         return false;
     }
     return true;
@@ -209,7 +209,7 @@ bool ForceNow(const char* eventName) {
         if (!ResolveOffsets(box)) return;
         const int32_t n = *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(box) + g_offN);
         if (n <= 0) {
-            UE_LOGI("event_force: %s already consumed (N=%d) -- nothing to force", boxNarrow, n);
+            UE_LOGI("event_force: %s already consumed (amount=%d) -- nothing to force", boxNarrow, n);
             return;
         }
         void* pawn = LocalPawn();
@@ -223,11 +223,25 @@ bool ForceNow(const char* eventName) {
         f.Set<void*>(L"OtherActor", pawn);
         // OtherComp/OtherBodyIndex/bFromSweep/SweepResult stay zeroed -- the
         // handler's bytecode only reads OtherActor (class filter) [trigger_box_N RE].
-        if (ue_wrap::Call(box, f))
+        if (ue_wrap::Call(box, f)) {
             UE_LOGI("event_force: '%s' FORCED -- %s overlap dispatched with the local pawn "
                     "(native filter/N/collision bookkeeping ran)", boxNarrow, boxNarrow);
-        else
+            // The handler spawns synchronously, so a pyramid that did not appear is already
+            // visible here: this line separates a dead box from a dead spawner.
+            if (std::wstring(boxName) == L"TB_event_piramid") {
+                const auto liveInstances = [](const wchar_t* cls) {
+                    int count = 0;
+                    for (void* o : R::FindObjectsByClass(cls))
+                        if (o && R::IsLive(o) && !R::NameStartsWith(R::NameOf(o), L"Default__")) ++count;
+                    return count;
+                };
+                UE_LOGI("event_force: %s after dispatch: amount=%d armed=%d, live piramid2_C=%d killerwisp_C=%d",
+                        boxNarrow, *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(box) + g_offN),
+                        ReadArmed(box) ? 1 : 0, liveInstances(L"piramid2_C"), liveInstances(L"killerwisp_C"));
+            }
+        } else {
             UE_LOGW("event_force: %s overlap dispatch FAILED", boxNarrow);
+        }
     });
     return true;
 }
