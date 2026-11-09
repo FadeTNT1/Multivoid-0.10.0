@@ -251,11 +251,40 @@ reason is a warning with the trace off (`coop/interactables/computer_readiness`)
 ### Upgrades
 
 The signal upgrades are one persistent struct of eighteen levels that parametrise the download,
-ping, coordinate, refiner, radar and detector simulations. No lane mirrors them: they ride only
-the transferred save, once, so a level bought mid-session diverges silently. The desk routes
-around it by streaming the derived frequency and polarity data, but the struct itself, and the
-purchase as an intent the host validates against the shared research points, are designed and
-not built. The ATV's physical modules are on [vehicles.md](vehicles.md).
+ping, coordinate, refiner, radar and detector simulations (`coop/interactables/upgrade_sync`). The
+host's struct is the group's: a purchase on a client is an intent the host validates against the
+shared research points and performs, and the host polls the struct and broadcasts the whole of it,
+absolute, whenever it moves, whoever moved it (the panel, a client's purchase, the cheat menu). A
+joiner is sent the levels at its ready edge. A client writes them into its own save slot.
+
+A written level is only half the change. The game derives some of what the simulations use from the
+levels once, in the gamemode's `upgraded` hook, which the panel's button runs after its own write
+and which tells every actor that implements the upgrade interface to cache its numbers:
+
+| Read live, on every pass | Cached by the hook |
+|---|---|
+| the detector's frequency (`DL_duration`, in the download loop), the ping's speed (`process_coords`) | the detector quality, the ping cooldown, the cursor's speed and drift, the coordinate sweep's speed, the ping strength (`triangleLevel`) |
+
+So every peer re-derives after a change. The need is held as a world-scoped pending state
+(`coop/interactables/upgrade_rederive`) and not as a fire-and-forget call: the hook writes through
+object chains (the desk's widget to its coordinates panel; the gamemode's master spaceRenderer) and
+a Blueprint write through a null link is silent, so the call waits until the desk, its widget, the
+coordinates panel and both space renderers exist, is retried once a second when the dispatch fails,
+and goes anyway after fifteen seconds of waiting. It is raised once per real change (a host-observed
+change, a client's applied mirror that moved a row, and the first mirror of a world), merges with a
+change that lands while it is pending, and is dropped at a world change. A consumer set that differs
+from the one the last derive reached (the desk's widget built after the call ran) asks for one more
+derive, at most eight a world. The hook runs through `ue_wrap/world/upgrades`; the names it and its
+members go by are in `ue_wrap/core/sdk_profile_names.h`.
+
+Both peers log each step, once per change and never per tick: the rows that moved with old and new
+level and who moved them (`HOST levels changed by slot 2 (buy index 9)`; a client logs `applied host
+levels` with the rows), the hook's result, and after a successful re-derive the six representative
+cached values beside what the game's own formulas give for the levels held, `STALE` naming any member
+the hook did not reach. A line `desk reads ANOTHER gamemode` would mean the desk's live reads go
+through a different save slot than the one the lane writes. The desk's own physical upgrades (a
+server box's) are on `coop/interactables/server_upgrade_sync`; the ATV's modules are on
+[vehicles.md](vehicles.md).
 
 ## Who owns what
 
@@ -279,7 +308,7 @@ not built. The ATV's physical modules are on [vehicles.md](vehicles.md).
 | the servers | the host | state driven into each box |
 | a SAT console command that rests on the world | the host, on a terminal kept for its typist | the typed line up; the printed lines onto the shared screen, the busy state to the typist |
 | a SAT terminal's screen (input, history, prompt, busy), one per placed panel | the host's hidden terminal for that panel | whole, per terminal, to every ready peer on a change and every terminal's on join; the panel holder's input line up and relayed |
-| the upgrade levels | the host's save, once | not mirrored |
+| the upgrade levels | the host's save | the host's polled whole-struct broadcast; a client's purchase an intent the host performs; each peer re-derives its cached members |
 
 ## Wire messages
 
@@ -322,13 +351,14 @@ mid-command while another client keeps the session leaves the command running on
 is bound to its executor and its busy state as its world is ready; the last client's leave ends the
 session, and every such terminal is discarded with it, its command stopping there. An eraser press's
 show lasts its 3 s and is not replayed; its wipe arrives as the drive's row. The upgrade levels
-arrive with the save and never again.
+arrive with the save and again as a direct send at the ready edge, and a joiner's first mirror of
+a world re-derives its cached members.
 
 ## Known limits
 
 | Limit | Evidence |
 |---|---|
-| The upgrade levels are not mirrored; a level bought mid-session diverges until the next join | `[V]` no lane exists; `coop/interactables/desk_sim_sync` names the gap |
+| A bought level's effect on the detector quality, ping cooldown, cursor speed and drift, coordinate speed and ping strength, and on the live-read detector frequency and ping speed, was reported absent on a peer. The lost re-derive (a hook call whose failure was dropped, one made before the desk's widget existed) is fixed; whether it was the whole cause is not established | `[V]` `coop/interactables/upgrade_sync`; `[?]` the cause on the tested build: the log lines `re-derive ... hook=ok`, `derived (held/expected) ... STALE` and `desk reads ANOTHER gamemode` settle it from one session |
 | The coordinate log's animated line families are generated per peer from inputs that never mirror, so the host's and a client's logs differ; only the eight one-shot lines ride the wire, the reset's line written by each peer's own reset | `[V]` `coop/interactables/console_state_sync` |
 | A signal whose download's `begin` spawns a world prop (lifecrystal's crystal at the ROZ ship) spawns it on each peer, and a client's own is a world birth it does not author: the host's arriving birth adopts it when the arm's row came first, and it stays beside the host's when the host sent its birth before the arm's row (both ride the Default lane, so they arrive in send order) | `[RD]` `objectRenderer.begin`'s fourth step; the arriving birth's same-class match within 30 cm (`coop/props/remote_prop_spawn`) |
 | The signal camera's trigger runs on each peer, as its arm's `begin` does; the main map's one, the locker looker, watches that peer's own camera and ends that player's game as in single player | `[RD]` `mainGamemode.deleteActiveSignal`, `objectRenderer.begin`, `trigger_lockerLooker`; by design until decided |
@@ -347,6 +377,7 @@ arrive with the save and never again.
 | Concept | Files |
 |---|---|
 | occupancy | `coop/interactables/device_occupancy` |
+| the upgrades | `coop/interactables/upgrade_sync`, `coop/interactables/upgrade_rederive`, `ue_wrap/world/upgrades` |
 | the desk | `coop/interactables/desk_input_sync`, `coop/interactables/desk_sim_sync`, `coop/interactables/desk_ping_sync`, `coop/interactables/desk_cursor_sync`, `coop/interactables/desk_snd_fx`, `coop/interactables/console_state_sync` |
 | signals, the catch, the dishes | `coop/interactables/signal_sync`, `coop/interactables/signal_wire`, `coop/interactables/signal_catch_sync`, `coop/interactables/dish_sync`, `coop/interactables/dish_calib_sync`, `coop/interactables/download_arm_sync` |
 | the deck and the refiner | `coop/interactables/deck_play_sync`, `coop/interactables/comp_sync` |

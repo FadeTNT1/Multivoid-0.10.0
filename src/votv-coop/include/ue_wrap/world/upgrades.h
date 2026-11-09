@@ -3,7 +3,10 @@
 //
 // The levels parametrise the download, ping, coordinate, refiner, radar and detector
 // simulations. They live in ONE persistent struct on the save, so they are machine-wide rather
-// than per-actor, and nothing in the game re-derives them: a write is the whole state change.
+// than per-actor. Some simulations read the struct live on every pass (the detector's
+// frequency, the ping's speed); others cache a derived value that only the gamemode's `upgraded`
+// hook refreshes (see ApplyUpgradedHook and the derived-value block below), so a write alone is
+// not the whole state change for those.
 //
 // Members are UserDefinedStruct fields, so each renders with a "_NN_GUID" tail that a recook
 // re-mints; they resolve by PREFIX. The wire order is this file's table order, fixed here so a
@@ -55,6 +58,44 @@ int32_t MaxLevel(int panelIndex);
 // it is paid for and inert until something else runs it. It walks the actor list, so it belongs on
 // a real change, never on a poll. False if the gamemode or the verb did not resolve. Game thread.
 bool ApplyUpgradedHook();
+
+// ---- the hook's consumers and what it derives -------------------------------------------------------
+//
+// `upgraded` writes through object chains (the desk's atlas widget to its coordinates panel; the gamemode's
+// master spaceRenderer), and a Blueprint write through a null link is silent. So the hook is only worth
+// calling once those links exist. Every pointer is liveness-checked and null when absent. Game thread.
+struct Consumers {
+    void* desk = nullptr;               // the placed desk (analogDScreenTest)
+    void* deskGamemode = nullptr;       // the gamemode the desk's own reads go through
+    void* atlas = nullptr;              // the desk's widget (carries ui_coordinates)
+    void* uiCoords = nullptr;           // the coordinates panel (coordRadarsSpeed)
+    void* spaceRenderer = nullptr;      // the placed spaceRenderer (movementSpeed, coordinateDrift)
+    void* masterSpaceRenderer = nullptr;// gamemode.master_spacerenderer (triangleLevel)
+    bool  deskReadsOurGamemode = false; // deskGamemode is the gamemode the levels are written through
+};
+void ReadConsumers(Consumers& out);
+
+// True when every link the hook writes through exists. `missing` (optional) gets the first absent link's
+// name, a static string.
+bool ConsumersReady(const Consumers& c, const char** missing = nullptr);
+
+// The representative cached values the hook derives, NaN where a member did not read.
+struct Derived {
+    float detectorQuality = 0.f;   // desk.upgradeDetectorQuality
+    float maxCooldown = 0.f;       // desk.coord_maxCooldown
+    float movementSpeed = 0.f;     // spaceRenderer.movementSpeed
+    float coordinateDrift = 0.f;   // spaceRenderer.coordinateDrift
+    float coordRadarsSpeed = 0.f;  // ui_coordinates.coordRadarsSpeed
+    float triangleLevel = 0.f;     // master spaceRenderer.triangleLevel
+};
+void ReadDerived(Derived& out);
+
+// The values the game's own formulas give for `levels` (wire order), transcribed from the same bytecode as
+// the price table, so a log can set what the world holds beside what it should hold.
+void ExpectedDerived(const int32_t* levels, Derived& out);
+
+// The wire-order row's human name ("upg_downloadSpd_"), for logs. Null out of range.
+const wchar_t* LevelLabel(int wireIndex);
 
 // Re-run each open panel row's own upd(), so a level written from outside the UI shows on a
 // panel that is already up. Cheap and safe when none is open: it walks live widgets only.
