@@ -277,7 +277,7 @@ CommitResult SendCommit(uint16_t seq, H::Kind kind, void* hookActor) {
 
     std::vector<uint8_t> blob;
     Serialize(blob, seq, static_cast<uint8_t>(kind), 0, rec);
-    if (blob.size() > coop::blob_chunks::MaxBlobBytes()) {
+    if (blob.size() > coop::blob_chunks::kLaneBlobBytes) {
         UE_LOGE("hook_anchor: commit blob for seq %u is %zu bytes, past the transport ceiling",
                 (unsigned)seq, blob.size());
         return CommitResult::Failed;

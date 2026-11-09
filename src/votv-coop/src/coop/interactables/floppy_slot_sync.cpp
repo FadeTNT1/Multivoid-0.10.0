@@ -280,7 +280,7 @@ std::vector<std::vector<uint8_t>> PackCanonicalSet(
                 continue;
             }
             // 4 = the head plus the count; keep a whole entry together.
-            if (count > 0 && body.size() + one.size() + 4 > coop::blob_chunks::MaxBlobBytes())
+            if (count > 0 && body.size() + one.size() + 4 > coop::blob_chunks::kLaneBlobBytes)
                 break;
             body.insert(body.end(), one.begin(), one.end());
             ++count;

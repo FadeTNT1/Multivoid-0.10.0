@@ -102,7 +102,7 @@ bool BroadcastContainer(coop::net::Session* s, uint32_t eid, void* inv, int toSl
             return true;  // unchanged -- say nothing
     }
     const std::vector<uint8_t> blob = cw::Pack(eid, recs, flags);
-    if (blob.size() > coop::blob_chunks::MaxBlobBytes()) {
+    if (blob.size() > coop::blob_chunks::kLaneBlobBytes) {
         UE_LOGW("container_contents: eid=%u blob %zu B exceeds the transport ceiling -- dropped "
                 "(contents stay diverged; there is no bulk path)", eid, blob.size());
         return true;

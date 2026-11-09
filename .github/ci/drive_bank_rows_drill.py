@@ -27,6 +27,7 @@ BLOB_STUB = """#pragma once
 #include <vector>
 namespace coop::blob_chunks {
 inline size_t MaxBlobBytes() { return 1u << 20; }
+inline constexpr size_t kLaneBlobBytes = 1u << 20;
 inline uint64_t Fnv64(const std::vector<uint8_t>& b) {
     uint64_t h = 1469598103934665603ull;
     for (uint8_t c : b) { h ^= c; h *= 1099511628211ull; }

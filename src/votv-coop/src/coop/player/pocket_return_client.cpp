@@ -77,6 +77,8 @@ uint32_t    g_trip = 0;
 uint8_t     g_slot = coop::players::kPeerIdUnknown;
 int64_t     g_phaseAtMs = 0;       // the current phase began
 int64_t     g_progressAtMs = 0;    // the transfer's last new byte (WaitTransfer)
+uint64_t    g_applyChunksSeen = 0; // the host's apply-blob chunk count at g_applyChunkAtMs
+int64_t     g_applyChunkAtMs = 0;  // when that count last moved (TickApply: silence, not total time)
 uint32_t    g_lastDone = 0;
 int64_t     g_lastPollMs = 0;      // the load verb's last poll (Load)
 int64_t     g_announcedAtMs = 0;   // the world-ready announce went (WaitReady); 0 = not yet
@@ -204,9 +206,14 @@ void TickTransfer(int64_t now) {
 
 void TickApply(int64_t now) {
     if (!PIS::HasPendingApply()) {
-        if (now - g_phaseAtMs > kProfileMs)
+        // A large profile is paced out over many seconds: the bound is silence since the last chunk.
+        if (const uint64_t taken = PIS::ApplyBlobChunksTaken(); taken != g_applyChunksSeen) {
+            g_applyChunksSeen = taken;
+            g_applyChunkAtMs = now;
+        }
+        if (now - (g_applyChunkAtMs > g_phaseAtMs ? g_applyChunkAtMs : g_phaseAtMs) > kProfileMs)
             Fail(PT::Reason::TransferFailed,
-                 "no inventory profile arrived in 20 s; loading without one would empty the inventory");
+                 "no inventory profile arrived (20 s of silence from the host); loading without one would empty the inventory");
         return;
     }
     // The world being left is the one the episode must not take as loaded, and the announce state is

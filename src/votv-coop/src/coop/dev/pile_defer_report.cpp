@@ -28,7 +28,7 @@ uint32_t g_seq = 0;
 Clock::time_point g_nextSweep{};
 
 size_t MaxRows() {
-    return (coop::blob_chunks::MaxBlobBytes() - kReportBytes) / sizeof(coop::net::DevParityEntry);
+    return (coop::blob_chunks::kLaneBlobBytes - kReportBytes) / sizeof(coop::net::DevParityEntry);
 }
 
 }  // namespace

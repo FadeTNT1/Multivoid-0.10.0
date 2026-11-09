@@ -181,14 +181,14 @@ std::vector<uint8_t> PackCanonical(const L::BufferQuad& q, uint32_t gen) {
     return b;
 }
 
-// The transport hard-caps a blob at MaxBlobBytes(), and a failed send on the
+// The transport hard-caps a blob at MaxBlobBytes(); this lane holds itself to kLaneBlobBytes, and a failed send on the
 // canonical path is a SILENT divergence. Bound the canonical BELOW the cap
 // deterministically (drop TAIL buffer rows first, then tail fd rows) with a WARN --
 // the same accepted-residual class as the laptop content cap.
 std::vector<uint8_t> PackCanonicalBounded(L::BufferQuad q, uint32_t gen) {
     std::vector<uint8_t> b = PackCanonical(q, gen);
     int dropped = 0;
-    while (b.size() > coop::blob_chunks::MaxBlobBytes() &&
+    while (b.size() > coop::blob_chunks::kLaneBlobBytes &&
            (!q.buffer.empty() || !q.data.empty())) {
         if (!q.buffer.empty()) {
             q.buffer.pop_back();
@@ -202,7 +202,7 @@ std::vector<uint8_t> PackCanonicalBounded(L::BufferQuad q, uint32_t gen) {
     if (dropped)
         UE_LOGW("laptop_buffer: canonical quad over the %zu B transport cap -- %d tail "
                 "row(s) dropped (OPEN-9-class residual)",
-                coop::blob_chunks::MaxBlobBytes(), dropped);
+                coop::blob_chunks::kLaneBlobBytes, dropped);
     return b;
 }
 
@@ -346,10 +346,10 @@ void HostApplyBatch(Reader& r, uint8_t senderSlot) {
         UE_LOGW("laptop_buffer: malformed batch from slot %u -- dropped (canonical follows)",
                 static_cast<unsigned>(senderSlot));
     } else if (const size_t packed = PackCanonical(q, gen).size();
-               packed > coop::blob_chunks::MaxBlobBytes()) {
+               packed > coop::blob_chunks::kLaneBlobBytes) {
         // appendTail has NO cap of its own, so a wire batch could grow the host's engine
         // arrays without bound. The bound is NOT invented here -- it already exists one
-        // function away: PackCanonicalBounded drops TAIL rows to fit MaxBlobBytes(), so any
+        // function away: PackCanonicalBounded drops TAIL rows to fit kLaneBlobBytes, so any
         // state past that point is one the canonical cannot carry. Applying it would grow
         // the engine array into a region the ack silently truncates, which is unbounded
         // growth AND permanent divergence at once. Refuse the WHOLE batch (a
@@ -357,7 +357,7 @@ void HostApplyBatch(Reader& r, uint8_t senderSlot) {
         // unconditional canonical below heal the sender.
         UE_LOGW("laptop_buffer: batch from slot %u REFUSED -- the applied quad would pack "
                 "to %zu B, past the %zu B transport cap; nothing written, canonical follows",
-                static_cast<unsigned>(senderSlot), packed, coop::blob_chunks::MaxBlobBytes());
+                static_cast<unsigned>(senderSlot), packed, coop::blob_chunks::kLaneBlobBytes);
     } else {
         L::WriteQuadAndRebuild(q);
         UE_LOGI("laptop_buffer: batch from slot %u applied (%d op(s), %d skipped, rwDelta=%d)",

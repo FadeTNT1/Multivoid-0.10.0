@@ -543,6 +543,7 @@ set(VOTVCOOP_SOURCES
     src/ue_wrap/actors/save_rows.cpp
     src/coop/world/email_sync.cpp
     src/coop/net/blob_chunks.cpp
+    src/coop/net/blob_pacer.cpp
     src/coop/interactables/signal_wire.cpp
     src/coop/interactables/meadow_db_sync.cpp
     src/coop/interactables/meadow_db_join.cpp

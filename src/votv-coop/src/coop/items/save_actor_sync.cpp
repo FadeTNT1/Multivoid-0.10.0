@@ -172,7 +172,7 @@ std::vector<uint8_t> Pack(const Msg& m) {
         default: break;
     }
     // The 0.10.0 record is the larger half; a message past the transport goes with the legacy record alone.
-    if (b.size() > coop::blob_chunks::MaxBlobBytes() && !m.better.empty()) {
+    if (b.size() > coop::blob_chunks::kLaneBlobBytes && !m.better.empty()) {
         Msg lean = m;
         lean.better.clear();
         return Pack(lean);
@@ -318,7 +318,7 @@ uint32_t g_sendSeq = 1;
 bool g_outFullSaid = false;
 
 void Enqueue(int slot, std::vector<uint8_t>&& bytes) {
-    if (bytes.size() > coop::blob_chunks::MaxBlobBytes()) {
+    if (bytes.size() > coop::blob_chunks::kLaneBlobBytes) {
         UE_LOGW("[SAVE-ACTOR] a %zu-byte message is past the transport -- dropped", bytes.size());
         ++g_cDropped;
         return;

@@ -271,7 +271,10 @@ void DriveMenuModeJoinWorldBoot() {
     auto waitForApplyBlob = []() -> bool {
         namespace PIS = coop::player_inventory_sync;
         if (PIS::HasPendingApply()) return true;
-        const ULONGLONG w0 = ::GetTickCount64();
+        // The bound is SILENCE, not total time: a large profile is paced out chunk by chunk over
+        // many seconds, and every chunk that arrives restarts the clock.
+        ULONGLONG w0 = ::GetTickCount64();
+        uint64_t chunksSeen = PIS::ApplyBlobChunksTaken();
         while (!PIS::HasPendingApply()) {
             if (coop::shutdown::IsShuttingDown() || !S().running()) return false;
             // The host sends this the moment the slot's guid arrives and retries every tick on a
@@ -281,9 +284,13 @@ void DriveMenuModeJoinWorldBoot() {
             // the apply hook empty the host's items out of the save object: the player walked into
             // the world with someone else's emptied inventory and was told nothing, and this
             // session then reported no inventory back.
+            if (const uint64_t taken = PIS::ApplyBlobChunksTaken(); taken != chunksSeen) {
+                chunksSeen = taken;
+                w0 = ::GetTickCount64();
+            }
             if (::GetTickCount64() - w0 > 20000) {
                 FailJoinNoWorld_(coop::net::EndReason::ProfileNotSent,
-                                 "no inventory arrived in 20s, and loading without one would put "
+                                 "no inventory arrived (20s of silence from the host), and loading without one would put "
                                  "you in the world with an emptied inventory");
                 return false;
             }

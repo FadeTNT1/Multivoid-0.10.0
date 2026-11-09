@@ -53,6 +53,11 @@ bool SendInventoryToSlot(int peerSlot);
 // on this before loading the world, so the SaveObjectReadyHook always has the data). Game thread.
 bool HasPendingApply();
 
+// CLIENT: a count that rises with every chunk of the host's apply blob that arrives. A join wait
+// that sees it move knows the host is delivering (a large blob is paced over many seconds); only
+// silence is a failure. Game thread.
+uint64_t ApplyBlobChunksTaken();
+
 // CLIENT: the next save object to come ready belongs to a join, so the hook may substitute the
 // profile into it (or empty the host's items out of it when none arrived), and the hook resets the
 // host's status effects out of it before either. One-shot, consumed by

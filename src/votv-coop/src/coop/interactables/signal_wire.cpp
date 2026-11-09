@@ -89,7 +89,7 @@ std::vector<uint8_t> Serialize(const ue_wrap::signal_dynamic::Row& r) {
     }
     const size_t prefix = kHeadSize + 2 * (nc + ic + oc + sc);
     bool image = !r.image.empty();
-    if (image && prefix + 4 + r.image.size() > coop::blob_chunks::MaxBlobBytes()) {
+    if (image && prefix + 4 + r.image.size() > coop::blob_chunks::kLaneBlobBytes) {
         image = false;
         if (!g_saidImageOverCap) {
             g_saidImageOverCap = true;

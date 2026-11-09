@@ -2,7 +2,7 @@
 // every lane that ships one: SavedSignalAppend and CompData, the DrivePayload and RackState drive
 // lanes, and the meadow append/order pair. The blob rides BlobChunkPayload chunks. The photo rides
 // only in a row read with it (signal_dynamic::ReadStruct's withImage), as SavedSignalAppend's are,
-// and only within blob_chunks::MaxBlobBytes(); past it the row crosses without it, logged.
+// and only within blob_chunks::kLaneBlobBytes; past it the row crosses without it, logged.
 //
 // Layout, version byte 1, little-endian:
 //   u8 ver; u8 flags(bit0 hasData, bit1 isCopy, bit3 image); u8 frequency; u8 quality;

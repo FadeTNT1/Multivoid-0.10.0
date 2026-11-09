@@ -107,7 +107,7 @@ bool Encode(uint64_t which, std::vector<uint8_t>& blob, int& rows) {
         W::AppWStr(blob, code);
     }
     rows = static_cast<int>(codes.size());
-    return blob.size() <= coop::blob_chunks::MaxBlobBytes();
+    return blob.size() <= coop::blob_chunks::kLaneBlobBytes;
 }
 
 uint64_t AllDishes() {

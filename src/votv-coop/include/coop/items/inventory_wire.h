@@ -24,8 +24,10 @@ namespace coop::inventory_wire {
 //   4 -- a present byte and the inventory component's bytes, then the vitals and the pose.
 inline constexpr uint8_t kVersion = 4;
 
-// The largest inventory a blob may carry: the transport's ceiling bounds it in practice.
-inline constexpr uint32_t kMaxItemBytes = 1u << 20;
+// The largest inventory a blob may carry: the transport ceiling (blob_chunks::MaxBlobBytes(), about
+// 21.4 MB; player_inventory_sync.cpp static_asserts this stays above it). A lower bound here would refuse a profile the transport delivers, and the host would
+// take the refusal for a corrupt file.
+inline constexpr uint32_t kMaxItemBytes = 25'000'000u;
 
 // Serialize `p` into a fresh blob.
 std::vector<uint8_t> Serialize(const coop::player_profile::Profile& p);

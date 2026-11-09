@@ -74,7 +74,7 @@ public:
     // split them, so they go straight or are held together. Each packet follows SendOrQueue's rules;
     // the first Dropped ends the batch. Returns Dropped if one was, else Queued if any was held, else
     // Streamed; `streamed` is how many entered GNS. The slot lock is held across up to 255 sends
-    // (a blob's chunk ceiling), about the length of one Drain pass (kDrainPassCap). Any thread.
+    // (a blob's one-call chunk ceiling, blob_pacer.h kBatchMaxChunks), about the length of one Drain pass (kDrainPassCap). Any thread.
     SendOutcome SendOrQueueBatch(int slot, int lane, uint32_t hConn, const uint8_t* wire, int len,
                                  int count, SendAdmission& adm, int& streamed);
 

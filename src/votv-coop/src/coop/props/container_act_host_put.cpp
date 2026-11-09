@@ -66,7 +66,7 @@ cre::EditResult ReadFit(uint32_t eid, const SR::SaveRecord& rec, size_t flagByte
     if (r != cre::EditResult::Done) return r;
     countAtCap = recs.size() >= csw::kMaxRecords;
     bytesOver = csw::SliceBytes(recs) + caw::RecordBytes(rec) + flagBytes >
-                coop::blob_chunks::MaxBlobBytes();
+                coop::blob_chunks::kLaneBlobBytes;
     return cre::EditResult::Done;
 }
 

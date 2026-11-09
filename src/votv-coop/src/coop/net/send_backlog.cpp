@@ -92,6 +92,15 @@ SendOutcome SendBacklog::SendOrQueueBatch(int slot, int lane, uint32_t hConn, co
     // between two packets of the batch, so all of them go straight or all of them queue behind
     // the same head. The first Dropped ends the batch, as it ends a chunk loop.
     std::lock_guard<std::mutex> lk(s.mu);
+    // A run that could not all fit under the slot's byte cap is refused whole, BEFORE any packet goes:
+    // sent piecemeal it would leave half a blob in the stream and then trip the fatal cap, kicking the
+    // connection. Counting the whole run as queued is conservative (the send buffer takes some of it),
+    // and it keeps a blob all-or-nothing. A blob this big belongs on the paced path (blob_pacer.h).
+    if (s.totalBytes + s.joinBytes + static_cast<size_t>(len) * static_cast<size_t>(count) > kMaxBytesPerSlot) {
+        UE_LOGW("send_backlog: slot %d lane %d batch of %d x %d B refused whole (backlog %zu B, cap %zu B)",
+                slot, lane, count, len, s.totalBytes + s.joinBytes, kMaxBytesPerSlot);
+        return SendOutcome::Dropped;
+    }
     SendOutcome worst = SendOutcome::Streamed;
     for (int i = 0; i < count; ++i) {
         const SendOutcome rc = SendLocked_(s, slot, lane, hConn, wire + static_cast<size_t>(i) * len,

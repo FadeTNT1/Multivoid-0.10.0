@@ -31,7 +31,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 340;
+inline constexpr uint16_t kProtocolVersion = 341;
 
 // The peer slots a per-slot wire array holds: the host and nine clients. It equals
 // coop::players::kMaxPeers (static_assert'd in coop/net/session.h); this header stays free of the
@@ -3154,10 +3154,10 @@ static_assert(sizeof(HookDestroyPayload) == 4, "HookDestroyPayload must be 4 byt
 // text; pfpLeaf }, capped at 256 / 4096 / 96 chars; signal rows are coop/signal_wire.
 struct BlobChunkPayload {
     uint32_t blobSeq;    // 4 -- per-SENDER monotonically increasing (per kind)
-    uint8_t  chunkIdx;   // 1
-    uint8_t  chunks;     // 1 -- total (>=1)
+    uint32_t chunkIdx;   // 4 -- wide enough for coop/blob_chunks kMaxBlobChunks (100000)
+    uint32_t chunks;     // 4 -- total (>=1, <= kMaxBlobChunks)
     uint16_t chunkLen;   // 2 -- used bytes in data[]
-    uint8_t  data[220];  // 220
+    uint8_t  data[214];  // 214
 };
 static_assert(sizeof(BlobChunkPayload) == 228, "BlobChunkPayload must be 228 bytes");
 static_assert(sizeof(BlobChunkPayload) <= 256 - 20 - 8,

@@ -10,7 +10,7 @@
 //
 // HOSTILE-INPUT CONTRACT: the peer is not trusted. Every field is bounds-checked, a record's declared length is held
 // to kMaxRecordBytes BEFORE any DeSave (so a refused or unserved put costs a bounds check, not a parse), and any byte
-// after a family's tail is Malformed. The whole blob is already bounded by blob_chunks::MaxBlobBytes at the assembler.
+// after a family's tail is Malformed. The whole blob is already bounded by blob_chunks::kLaneBlobBytes where it is built; the assembler admits up to MaxBlobBytes().
 
 #pragma once
 

@@ -134,7 +134,7 @@ std::vector<uint8_t> PackCanonical(uint32_t eid, const FB::BoxArrays& a) {
 std::vector<uint8_t> PackCanonicalBounded(uint32_t eid, FB::BoxArrays a) {
     std::vector<uint8_t> b = PackCanonical(eid, a);
     int dropped = 0;
-    while (b.size() > coop::blob_chunks::MaxBlobBytes() && !a.data.empty()) {
+    while (b.size() > coop::blob_chunks::kLaneBlobBytes && !a.data.empty()) {
         a.data.pop_back();
         if (!a.types.empty()) a.types.pop_back();
         ++dropped;
@@ -143,7 +143,7 @@ std::vector<uint8_t> PackCanonicalBounded(uint32_t eid, FB::BoxArrays a) {
     if (dropped)
         UE_LOGW("floppybox: canonical eid=%u over the %zu B transport cap -- %d tail "
                 "entr(ies) dropped (OPEN-9-class residual)", eid,
-                coop::blob_chunks::MaxBlobBytes(), dropped);
+                coop::blob_chunks::kLaneBlobBytes, dropped);
     return b;
 }
 

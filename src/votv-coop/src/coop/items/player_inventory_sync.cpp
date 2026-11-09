@@ -5,6 +5,7 @@
 #include "player_inventory_internal.h"  // co-located: the state the pocket half shares
 
 #include "coop/net/blob_chunks.h"
+#include "coop/net/blob_pacer.h"
 #include "coop/config/config.h"
 #include "coop/items/inventory_death_keep.h"
 #include "coop/items/inventory_wire.h"
@@ -38,6 +39,9 @@
 #include <utility>
 #include <vector>
 
+static_assert(coop::inventory_wire::kMaxItemBytes >= coop::blob_chunks::MaxBlobBytes(),
+              "the inventory codec must admit every blob the transport can deliver");
+
 namespace coop::player_inventory_sync {
 // The state and helpers the pocket half (player_inventory_pocket.cpp) shares through
 // player_inventory_internal.h; nothing outside this directory names them.
@@ -51,12 +55,31 @@ std::atomic<coop::net::Session*> g_session{nullptr};
 // coop/player/player_profile_store, which holds it by GUID.
 coop::blob_chunks::Assembler g_assembler;
 
+// Both directions: blobs past blob_chunks::kBatchMaxChunks are fed to the transport a few chunks per
+// tick (coop/net/blob_pacer.h) instead of in one call. Keyed by peer slot: a client's only job is to
+// slot 0 (the host), the host's are to client slots. Game thread.
+coop::blob_chunks::PacedSender g_paced;
+
+// Ship one profile blob: to the host (peerSlot < 0, a client) or to one client slot. A blob of at
+// most kBatchMaxChunks goes in one all-or-nothing call; a larger one is handed to the paced sender,
+// which cannot refuse it (only a blob past MaxBlobBytes(), which callers rule out first). True means
+// it is on its way: sent, or held by a job that only a disconnect or session stop can end.
+bool ShipInventoryBlob(coop::net::Session* s, int peerSlot, uint32_t seq, const std::vector<uint8_t>& blob) {
+    const auto kind = coop::net::ReliableKind::PlayerInventoryBlob;
+    if (coop::blob_chunks::ChunkCount(blob.size()) > coop::blob_chunks::kBatchMaxChunks)
+        return g_paced.Enqueue(peerSlot < 0 ? 0 : peerSlot, kind, seq, blob);
+    return peerSlot < 0 ? coop::blob_chunks::SendBlob(s, kind, seq, blob)
+                        : coop::blob_chunks::SendBlobToSlot(s, peerSlot, kind, seq, blob);
+}
+
 // Client: the send-dedup state.
 uint64_t          g_lastItemsHash = 0;  // the items half of the last profile sent
 Clock::time_point g_lastSend{};
 coop::player_profile::Pose g_lastSentPose;  // the pose the last sent profile carried
 uint64_t         g_oversizeHash = 0;  // the state already reported as too large to send
 uint32_t          g_sendSeq = 0;
+// Host: the slots whose too-large profile was already reported (SendInventoryToSlot), once each.
+std::array<bool, coop::net::kMaxPeers> g_oversizeReported{};
 Clock::time_point g_lastPoll{};
 Clock::time_point g_lastSweep{};
 
@@ -190,7 +213,7 @@ bool SendProfile(coop::net::Session* s, std::vector<uint8_t> blob, uint64_t item
         }
         return false;
     }
-    if (coop::blob_chunks::SendBlob(s, coop::net::ReliableKind::PlayerInventoryBlob, ++g_sendSeq, blob)) {
+    if (ShipInventoryBlob(s, -1, ++g_sendSeq, blob)) {
         // Logged for a change of the items only: the vitals cadence is steady state, not an event.
         if (itemsHash != g_lastItemsHash)
             UE_LOGI("player_inventory[client]: streamed profile (%zu bytes, %zu of inventory) to host",
@@ -210,6 +233,9 @@ void ClientStreamTick(coop::net::Session* s) {
     const Clock::time_point now = Clock::now();
     if (now - g_lastPoll < kClientPoll) return;
     g_lastPoll = now;
+    // The host's apply blob is reassembled here too: a half that stopped coming is dropped after
+    // the silence TTL (the TTL runs from the LAST chunk, so a paced blob is not swept while it flows).
+    g_clientAssembler.Sweep(now, kAsmTtl);
     if (!g_profileApplied) return;  // this world holds no profile of ours to report
     // On a pocket trip the stream stands down: the pocket's place means nothing in the host's world,
     // and the carried state was flushed with the departure place at the trip's start and is flushed
@@ -567,6 +593,15 @@ void Tick() {
     if (g_pawnVitalsPending && !g_subPending && !g_subAfterLoad && coop::players::Registry::Get().Local())
         ApplyPendingPawnVitals("once the pawn was reachable");
     if (s && s->connected()) {
+        // Every frame: the paced blobs. One that stalled for good is forgotten, so the owner's
+        // dedup re-sends it under a fresh seq: the host clears the slot's push latch, the client
+        // its items hash.
+        std::vector<int> abandoned;
+        g_paced.Tick(s, abandoned);
+        for (const int slot : abandoned) {
+            if (s->role() == coop::net::Role::Host) g_applySentToSlot[slot] = false;
+            else g_lastItemsHash = 0;
+        }
         if (s->role() == coop::net::Role::Client) ClientStreamTick(s);
         else                                      HostPersistTick(s);
     }
@@ -673,6 +708,8 @@ void OnReliable(const coop::net::BlobChunkPayload& p, uint8_t senderPeerSlot) {
     ++g_profilesReceived;
 }
 
+uint64_t ApplyBlobChunksTaken() { return g_clientAssembler.ChunksTaken(); }
+
 uint32_t ProfilesReceived() { return g_profilesReceived; }
 
 uint32_t WorldSavesWritten() { return g_worldSavesWritten; }
@@ -720,14 +757,28 @@ bool SendInventoryToSlot(int peerSlot) {
         UE_LOGI("player_inventory: slot %d guid=%s -- first join, the starting kit", peerSlot,
                 guid.c_str());
     }
-    if (coop::blob_chunks::SendBlobToSlot(s, peerSlot, coop::net::ReliableKind::PlayerInventoryBlob,
-                                          ++g_hostSendSeq[peerSlot], blob)) {
-        UE_LOGI("player_inventory: sent slot %d guid=%s its per-player inventory (%zu-byte blob)",
-                peerSlot, guid.c_str(), blob.size());
+    // A profile past the transport ceiling can never be delivered, and a profile is not a list whose
+    // tail may be dropped. Say so ONCE per slot and connection, and treat the push as handled (so it
+    // is not retried every tick forever): the joiner gets no blob, its join wait ends in the named
+    // failure, and nothing is truncated or overwritten. Re-armed by the slot's disconnect.
+    if (blob.size() > coop::blob_chunks::MaxBlobBytes()) {
+        if (!g_oversizeReported[peerSlot]) {
+            g_oversizeReported[peerSlot] = true;
+            UE_LOGE("player_inventory: slot %d guid=%s -- the profile is %zu bytes, past the %zu-byte "
+                    "transport ceiling: it cannot be sent and is NOT truncated; the player joins "
+                    "without it (not retried)", peerSlot, guid.c_str(), blob.size(),
+                    coop::blob_chunks::MaxBlobBytes());
+        }
         return true;
     }
-    UE_LOGW("player_inventory: send to slot %d refused (channel busy) -- will RETRY next tick "
-            "(NOT latched as sent)", peerSlot);
+    const bool paced = coop::blob_chunks::ChunkCount(blob.size()) > coop::blob_chunks::kBatchMaxChunks;
+    if (ShipInventoryBlob(s, peerSlot, ++g_hostSendSeq[peerSlot], blob)) {
+        UE_LOGI("player_inventory: %s slot %d guid=%s its per-player inventory (%zu-byte blob)",
+                paced ? "queued for paced delivery to" : "sent", peerSlot, guid.c_str(), blob.size());
+        return true;
+    }
+    UE_LOGW("player_inventory: send to slot %d refused (the transport took no part of the %zu-byte "
+            "blob) -- will RETRY next tick (NOT latched as sent)", peerSlot, blob.size());
     return false;
 }
 
@@ -751,8 +802,13 @@ void OnDisconnectForSlot(int peerSlot) {
     if (!s || s->role() != coop::net::Role::Host) return;
     // The leaver's profile stays held by GUID: a rejoin gets it back, and the next save of the
     // host's world cuts it to disk with everyone else's.
-    if (peerSlot >= 0 && peerSlot < coop::net::kMaxPeers)
+    if (peerSlot >= 0 && peerSlot < coop::net::kMaxPeers) {
+        // A job for this slot must never reach whoever is seated there next.
+        g_paced.CancelSlot(peerSlot);
+        g_assembler.ClearSlot(static_cast<uint8_t>(peerSlot));
+        g_oversizeReported[peerSlot] = false;
         g_applySentToSlot[peerSlot] = false;  // a rejoin re-pushes the apply blob
+    }
 }
 
 void OnDisconnect() {
@@ -762,6 +818,8 @@ void OnDisconnect() {
     // Client: reset the send dedup so a reconnect re-streams, and drop any pending apply blob and
     // its assembler, so a rejoin waits for a fresh host push and never applies a stale inventory
     // to a new world.
+    g_paced.CancelAll();
+    g_oversizeReported.fill(false);
     g_lastItemsHash = 0;
     g_lastSend = Clock::time_point{};
     g_joinPose = {};

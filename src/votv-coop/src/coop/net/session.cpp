@@ -95,6 +95,10 @@ int BuildReliableBatch_(std::vector<uint8_t>& wire, ReliableKind kind, const voi
     return total;
 }
 thread_local std::vector<uint8_t> t_batchWire;
+// A run of more than a few hundred chunks must not leave its wire buffer pinned on the thread.
+void ReleaseBigBatchWire_() {
+    if (t_batchWire.capacity() > (256u << 10)) std::vector<uint8_t>().swap(t_batchWire);
+}
 }  // namespace
 
 bool Session::SendReliableToSlot(int peerSlot, ReliableKind kind, const void* payload,
@@ -292,6 +296,7 @@ bool Session::SendReliableBatchToSlot(int peerSlot, ReliableKind kind, const voi
         peerSlot, static_cast<int>(LaneForKind(kind)), hConn, t_batchWire.data(), total, count,
         admission_, streamed);
     if (streamed > 0) rateControl_.NoteReliableQueued(peerSlot, streamed * total);
+    ReleaseBigBatchWire_();
     return rc != SendOutcome::Dropped;
 }
 
@@ -326,6 +331,7 @@ bool Session::SendReliableBatch(ReliableKind kind, const void* payloads, int pay
         if (streamed > 0) rateControl_.NoteReliableQueued(i, streamed * total);
         if (rc != SendOutcome::Dropped) anySuccess = true;
     }
+    ReleaseBigBatchWire_();
     return anySuccess;
 }
 
