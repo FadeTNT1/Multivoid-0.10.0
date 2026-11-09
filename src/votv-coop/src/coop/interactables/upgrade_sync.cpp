@@ -3,6 +3,7 @@
 #include "coop/interactables/upgrade_sync.h"
 
 #include "coop/interactables/device_occupancy.h"
+#include "coop/interactables/upgrade_rederive.h"
 #include "coop/net/intent_bucket.h"
 #include "coop/net/intent_queue.h"
 #include "coop/net/protocol.h"
@@ -19,7 +20,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace coop::upgrade_sync {
 namespace {
@@ -64,6 +68,26 @@ bool     g_havePendingApply = false;
 uint32_t g_pendingGen = 0;  // the world the pending mirror was received in
 
 uint64_t g_sent = 0, g_bought = 0, g_sold = 0, g_denied = 0, g_broadcast = 0, g_applied = 0;
+uint64_t g_rederives = 0, g_rederiveFails = 0;
+
+// The re-derive the world still owes its consumers, and the consumer set it last derived into. Both are
+// world-scoped: Service() clears them when the world generation moves.
+coop::upgrade_rederive::Pending       g_rederive;
+coop::upgrade_rederive::ConsumerWatch g_watch;
+uint32_t g_stateGen = 0;
+bool     g_haveStateGen = false;
+uint64_t g_nextWatchMs = 0;
+bool     g_firstApplyDone = false;  // client: the world's first host mirror has been written
+bool     g_saidSendFail = false;
+
+// The host's change log baseline: the levels as last seen, whoever wrote them.
+int32_t g_observed[UP::kLevelCount];
+bool    g_haveObserved = false;
+// Who the next observed change is credited to. The panel's own button and the cheat menu write without
+// passing through here, so an unnamed change is the host's own.
+constexpr const char* kWhoHost = "the host (its own panel or the cheat menu)";
+const char* g_who = kWhoHost;
+char        g_whoBuf[64];
 
 uint64_t NowMs() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -79,17 +103,168 @@ coop::roster_ledger::PerSlotState<Slot> g_slots;
 
 // ---- host side -------------------------------------------------------------------------------
 
+// "downloadSpd 3->4, scannerFr 0->1": the rows that differ, by their table name.
+std::wstring DiffText(const int32_t* before, const int32_t* after) {
+    std::wstring out;
+    for (int i = 0; i < UP::kLevelCount; ++i) {
+        if (before[i] == after[i]) continue;
+        const wchar_t* label = UP::LevelLabel(i);
+        std::wstring name = label ? label : L"?";
+        if (name.size() > 5 && name.compare(0, 4, L"upg_") == 0) name = name.substr(4, name.size() - 5);
+        if (!out.empty()) out += L", ";
+        out += name + L" " + std::to_wstring(before[i]) + L"->" + std::to_wstring(after[i]);
+    }
+    return out;
+}
+
+void RequestRederive(const char* why) {
+    g_rederive.Request(ue_wrap::world_identity::Generation(), NowMs(), why);
+}
+
+bool Close(float got, float want) {
+    return std::isfinite(got) && std::fabs(got - want) <= 1e-3f * (std::fabs(want) > 1.f ? std::fabs(want) : 1.f);
+}
+
+// After a successful hook: the cached members beside what the game's formulas give for the levels now held. A
+// name under "not derived" is a member the hook did not reach on this peer. One pair of lines per derive, never
+// per tick.
+void LogDerived(const char* role, const char* why, uint64_t waitedMs, uint32_t calls, bool forced,
+                const UP::Consumers& c) {
+    int32_t level[UP::kLevelCount] = {};
+    UP::ReadLevels(level);
+    UP::Derived got, want;
+    UP::ReadDerived(got);
+    UP::ExpectedDerived(level, want);
+    std::string stale;
+    auto check = [&](const char* name, float g, float w) {
+        if (Close(g, w)) return;
+        if (!stale.empty()) stale += ", ";
+        stale += name;
+    };
+    check("detectorQuality", got.detectorQuality, want.detectorQuality);
+    check("maxCooldown", got.maxCooldown, want.maxCooldown);
+    check("movementSpeed", got.movementSpeed, want.movementSpeed);
+    check("coordinateDrift", got.coordinateDrift, want.coordinateDrift);
+    check("coordRadarsSpeed", got.coordRadarsSpeed, want.coordRadarsSpeed);
+    check("triangleLevel", got.triangleLevel, want.triangleLevel);
+    UE_LOGI("upgrade_sync: %s re-derive #%llu (%s) hook=ok on call %u after %llums%s; the desk reads %s gamemode",
+            role, static_cast<unsigned long long>(g_rederives), why, calls,
+            static_cast<unsigned long long>(waitedMs),
+            forced ? ", consumers still missing -- forced" : "",
+            c.deskReadsOurGamemode ? "our" : "ANOTHER");
+    char buf[420];
+    std::snprintf(buf, sizeof(buf),
+                  "upgrade_sync: %s derived (held/expected) detectorQuality=%.4f/%.4f maxCooldown=%.3f/%.3f "
+                  "movementSpeed=%.3f/%.3f coordinateDrift=%.3f/%.3f coordRadarsSpeed=%.1f/%.1f "
+                  "triangleLevel=%.4f/%.4f -- %s%s",
+                  role, got.detectorQuality, want.detectorQuality, got.maxCooldown, want.maxCooldown,
+                  got.movementSpeed, want.movementSpeed, got.coordinateDrift, want.coordinateDrift,
+                  got.coordRadarsSpeed, want.coordRadarsSpeed, got.triangleLevel, want.triangleLevel,
+                  stale.empty() ? "all current" : "not derived: ", stale.c_str());
+    if (stale.empty()) UE_LOGI("%s", buf);
+    else UE_LOGW("%s", buf);
+}
+
+const char* RoleName(coop::net::Session& s) {
+    return s.role() == coop::net::Role::Host ? "HOST" : "CLIENT";
+}
+
+// Per tick, both roles. The need for a re-derive lives in g_rederive until a call to the hook succeeds with the
+// actors that consume it in the world; a failed or too-early call is tried again, a world change drops it.
+void Service(coop::net::Session& s) {
+    const uint64_t now = NowMs();
+    const uint32_t gen = ue_wrap::world_identity::Generation();
+    if (!g_haveStateGen || gen != g_stateGen) {
+        if (g_rederive.active())
+            UE_LOGI("upgrade_sync: a pending re-derive (%s) dropped at the world change", g_rederive.why());
+        g_rederive.Clear();
+        g_watch.Reset();
+        g_stateGen = gen;
+        g_haveStateGen = true;
+        g_haveObserved = false;
+        g_firstApplyDone = false;
+        g_nextWatchMs = 0;
+    }
+    const bool pending = g_rederive.active();
+    const bool watchDue = g_watch.derived() && now >= g_nextWatchMs;
+    if (!pending && !watchDue) return;
+
+    UP::Consumers c;
+    UP::ReadConsumers(c);
+    const char* missing = nullptr;
+    const bool ready = UP::ConsumersReady(c, &missing);
+    const uintptr_t sig[coop::upgrade_rederive::ConsumerWatch::kSlots] = {
+        reinterpret_cast<uintptr_t>(c.desk),          reinterpret_cast<uintptr_t>(c.deskGamemode),
+        reinterpret_cast<uintptr_t>(c.atlas),         reinterpret_cast<uintptr_t>(c.uiCoords),
+        reinterpret_cast<uintptr_t>(c.spaceRenderer), reinterpret_cast<uintptr_t>(c.masterSpaceRenderer)};
+    if (watchDue) {
+        g_nextWatchMs = now + 500;
+        if (g_watch.Observe(sig, ready, now)) RequestRederive("the consumers changed since the last derive");
+        if (g_watch.TakeCapNotice())
+            UE_LOGW("upgrade_sync: the consumer set changed more than %u times in this world -- no further "
+                    "automatic re-derives", coop::upgrade_rederive::ConsumerWatch::kMaxPerWorld);
+    }
+    if (g_rederive.TakeWaitNotice(ready, now))
+        UE_LOGW("upgrade_sync: re-derive (%s) waiting on %s -- the hook is held until it exists (or %llus pass)",
+                g_rederive.why(), missing ? missing : "?",
+                static_cast<unsigned long long>(coop::upgrade_rederive::kForceAfterMs / 1000));
+
+    if (g_rederive.Poll(gen, ready, now) != coop::upgrade_rederive::Action::Fire) return;
+    const char* why = g_rederive.why();
+    const uint64_t waited = g_rederive.waitedMs(now);
+    const bool forced = g_rederive.forced();
+    const bool ok = UP::ApplyUpgradedHook();
+    g_rederive.Report(ok, now);
+    if (!ok) {
+        ++g_rederiveFails;
+        const uint32_t fails = g_rederive.fails();
+        if (fails == 1 || fails == coop::upgrade_rederive::kWarnAfterFails)
+            UE_LOGW("upgrade_sync: %s re-derive (%s) -- the gamemode's upgraded() did not dispatch (call %u); "
+                    "retrying every %llus", RoleName(s), why, fails,
+                    static_cast<unsigned long long>(coop::upgrade_rederive::kRetryMs / 1000));
+        return;
+    }
+    ++g_rederives;
+    g_watch.MarkDerived(sig);
+    LogDerived(RoleName(s), why, waited, g_rederive.fails() + 1u, forced, c);
+}
+
+// The host's view of a change: the log line naming the rows, who made it, and the re-derive it owes. Runs before
+// the send, so a change is noted once whether or not a peer was there to hear it.
+void ObserveHostLevels(const int32_t* now, const char* who) {
+    if (!g_haveObserved) {
+        std::memcpy(g_observed, now, sizeof(g_observed));
+        g_haveObserved = true;
+        return;
+    }
+    if (std::memcmp(now, g_observed, sizeof(g_observed)) == 0) return;
+    UE_LOGI("upgrade_sync: HOST levels changed by %s: %ls", who, DiffText(g_observed, now).c_str());
+    std::memcpy(g_observed, now, sizeof(g_observed));
+    RequestRederive("levels changed on the host");
+}
+
 // Read the struct and broadcast it if it moved. Also the acknowledgement of a purchase: the
 // publisher is one function so a purchase and a cheat converge by the same route.
 void Publish(coop::net::Session& s, const char* why) {
     if (s.role() != coop::net::Role::Host || !s.connected()) return;
     coop::net::UpgradeLevelsPayload p{};
     if (!UP::ReadLevels(p.level)) return;
+    ObserveHostLevels(p.level, g_who);
     if (g_havePublished && std::memcmp(p.level, g_published, sizeof(g_published)) == 0) return;
+    // Nobody to hear it: a joiner is sent the levels directly at its ready edge, and the change is not spent.
+    if (!s.AnyWorldReadyPeer()) return;
     const bool first = !g_havePublished;  // the first publish moved nothing; say so
+    // The dedup is committed only for a send that was taken; a refused one is retried at the next poll.
+    if (!s.SendReliable(coop::net::ReliableKind::UpgradeLevels, &p, sizeof(p))) {
+        if (!g_saidSendFail) {
+            g_saidSendFail = true;
+            UE_LOGW("upgrade_sync: the levels broadcast was refused -- retrying at each poll");
+        }
+        return;
+    }
+    g_saidSendFail = false;
     std::memcpy(g_published, p.level, sizeof(g_published));
     g_havePublished = true;
-    s.SendReliable(coop::net::ReliableKind::UpgradeLevels, &p, sizeof(p));
     ++g_broadcast;
     UE_LOGI("upgrade_sync: %s (%s) -- broadcast to all (#%llu)",
             first ? "the session's first levels" : "levels moved", why,
@@ -196,10 +371,14 @@ void Execute(coop::net::Session& s, const coop::net::UpgradeIntentPayload& p, ui
 
     // The button's own second half: the panel repaint, then the gamemode's re-derive. Without the
     // second one the level is written and nothing in the world reads it until some later purchase
-    // or a load runs the hook.
+    // or a load runs the hook. The re-derive is a pending need (Publish raises it as it sees the
+    // change), so a call that fails or finds no consumers yet is retried, not lost.
     UP::RefreshOpenRows();  // the host's own panel, if it is up
-    UP::ApplyUpgradedHook();
+    std::snprintf(g_whoBuf, sizeof(g_whoBuf), "slot %u (%s index %d)", static_cast<unsigned>(slot),
+                  buying ? "buy" : "sell", index);
+    g_who = g_whoBuf;
     Publish(s, "a purchase");
+    g_who = kWhoHost;
 }
 
 // ---- the client's gate -----------------------------------------------------------------------
@@ -273,6 +452,7 @@ void Tick(coop::net::Session& session) {
     sg::ResolvePendingNames();
     ArmWatches();
     if (!session.running()) return;
+    Service(session);
 
     if (!g_saidLive && sg::NameWatchLive(kRowBuy, kTagUpgrade)) {
         g_saidLive = true;
@@ -298,13 +478,26 @@ void Tick(coop::net::Session& session) {
             UE_LOGI("upgrade_sync: a mirror from the previous world dropped at the world change");
         }
         if (g_havePendingApply) {
+            int32_t before[UP::kLevelCount] = {};
+            const bool had = UP::ReadLevels(before);
             if (UP::WriteLevels(g_pendingApply.level)) {
                 g_havePendingApply = false;
                 ++g_applied;
-                UP::ApplyUpgradedHook();  // the numbers are nothing until the world re-derives from them
+                const bool changed = !had || std::memcmp(before, g_pendingApply.level, sizeof(before)) != 0;
+                const bool first = !g_firstApplyDone;
+                g_firstApplyDone = true;
+                // The numbers are nothing to the cached members until the world re-derives from them: a
+                // pending need, held until the hook has run with its consumers in the world. A mirror that
+                // moves nothing re-derives only as the world's first, since the save the peer loaded may
+                // predate the host's levels.
+                if (changed || first)
+                    RequestRederive(changed ? "levels changed by the host" : "the host's levels for this world");
                 const int rows = UP::RefreshOpenRows();
-                UE_LOGI("upgrade_sync: applied host levels (#%llu, %d open row(s) repainted)",
-                        static_cast<unsigned long long>(g_applied), rows);
+                UE_LOGI("upgrade_sync: applied host levels (#%llu, %d open row(s) repainted): %ls%s",
+                        static_cast<unsigned long long>(g_applied), rows,
+                        changed ? DiffText(had ? before : g_pendingApply.level, g_pendingApply.level).c_str()
+                                : L"no row moved",
+                        (changed || first) ? " -- re-derive requested" : "");
             }
         }
         return;
@@ -351,9 +544,20 @@ void OnDisconnect() {
                 static_cast<unsigned long long>(g_sold), static_cast<unsigned long long>(g_denied),
                 static_cast<unsigned long long>(g_broadcast),
                 static_cast<unsigned long long>(g_applied));
+    if (g_rederives || g_rederiveFails)
+        UE_LOGI("upgrade_sync: session end -- re-derives=%llu failed hook calls=%llu",
+                static_cast<unsigned long long>(g_rederives), static_cast<unsigned long long>(g_rederiveFails));
     g_havePublished = false;
     g_havePendingApply = false;
+    g_rederive.Clear();
+    g_watch.Reset();
+    g_haveStateGen = false;
+    g_haveObserved = false;
+    g_firstApplyDone = false;
+    g_saidSendFail = false;
+    g_who = kWhoHost;
     g_sent = g_bought = g_sold = g_denied = g_broadcast = g_applied = 0;
+    g_rederives = g_rederiveFails = 0;
 }
 
 }  // namespace coop::upgrade_sync

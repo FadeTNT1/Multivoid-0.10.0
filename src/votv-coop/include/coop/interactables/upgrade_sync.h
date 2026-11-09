@@ -30,8 +30,9 @@ namespace coop::upgrade_sync {
 // until the widget class loads. Game thread.
 void Install(coop::net::Session* session);
 
-// Per-tick (net-pump game thread). HOST: poll the struct and broadcast on change, then run one
-// queued purchase per sender per token. CLIENT: keep the gate enabled and retry the latest
+// Per-tick (net-pump game thread). BOTH: run the pending re-derive of the cached members
+// (upgrade_rederive.h). HOST: poll the struct, log what moved and who moved it, broadcast on change,
+// then run one queued purchase per sender per token. CLIENT: keep the gate enabled and retry the latest
 // pending mirror until the store resolves (a join-edge mirror can arrive before the save loads).
 void Tick(coop::net::Session& session);
 

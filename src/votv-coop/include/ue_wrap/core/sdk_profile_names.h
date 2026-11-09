@@ -2277,6 +2277,25 @@ inline constexpr const wchar_t* DeskPlaybackScreen        = L"screen_play";
 inline constexpr const wchar_t* DeskRefinerButtonPrefix   = L"button_comp_";
 inline constexpr const wchar_t* DeskRefinerScreen         = L"screen_comp";
 inline constexpr const wchar_t* DeskPhoneButton           = L"button_phone";
+
+// The signal upgrades' re-derive (0.10.0 bytecode capture). mainGamemode_C::upgraded() sets the global sensorLevel
+// parameter, runs the object renderer's setRT and tells every int_upgrade_C actor upgraded_pcUpgrades(), which caches
+// the levels into derived members through gamemode.save_slot.upgrades:
+//   analogDScreenTest_C   upgradeDetectorQuality = (detecQual/16)^2;  coord_maxCooldown = lerp(30, 5, (coordCooldown/16)^2);
+//                         radarupgrade(gamemode) -> gamemode.master_spacerenderer.triangleLevel = (triangleProb/16)^2
+//   spaceRenderer_C       movementSpeed = lerp(2, 4, (coordMovementSpeed/16)^2); coordinateDrift = lerp(0.4, 4, (coordDrift/16)^2);
+//                         gamemode.analogPanels.Widget.ui_coordinates.coordRadarsSpeed = lerp(600, 1200, (coordRadarSpeed/16)^2)
+// A null link in either chain skips the write silently, which is why the consumers are checked before the call. The
+// desk's detector frequency (DL_duration, in download_repeatPlay) and the ping speed (process_coords) are read live
+// from the same struct on every pass and have no cache.
+inline constexpr const wchar_t* UpgradedHookFn               = L"upgraded";
+inline constexpr const wchar_t* DeskGamemodeProp             = L"gamemode";
+inline constexpr const wchar_t* GamemodeMasterSpaceRendererProp = L"master_spacerenderer";
+inline constexpr const wchar_t* DeskUpgradeDetectorQualityProp = L"upgradeDetectorQuality";
+inline constexpr const wchar_t* SpaceRendererMovementSpeedProp = L"movementSpeed";
+inline constexpr const wchar_t* SpaceRendererCoordinateDriftProp = L"coordinateDrift";
+inline constexpr const wchar_t* SpaceRendererTriangleLevelProp = L"triangleLevel";
+inline constexpr const wchar_t* CoordsPanelRadarsSpeedProp   = L"coordRadarsSpeed";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

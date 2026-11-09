@@ -6,10 +6,14 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/sdk_profile_names.h"
+#include "ue_wrap/desk/console_desk.h"
+#include "ue_wrap/desk/space_renderer.h"
 #include "ue_wrap/world/economy.h"
 #include "ue_wrap/world/world_singleton.h"
 
 #include <cmath>
+#include <limits>
 #include <string>
 
 namespace ue_wrap::upgrades {
@@ -189,10 +193,101 @@ int32_t MaxLevel(int panelIndex) {
 bool ApplyUpgradedHook() {
     void* gm = world_singleton::Gamemode();
     if (!gm) return false;
-    void* fn = R::FindDispatchFunctionCached(R::ClassOf(gm), L"upgraded");
+    void* fn = R::FindDispatchFunctionCached(R::ClassOf(gm), profile::name::UpgradedHookFn);
     if (!fn) return false;
     ParamFrame f(fn);
     return f.valid() && Call(gm, f);
+}
+
+// ---- the hook's consumers and what it derives ---------------------------------------------------------------------
+
+namespace {
+
+R::InstanceOffset g_offDeskGamemode{profile::name::DeskGamemodeProp};
+R::InstanceOffset g_offMasterSr{profile::name::GamemodeMasterSpaceRendererProp};
+R::InstanceOffset g_offDetectorQuality{profile::name::DeskUpgradeDetectorQualityProp};
+R::InstanceOffset g_offMovementSpeed{profile::name::SpaceRendererMovementSpeedProp};
+R::InstanceOffset g_offDrift{profile::name::SpaceRendererCoordinateDriftProp};
+R::InstanceOffset g_offTriangle{profile::name::SpaceRendererTriangleLevelProp};
+R::InstanceOffset g_offRadarsSpeed{profile::name::CoordsPanelRadarsSpeedProp};
+
+// Wire-order rows the formulas read (the table above).
+enum : int { kRowCoordDrift = 4, kRowCoordMovementSpeed = 6, kRowCoordRadarSpeed = 8, kRowCoordCooldown = 9,
+             kRowDetecQual = 12, kRowTriangleProb = 17 };
+
+void* LiveRef(void* base, R::InstanceOffset& member) {
+    if (!base) return nullptr;
+    const int32_t off = member.Of(base);
+    if (off < 0) return nullptr;
+    void* p = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(base) + off);
+    return (p && R::IsLive(p)) ? p : nullptr;
+}
+
+float ReadFloat(void* base, R::InstanceOffset& member) {
+    if (!base) return std::numeric_limits<float>::quiet_NaN();
+    const int32_t off = member.Of(base);
+    if (off < 0) return std::numeric_limits<float>::quiet_NaN();
+    return *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(base) + off);
+}
+
+// The game's curve: (level / 16) ^ 2, the Blueprint's MultiplyMultiply_FloatFloat.
+float Curve(int32_t level) {
+    const float t = static_cast<float>(level) / 16.f;
+    return t * t;
+}
+float Lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+}  // namespace
+
+void ReadConsumers(Consumers& out) {
+    out = Consumers{};
+    void* gm = world_singleton::Gamemode();
+    if (!gm) return;
+    out.desk = ue_wrap::console_desk::Instance();
+    out.deskGamemode = LiveRef(out.desk, g_offDeskGamemode);
+    out.deskReadsOurGamemode = out.deskGamemode && out.deskGamemode == gm;
+    out.atlas = ue_wrap::console_desk::AtlasWidget();
+    void* ui = ue_wrap::console_desk::AtlasUiCoordsSlot();
+    out.uiCoords = (ui && R::IsLive(ui)) ? ui : nullptr;
+    ue_wrap::space_renderer::EnsureResolved();
+    out.spaceRenderer = ue_wrap::space_renderer::Instance();
+    out.masterSpaceRenderer = LiveRef(gm, g_offMasterSr);
+}
+
+bool ConsumersReady(const Consumers& c, const char** missing) {
+    const char* gone = nullptr;
+    if (!c.desk) gone = "desk";
+    else if (!c.atlas) gone = "desk widget (atlas)";
+    else if (!c.uiCoords) gone = "coordinates panel";
+    else if (!c.spaceRenderer) gone = "spaceRenderer";
+    else if (!c.masterSpaceRenderer) gone = "gamemode.master_spacerenderer";
+    if (missing) *missing = gone;
+    return gone == nullptr;
+}
+
+void ReadDerived(Derived& out) {
+    Consumers c;
+    ReadConsumers(c);
+    out.detectorQuality = ReadFloat(c.desk, g_offDetectorQuality);
+    float cd = 0.f;
+    out.maxCooldown = ue_wrap::console_desk::ReadMaxCooldown(cd) ? cd : std::numeric_limits<float>::quiet_NaN();
+    out.movementSpeed = ReadFloat(c.spaceRenderer, g_offMovementSpeed);
+    out.coordinateDrift = ReadFloat(c.spaceRenderer, g_offDrift);
+    out.coordRadarsSpeed = ReadFloat(c.uiCoords, g_offRadarsSpeed);
+    out.triangleLevel = ReadFloat(c.masterSpaceRenderer, g_offTriangle);
+}
+
+void ExpectedDerived(const int32_t* l, Derived& out) {
+    out.detectorQuality = Curve(l[kRowDetecQual]);
+    out.maxCooldown = Lerp(30.f, 5.f, Curve(l[kRowCoordCooldown]));
+    out.movementSpeed = Lerp(2.f, 4.f, Curve(l[kRowCoordMovementSpeed]));
+    out.coordinateDrift = Lerp(0.4f, 4.f, Curve(l[kRowCoordDrift]));
+    out.coordRadarsSpeed = Lerp(600.f, 1200.f, Curve(l[kRowCoordRadarSpeed]));
+    out.triangleLevel = Curve(l[kRowTriangleProb]);
+}
+
+const wchar_t* LevelLabel(int wireIndex) {
+    return (wireIndex >= 0 && wireIndex < kLevelCount) ? kRows[wireIndex].prefix : nullptr;
 }
 
 int RefreshOpenRows() {
