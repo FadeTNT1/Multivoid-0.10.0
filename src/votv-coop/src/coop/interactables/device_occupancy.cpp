@@ -62,7 +62,8 @@ bool g_pendingSend = false;
 bool g_denyPending = false;
 std::wstring g_denyKey;   // log + the busy-line cooldown key
 uint8_t g_denyHolder = 0xFF;  // holder slot captured in PRE (drives the busy line's nick)
-std::wstring g_denyName;      // the aimed unit's native object name captured in PRE
+std::wstring g_denyName;      // what the busy line calls the unit, captured in PRE
+std::wstring g_denyDetail;    // log only: the desk component the press landed on, when it decided the deny
 std::chrono::steady_clock::time_point g_lastDenySound{};
 constexpr auto kDenyDebounce = std::chrono::milliseconds(300);  // press+release double-fire
 
@@ -84,6 +85,10 @@ std::wstring g_lastLineKey;
 std::chrono::steady_clock::time_point g_lastLineTime{};
 constexpr auto kLineCooldown = std::chrono::seconds(3);
 
+// What the busy line calls a claim key when no unit name was captured. The desk's one claim is its coordinate
+// screen, so say that instead of the key text.
+const wchar_t kCoordScreenName[] = L"the coordinate screen";
+
 // Push the local-only busy notice ("<nick> is using <device>"). Rides the feed's direct
 // announce, ungated by the cosmetic peer-actions chat toggle: deny feedback is functional,
 // since without it the deny is a bare click. An empty device name falls back to the claim
@@ -94,7 +99,9 @@ void PushBusyLine(const std::wstring& key, const std::wstring& deviceName, uint8
     g_lastLineKey = key;
     g_lastLineTime = now;
     coop::peer_action_feed::AnnounceDirect(holder, coop::peer_action_feed::Action::UsingDevice,
-                                           deviceName.empty() ? key : deviceName);
+                                           !deviceName.empty() ? deviceName
+                                           : key == L"desk"    ? std::wstring(kCoordScreenName)
+                                                               : key);
 }
 
 bool g_observersInstalled = false;
@@ -223,6 +230,51 @@ void ForceExitLocal(void* local, const std::wstring& key, uint8_t holder) {
     PushBusyLine(key, fresh ? g_memoName : std::wstring(), holder);
 }
 
+// The desk is the one device whose claim covers a part of it: the coordinate screen. The physical buttons of its
+// other stations have no enter or leave the game makes, so they are never claimed and never denied. Whether the
+// press the player is aiming now would land on the claimed part, as the desk's own actionOptionIndex would read it
+// (mainPlayer.HitResult.Component). A press whose component cannot be resolved is treated as landing on it, which
+// is the whole-desk deny this gate had before components were told apart.
+//
+// `deskName` is the desk actor's native name, for the log. `detail` receives a log suffix naming the component.
+bool DeskPressHitsClaim(void* player, void* desk, uint8_t holder, const std::wstring& deskName,
+                        std::wstring* detail, std::wstring* busyName) {
+    const DS::DeskAimInfo info = DS::ClassifyAimedDeskComponent(player, desk);
+    if (info.aim == DS::DeskAim::Coordinates) {
+        *detail = L" via component '" + info.hitComponent + L"'";
+        *busyName = kCoordScreenName;
+        return true;
+    }
+    if (info.aim == DS::DeskAim::Other) {
+        // The line that confirms in a live session that HitResult.Component resolves and tells the stations
+        // apart: once per distinct component, so a masher cannot flood the log.
+        static std::vector<std::wstring> sSeen;
+        bool fresh = true;
+        for (const std::wstring& n : sSeen) fresh = fresh && n != info.hitComponent;
+        if (fresh && sSeen.size() < 32) {
+            sSeen.push_back(info.hitComponent);
+            UE_LOGI("device_occupancy: desk press PASSES the coordinate-screen claim of slot %u: "
+                    "HitResult.Component '%ls' (lookAtComponent '%ls') on '%ls' is not the coordinate screen",
+                    static_cast<unsigned>(holder), info.hitComponent.c_str(),
+                    info.lookComponent.empty() ? L"none" : info.lookComponent.c_str(), deskName.c_str());
+        }
+        return false;
+    }
+    // Fail-safe: deny as before, and say why at a low rate so a live session can see which assumption failed.
+    static std::chrono::steady_clock::time_point sNextSay{};
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= sNextSay) {
+        sNextSay = now + std::chrono::seconds(10);
+        UE_LOGW("device_occupancy: desk press component not resolved (%ls) on '%ls': HitResult.Component '%ls', "
+                "lookAtComponent '%ls' -- denying the whole desk while slot %u holds the coordinate screen",
+                info.why, deskName.c_str(), info.hitComponent.empty() ? L"none" : info.hitComponent.c_str(),
+                info.lookComponent.empty() ? L"none" : info.lookComponent.c_str(), static_cast<unsigned>(holder));
+    }
+    *detail = L" (component unresolved)";
+    *busyName = L"the signal desk";
+    return true;
+}
+
 // The use-input deny gate (pre clears the aim, post restores). Both roles: any peer aiming
 // the use key at a device the wire says another peer holds gets the native chain no-opped
 // and the deny click. The door's discipline: leak-restore first in pre (a faulted dispatch
@@ -251,6 +303,7 @@ void OnUseInputPre(void* self, void*, void*) {
                 g_denyKey = L"atv";
                 g_denyHolder = holder;
                 g_denyName = L"the ATV";
+                g_denyDetail.clear();
             }
             return;
         }
@@ -262,16 +315,24 @@ void OnUseInputPre(void* self, void*, void*) {
     // The aim memo is written unconditionally, before the busy check: the rising-edge and
     // lost-race denies see the table free at this press, so a deny-gated write would leave
     // exactly those surfaces nameless.
-    g_memoName = R::ToString(R::NameOf(aimed));
+    const std::wstring aimedName = R::ToString(R::NameOf(aimed));
+    // The desk is named by its claim: only the coordinate screen is claimed, so that is what a loser of the race
+    // for it was trying to use, whichever part of the desk the memo's press landed on.
+    g_memoName = key == kDeskClaim ? std::wstring(kCoordScreenName) : aimedName;
     g_memoKey = key;
     g_memoLastTick = coop::net_pump::TickSerial() + kMemoFreshTicks;
     uint8_t holder = 0xFF;
     if (!BusyByOther(key, LocalSlot(), &holder)) return;  // free or our own
+    std::wstring detail;
+    std::wstring busyName = g_memoName;
+    if (key == kDeskClaim && !DeskPressHitsClaim(self, aimed, holder, aimedName, &detail, &busyName))
+        return;  // a press on another station of the desk: the native chain runs
     if (DS::ClearAimForDispatch(self)) {
         g_denyPending = true;
         g_denyKey = key;
         g_denyHolder = holder;
-        g_denyName = g_memoName;
+        g_denyName = busyName;
+        g_denyDetail = detail;
     }
 }
 
@@ -283,8 +344,8 @@ void OnUseInputPost(void* self, void*, void*) {
     const auto now = std::chrono::steady_clock::now();
     if (now - g_lastDenySound < kDenyDebounce) return;  // press+release = one click
     g_lastDenySound = now;
-    UE_LOGI("device_occupancy: DENIED E at busy device '%ls' ('%ls' held by slot %u)",
-            g_denyKey.c_str(), g_denyName.c_str(), static_cast<unsigned>(g_denyHolder));
+    UE_LOGI("device_occupancy: DENIED E at busy device '%ls' ('%ls' held by slot %u)%ls",
+            g_denyKey.c_str(), g_denyName.c_str(), static_cast<unsigned>(g_denyHolder), g_denyDetail.c_str());
     if (self) coop::prop_sound::PlayDenyClick(self);
     PushBusyLine(g_denyKey, g_denyName, g_denyHolder);
 }
@@ -606,6 +667,7 @@ void OnDisconnect() {
     g_denyPending = false;
     g_denyHolder = 0xFF;
     g_denyName.clear();
+    g_denyDetail.clear();
     g_memoName.clear();      // busy-notice aim memo (session-end full teardown)
     g_memoKey.clear();
     g_memoLastTick = 0;

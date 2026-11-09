@@ -74,6 +74,9 @@ jobs:
       - name: Per-player profile codec regression
         run: python3 .github/ci/inventory_wire_drill.py
 
+      - name: Desk component to station mapping regression
+        run: python3 .github/ci/desk_station_drill.py
+
       - name: Public-leak gate drill
         run: python3 .github/ci/public_leak_gate_drill.py
 

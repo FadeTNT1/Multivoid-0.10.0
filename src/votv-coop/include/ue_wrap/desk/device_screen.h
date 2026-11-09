@@ -4,12 +4,14 @@
 // clear/restore primitive, and the reflected force-exit. NO network logic -- coop::device_occupancy
 // drives the busy/deny mirror through here.
 //
-// Deny granularity is the WHOLE device actor. Component-level gating (the desk coords cluster
-// alone, the radar panel as against its alarm lever) waits on the lookAtComponent versus
-// HitResult.Component equivalence being validated hands-on.
+// Deny granularity is the WHOLE device actor, except the main desk: its claim is the coordinate screen
+// alone, so ClassifyAimedDeskComponent tells the gate which part of the desk a press lands on and a press
+// on any other part (the download, playback and refiner buttons) passes. The radar panel as against its
+// alarm lever is still whole-actor.
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace ue_wrap::device_screen {
@@ -58,6 +60,25 @@ std::wstring ClassifyWidgetClaimKey(void* widget);
 // prop_paper_drawable_C -> "draw_<hash>". Empty for a non-device actor, for a transformer or arcade
 // whose location read failed, and for a notebook or paper with no Key.
 std::wstring ClassifyDeviceActorClaimKey(void* actor);
+
+// Where a press on the main desk lands. `Unresolved` when the player's aim does not name a live component of that
+// desk, which the caller treats as the whole desk (the fail-safe: today's behaviour).
+enum class DeskAim : uint8_t { Unresolved, Coordinates, Other };
+
+struct DeskAimInfo {
+    DeskAim      aim = DeskAim::Unresolved;
+    std::wstring hitComponent;   // the name of mainPlayer.HitResult.Component, empty when it does not resolve
+    std::wstring lookComponent;  // the name of mainPlayer.lookAtComponent, empty when null or not live
+    const wchar_t* why = L"";    // for Unresolved: what failed
+};
+
+// Classify the part of `desk` (an analogDScreenTest_C actor the local player aims at) a use press would land on.
+// The desk's actionOptionIndex takes its pressed button from the `hit` the player passes, i.e. from
+// HitResult.Component, so that is the component classified; lookAtComponent is read as a second witness and either
+// naming the coordinate screen is enough to say Coordinates. A component is the coordinate screen by name
+// (ue_wrap/desk/desk_station.h) or by being the desk's own button_coords member. Unresolved when the HitResult does
+// not name `desk` and a live component of it. Four reflected reads, no dispatch. Game thread.
+DeskAimInfo ClassifyAimedDeskComponent(void* player, void* desk);
 
 // Whether the claim key of an interface widget can change while the widget pointer stays the same: the SAT
 // console's, whose key is the panel it was entered from. The occupancy edge re-reads such a key each tick.

@@ -53,7 +53,13 @@ so each peer polls the player's active-interface field for the edge; the host ar
 first-wins claim table, a client claims optimistically and force-exits if the host answers that
 another slot holds the device, and a second peer's press is denied with the game's own denied
 sound (`coop/interactables/device_occupancy`). The claim engages only on the screen edge; the
-desk's physical buttons never set it, which is why the input lane below is claim-free.
+desk's physical buttons never set it, which is why the input lane below is claim-free. The desk's claim
+(`desk`) is its coordinate screen alone: the gate reads the component the press lands on
+(`mainPlayer.HitResult.Component`, with `lookAtComponent` as a second witness) and denies only the
+coordinate cluster, so while one peer is in the screen, or its ping runs on, others still use the download,
+playback, refiner and phone buttons. A press whose component cannot be resolved is denied as the whole desk
+was, and logged (`desk press component not resolved`); the first press on each other component logs
+`desk press PASSES the coordinate-screen claim`.
 
 ### The desk: inputs, the simulation, the cursor, the sounds
 
@@ -73,7 +79,7 @@ presser's. Receivers keep the flag clear (setting it woke a phantom parallel mac
 presser streams the stage and three accumulator values at 10 Hz. The host validates the desk
 holder and names the pinger in each packet it relays; a mirror writes the values once per packet, and
 the host ends the scan on every client when its pinger leaves.
-A desk hold covers the pinger's run so nobody else can claim the desk mid-ping.
+A desk hold covers the pinger's run so nobody else can claim the coordinate screen mid-ping.
 The run is the pinger's presentation, and its verdict is the
 host's (`coop/interactables/desk_ping_sync`): at stage 3 a client's gate refuses the verdict and
 sends its view and triangle, the host checks the claim, the running ping and the triangle and

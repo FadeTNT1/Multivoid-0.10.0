@@ -13,7 +13,10 @@
 #include "ue_wrap/core/types.h"
 #include "ue_wrap/actors/notebook.h"
 #include "ue_wrap/actors/prop.h"
+#include "ue_wrap/desk/desk_press.h"     // Member: the desk's own button_coords, for the by-pointer check
+#include "ue_wrap/desk/desk_station.h"
 #include "ue_wrap/desk/sat_console.h"  // PanelKey, ReadUsed: a SAT panel is a terminal of its own
+#include "ue_wrap/engine/hit_result.h"
 
 #include <chrono>
 #include <cmath>
@@ -313,6 +316,47 @@ bool ClaimKeyMayMove(void* widget) {
     void* cls = R::ClassOf(widget);
     FillWidgetSlotFromClass(cls);
     return g_widgets[1].cls && cls == g_widgets[1].cls;
+}
+
+namespace {
+
+// The name of a live component, or empty.
+std::wstring ComponentName(void* component) {
+    if (!component || !R::IsLive(component)) return {};
+    return R::ToString(R::NameOf(component));
+}
+
+}  // namespace
+
+DeskAimInfo ClassifyAimedDeskComponent(void* player, void* desk) {
+    DeskAimInfo info;
+    if (!player || !desk) { info.why = L"no player or desk"; return info; }
+    // The second witness: the component the look-at trace keeps. A raw pointer the game may have since freed or
+    // nulled (updToggles nulls it), so it is only named when it is live, and only ever adds a deny.
+    const int32_t offLook = RO::MainPlayer_lookAtComponent();
+    void* lookComp = offLook >= 0
+        ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(player) + offLook) : nullptr;
+    info.lookComponent = ComponentName(lookComp);
+
+    ue_wrap::hit_result::Hit hit;
+    if (!ue_wrap::hit_result::ReadField(player, L"HitResult", &hit)) {
+        info.why = L"HitResult did not read";
+        return info;
+    }
+    if (hit.actor != desk) { info.why = L"HitResult.Actor is not the aimed desk"; return info; }
+    if (!hit.component) { info.why = L"HitResult.Component is empty or stale"; return info; }
+    info.hitComponent = ComponentName(hit.component);
+    if (info.hitComponent.empty()) { info.why = L"HitResult.Component is not live"; return info; }
+
+    const auto isCoords = [&](void* comp, const std::wstring& name) {
+        if (comp && comp == ue_wrap::desk_press::Member(desk, ue_wrap::profile::name::DeskCoordButton)) return true;
+        if (comp && comp == ue_wrap::desk_press::Member(desk, ue_wrap::profile::name::DeskCoordScreen)) return true;
+        return !name.empty() && ue_wrap::desk_station::IsClaimed(ue_wrap::desk_station::ClassifyName(name));
+    };
+    const bool coords = isCoords(hit.component, info.hitComponent) ||
+                        (!info.lookComponent.empty() && isCoords(lookComp, info.lookComponent));
+    info.aim = coords ? DeskAim::Coordinates : DeskAim::Other;
+    return info;
 }
 
 bool ClearAimForDispatch(void* player) {

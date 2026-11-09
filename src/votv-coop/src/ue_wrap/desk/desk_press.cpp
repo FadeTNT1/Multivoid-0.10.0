@@ -25,6 +25,7 @@ struct ListHeader {
 // The desk's and its game mode's members a press reads, each offset kept per class.
 R::InstanceOffset g_playerUsing{L"player_using"};
 R::InstanceOffset g_lookingAtPanel{L"lookingAtPanel"};
+R::InstanceOffset g_componentButton{L"component_button"};
 R::InstanceOffset g_gamemode{L"gamemode"};
 R::InstanceOffset g_mainPlayer{L"mainPlayer"};
 R::InstanceOffset g_selectIndex{L"play_selectIndex"};
@@ -109,19 +110,24 @@ bool PressForAnother(void* desk, void* player, void* component, int* dropped) {
     if (dropped) *dropped = 0;
     uint8_t* usingField = Field(desk, g_playerUsing);
     uint8_t* panelField = Field(desk, g_lookingAtPanel);
+    // The button the desk last took a press on. It is the desk's ONE copy: actionOptionIndex writes it from the hit
+    // (:2355) and the held-button handlers read it afterwards (addFilterParam per scroll step, updText), so a
+    // replayed press that left its button here would redirect a hold the machine's own player is still making.
+    uint8_t* buttonField = Field(desk, g_componentButton);
     // The machine's own player, as the press's compare chain reaches it: gamemode->mainPlayer. None (a player
     // between lives) has no bindings to keep, and the press's own read of it then touches nothing.
     void* gamemode = ObjectField(desk, g_gamemode);
     void* own = gamemode ? ObjectField(gamemode, g_mainPlayer) : nullptr;
     ListHeader* lists[2] = {nullptr, nullptr};
     if (own && !ScrollLists(own, lists[0], lists[1])) lists[0] = lists[1] = nullptr;
-    if (!usingField || !panelField || (own && (!lists[0] || !lists[1]))) {
-        UE_LOGW("desk_press: press for another player not made: player_using=%d lookingAtPanel=%d, and the "
-                "machine's player %p has scroll lists %d/%d", usingField ? 1 : 0, panelField ? 1 : 0, own,
-                lists[0] ? 1 : 0, lists[1] ? 1 : 0);
+    if (!usingField || !panelField || !buttonField || (own && (!lists[0] || !lists[1]))) {
+        UE_LOGW("desk_press: press for another player not made: player_using=%d lookingAtPanel=%d "
+                "component_button=%d, and the machine's player %p has scroll lists %d/%d", usingField ? 1 : 0,
+                panelField ? 1 : 0, buttonField ? 1 : 0, own, lists[0] ? 1 : 0, lists[1] ? 1 : 0);
         return false;
     }
     void* const heldUsing = *reinterpret_cast<void**>(usingField);
+    void* const heldButton = *reinterpret_cast<void**>(buttonField);
     const int32_t heldPanel = *reinterpret_cast<int32_t*>(panelField);
     ListHeader held[2];
     for (int i = 0; i < 2; ++i) {
@@ -140,6 +146,7 @@ bool PressForAnother(void* desk, void* player, void* component, int* dropped) {
     }
     *reinterpret_cast<void**>(usingField) = heldUsing;
     *reinterpret_cast<int32_t*>(panelField) = heldPanel;
+    *reinterpret_cast<void**>(buttonField) = heldButton;
     return pressed;
 }
 
