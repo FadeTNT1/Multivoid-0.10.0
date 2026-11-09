@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <cstddef>  // size_t, named unqualified below
+
 namespace ue_wrap::profile {
 
 // ---- content names (change with game content, not the engine) ------------
@@ -2260,6 +2262,21 @@ inline constexpr float CargoLiftTravelUU = 500.0f;
 inline constexpr const wchar_t* DeskPanelsStateProp     = L"panelsState";
 inline constexpr const wchar_t* DeskUpdPanelsFn         = L"updPanels";
 inline constexpr const wchar_t* DeskBackPanelClassPrefix = L"prop_computerBackPanel";
+// The main desk's station components (analogDScreenTest_C, 0.10.0 bytecode capture): the names of the components a
+// press can land on, grouped by the station they belong to. Only the coordinate cluster is an enterable screen (its
+// button runs `enter interface` on screen_coords); every other group is a bank of physical buttons that act where
+// they are pressed. ue_wrap/desk/desk_station.h maps a component name to its station.
+inline constexpr const wchar_t* DeskCoordButton           = L"button_coords";
+inline constexpr const wchar_t* DeskCoordScreen           = L"screen_coords";
+inline constexpr const wchar_t* DeskCoordSwitchPrefix     = L"screenbutton_switchtocoord";
+inline constexpr const wchar_t* DeskCoordBringPrefix      = L"screenbutton_bringcoord";
+inline constexpr const wchar_t* DeskDownloadButtonPrefix  = L"button_downl_";
+inline constexpr const wchar_t* DeskDownloadScreen        = L"screen_download";
+inline constexpr const wchar_t* DeskPlaybackButtonPrefix  = L"button_play_";
+inline constexpr const wchar_t* DeskPlaybackScreen        = L"screen_play";
+inline constexpr const wchar_t* DeskRefinerButtonPrefix   = L"button_comp_";
+inline constexpr const wchar_t* DeskRefinerScreen         = L"screen_comp";
+inline constexpr const wchar_t* DeskPhoneButton           = L"button_phone";
 }  // namespace name
 
 }  // namespace ue_wrap::profile

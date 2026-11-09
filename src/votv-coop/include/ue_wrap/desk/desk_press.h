@@ -20,9 +20,11 @@ void* Member(void* desk, const wchar_t* member);
 bool Press(void* desk, void* player, void* component);
 
 // Press, made for a player other than this machine's own, which leaves that one and the desk's use as they were.
-// A press writes the desk's player_using and lookingAtPanel (:2347, lookAt's first line), and every press that
-// reaches the button compare chain clears the scroll-wheel bindings of the gamemode's mainPlayer (:2522-2525),
-// which here is not the presser. All four are held aside across the press and put back after it, and a binding
+// A press writes the desk's player_using, lookingAtPanel and component_button (:2347, lookAt's first line, and
+// :2355 -- the button the machine's own player may still be holding, which the held-button handlers read), and
+// every press that reaches the button compare chain clears the scroll-wheel bindings of the gamemode's
+// mainPlayer (:2522-2525), which here is not the presser. All five are held aside across the press and put back
+// after it, and a binding
 // the press made on this machine's player meanwhile is dropped (`dropped` counts them). The `used` binding the
 // press adds lands on `player`. That covers a button whose branch reaches this machine's player only through
 // those lists, as the save family's five do; a scroll branch's resetScrollOnUseRelease (:2540) or a branch that
