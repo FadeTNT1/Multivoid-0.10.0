@@ -5,18 +5,19 @@ param(
     [string[]]$Events,
     [ValidateRange(8,120)][int]$ObserveSeconds = 12,
     [ValidateRange(60,600)][int]$JoinSeconds = 300,
-    [ValidateRange(1024,65535)][int]$Port = 28771
+    [ValidateRange(1024,65535)][int]$Port = 28771,
+    [string]$GameRoot = $(if ($env:VOTV_GAME_ROOT) { $env:VOTV_GAME_ROOT } else { Join-Path ([Environment]::GetFolderPath('Desktop')) 'VOTV 0.10.0' })
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$source = 'C:\Users\andre\Desktop\VOTV 0.10.0\a0.10.0_0009\WindowsNoEditor'
-$rig = 'C:\Users\andre\Desktop\VOTV 0.10.0\rig'
+$source = Join-Path $GameRoot 'a0.10.0_0009\WindowsNoEditor'
+$rig = Join-Path $GameRoot 'rig'
 $build = Join-Path $repo 'build/synctest'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $report = Join-Path $repo "local/tests/synctest/$stamp"
-$lockPath = 'C:\Users\andre\AppData\Local\Temp\multivoid-synctest.lock'
-$realSaves = 'C:\Users\andre\AppData\Local\VotV\Saved\SaveGames'
+$lockPath = Join-Path ([IO.Path]::GetTempPath()) 'multivoid-synctest.lock'
+$realSaves = Join-Path $env:LOCALAPPDATA 'VotV\Saved\SaveGames'
 $lock = $null; $guard = $null
 $peers = @{}; $results = [Collections.Generic.List[object]]::new()
 $pairNumber = 0
